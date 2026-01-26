@@ -1,0 +1,50 @@
+export interface Anime {
+  id: string;
+  title: string;
+  titleJapanese?: string;
+  image: string;
+  cover?: string;
+  description: string;
+  type: 'TV' | 'Movie' | 'OVA' | 'ONA' | 'Special';
+  status: 'Ongoing' | 'Completed' | 'Upcoming';
+  rating?: number;
+  episodes: number;
+  episodesAired?: number;
+  duration?: string;
+  genres: string[];
+  studios?: string[];
+  season?: string;
+  year?: number;
+  subCount?: number;
+  dubCount?: number;
+  isMature?: boolean;
+}
+
+export interface Episode {
+  id: string;
+  number: number;
+  title: string;
+  isFiller?: boolean;
+  hasSub: boolean;
+  hasDub: boolean;
+}
+
+export interface StreamingSource {
+  id: string;
+  name: string;
+  type: 'sub' | 'dub';
+  quality: string;
+  url: string;
+}
+
+export interface AnimeSearchResult {
+  results: Anime[];
+  totalPages: number;
+  currentPage: number;
+  hasNextPage: boolean;
+}
+
+export interface TopAnime {
+  rank: number;
+  anime: Anime;
+}
