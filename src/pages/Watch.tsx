@@ -80,14 +80,25 @@ const Watch = () => {
     }
   }, [selectedEpisodeNum, setSearchParams]);
 
-  // Auto-select best server
+  // Auto-select best server when servers load or audio type changes
   useEffect(() => {
-    if (servers?.length && !selectedServer) {
+    if (servers?.length) {
       // Prefer servers matching audio type
-      const matchingServer = servers.find(s => s.type === audioType);
-      setSelectedServer(matchingServer?.name || servers[0].name);
+      const matchingServers = servers.filter(s => s.type === audioType);
+      if (matchingServers.length > 0) {
+        setSelectedServer(matchingServers[0].name);
+      } else if (!selectedServer) {
+        setSelectedServer(servers[0].name);
+      }
     }
-  }, [servers, audioType, selectedServer]);
+  }, [servers, audioType]);
+
+  // Reset server and retry count when audio type changes
+  useEffect(() => {
+    setSelectedServer('');
+    setServerRetryCount(0);
+    console.log(`[Watch] 🔊 Audio type changed to: ${audioType}`);
+  }, [audioType]);
 
   // Auto-failover on stream error
   useEffect(() => {
