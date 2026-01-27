@@ -126,7 +126,7 @@ class StreamExtractor {
                         if (m3u8Matches) {
                             m3u8Matches.forEach(url => capturedM3u8s.add(url));
                         }
-                    } catch {}
+                    } catch { }
                 }
             });
 
@@ -137,7 +137,7 @@ class StreamExtractor {
             });
 
             // Wait for the video player iframe to load
-            await page.waitForSelector('iframe', { timeout: 15000 }).catch(() => {});
+            await page.waitForSelector('iframe', { timeout: 15000 }).catch(() => { });
 
             // Wait a bit for streams to start loading
             await this.delay(5000);
@@ -149,11 +149,11 @@ class StreamExtractor {
                     await playBtn.click();
                     await this.delay(3000);
                 }
-            } catch {}
+            } catch { }
 
             // Try to get the iframe src and navigate to it directly
             const iframeSrc = await page.$eval('iframe', (el) => el.src).catch(() => null);
-            
+
             if (iframeSrc && iframeSrc.includes('embed')) {
                 logger.info(`[StreamExtractor] Found embed iframe: ${iframeSrc.substring(0, 80)}...`);
 
@@ -275,9 +275,9 @@ class StreamExtractor {
 
             // Try to click play
             try {
-                await page.click('.play-btn, [class*="play"], .jw-icon-display').catch(() => {});
+                await page.click('.play-btn, [class*="play"], .jw-icon-display').catch(() => { });
                 await this.delay(5000);
-            } catch {}
+            } catch { }
 
             // Get video src
             const videoSrc = await page.evaluate(() => {

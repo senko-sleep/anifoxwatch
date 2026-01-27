@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import * as cheerio from 'cheerio';
+import puppeteer, { Browser, Page } from 'puppeteer';
 import { BaseAnimeSource } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
@@ -10,19 +11,12 @@ import { logger } from '../utils/logger.js';
  * 
  * Strategy:
  * - Scrapes 9animetv.to directly for anime metadata, episodes, and servers
- * - Uses HiAnime API (local or remote) for actual streaming URLs
- * - Both sites use similar infrastructure (rapid-cloud), so content is cross-compatible
- * 
- * Features:
- * - High-quality HD streams (720p, 1080p)
- * - Both Sub and Dub support
- * - Multiple server fallbacks
- * - Direct website scraping for latest content
+ * - Uses Puppeteer to extract streaming links directly from the page (scraping logic)
+ * - Fallback to HiAnime API if scraping fails
  */
 export class NineAnimeSource extends BaseAnimeSource {
     name = '9Anime';
     baseUrl = 'https://9animetv.to';
-    private hianimeApiUrl: string;
     private client: AxiosInstance;
 
     // Smart caching with TTL
@@ -43,8 +37,6 @@ export class NineAnimeSource extends BaseAnimeSource {
 
     constructor() {
         super();
-        this.hianimeApiUrl = this.hianimeApis[0];
-        
         this.client = axios.create({
             timeout: 15000,
             headers: {
@@ -87,7 +79,7 @@ export class NineAnimeSource extends BaseAnimeSource {
         const id = url.split('/watch/')[1]?.split('?')[0] || '';
         const image = el.find('img').attr('data-src') || el.find('img').attr('src') || '';
         const type = el.find('.fdi-item').first().text().trim() || 'TV';
-        
+
         const subText = el.find('.tick-sub').text().trim();
         const dubText = el.find('.tick-dub').text().trim();
         const subCount = parseInt(subText) || 0;
@@ -139,6 +131,183 @@ export class NineAnimeSource extends BaseAnimeSource {
         return 'auto';
     }
 
+    // ============ PUPPETEER SCRAPING ============
+
+    private async launchBrowser(): Promise<Browser> {
+        return puppeteer.launch({
+            headless: true, // Use headless for server
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+            ]
+        });
+    }
+
+    private async delay(ms: number): Promise<void> {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /**
+     * Extract stream URLs from embed page using Puppeteer
+     */
+    private async extractStreamFromEmbed(browser: Browser, embedUrl: string, referer: string): Promise<VideoSource[]> {
+        const sources: VideoSource[] = [];
+        const page = await browser.newPage();
+
+        try {
+            await page.setUserAgent(
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            );
+
+            // Intercept network requests
+            await page.setRequestInterception(true);
+
+            const capturedM3U8s: string[] = [];
+
+            page.on('request', (req) => {
+                const url = req.url();
+                if (url.includes('.m3u8') && !url.includes('subtitles')) {
+                    capturedM3U8s.push(url);
+                }
+                req.continue();
+            });
+
+            page.on('response', async (response) => {
+                const url = response.url();
+                if (url.includes('getSources') || url.includes('source')) {
+                    try {
+                        const text = await response.text();
+                        try {
+                            const data = JSON.parse(text);
+                            if (data.sources && Array.isArray(data.sources)) {
+                                data.sources.forEach((s: any) => {
+                                    const src = s.file || s.url || s.src;
+                                    if (src) capturedM3U8s.push(src);
+                                });
+                            }
+                        } catch { }
+                    } catch { }
+                }
+            });
+
+            // Navigate to embed with referer
+            await page.setExtraHTTPHeaders({ 'Referer': referer });
+
+            await page.goto(embedUrl, {
+                waitUntil: 'networkidle0',
+                timeout: 30000
+            });
+
+            // Wait for player to initialize
+            await this.delay(3000);
+
+            // Try to click play
+            try {
+                await page.click('.play-btn, .vjs-big-play-button, [class*="play"]').catch(() => { });
+                await this.delay(2000);
+            } catch { }
+
+            // Check video element
+            const videoSrc = await page.evaluate(() => {
+                const video = document.querySelector('video');
+                return video?.src || video?.currentSrc || null;
+            });
+
+            if (videoSrc && videoSrc.includes('.m3u8')) {
+                capturedM3U8s.push(videoSrc);
+            }
+
+            // Check HTML for m3u8 URLs (Regex Fallback)
+            const html = await page.content();
+            const m3u8Regex = /https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*/g;
+            const matches = html.match(m3u8Regex);
+            if (matches) {
+                matches.forEach(url => {
+                    if (!url.includes('subtitles')) {
+                        capturedM3U8s.push(url);
+                    }
+                });
+            }
+
+            // Dedupe and format
+            const uniqueUrls = [...new Set(capturedM3U8s)];
+            uniqueUrls.forEach(url => {
+                sources.push({
+                    url,
+                    quality: 'auto',
+                    isM3U8: url.includes('.m3u8'),
+                    isDASH: url.includes('.mpd')
+                });
+            });
+
+        } catch (error) {
+            logger.error(`Puppeteer extraction failed for ${embedUrl}`, error as any, {}, this.name);
+        } finally {
+            await page.close();
+        }
+
+        return sources;
+    }
+
+    private async getStreamsFromPuppeteer(episodeId: string, serverId: string): Promise<StreamingData | null> {
+        let browser: Browser | null = null;
+
+        try {
+            // Reconstruct episode URL
+            // id: "anime-slug?ep=123"
+            const [animeSlug, epParam] = episodeId.split('?');
+            const epId = epParam?.replace('ep=', '') || serverId; // Fallback
+
+            const episodeUrl = `${this.baseUrl}/watch/${animeSlug}?ep=${epId}`;
+            logger.info(`Puppeteer scraping: ${episodeUrl}`, undefined, this.name);
+
+            browser = await this.launchBrowser();
+            const page = await browser.newPage();
+
+            // Step 1: Get Embed URL via API (faster than scraping page for it)
+            // We need cookies/headers mimicking browser, but axios might suffice for this part
+            // Actually, scrape-9anime-v2 uses axios for this part too, let's use that to save time
+            const serverUrl = `${this.baseUrl}/ajax/episode/sources?id=${serverId}`;
+            const sourcesResponse = await this.client.get(serverUrl, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Referer': episodeUrl
+                }
+            });
+
+            if (!sourcesResponse.data?.link) {
+                throw new Error('No embed link found');
+            }
+
+            const embedUrl = sourcesResponse.data.link;
+            logger.info(`Found embed URL: ${embedUrl}`, undefined, this.name);
+
+            // Step 2: Extract streams from embed
+            const sources = await this.extractStreamFromEmbed(browser, embedUrl, episodeUrl);
+
+            await browser.close();
+            browser = null;
+
+            if (sources.length > 0) {
+                return {
+                    sources,
+                    subtitles: [], // Text scraping for subs is complex, skipping for now or use API fallback
+                    source: this.name,
+                    headers: { Referer: 'https://iframe.cool/' } // Generic referer, might need adjustment
+                };
+            }
+
+            return null;
+
+        } catch (error) {
+            logger.error('Puppeteer scraping failed', error as any, {}, this.name);
+            if (browser) await browser.close();
+            return null;
+        }
+    }
+
     // ============ 9ANIME SCRAPING METHODS ============
 
     async healthCheck(): Promise<boolean> {
@@ -173,7 +342,6 @@ export class NineAnimeSource extends BaseAnimeSource {
                 }
             });
 
-            // Get pagination info
             const hasNextPage = $('.pagination .page-item.active').next('.page-item').length > 0;
             const totalPages = parseInt($('.pagination .page-item:not(.next):last').text()) || 1;
 
@@ -205,13 +373,13 @@ export class NineAnimeSource extends BaseAnimeSource {
             });
 
             const $ = cheerio.load(response.data);
-            
+
             const title = $('h2.film-name').text().trim();
             const image = $('.film-poster img').attr('src') || '';
             const description = $('.film-description .text').text().trim() || 'No description available.';
             const type = $('.item-title:contains("Type:")').next('.item-content').text().trim();
             const status = $('.item-title:contains("Status:")').next('.item-content').text().trim();
-            
+
             const anime: AnimeBase = {
                 id: `9anime-${animeSlug}`,
                 title,
@@ -220,7 +388,7 @@ export class NineAnimeSource extends BaseAnimeSource {
                 description,
                 type: this.mapType(type),
                 status: this.mapStatus(status),
-                episodes: 0, // Will be populated when getting episodes
+                episodes: 0,
                 episodesAired: 0,
                 duration: '24m',
                 genres: [],
@@ -231,7 +399,6 @@ export class NineAnimeSource extends BaseAnimeSource {
                 source: this.name
             };
 
-            // Extract genres
             $('.item-title:contains("Genres:")').next('.item-content').find('a').each((i, el) => {
                 anime.genres?.push($(el).text().trim());
             });
@@ -239,7 +406,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             this.setCache(cacheKey, anime, this.cacheTTL.anime);
             return anime;
         } catch (error) {
-            this.handleError(error, 'getAnime');
+            this.handleError(error as any, 'getAnime');
             return null;
         }
     }
@@ -251,9 +418,8 @@ export class NineAnimeSource extends BaseAnimeSource {
 
         try {
             const animeSlug = animeId.replace('9anime-', '');
-            // Extract numeric ID from slug (e.g., "naruto-shippuden-355" -> "355")
             const numericId = animeSlug.match(/-(\d+)$/)?.[1] || '';
-            
+
             if (!numericId) {
                 logger.warn(`Could not extract numeric ID from: ${animeSlug}`, undefined, this.name);
                 return [];
@@ -286,7 +452,7 @@ export class NineAnimeSource extends BaseAnimeSource {
                         title: epTitle,
                         isFiller: false,
                         hasSub: true,
-                        hasDub: true // Determined by server list
+                        hasDub: true
                     });
                 }
             });
@@ -294,21 +460,17 @@ export class NineAnimeSource extends BaseAnimeSource {
             this.setCache(cacheKey, episodes, this.cacheTTL.episodes);
             return episodes;
         } catch (error) {
-            this.handleError(error, 'getEpisodes');
+            this.handleError(error as any, 'getEpisodes');
             return [];
         }
     }
 
-    /**
-     * Get streaming servers for an episode
-     */
     async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
         const cacheKey = `9anime-servers:${episodeId}`;
         const cached = this.getCached<EpisodeServer[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            // Extract numeric episode ID from format "anime-slug?ep=123"
             const epNumericId = episodeId.split('ep=')[1] || episodeId;
 
             const response = await this.client.get(`${this.baseUrl}/ajax/episode/servers`, {
@@ -355,7 +517,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             this.setCache(cacheKey, servers, this.cacheTTL.servers);
             return servers;
         } catch (error) {
-            this.handleError(error, 'getEpisodeServers');
+            this.handleError(error as any, 'getEpisodeServers');
             return [
                 { name: 'hd-1', url: '', type: 'sub' },
                 { name: 'hd-2', url: '', type: 'sub' }
@@ -363,16 +525,39 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 
-    /**
-     * Get streaming links using HiAnime API (cross-compatible with 9anime content)
-     */
     async getStreamingLinks(episodeId: string, server: string = 'hd-1', category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
         const cacheKey = `9anime-stream:${episodeId}:${server}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
 
         try {
-            // Try HiAnime API for streaming (since both use similar infrastructure)
+            // 1. Try Puppeteer Scraping first (Primary Strategy)
+            logger.info(`Attempting Puppeteer scraping for ${episodeId}`, undefined, this.name);
+
+            // We need a server ID to scrape. If server is "hd-1" (default), we might need to fetch real server ID first
+            let targetServerId = '';
+
+            // If server param looks like a real ID (numeric), use it. otherwise fetch servers
+            if (server && server !== 'hd-1' && server !== 'hd-2') {
+                targetServerId = server; // It's likely the data-id from getEpisodeServers
+            } else {
+                // Fetch servers to get a real ID
+                const servers = await this.getEpisodeServers(episodeId);
+                const matchingServer = servers.find(s => s.type === category) || servers[0];
+                if (matchingServer && matchingServer.url) {
+                    targetServerId = matchingServer.url;
+                }
+            }
+
+            if (targetServerId) {
+                const scrapedData = await this.getStreamsFromPuppeteer(episodeId, targetServerId);
+                if (scrapedData) {
+                    this.setCache(cacheKey, scrapedData, this.cacheTTL.stream);
+                    return scrapedData;
+                }
+            }
+
+            // 2. Fallback: Try HiAnime API
             for (const apiUrl of this.hianimeApis) {
                 try {
                     const response = await axios.get(`${apiUrl}/api/v2/hianime/episode/sources`, {
@@ -405,25 +590,17 @@ export class NineAnimeSource extends BaseAnimeSource {
                             source: this.name
                         };
 
-                        // Sort by quality
-                        streamData.sources.sort((a, b) => {
-                            const order: Record<string, number> = { '1080p': 0, '720p': 1, '480p': 2, '360p': 3, 'auto': 4 };
-                            return (order[a.quality] || 5) - (order[b.quality] || 5);
-                        });
-
                         this.setCache(cacheKey, streamData, this.cacheTTL.stream);
-                        logger.info(`Got stream from ${apiUrl}`, { episodeId }, this.name);
                         return streamData;
                     }
-                } catch (e: any) {
-                    logger.warn(`HiAnime API ${apiUrl} failed: ${e.message}`, undefined, this.name);
+                } catch {
                     continue;
                 }
             }
 
             return { sources: [], subtitles: [] };
         } catch (error) {
-            this.handleError(error, 'getStreamingLinks');
+            this.handleError(error as any, 'getStreamingLinks');
             return { sources: [], subtitles: [] };
         }
     }
@@ -441,9 +618,8 @@ export class NineAnimeSource extends BaseAnimeSource {
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
 
-            // Get trending from homepage
             $('.block_area_trending .flw-item, .trending-list .flw-item').each((i, el) => {
-                if (i < 10) { // Limit to top 10
+                if (i < 10) {
                     const anime = this.mapAnimeFromScrape($(el), $);
                     if (anime.title) {
                         results.push(anime);
@@ -451,7 +627,6 @@ export class NineAnimeSource extends BaseAnimeSource {
                 }
             });
 
-            // Fallback to first section if trending not found
             if (results.length === 0) {
                 $('.block_area:first .flw-item').each((i, el) => {
                     if (i < 10) {
@@ -466,7 +641,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             this.setCache(cacheKey, results, 10 * 60 * 1000);
             return results;
         } catch (error) {
-            this.handleError(error, 'getTrending');
+            this.handleError(error as any, 'getTrending');
             return [];
         }
     }
@@ -494,7 +669,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             this.setCache(cacheKey, results, 3 * 60 * 1000);
             return results;
         } catch (error) {
-            this.handleError(error, 'getLatest');
+            this.handleError(error as any, 'getLatest');
             return [];
         }
     }
@@ -527,7 +702,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             this.setCache(cacheKey, results, 15 * 60 * 1000);
             return results;
         } catch (error) {
-            this.handleError(error, 'getTopRated');
+            this.handleError(error as any, 'getTopRated');
             return [];
         }
     }

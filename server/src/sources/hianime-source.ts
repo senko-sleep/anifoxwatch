@@ -5,6 +5,134 @@ import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js
 import { Agent } from 'http';
 import { logger } from '../utils/logger.js';
 
+// ============ API RESPONSE INTERFACES ============
+
+interface HiAnimeAPIResponse {
+    success?: boolean;
+    status?: number;
+    data?: unknown;
+}
+
+interface AnimeInfoRaw {
+    id: string;
+    name?: string;
+    title?: string;
+    jname?: string;
+    poster?: string;
+    image?: string;
+    description?: string;
+    type?: string;
+    status?: string;
+    rating?: string;
+    malscore?: string;
+    episodes?: {
+        sub?: number;
+        dub?: number;
+    };
+    totalEpisodes?: number;
+    duration?: string;
+    genres?: string[];
+    studios?: string[];
+    season?: string;
+    aired?: string;
+    rank?: number;
+}
+
+interface AnimeDetailResponse {
+    anime?: {
+        info?: AnimeInfoRaw;
+        moreInfo?: {
+            genres?: string[];
+            studios?: string;
+            status?: string;
+        };
+    } | AnimeInfoRaw;
+}
+
+interface SearchResponse {
+    animes?: AnimeInfoRaw[];
+    totalPages?: number;
+    currentPage?: number;
+    hasNextPage?: boolean;
+}
+
+interface HomeResponse {
+    trendingAnimes?: AnimeInfoRaw[];
+    spotlightAnimes?: AnimeInfoRaw[];
+    latestEpisodeAnimes?: AnimeInfoRaw[];
+    top10Animes?: {
+        today?: AnimeInfoRaw[];
+        week?: AnimeInfoRaw[];
+    };
+}
+
+interface CategoryResponse {
+    animes?: AnimeInfoRaw[];
+}
+
+interface EpisodeRaw {
+    episodeId: string;
+    number?: number;
+    title?: string;
+    isFiller?: boolean;
+}
+
+interface EpisodesResponse {
+    episodes?: EpisodeRaw[];
+}
+
+interface ServerRaw {
+    serverName?: string;
+    server_name?: string;
+    name?: string;
+    type?: 'sub' | 'dub';
+}
+
+interface ServersResponse {
+    sub?: ServerRaw[];
+    dub?: ServerRaw[];
+}
+
+interface ChiServersResponse {
+    success?: boolean;
+    results?: {
+        servers?: ServerRaw[];
+    };
+}
+
+interface SourceRaw {
+    url: string;
+    quality?: string;
+    label?: string;
+    isM3U8?: boolean;
+}
+
+interface SubtitleRaw {
+    url: string;
+    lang?: string;
+    language?: string;
+    label?: string;
+}
+
+interface StreamSourcesResponse {
+    sources?: SourceRaw[];
+    subtitles?: SubtitleRaw[];
+    headers?: Record<string, string>;
+    intro?: {
+        start: number;
+        end: number;
+    };
+    outro?: {
+        start: number;
+        end: number;
+    };
+}
+
+interface ChiStreamResponse {
+    success?: boolean;
+    results?: StreamSourcesResponse;
+}
+
 /**
  * HiAnime Source - Primary reliable anime source using the aniwatch-api
  * API Documentation: https://github.com/ghoshRitesh12/aniwatch-api
@@ -21,7 +149,7 @@ export class HiAnimeSource extends BaseAnimeSource {
     private client: AxiosInstance;
 
     // Smart caching with TTL
-    private cache: Map<string, { data: any; expires: number }> = new Map();
+    private cache: Map<string, { data: unknown; expires: number }> = new Map();
     private cacheTTL = {
         home: 5 * 60 * 1000,        // 5 min
         search: 3 * 60 * 1000,      // 3 min
@@ -33,7 +161,7 @@ export class HiAnimeSource extends BaseAnimeSource {
 
     // List of API instances to try (in order of preference)
     private apiInstances = [
-        'http://localhost:4000',
+        //'http://localhost:3001',
         'https://aniwatch-api-v2.vercel.app',
         'https://api-aniwatch.onrender.com',
         'https://aniwatch-api.onrender.com',
@@ -74,7 +202,7 @@ export class HiAnimeSource extends BaseAnimeSource {
         return null;
     }
 
-    private setCache(key: string, data: any, ttl: number): void {
+    private setCache(key: string, data: unknown, ttl: number): void {
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
@@ -87,7 +215,7 @@ export class HiAnimeSource extends BaseAnimeSource {
 
     // ============ API REQUEST WITH FALLBACK ============
 
-    private async apiRequest<T>(path: string, params?: Record<string, any>): Promise<T> {
+    private async apiRequest<T>(path: string, params?: Record<string, unknown>): Promise<T> {
         let lastError: Error | null = null;
 
         // Try current API instance first, then fallback to others
@@ -96,7 +224,7 @@ export class HiAnimeSource extends BaseAnimeSource {
             const apiUrl = this.apiInstances[apiIndex];
 
             try {
-                const response = await axios.get(`${apiUrl}/api/v2/hianime${path}`, {
+                const response = await axios.get<HiAnimeAPIResponse>(`${apiUrl}/api/v2/hianime${path}`, {
                     params,
                     timeout: 15000,
                     headers: {
@@ -113,9 +241,10 @@ export class HiAnimeSource extends BaseAnimeSource {
                     return (response.data.data || response.data) as T;
                 }
                 throw new Error(`API returned success: false or status: ${response.data?.status}`);
-            } catch (error: any) {
-                lastError = error;
-                logger.warn(`API ${apiUrl} failed: ${error.message}`, { path, params }, this.name);
+            } catch (error) {
+                const err = error as Error;
+                lastError = err;
+                logger.warn(`API ${apiUrl} failed: ${err.message}`, { path, params }, this.name);
                 continue;
             }
         }
@@ -125,7 +254,7 @@ export class HiAnimeSource extends BaseAnimeSource {
 
     // ============ DATA MAPPING ============
 
-    private mapAnime(data: any): AnimeBase {
+    private mapAnime(data: AnimeInfoRaw): AnimeBase {
         return {
             id: `hianime-${data.id}`,
             title: data.name || data.title || 'Unknown',
@@ -150,7 +279,7 @@ export class HiAnimeSource extends BaseAnimeSource {
         };
     }
 
-    private mapAnimeFromSearch(data: any): AnimeBase {
+    private mapAnimeFromSearch(data: AnimeInfoRaw): AnimeBase {
         return {
             id: `hianime-${data.id}`,
             title: data.name || 'Unknown',
@@ -173,7 +302,7 @@ export class HiAnimeSource extends BaseAnimeSource {
         };
     }
 
-    private mapType(type: string): 'TV' | 'Movie' | 'OVA' | 'ONA' | 'Special' {
+    private mapType(type?: string): 'TV' | 'Movie' | 'OVA' | 'ONA' | 'Special' {
         const t = (type || '').toUpperCase();
         if (t.includes('MOVIE')) return 'Movie';
         if (t.includes('OVA')) return 'OVA';
@@ -182,7 +311,7 @@ export class HiAnimeSource extends BaseAnimeSource {
         return 'TV';
     }
 
-    private mapStatus(status: string): 'Ongoing' | 'Completed' | 'Upcoming' {
+    private mapStatus(status?: string): 'Ongoing' | 'Completed' | 'Upcoming' {
         const s = (status || '').toLowerCase();
         if (s.includes('ongoing') || s.includes('airing') || s.includes('currently')) return 'Ongoing';
         if (s.includes('upcoming') || s.includes('not yet')) return 'Upcoming';
@@ -193,7 +322,7 @@ export class HiAnimeSource extends BaseAnimeSource {
 
     async healthCheck(): Promise<boolean> {
         try {
-            await this.apiRequest('/home');
+            await this.apiRequest<HomeResponse>('/home');
             this.isAvailable = true;
             return true;
         } catch {
@@ -208,10 +337,10 @@ export class HiAnimeSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<any>('/search', { q: query, page });
+            const data = await this.apiRequest<SearchResponse>('/search', { q: query, page });
 
             const result: AnimeSearchResult = {
-                results: (data.animes || []).map((a: any) => this.mapAnimeFromSearch(a)),
+                results: (data.animes || []).map((a) => this.mapAnimeFromSearch(a)),
                 totalPages: data.totalPages || 1,
                 currentPage: data.currentPage || page,
                 hasNextPage: data.hasNextPage || false,
@@ -233,12 +362,17 @@ export class HiAnimeSource extends BaseAnimeSource {
 
         try {
             const animeId = id.replace('hianime-', '');
-            const data = await this.apiRequest<any>(`/anime/${animeId}`);
+            const data = await this.apiRequest<AnimeDetailResponse>(`/anime/${animeId}`);
 
-            const anime = this.mapAnime(data.anime?.info || data.anime || data);
+            // Handle nested structure
+            const animeInfo = (typeof data.anime === 'object' && 'info' in data.anime)
+                ? data.anime.info
+                : data.anime || data as unknown as AnimeInfoRaw;
+
+            const anime = this.mapAnime(animeInfo as AnimeInfoRaw);
 
             // Merge in moreInfo if available
-            if (data.anime?.moreInfo) {
+            if (typeof data.anime === 'object' && 'moreInfo' in data.anime && data.anime.moreInfo) {
                 anime.genres = data.anime.moreInfo.genres || anime.genres;
                 anime.studios = data.anime.moreInfo.studios ? [data.anime.moreInfo.studios] : anime.studios;
                 anime.status = this.mapStatus(data.anime.moreInfo.status || '');
@@ -259,9 +393,9 @@ export class HiAnimeSource extends BaseAnimeSource {
 
         try {
             const id = animeId.replace('hianime-', '');
-            const data = await this.apiRequest<any>(`/anime/${id}/episodes`);
+            const data = await this.apiRequest<EpisodesResponse>(`/anime/${id}/episodes`);
 
-            const episodes: Episode[] = (data.episodes || []).map((ep: any) => ({
+            const episodes: Episode[] = (data.episodes || []).map((ep) => ({
                 id: ep.episodeId,
                 number: ep.number || 1,
                 title: ep.title || `Episode ${ep.number || 1}`,
@@ -289,54 +423,71 @@ export class HiAnimeSource extends BaseAnimeSource {
 
         try {
             // episodeId is already in full format "anime-id?ep=number"
-            // For the chi API, we can get servers from the /api/stream endpoint
             const apiUrl = this.apiInstances[this.currentApiIndex];
 
             let servers: EpisodeServer[] = [];
 
             if (apiUrl.includes('chi.vercel.app')) {
                 // Use new ZEN API structure
-                const response = await axios.get(`${apiUrl}/api/stream`, {
-                    params: { id: episodeId, server: 'hd-1', type: 'sub' }
-                });
+                try {
+                    const response = await axios.get<ChiServersResponse>(`${apiUrl}/api/stream`, {
+                        params: { id: episodeId, server: 'hd-1', type: 'sub' },
+                        timeout: 15000
+                    });
 
-                if (response.data?.success && response.data.results?.servers) {
-                    servers = response.data.results.servers.map((s: any) => ({
-                        name: s.server_name || s.name,
-                        url: '',
-                        type: s.type || 'sub'
-                    }));
+                    if (response.data?.success && response.data.results?.servers) {
+                        servers = response.data.results.servers.map((s) => ({
+                            name: s.server_name || s.name || 'unknown',
+                            url: '',
+                            type: s.type || 'sub'
+                        }));
+                    }
+                } catch (e) {
+                    logger.warn('CHI API /api/stream failed for servers', undefined, this.name);
                 }
-            } else {
-                // Use legacy aniwatch-api structure
-                const data = await this.apiRequest<any>('/episode/servers', { animeEpisodeId: episodeId });
-                if (data.sub) {
-                    data.sub.forEach((s: any) => {
-                        servers.push({ name: s.serverName, url: '', type: 'sub' });
-                    });
-                }
-                if (data.dub) {
-                    data.dub.forEach((s: any) => {
-                        servers.push({ name: s.serverName, url: '', type: 'dub' });
-                    });
+            }
+
+            // Try legacy endpoint if chi failed or not chi instance
+            if (servers.length === 0) {
+                try {
+                    const data = await this.apiRequest<ServersResponse>('/episode/servers', { animeEpisodeId: episodeId });
+                    if (data.sub) {
+                        data.sub.forEach((s) => {
+                            servers.push({ name: s.serverName || 'unknown', url: '', type: 'sub' });
+                        });
+                    }
+                    if (data.dub) {
+                        data.dub.forEach((s) => {
+                            servers.push({ name: s.serverName || 'unknown', url: '', type: 'dub' });
+                        });
+                    }
+                } catch (e) {
+                    logger.warn('Legacy /episode/servers endpoint failed', undefined, this.name);
                 }
             }
 
             if (servers.length === 0) {
                 // Fallback defaults
                 servers = [
-                    { name: 'hd-1', url: '', type: 'sub' },
-                    { name: 'hd-2', url: '', type: 'sub' }
+                    { name: 'hd-2', url: '', type: 'sub' },
+                    { name: 'hd-1', url: '', type: 'sub' }
                 ];
             }
+
+            // Sort servers to prioritize hd-2
+            servers.sort((a, b) => {
+                if (a.name === 'hd-2') return -1;
+                if (b.name === 'hd-2') return 1;
+                return 0;
+            });
 
             this.setCache(cacheKey, servers, this.cacheTTL.servers);
             return servers;
         } catch (error) {
             this.handleError(error, 'getEpisodeServers');
             return [
-                { name: 'hd-1', url: '', type: 'sub' },
-                { name: 'hd-2', url: '', type: 'sub' }
+                { name: 'hd-2', url: '', type: 'sub' },
+                { name: 'hd-1', url: '', type: 'sub' }
             ];
         }
     }
@@ -344,7 +495,7 @@ export class HiAnimeSource extends BaseAnimeSource {
     /**
      * Get HD streaming links for an episode
      */
-    async getStreamingLinks(episodeId: string, server: string = 'hd-1', category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server: string = 'hd-2', category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
         const cacheKey = `stream:${episodeId}:${server}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
@@ -356,20 +507,21 @@ export class HiAnimeSource extends BaseAnimeSource {
             // If we're on the chi.vercel.app instance, prefer its /api/stream endpoint
             if (apiUrl.includes('chi.vercel.app')) {
                 try {
-                    const response = await axios.get(`${apiUrl}/api/stream`, {
-                        params: { id: episodeId, server, type: category }
+                    const response = await axios.get<ChiStreamResponse>(`${apiUrl}/api/stream`, {
+                        params: { id: episodeId, server, type: category },
+                        timeout: 15000
                     });
 
                     if (response.data?.success && response.data?.results) {
                         const results = response.data.results;
                         streamData = {
-                            sources: (results.sources || []).map((s: any): VideoSource => ({
+                            sources: (results.sources || []).map((s): VideoSource => ({
                                 url: s.url,
                                 quality: this.normalizeQuality(s.quality || s.label || 'auto'),
                                 isM3U8: s.isM3U8 || (typeof s.url === 'string' && s.url.includes('.m3u8')),
                                 isDASH: typeof s.url === 'string' && s.url.includes('.mpd')
                             })),
-                            subtitles: (results.subtitles || []).map((sub: any) => ({
+                            subtitles: (results.subtitles || []).map((sub) => ({
                                 url: sub.url,
                                 lang: sub.lang || sub.language || 'Unknown',
                                 label: sub.label || sub.lang || sub.language
@@ -397,24 +549,24 @@ export class HiAnimeSource extends BaseAnimeSource {
                 }
             }
 
-            // Try standard endpoint structure first even for chi
-            const data = await this.apiRequest<any>('/episode/sources', {
+            // Try standard endpoint structure (for legacy instances or if chi failed)
+            const data = await this.apiRequest<StreamSourcesResponse>('/episode/sources', {
                 animeEpisodeId: episodeId,
                 server,
-                type: category
+                category
             });
 
             streamData = {
-                sources: (data.sources || []).map((s: any): VideoSource => ({
+                sources: (data.sources || []).map((s): VideoSource => ({
                     url: s.url,
-                    quality: this.normalizeQuality(s.quality),
+                    quality: this.normalizeQuality(s.quality || 'auto'),
                     isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
                     isDASH: s.url?.includes('.mpd')
                 })),
-                subtitles: (data.subtitles || []).map((sub: any) => ({
+                subtitles: (data.subtitles || []).map((sub) => ({
                     url: sub.url,
-                    lang: sub.lang,
-                    label: sub.lang
+                    lang: sub.lang || 'Unknown',
+                    label: sub.lang || 'Unknown'
                 })),
                 headers: data.headers,
                 intro: data.intro,
@@ -454,11 +606,11 @@ export class HiAnimeSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<any>('/home');
+            const data = await this.apiRequest<HomeResponse>('/home');
 
             // Get trending animes from home page
             const trending = data.trendingAnimes || data.spotlightAnimes || [];
-            const results = trending.map((a: any) => this.mapAnimeFromSearch(a));
+            const results = trending.map((a) => this.mapAnimeFromSearch(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
             return results;
@@ -474,11 +626,11 @@ export class HiAnimeSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<any>('/home');
+            const data = await this.apiRequest<HomeResponse>('/home');
 
             // Get latest episode animes from home page
             const latest = data.latestEpisodeAnimes || [];
-            const results = latest.map((a: any) => this.mapAnimeFromSearch(a));
+            const results = latest.map((a) => this.mapAnimeFromSearch(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
             return results;
@@ -494,11 +646,12 @@ export class HiAnimeSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<any>('/home');
+            const data = await this.apiRequest<HomeResponse>('/home');
 
             // Get top 10 animes from home page
             const topAnimes = data.top10Animes?.today || data.top10Animes?.week || [];
-            const results = topAnimes.slice(0, limit).map((a: any, i: number) => ({
+            // FIX: Replaced (a: any, i: number) with properly typed parameters
+            const results = topAnimes.slice(0, limit).map((a, i) => ({
                 rank: a.rank || ((page - 1) * limit + i + 1),
                 anime: this.mapAnimeFromSearch(a)
             }));
@@ -520,8 +673,8 @@ export class HiAnimeSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<any>('/category/most-popular', { page });
-            const results = (data.animes || []).map((a: any) => this.mapAnimeFromSearch(a));
+            const data = await this.apiRequest<CategoryResponse>('/category/most-popular', { page });
+            const results = (data.animes || []).map((a) => this.mapAnimeFromSearch(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
             return results;
@@ -540,8 +693,8 @@ export class HiAnimeSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<any>('/category/top-airing', { page });
-            const results = (data.animes || []).map((a: any) => this.mapAnimeFromSearch(a));
+            const data = await this.apiRequest<CategoryResponse>('/category/top-airing', { page });
+            const results = (data.animes || []).map((a) => this.mapAnimeFromSearch(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
             return results;

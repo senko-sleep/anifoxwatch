@@ -10,6 +10,7 @@
     },
     "dependencies": {
         "@consumet/extensions": "^1.8.8",
+        "aniwatch": "^2.24.3",
         "axios": "^1.6.8",
         "cheerio": "^1.0.0-rc.12",
         "cli-highlight": "^2.1.11",

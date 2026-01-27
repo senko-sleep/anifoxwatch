@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run dev:api\" \"npm run dev:client\"",
+    "dev": "concurrently --names \"API,CLIENT\" -c \"blue,green\" \"npm run dev:api\" \"npm run dev:client\" --kill-others",
     "dev:client": "vite",
-    "dev:api": "cd server && npm run dev",
+    "dev:api": "npm run dev --prefix server",
     "dev:all": "concurrently \"npm run dev:api\" \"npm run dev:client\"",
     "build": "vite build",
     "build:dev": "vite build --mode development",

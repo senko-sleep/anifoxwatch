@@ -368,12 +368,12 @@ export class GogoanimeSource extends BaseAnimeSource {
                 const href = $(el).find('.name a').attr('href') || '';
                 // Latest on home.html links to episode, not category
                 // href example: /boruto-episode-287
-                const episodeId = href.substring(1); 
+                const episodeId = href.substring(1);
                 // We need the anime ID. Usually we can't easily get it from episode slug without info call.
                 // But for list display, we can use episodeId as ID temporarily or try to guess.
                 // Gogoanime: /category/boruto from /boruto-episode-287
                 const animeId = episodeId.replace(/-episode-\d+$/, '');
-                
+
                 results.push({
                     id: `gogoanime-${animeId}`,
                     title: title,
