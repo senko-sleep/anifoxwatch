@@ -324,9 +324,15 @@ export const VideoPlayer = ({
     const handleEnded = () => {
       setIsPlaying(false);
       // If video ended and there's a next episode, start countdown
-      if (hasNextEpisode && !showNextEpisodeCountdown) {
-        setShowNextEpisodeCountdown(true);
-        setNextEpisodeCountdown(10);
+      // Only trigger if not already showing countdown
+      if (hasNextEpisode) {
+        setShowNextEpisodeCountdown(prev => {
+          if (!prev) {
+            setNextEpisodeCountdown(10);
+            return true;
+          }
+          return prev;
+        });
       }
     };
     const handleWaiting = () => setIsLoading(true);
@@ -372,9 +378,9 @@ export const VideoPlayer = ({
       return () => clearTimeout(timer);
     } else if (showNextEpisodeCountdown && nextEpisodeCountdown === 0) {
       // Auto-play next episode
-      onNextEpisode?.();
       setShowNextEpisodeCountdown(false);
       setNextEpisodeCountdown(10);
+      onNextEpisode?.();
     }
   }, [showNextEpisodeCountdown, nextEpisodeCountdown, onNextEpisode]);
 

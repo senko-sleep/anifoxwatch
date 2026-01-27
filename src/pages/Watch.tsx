@@ -57,43 +57,27 @@ const Watch = () => {
     refetch: refetchStream
   } = useStreamingLinks(selectedEpisode || '', selectedServer || undefined, audioType, !!selectedEpisode);
 
-  // Initialize episode from URL or first episode
+  // Initialize episode from URL or first episode (runs once on mount)
   useEffect(() => {
-    // Don't initialize if we're switching episodes
-    if (isSwitchingEpisode) return;
+    if (!episodes?.length || selectedEpisode) return;
     
     const epParam = searchParams.get('ep');
-    if (epParam && episodes?.length) {
+    if (epParam) {
       const epNum = parseInt(epParam, 10);
       const ep = episodes.find(e => e.number === epNum);
-      if (ep && ep.id !== selectedEpisode) {
+      if (ep) {
         setSelectedEpisode(ep.id);
         setSelectedEpisodeNum(ep.number);
         return;
       }
     }
-    // Default to first episode only if no episode selected
-    if (episodes?.length && !selectedEpisode) {
-      setSelectedEpisode(episodes[0].id);
-      setSelectedEpisodeNum(episodes[0].number);
-    }
-  }, [episodes, searchParams, selectedEpisode, isSwitchingEpisode]);
+    // Default to first episode if no URL param
+    setSelectedEpisode(episodes[0].id);
+    setSelectedEpisodeNum(episodes[0].number);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [episodes]);
 
-  // Update URL when episode changes
-  useEffect(() => {
-    // Don't update URL if switching episodes or loading stream
-    if (isSwitchingEpisode || streamLoading) return;
-    
-    if (selectedEpisodeNum) {
-      const currentEpParam = searchParams.get('ep');
-      const newEpParam = String(selectedEpisodeNum);
-      
-      // Only update URL if episode actually changed
-      if (currentEpParam !== newEpParam) {
-        setSearchParams({ ep: newEpParam }, { replace: true });
-      }
-    }
-  }, [selectedEpisodeNum, setSearchParams, searchParams, isSwitchingEpisode, streamLoading]);
+
 
   // Auto-select best server when servers load or audio type changes
   useEffect(() => {
@@ -219,6 +203,14 @@ const Watch = () => {
     // Set switching state to prevent URL conflicts
     setIsSwitchingEpisode(true);
     
+    // Update URL first, then state
+    const currentEpParam = searchParams.get('ep');
+    const newEpParam = String(episodeNum);
+    
+    if (currentEpParam !== newEpParam) {
+      setSearchParams({ ep: newEpParam }, { replace: true });
+    }
+    
     setSelectedEpisode(episodeId);
     setSelectedEpisodeNum(episodeNum);
     setSelectedServer(''); // Reset server for new episode
@@ -227,8 +219,8 @@ const Watch = () => {
     // Clear switching state after a delay
     setTimeout(() => {
       setIsSwitchingEpisode(false);
-    }, 1000);
-  }, [selectedEpisode]);
+    }, 500);
+  }, [selectedEpisode, searchParams, setSearchParams]);
 
   const handlePrevEpisode = useCallback(() => {
     if (!episodes?.length) return;
