@@ -84,17 +84,24 @@ router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<v
 });
 
 /**
+ * Server priority order - hd-2 works best based on testing
+ */
+const SERVER_PRIORITY = ['hd-2', 'hd-1', 'hd-3'];
+
+/**
  * @route GET /api/stream/watch/:episodeId
- * @query server - Server name (optional, default: auto-select best)
+ * @query server - Server name (optional, will try multiple if not specified)
  * @query category - sub/dub
  * @query proxy - If true, automatically proxy all stream URLs (default: true)
+ * @query tryAll - If true, try all servers until one works (default: true)
  * @description Get streaming URLs for an episode
  */
 router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<void> => {
     const episodeId = req.params.episodeId as string;
-    const { server, category, proxy: useProxy = 'true' } = req.query;
+    const { server, category, proxy: useProxy = 'true', tryAll = 'true' } = req.query;
     const requestId = (req as any).id;
     const shouldProxy = useProxy !== 'false';
+    const shouldTryAll = tryAll !== 'false' && !server; // Only try all if no specific server requested
     const proxyBase = getProxyBaseUrl(req);
     
     logger.info(`[STREAM] Fetching stream for episode: ${episodeId}`, {
@@ -102,78 +109,108 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         server,
         category,
         shouldProxy,
+        shouldTryAll,
         requestId
     });
 
-    try {
-        const streamData = await sourceManager.getStreamingLinks(
-            episodeId,
-            server as string | undefined,
-            category as 'sub' | 'dub' | undefined
-        );
+    // Determine servers to try
+    const serversToTry = server ? [server as string] : SERVER_PRIORITY;
+    let streamData: any = { sources: [], subtitles: [] };
+    let lastError: string | null = null;
+    let successServer: string | null = null;
 
-        if (streamData.sources.length === 0) {
-            logger.error(`[STREAM] No sources found for episode: ${episodeId}`, undefined, {
+    for (const currentServer of serversToTry) {
+        try {
+            logger.info(`[STREAM] Trying server: ${currentServer}`, { episodeId, requestId });
+
+            const data = await sourceManager.getStreamingLinks(
                 episodeId,
-                server: server as string,
-                category: category as string,
-                requestId
-            });
+                currentServer,
+                (category as 'sub' | 'dub') || 'sub'
+            );
 
-            res.status(404).json({
-                error: 'No streaming sources found',
-                episodeId,
-                server,
-                category,
-                suggestion: 'Try a different server or check episode availability'
-            });
-            return;
-        }
-
-        // Log original sources
-        logger.info(`[STREAM] Found ${streamData.sources.length} sources for episode: ${episodeId}`, {
-            episodeId,
-            sourceCount: streamData.sources.length,
-            qualities: streamData.sources.map(s => s.quality).join(', '),
-            originalUrls: streamData.sources.map(s => s.url.substring(0, 50) + '...'),
-            requestId
-        });
-
-        // Proxy the stream URLs if requested
-        if (shouldProxy) {
-            streamData.sources = streamData.sources.map(source => ({
-                ...source,
-                url: proxyUrl(source.url, proxyBase),
-                originalUrl: source.url // Keep original for debugging
-            }));
-
-            // Also proxy subtitle URLs
-            if (streamData.subtitles) {
-                streamData.subtitles = streamData.subtitles.map(sub => ({
-                    ...sub,
-                    url: proxyUrl(sub.url, proxyBase)
-                }));
+            if (data.sources && data.sources.length > 0) {
+                streamData = data;
+                successServer = currentServer;
+                logger.info(`[STREAM] ✅ Got ${data.sources.length} sources from ${currentServer}`, {
+                    episodeId,
+                    server: currentServer,
+                    qualities: data.sources.map((s: any) => s.quality).join(', '),
+                    requestId
+                });
+                break;
+            } else {
+                logger.warn(`[STREAM] No sources from ${currentServer}`, { episodeId, requestId });
             }
-
-            logger.info(`[STREAM] Proxied ${streamData.sources.length} sources`, {
-                episodeId,
-                proxiedUrls: streamData.sources.map(s => s.url.substring(0, 80)),
-                requestId
-            });
+        } catch (error: any) {
+            lastError = error.message;
+            logger.warn(`[STREAM] Server ${currentServer} failed: ${error.message}`, { episodeId, requestId });
+            
+            if (!shouldTryAll) {
+                break;
+            }
         }
+    }
 
-        // Add cache headers for performance
-        res.set('Cache-Control', 'private, max-age=3600'); // 1 hour
-        res.json(streamData);
-    } catch (error: any) {
-        logger.error(`[STREAM] Error fetching stream for episode: ${episodeId}`, error, {
+    if (streamData.sources.length === 0) {
+        logger.error(`[STREAM] No sources found after trying all servers for episode: ${episodeId}`, undefined, {
             episodeId,
-            server,
-            category,
+            triedServers: serversToTry.join(', '),
+            category: category as string,
+            lastError,
             requestId
         });
-        res.status(500).json({ error: 'Failed to get streaming links', message: error.message });
+
+        res.status(404).json({
+            error: 'No streaming sources found',
+            episodeId,
+            triedServers: serversToTry,
+            lastError,
+            suggestion: 'All servers failed. Please try again later.'
+        });
+        return;
     }
+
+    // Log successful extraction
+    logger.info(`[STREAM] Found ${streamData.sources.length} sources from ${successServer}`, {
+        episodeId,
+        server: successServer,
+        sourceCount: streamData.sources.length,
+        qualities: streamData.sources.map((s: any) => s.quality).join(', '),
+        originalUrls: streamData.sources.map((s: any) => s.url?.substring(0, 50) + '...'),
+        requestId
+    });
+
+    // Proxy the stream URLs if requested
+    if (shouldProxy) {
+        streamData.sources = streamData.sources.map((source: any) => ({
+            ...source,
+            url: proxyUrl(source.url, proxyBase),
+            originalUrl: source.url // Keep original for debugging
+        }));
+
+        // Also proxy subtitle URLs
+        if (streamData.subtitles) {
+            streamData.subtitles = streamData.subtitles.map((sub: any) => ({
+                ...sub,
+                url: proxyUrl(sub.url, proxyBase)
+            }));
+        }
+
+        logger.info(`[STREAM] Proxied ${streamData.sources.length} sources`, {
+            episodeId,
+            proxiedUrls: streamData.sources.map((s: any) => s.url?.substring(0, 80)),
+            requestId
+        });
+    }
+
+    // Add server info to response
+    streamData.server = successServer;
+    streamData.triedServers = serversToTry;
+
+    // Short cache - streams expire quickly
+    res.set('Cache-Control', 'private, max-age=300'); // 5 minutes
+    res.json(streamData);
 });
 
 /**
@@ -213,18 +250,25 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     try {
         // Determine best referer based on URL domain
-        const referers: Record<string, string> = {
-            'sunshinerays': 'https://rapid-cloud.co/',
-            'rainveil': 'https://rapid-cloud.co/',
-            'lightningspark': 'https://megacloud.tv/',
-            'megacloud': 'https://megacloud.tv/',
-            'vidcloud': 'https://vidcloud9.com/',
-            'rapid-cloud': 'https://rapid-cloud.co/',
-            'default': 'https://hianimez.to/'
+        const cdnConfig: Record<string, { referer: string; origin?: string }> = {
+            'sunshinerays': { referer: 'https://rapid-cloud.co/' },
+            'sunburst': { referer: 'https://rapid-cloud.co/' },
+            'rainveil': { referer: 'https://rapid-cloud.co/' },
+            'lightningspark': { referer: 'https://megacloud.tv/' },
+            'megacloud': { referer: 'https://megacloud.tv/' },
+            'vidcloud': { referer: 'https://vidcloud9.com/' },
+            'rapid-cloud': { referer: 'https://rapid-cloud.co/' },
+            'netmagcdn': { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
+            'biananset': { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
+            'anicdnstream': { referer: 'https://hianimez.to/' },
+            'gogocdn': { referer: 'https://gogoanime.run/' },
+            'default': { referer: 'https://hianimez.to/' }
         };
         
-        const matchedReferer = Object.entries(referers).find(([key]) => domain.includes(key));
-        const referer = matchedReferer ? matchedReferer[1] : referers.default;
+        const matchedConfig = Object.entries(cdnConfig).find(([key]) => domain.includes(key));
+        const config = matchedConfig ? matchedConfig[1] : cdnConfig.default;
+        const referer = config.referer;
+        const origin = config.origin || referer.replace(/\/$/, '');
         
         const response = await axios.get(url, {
             responseType: 'arraybuffer',
@@ -234,13 +278,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept-Encoding': 'gzip, deflate, br',
                 'Referer': referer,
-                'Origin': referer.replace(/\/$/, ''),
+                'Origin': origin,
                 'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
                 'sec-ch-ua-mobile': '?0',
                 'sec-ch-ua-platform': '"Windows"',
                 'sec-fetch-dest': isM3u8 ? 'empty' : 'video',
                 'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'cross-site'
+                'sec-fetch-site': 'cross-site',
+                'Connection': 'keep-alive'
             },
             timeout: 30000,
             maxRedirects: 5,
