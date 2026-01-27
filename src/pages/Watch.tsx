@@ -34,7 +34,7 @@ const Watch = () => {
   // State
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(1);
-  const [audioType, setAudioType] = useState<AudioType>('sub');
+  const [audioType, setAudioType] = useState<AudioType>('dub');
   const [audioManuallySet, setAudioManuallySet] = useState(false);
   const [quality, setQuality] = useState<QualityType>('auto');
   const [selectedServer, setSelectedServer] = useState<string>('');
@@ -229,15 +229,15 @@ const Watch = () => {
   const hasPrev = episodes?.findIndex(e => e.id === selectedEpisode) > 0;
   const hasNext = episodes ? episodes.findIndex(e => e.id === selectedEpisode) < episodes.length - 1 : false;
 
-  // Default audio behavior (Sub first; fall back to Dub if Sub isn't available)
+  // Default audio behavior (Dub first; fall back to Sub if Dub isn't available)
   useEffect(() => {
     if (!currentEpisode) return;
     if (audioManuallySet) return;
 
-    if (currentEpisode.hasSub) {
-      setAudioType('sub');
-    } else if (currentEpisode.hasDub) {
+    if (currentEpisode.hasDub) {
       setAudioType('dub');
+    } else if (currentEpisode.hasSub) {
+      setAudioType('sub');
     }
   }, [currentEpisode, audioManuallySet]);
 

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { AnimeGrid } from '@/components/anime/AnimeGrid';
-import { useSearch } from '@/hooks/useAnime';
+import { useSearch, useGenre, useTrending } from '@/hooks/useAnime';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -39,6 +39,15 @@ type SortOption = 'relevance' | 'rating' | 'year' | 'title' | 'episodes';
 type TypeFilter = 'all' | 'TV' | 'Movie' | 'OVA' | 'ONA' | 'Special';
 type StatusFilter = 'all' | 'Ongoing' | 'Completed' | 'Upcoming';
 
+// Common anime genres
+const COMMON_GENRES = [
+  'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance',
+  'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller', 'Yuri', 'Yaoi',
+  'Ecchi', 'Harem', 'Mecha', 'Music', 'Psychological', 'Historical', 'Parody',
+  'Samurai', 'Shounen', 'Shoujo', 'Seinen', 'Josei', 'Kids', 'Police', 'Military',
+  'School', 'Demons', 'Game', 'Magic', 'Vampire', 'Space', 'Time Travel', 'Martial Arts'
+];
+
 const Search = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
@@ -49,6 +58,7 @@ const Search = () => {
   const [sortBy, setSortBy] = useState<SortOption>('relevance');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [showFilters, setShowFilters] = useState(false);
   const [gridSize, setGridSize] = useState<'compact' | 'normal'>('normal');
 
@@ -70,18 +80,27 @@ const Search = () => {
     }
   }, [debouncedQuery, setSearchParams]);
 
-  // Fetch search results
-  const {
-    data: searchResult,
-    isLoading,
-    isFetching
-  } = useSearch(debouncedQuery, page, undefined, debouncedQuery.length >= 2);
+  // Fetch search results or genre results
+  const searchQuery = selectedGenres.length > 0 ? selectedGenres[0] : debouncedQuery;
+  const isGenreSearch = selectedGenres.length > 0 && !debouncedQuery;
+  const hasSearchQuery = debouncedQuery.length >= 2 || selectedGenres.length > 0;
+  
+  const { data: searchData, isLoading: searchLoading, isFetching: searchFetching } = useSearch(searchQuery, page, undefined, !isGenreSearch && hasSearchQuery);
+  const { data: genreData, isLoading: genreLoading, isFetching: genreFetching } = useGenre(searchQuery, page, undefined, isGenreSearch);
+  const { data: trendingData, isLoading: trendingLoading } = useTrending(1, undefined);
+  
+  // Use trending data as default when no search query
+  const data = useMemo(() => {
+    return hasSearchQuery ? (isGenreSearch ? genreData : searchData) : { results: trendingData || [], totalPages: 1, currentPage: 1, hasNextPage: false };
+  }, [hasSearchQuery, isGenreSearch, genreData, searchData, trendingData]);
+  const isLoading = hasSearchQuery ? (isGenreSearch ? genreLoading : searchLoading) : trendingLoading;
+  const isFetching = hasSearchQuery ? (isGenreSearch ? genreFetching : searchFetching) : false;
 
   // Filter and sort results
   const filteredResults = useMemo(() => {
-    if (!searchResult?.results) return [];
+    if (!data?.results) return [];
 
-    let results = [...searchResult.results];
+    let results = [...data.results];
 
     // Apply type filter
     if (typeFilter !== 'all') {
@@ -91,6 +110,28 @@ const Search = () => {
     // Apply status filter
     if (statusFilter !== 'all') {
       results = results.filter(anime => anime.status === statusFilter);
+    }
+
+    // Apply genre filter (only if not using API genre filtering)
+    if (selectedGenres.length > 0 && debouncedQuery) {
+      results = results.filter(anime => 
+        selectedGenres.some(genre => 
+          anime.genres.some(animeGenre => 
+            animeGenre.toLowerCase() === genre.toLowerCase()
+          )
+        )
+      );
+    }
+    
+    // If this is a pure genre search (no text query), filter by all selected genres
+    if (selectedGenres.length > 0 && !debouncedQuery) {
+      results = results.filter(anime => 
+        selectedGenres.some(genre => 
+          anime.genres.some(animeGenre => 
+            animeGenre.toLowerCase() === genre.toLowerCase()
+          )
+        )
+      );
     }
 
     // Apply sorting
@@ -112,16 +153,17 @@ const Search = () => {
     }
 
     return results;
-  }, [searchResult?.results, typeFilter, statusFilter, sortBy]);
+  }, [data, typeFilter, statusFilter, sortBy, debouncedQuery, selectedGenres]);
 
   // Clear all filters
   const clearFilters = () => {
     setTypeFilter('all');
     setStatusFilter('all');
     setSortBy('relevance');
+    setSelectedGenres([]);
   };
 
-  const hasActiveFilters = typeFilter !== 'all' || statusFilter !== 'all' || sortBy !== 'relevance';
+  const hasActiveFilters = typeFilter !== 'all' || statusFilter !== 'all' || sortBy !== 'relevance' || selectedGenres.length > 0;
 
   // Quick search suggestions
   const quickSearches = [
@@ -148,11 +190,11 @@ const Search = () => {
           {/* Header */}
           <div className="text-center mb-8">
             <h1 className="text-4xl sm:text-5xl font-black mb-3">
-              <span className="text-gradient-orange">Search</span>
+              <span className="text-gradient-orange">Browse</span>
               <span className="text-foreground"> Anime</span>
             </h1>
             <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-              Discover thousands of anime from multiple streaming sources
+              Explore popular anime and use filters to find exactly what you want to watch
             </p>
           </div>
 
@@ -272,16 +314,16 @@ const Search = () => {
 
           {/* Results count */}
           <div className="ml-auto text-sm text-muted-foreground">
-            {searchResult ? (
+            {data ? (
               <>
                 <span className="font-semibold text-foreground">{filteredResults.length}</span> results
-                {searchResult.totalPages > 1 && (
+                {data.totalPages > 1 && (
                   <span className="ml-2">
-                    • Page <span className="font-semibold text-foreground">{page}</span> of {searchResult.totalPages}
+                    • Page <span className="font-semibold text-foreground">{page}</span> of {data.totalPages}
                   </span>
                 )}
               </>
-            ) : debouncedQuery.length >= 2 ? (
+            ) : (selectedGenres.length > 0 || debouncedQuery.length >= 2) ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" />
                 Searching...
@@ -293,7 +335,54 @@ const Search = () => {
         {/* Expanded Filters */}
         {showFilters && (
           <div className="p-6 mb-8 bg-fox-surface/30 rounded-2xl border border-white/5 animate-in slide-in-from-top-2 duration-300">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {/* Genre Filter */}
+              <div className="lg:col-span-2">
+                <label className="text-sm font-semibold mb-3 block flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  Genres
+                </label>
+                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-3 bg-background/50 rounded-xl border border-white/10">
+                  {COMMON_GENRES.map((genre) => (
+                    <button
+                      key={genre}
+                      onClick={() => {
+                        setSelectedGenres(prev => 
+                          prev.includes(genre) 
+                            ? prev.filter(g => g !== genre)
+                            : [...prev, genre]
+                        );
+                        setPage(1);
+                      }}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
+                        selectedGenres.includes(genre)
+                          ? "bg-fox-orange text-white shadow-lg shadow-fox-orange/30"
+                          : "bg-fox-surface/60 hover:bg-fox-surface border border-white/5 hover:border-white/10"
+                      )}
+                    >
+                      {genre}
+                    </button>
+                  ))}
+                </div>
+                {selectedGenres.length > 0 && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {selectedGenres.length} genre{selectedGenres.length > 1 ? 's' : ''} selected
+                    </span>
+                    <button
+                      onClick={() => {
+                        setSelectedGenres([]);
+                        setPage(1);
+                      }}
+                      className="text-xs text-fox-orange hover:text-fox-orange/80"
+                    >
+                      Clear genres
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="text-sm font-semibold mb-3 block flex items-center gap-2">
                   <Tv className="w-4 h-4 text-fox-orange" />
@@ -335,18 +424,17 @@ const Search = () => {
           </div>
         )}
 
-        {/* Search Results */}
+        {/* Browse Results */}
         {!debouncedQuery ? (
-          // Empty state - Start searching
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-fox-orange/20 to-orange-500/10 flex items-center justify-center mb-8 shadow-lg shadow-fox-orange/10">
-              <Sparkles className="w-12 h-12 text-fox-orange" />
+          // Popular anime browsing
+          <div className="space-y-8">
+            <div className="text-center">
+              <h2 className="text-2xl font-bold mb-3">Popular Anime</h2>
+              <p className="text-muted-foreground max-w-md text-lg">
+                Browse trending anime or use filters and search to find exactly what you're looking for.
+              </p>
             </div>
-            <h2 className="text-2xl font-bold mb-3">Start Your Search</h2>
-            <p className="text-muted-foreground max-w-md text-lg">
-              Enter an anime title to search across multiple streaming sources.
-              We'll find the best quality streams for you.
-            </p>
+            <AnimeGrid anime={filteredResults} columns={gridSize === 'compact' ? 8 : 6} />
           </div>
         ) : debouncedQuery.length < 2 ? (
           <div className="text-center py-16">
@@ -404,7 +492,7 @@ const Search = () => {
             />
 
             {/* Pagination */}
-            {searchResult && searchResult.totalPages > 1 && (
+            {data && data.totalPages > 1 && (
               <div className="flex items-center justify-center gap-4 mt-12">
                 <Button
                   variant="outline"
@@ -417,14 +505,14 @@ const Search = () => {
                 </Button>
 
                 <div className="flex items-center gap-2">
-                  {Array.from({ length: Math.min(5, searchResult.totalPages) }).map((_, i) => {
+                  {Array.from({ length: Math.min(5, data.totalPages) }).map((_, i) => {
                     let pageNum: number;
-                    if (searchResult.totalPages <= 5) {
+                    if (data.totalPages <= 5) {
                       pageNum = i + 1;
                     } else if (page <= 3) {
                       pageNum = i + 1;
-                    } else if (page >= searchResult.totalPages - 2) {
-                      pageNum = searchResult.totalPages - 4 + i;
+                    } else if (page >= data.totalPages - 2) {
+                      pageNum = data.totalPages - 4 + i;
                     } else {
                       pageNum = page - 2 + i;
                     }
@@ -448,7 +536,7 @@ const Search = () => {
                 <Button
                   variant="outline"
                   onClick={() => setPage(p => p + 1)}
-                  disabled={!searchResult.hasNextPage || isFetching}
+                  disabled={!data.hasNextPage || isFetching}
                   className="h-12 px-6 rounded-xl gap-2"
                 >
                   Next

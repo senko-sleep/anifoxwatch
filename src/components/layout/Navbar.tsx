@@ -39,7 +39,7 @@ export const Navbar = () => {
             Home
           </Link>
           <Link
-            to="/search"
+            to="/browse"
             className="text-sm font-medium text-muted-foreground hover:text-fox-orange transition-colors"
           >
             Browse
@@ -133,7 +133,7 @@ export const Navbar = () => {
                 Home
               </Link>
               <Link
-                to="/search"
+                to="/browse"
                 className="px-3 py-2 rounded-lg text-sm font-medium hover:bg-fox-surface transition-colors"
                 onClick={() => setIsMobileMenuOpen(false)}
               >

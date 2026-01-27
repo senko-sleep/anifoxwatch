@@ -4,6 +4,7 @@ export interface AnimeBase {
     titleJapanese?: string;
     image: string;
     cover?: string;
+    banner?: string;
     description: string;
     type: 'TV' | 'Movie' | 'OVA' | 'ONA' | 'Special';
     status: 'Ongoing' | 'Completed' | 'Upcoming';

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
+import { VideoPreview } from './VideoPreview';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,6 +76,7 @@ export function VideoPlayer({
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const progressContainerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const retryCountRef = useRef(0);
@@ -96,9 +98,13 @@ export function VideoPlayer({
   const [hlsStats, setHlsStats] = useState<{ level: number; bandwidth: number } | null>(null);
   const [availableLevels, setAvailableLevels] = useState<{ height: number; bitrate: number }[]>([]);
   const [currentLevel, setCurrentLevel] = useState<number>(-1);
+  const [subtitleEnabled, setSubtitleEnabled] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [isPiPActive, setIsPiPActive] = useState(false);
-  const [subtitleEnabled, setSubtitleEnabled] = useState(false);
+  
+  // Video preview states
+  const [isProgressHovering, setIsProgressHovering] = useState(false);
+  const [progressMouseX, setProgressMouseX] = useState(0);
 
   // Retry loading the stream
   const retryLoad = useCallback(() => {
@@ -656,7 +662,13 @@ export function VideoPlayer({
         {/* Bottom controls */}
         <div className="absolute bottom-0 left-0 right-0 p-4 space-y-2">
           {/* Progress bar */}
-          <div className="relative group/progress">
+          <div 
+            ref={progressContainerRef}
+            className="relative group/progress"
+            onMouseEnter={() => setIsProgressHovering(true)}
+            onMouseLeave={() => setIsProgressHovering(false)}
+            onMouseMove={(e) => setProgressMouseX(e.clientX)}
+          >
             <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20 rounded-full overflow-hidden">
               <div
                 className="absolute h-full bg-white/40"
@@ -673,6 +685,17 @@ export function VideoPlayer({
               step={0.1}
               onValueChange={handleSeek}
               className="absolute bottom-0 left-0 right-0 opacity-0 group-hover/progress:opacity-100 transition-opacity cursor-pointer"
+            />
+            
+            {/* Video Preview */}
+            <VideoPreview
+              videoSrc={src}
+              currentTime={currentTime}
+              duration={duration}
+              isHovering={isProgressHovering}
+              mouseX={progressMouseX}
+              containerRef={progressContainerRef}
+              poster={poster}
             />
           </div>
 

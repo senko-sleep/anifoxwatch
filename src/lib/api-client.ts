@@ -1,6 +1,6 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // Streaming types
 export interface VideoSource {
@@ -119,6 +119,23 @@ class AnimeApiClient {
         return response.results || [];
     }
 
+    async getAnimeByGenre(genre: string, page: number = 1, source?: string): Promise<AnimeSearchResult> {
+        const params = new URLSearchParams({ page: String(page) });
+        if (source) params.append('source', source);
+        return this.fetch<AnimeSearchResult>(`/anime/genre/${encodeURIComponent(genre)}?${params}`);
+    }
+
+    async getRandomAnime(source?: string): Promise<Anime | null> {
+        try {
+            const params = new URLSearchParams();
+            if (source) params.append('source', source);
+            const queryString = params.toString() ? `?${params.toString()}` : '';
+            return await this.fetch<Anime>(`/anime/random${queryString}`);
+        } catch {
+            return null;
+        }
+    }
+
     async getAnime(id: string): Promise<Anime | null> {
         try {
             return await this.fetch<Anime>(`/anime/${encodeURIComponent(id)}`);
@@ -149,14 +166,14 @@ class AnimeApiClient {
         if (category) params.append('category', category);
 
         const queryString = params.toString() ? `?${params.toString()}` : '';
-        
+
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
-        
+
         try {
             const data = await this.fetch<StreamingData>(
                 `/stream/watch/${encodeURIComponent(episodeId)}${queryString}`
             );
-            
+
             console.log(`[API] ✅ Stream received:`, {
                 sources: data.sources?.length || 0,
                 qualities: data.sources?.map(s => s.quality).join(', '),
@@ -164,7 +181,7 @@ class AnimeApiClient {
                 hasIntro: !!data.intro,
                 source: data.source
             });
-            
+
             return data;
         } catch (error) {
             console.error(`[API] ❌ Stream fetch failed:`, error);

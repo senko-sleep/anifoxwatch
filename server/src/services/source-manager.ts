@@ -491,6 +491,111 @@ export class SourceManager {
         }
         return false;
     }
+
+    // ============ GENRE & RANDOM METHODS ============
+
+    /**
+     * Get anime by genre
+     * Uses search with genre query as fallback if source doesn't support genre filtering
+     */
+    async getAnimeByGenre(genre: string, page: number = 1, sourceName?: string): Promise<AnimeSearchResult> {
+        const timer = new PerformanceTimer(`Genre: ${genre}`, { genre, page });
+        const source = this.getAvailableSource(sourceName);
+
+        if (!source) {
+            logger.warn(`No available source for genre search`, { genre, page }, 'SourceManager');
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
+        }
+
+        try {
+            logger.sourceRequest(source.name, 'getAnimeByGenre', { genre, page });
+
+            // Try to use genre-specific method if available
+            if ('getByGenre' in source && typeof (source as any).getByGenre === 'function') {
+                const result = await (source as any).getByGenre(genre, page);
+                logger.sourceResponse(source.name, 'getByGenre', true, { resultCount: result.results?.length || 0 });
+                timer.end();
+                return result;
+            }
+
+            // Fallback: search with genre as query
+            logger.info(`Using search fallback for genre: ${genre}`, undefined, 'SourceManager');
+            const result = await source.search(genre, page);
+            logger.sourceResponse(source.name, 'search (genre fallback)', true, { resultCount: result.results.length });
+            timer.end();
+            return result;
+        } catch (error) {
+            logger.error(`Genre search failed for ${source.name}`, error as Error, { genre, page }, 'SourceManager');
+            // Try fallback
+            source.isAvailable = false;
+            const fallback = this.getAvailableSource();
+            if (fallback && fallback !== source) {
+                logger.failover(source.name, fallback.name, 'genre search failed', { genre, page });
+                return this.getAnimeByGenre(genre, page, fallback.name);
+            }
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
+        }
+    }
+
+    /**
+     * Get a random anime
+     * Fetches trending anime and picks one at random
+     */
+    async getRandomAnime(sourceName?: string): Promise<AnimeBase | null> {
+        const timer = new PerformanceTimer('Random anime', undefined);
+        const source = this.getAvailableSource(sourceName);
+
+        if (!source) {
+            logger.warn(`No available source for random anime`, undefined, 'SourceManager');
+            return null;
+        }
+
+        try {
+            logger.sourceRequest(source.name, 'getRandomAnime', undefined);
+
+            // Get trending anime (page 1-3 to have variety)
+            const allAnime: AnimeBase[] = [];
+            const pagesToTry = Math.min(3, 5); // Try up to 3 pages
+
+            for (let page = 1; page <= pagesToTry; page++) {
+                try {
+                    const trending = await source.getTrending(page);
+                    allAnime.push(...trending);
+                    if (allAnime.length >= 30) break; // Have enough to pick from
+                } catch {
+                    continue;
+                }
+            }
+
+            if (allAnime.length === 0) {
+                logger.warn(`No anime found for random selection`, undefined, 'SourceManager');
+                timer.end();
+                return null;
+            }
+
+            // Pick random anime
+            const randomIndex = Math.floor(Math.random() * allAnime.length);
+            const randomAnime = allAnime[randomIndex];
+
+            logger.sourceResponse(source.name, 'getRandomAnime', true, {
+                totalOptions: allAnime.length,
+                selectedIndex: randomIndex,
+                selectedId: randomAnime.id
+            });
+            timer.end();
+            return randomAnime;
+        } catch (error) {
+            logger.error(`Random anime failed for ${source.name}`, error as Error, undefined, 'SourceManager');
+            // Try fallback
+            source.isAvailable = false;
+            const fallback = this.getAvailableSource();
+            if (fallback && fallback !== source) {
+                logger.failover(source.name, fallback.name, 'random anime failed', undefined);
+                return this.getRandomAnime(fallback.name);
+            }
+            return null;
+        }
+    }
 }
 
 // Singleton instance

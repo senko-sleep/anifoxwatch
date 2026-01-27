@@ -8,6 +8,7 @@ export const queryKeys = {
     latest: (page: number, source?: string) => ['latest', page, source] as const,
     topRated: (page: number, limit: number, source?: string) => ['topRated', page, limit, source] as const,
     search: (query: string, page: number, source?: string) => ['search', query, page, source] as const,
+    genre: (genre: string, page: number, source?: string) => ['genre', genre, page, source] as const,
     anime: (id: string) => ['anime', id] as const,
     episodes: (animeId: string) => ['episodes', animeId] as const,
     servers: (episodeId: string) => ['servers', episodeId] as const,
@@ -50,6 +51,15 @@ export function useSearch(query: string, page: number = 1, source?: string, enab
         queryKey: queryKeys.search(query, page, source),
         queryFn: () => apiClient.search(query, page, source),
         enabled: enabled && query.length > 0,
+        staleTime: 2 * 60 * 1000,
+    });
+}
+
+export function useGenre(genre: string, page: number = 1, source?: string, enabled: boolean = true) {
+    return useQuery<AnimeSearchResult, Error>({
+        queryKey: queryKeys.genre(genre, page, source),
+        queryFn: () => apiClient.getAnimeByGenre(genre, page, source),
+        enabled: enabled && genre.length > 0,
         staleTime: 2 * 60 * 1000,
     });
 }

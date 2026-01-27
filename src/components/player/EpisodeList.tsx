@@ -113,30 +113,30 @@ export function EpisodeList({
   return (
     <div className="bg-fox-surface/30 rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-border/30">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-lg">Episodes</h3>
-          <Badge variant="secondary">
+      <div className="p-3 border-b border-border/30">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-base">Episodes</h3>
+          <Badge variant="secondary" className="text-xs">
             {episodes.length} eps
           </Badge>
         </div>
 
         {/* Search */}
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <div className="relative mb-2">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
             placeholder="Search episodes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 bg-background/50"
+            className="pl-8 bg-background/50 h-8 text-sm"
           />
         </div>
 
         {/* Filters */}
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           {seasons.length > 1 && (
             <Select value={selectedSeason} onValueChange={setSelectedSeason}>
-              <SelectTrigger className="flex-1 bg-background/50">
+              <SelectTrigger className="flex-1 bg-background/50 h-8 text-sm">
                 <SelectValue placeholder="All Seasons" />
               </SelectTrigger>
               <SelectContent>
@@ -154,12 +154,12 @@ export function EpisodeList({
             variant="outline"
             size="icon"
             onClick={() => setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}
-            className="bg-background/50"
+            className="bg-background/50 h-8 w-8"
           >
             {sortOrder === 'asc' ? (
-              <ChevronUp className="w-4 h-4" />
+              <ChevronUp className="w-3.5 h-3.5" />
             ) : (
-              <ChevronDown className="w-4 h-4" />
+              <ChevronDown className="w-3.5 h-3.5" />
             )}
           </Button>
 
@@ -167,19 +167,19 @@ export function EpisodeList({
             variant={showFillers ? 'outline' : 'secondary'}
             size="icon"
             onClick={() => setShowFillers(prev => !prev)}
-            className="bg-background/50"
+            className="bg-background/50 h-8 w-8"
             title={showFillers ? 'Hide fillers' : 'Show fillers'}
           >
-            <Filter className="w-4 h-4" />
+            <Filter className="w-3.5 h-3.5" />
           </Button>
         </div>
       </div>
 
       {/* Episode List */}
       <ScrollArea className="h-[500px]">
-        <div className="p-2 space-y-1">
+        <div className="p-1.5 space-y-1">
           {filteredEpisodes.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="text-center py-8 text-muted-foreground text-sm">
               No episodes found
             </div>
           ) : (
@@ -188,22 +188,22 @@ export function EpisodeList({
                 key={episode.id}
                 onClick={() => onEpisodeSelect(episode.id, episode.number)}
                 className={cn(
-                  "w-full p-3 rounded-lg text-left transition-all",
+                  "w-full p-2 rounded-lg text-left transition-all",
                   "hover:bg-fox-orange/10 group",
                   selectedEpisodeId === episode.id 
                     ? "bg-fox-orange/20 border border-fox-orange/50" 
                     : "bg-background/30"
                 )}
               >
-                <div className="flex items-start gap-3">
+                <div className="flex items-start gap-2">
                   {/* Episode number */}
                   <div className={cn(
-                    "w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0",
-                    "bg-fox-surface text-sm font-medium",
+                    "w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-xs",
+                    "bg-fox-surface font-medium",
                     selectedEpisodeId === episode.id && "bg-fox-orange text-white"
                   )}>
                     {selectedEpisodeId === episode.id ? (
-                      <Play className="w-4 h-4" fill="currentColor" />
+                      <Play className="w-3 h-3 fill-current" />
                     ) : (
                       episode.number
                     )}
@@ -212,8 +212,9 @@ export function EpisodeList({
                   {/* Episode info */}
                   <div className="flex-1 min-w-0">
                     <p className={cn(
-                      "font-medium text-sm truncate",
-                      selectedEpisodeId === episode.id && "text-fox-orange"
+                      "font-medium text-xs leading-tight",
+                      selectedEpisodeId === episode.id && "text-fox-orange",
+                      "line-clamp-2" // Allow up to 2 lines for longer titles
                     )}>
                       {episode.title !== `Episode ${episode.number}` 
                         ? episode.title 
@@ -221,21 +222,21 @@ export function EpisodeList({
                       }
                     </p>
                     
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                       {episode.hasSub && (
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Subtitles className="w-3 h-3" />
+                        <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
+                          <Subtitles className="w-2 h-2 flex-shrink-0" />
                           SUB
                         </span>
                       )}
                       {episode.hasDub && (
-                        <span className="flex items-center gap-1 text-xs text-green-500">
-                          <Mic className="w-3 h-3" />
+                        <span className="flex items-center gap-0.5 text-[10px] text-green-500 whitespace-nowrap">
+                          <Mic className="w-2 h-2 flex-shrink-0" />
                           DUB
                         </span>
                       )}
                       {episode.isFiller && (
-                        <Badge variant="outline" className="text-xs px-1 py-0 text-yellow-500 border-yellow-500/50">
+                        <Badge variant="outline" className="text-[9px] px-1 py-0 text-yellow-500 border-yellow-500/50 whitespace-nowrap">
                           Filler
                         </Badge>
                       )}
@@ -250,8 +251,8 @@ export function EpisodeList({
 
       {/* Quick stats */}
       {anime && (
-        <div className="p-3 border-t border-border/30 bg-background/30">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div className="p-2 border-t border-border/30 bg-background/30">
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
             <span>
               {anime.subCount || episodes.length} Sub
             </span>
