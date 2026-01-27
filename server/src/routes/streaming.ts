@@ -7,7 +7,9 @@ const router = Router();
 
 // Base URL for proxy - used to rewrite stream URLs
 const getProxyBaseUrl = (req: Request): string => {
-    const protocol = req.protocol;
+    // Force HTTPS on Render.com and other production environments
+    const isProduction = process.env.NODE_ENV === 'production';
+    const protocol = isProduction ? 'https' : req.protocol;
     const host = req.get('host');
     return `${protocol}://${host}/api/stream/proxy`;
 };
