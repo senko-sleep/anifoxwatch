@@ -163,7 +163,7 @@ const startServer = (port: number) => {
       `);
     });
 
-    server.on('error', (err: any) => {
+    server.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
             console.log(`⚠️  Port ${port} is in use, trying ${port + 1}...`);
             startServer(port + 1);

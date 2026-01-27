@@ -44,6 +44,8 @@ interface VideoPlayerProps {
   onEnded?: () => void;
   onError?: (error: string) => void;
   poster?: string;
+  onNextEpisode?: () => void;
+  hasNextEpisode?: boolean;
 }
 
 // Logger for video player events
@@ -64,7 +66,7 @@ const playerLog = (level: 'info' | 'warn' | 'error', message: string, data?: any
   }
 };
 
-export function VideoPlayer({
+export const VideoPlayer = ({
   src,
   isM3U8 = true,
   subtitles = [],
@@ -72,8 +74,10 @@ export function VideoPlayer({
   outro,
   onEnded,
   onError,
-  poster
-}: VideoPlayerProps) {
+  poster,
+  onNextEpisode,
+  hasNextEpisode
+}: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const progressContainerRef = useRef<HTMLDivElement>(null);
@@ -92,6 +96,8 @@ export function VideoPlayer({
   const [buffered, setBuffered] = useState(0);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
+  const [showNextEpisodeCountdown, setShowNextEpisodeCountdown] = useState(false);
+  const [nextEpisodeCountdown, setNextEpisodeCountdown] = useState(10);
   const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -317,7 +323,11 @@ export function VideoPlayer({
     };
     const handleEnded = () => {
       setIsPlaying(false);
-      onEnded?.();
+      // If video ended and there's a next episode, start countdown
+      if (hasNextEpisode && !showNextEpisodeCountdown) {
+        setShowNextEpisodeCountdown(true);
+        setNextEpisodeCountdown(10);
+      }
     };
     const handleWaiting = () => setIsLoading(true);
     const handleCanPlay = () => setIsLoading(false);
@@ -341,7 +351,7 @@ export function VideoPlayer({
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('canplay', handleCanPlay);
     };
-  }, [intro, outro, onEnded]);
+  }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown]);
 
   // Fullscreen change handler
   useEffect(() => {
@@ -352,6 +362,21 @@ export function VideoPlayer({
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  // Next episode countdown timer
+  useEffect(() => {
+    if (showNextEpisodeCountdown && nextEpisodeCountdown > 0) {
+      const timer = setTimeout(() => {
+        setNextEpisodeCountdown(prev => prev - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    } else if (showNextEpisodeCountdown && nextEpisodeCountdown === 0) {
+      // Auto-play next episode
+      onNextEpisode?.();
+      setShowNextEpisodeCountdown(false);
+      setNextEpisodeCountdown(10);
+    }
+  }, [showNextEpisodeCountdown, nextEpisodeCountdown, onNextEpisode]);
 
   // Picture-in-Picture handlers
   useEffect(() => {
@@ -614,6 +639,42 @@ export function VideoPlayer({
             <p className="text-white/40 text-xs mt-2">
               Tip: Try selecting a different server from the controls below
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Next Episode Countdown */}
+      {showNextEpisodeCountdown && hasNextEpisode && (
+        <div className="absolute bottom-24 right-4 bg-black/90 backdrop-blur-sm border border-white/20 rounded-lg p-4 animate-in slide-in-from-right z-20">
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-white text-sm font-medium">Next Episode</p>
+            <div className="w-12 h-12 rounded-full bg-fox-orange/20 flex items-center justify-center">
+              <span className="text-fox-orange text-lg font-bold">{nextEpisodeCountdown}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setShowNextEpisodeCountdown(false);
+                  setNextEpisodeCountdown(10);
+                }}
+                className="border-white/20 hover:bg-white/10 text-white text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  onNextEpisode?.();
+                  setShowNextEpisodeCountdown(false);
+                  setNextEpisodeCountdown(10);
+                }}
+                className="bg-fox-orange hover:bg-fox-orange/90 text-white text-xs"
+              >
+                Play Now
+              </Button>
+            </div>
           </div>
         </div>
       )}

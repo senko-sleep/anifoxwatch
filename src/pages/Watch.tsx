@@ -41,6 +41,7 @@ const Watch = () => {
   const [autoPlay, setAutoPlay] = useState(true);
   const [serverRetryCount, setServerRetryCount] = useState(0);
   const [sourceRetryIndex, setSourceRetryIndex] = useState(0);
+  const [isSwitchingEpisode, setIsSwitchingEpisode] = useState(false);
 
   // Refs
   const playerRef = useRef<HTMLDivElement>(null);
@@ -58,29 +59,41 @@ const Watch = () => {
 
   // Initialize episode from URL or first episode
   useEffect(() => {
+    // Don't initialize if we're switching episodes
+    if (isSwitchingEpisode) return;
+    
     const epParam = searchParams.get('ep');
     if (epParam && episodes?.length) {
       const epNum = parseInt(epParam, 10);
       const ep = episodes.find(e => e.number === epNum);
-      if (ep) {
+      if (ep && ep.id !== selectedEpisode) {
         setSelectedEpisode(ep.id);
         setSelectedEpisodeNum(ep.number);
         return;
       }
     }
-    // Default to first episode
+    // Default to first episode only if no episode selected
     if (episodes?.length && !selectedEpisode) {
       setSelectedEpisode(episodes[0].id);
       setSelectedEpisodeNum(episodes[0].number);
     }
-  }, [episodes, searchParams, selectedEpisode]);
+  }, [episodes, searchParams, selectedEpisode, isSwitchingEpisode]);
 
   // Update URL when episode changes
   useEffect(() => {
+    // Don't update URL if switching episodes or loading stream
+    if (isSwitchingEpisode || streamLoading) return;
+    
     if (selectedEpisodeNum) {
-      setSearchParams({ ep: String(selectedEpisodeNum) }, { replace: true });
+      const currentEpParam = searchParams.get('ep');
+      const newEpParam = String(selectedEpisodeNum);
+      
+      // Only update URL if episode actually changed
+      if (currentEpParam !== newEpParam) {
+        setSearchParams({ ep: newEpParam }, { replace: true });
+      }
     }
-  }, [selectedEpisodeNum, setSearchParams]);
+  }, [selectedEpisodeNum, setSearchParams, searchParams, isSwitchingEpisode, streamLoading]);
 
   // Auto-select best server when servers load or audio type changes
   useEffect(() => {
@@ -93,14 +106,14 @@ const Watch = () => {
         setSelectedServer(servers[0].name);
       }
     }
-  }, [servers, audioType]);
+  }, [servers, audioType, selectedServer]);
 
   // Reset server and retry count when audio type changes
   useEffect(() => {
     setSelectedServer('');
     setServerRetryCount(0);
     console.log(`[Watch] 🔊 Audio type changed to: ${audioType}`);
-  }, [audioType]);
+  }, [audioType, selectedEpisode]);
 
   // Auto-failover on stream error
   useEffect(() => {
@@ -198,13 +211,24 @@ const Watch = () => {
     return streamData.sources[0];
   }, [streamData, quality, sourceRetryIndex]);
 
-  // Episode navigation
+  // Episode navigation with smooth transitions
   const handleEpisodeSelect = useCallback((episodeId: string, episodeNum: number) => {
+    // Prevent unnecessary re-renders if same episode
+    if (episodeId === selectedEpisode) return;
+    
+    // Set switching state to prevent URL conflicts
+    setIsSwitchingEpisode(true);
+    
     setSelectedEpisode(episodeId);
     setSelectedEpisodeNum(episodeNum);
     setSelectedServer(''); // Reset server for new episode
     playerRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
+    
+    // Clear switching state after a delay
+    setTimeout(() => {
+      setIsSwitchingEpisode(false);
+    }, 1000);
+  }, [selectedEpisode]);
 
   const handlePrevEpisode = useCallback(() => {
     if (!episodes?.length) return;
@@ -340,14 +364,15 @@ const Watch = () => {
                     </div>
                   ) : videoSource ? (
                     <VideoPlayer
-                      src={videoSource.url}
-                      isM3U8={videoSource.isM3U8}
+                      src={videoSource?.url || ''}
+                      isM3U8={videoSource?.isM3U8}
                       subtitles={streamData?.subtitles}
                       intro={streamData?.intro}
                       outro={streamData?.outro}
-                      onEnded={autoPlay && hasNext ? handleNextEpisode : undefined}
                       onError={handlePlayerError}
-                      poster={anime.cover || anime.image}
+                      poster={anime.image}
+                      onNextEpisode={handleNextEpisode}
+                      hasNextEpisode={hasNext}
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
