@@ -5,17 +5,6 @@ import animeRoutes from './routes/anime.js';
 import sourcesRoutes from './routes/sources.js';
 import streamingRoutes from './routes/streaming.js';
 import { logger, createRequestContext, PerformanceTimer } from './utils/logger.js';
-
-// Health check endpoint
-app.get('/api/health', (req: Request, res: Response) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    service: 'anifoxwatch-api',
-    version: '1.0.0'
-  });
-});
-
 // Extend Request interface to include id
 interface ExtendedRequest extends Request {
     id: string;
@@ -187,3 +176,4 @@ const startServer = (port: number) => {
 startServer(Number(PORT));
 
 export default app;
+
