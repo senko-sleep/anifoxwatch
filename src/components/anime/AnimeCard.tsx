@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Play, Star } from 'lucide-react';
+import { Play, Star, Tv, Calendar } from 'lucide-react';
 import { Anime } from '@/types/anime';
 import { cn } from '@/lib/utils';
 
@@ -8,21 +8,23 @@ interface AnimeCardProps {
   className?: string;
   style?: React.CSSProperties;
   onMouseEnter?: () => void;
+  showRank?: number;
 }
 
-export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardProps) => {
+export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: AnimeCardProps) => {
   return (
     <Link
       to={`/watch/${anime.id}`}
       style={style}
       onMouseEnter={onMouseEnter}
       className={cn(
-        'group relative flex flex-col hover:scale-[1.02] transition-all duration-300',
+        'group relative flex flex-col',
         className
       )}
     >
-      {/* Image Container - Extremely Clean */}
-      <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-900 shadow-md ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
+      {/* Image Container */}
+      <div className="relative aspect-[2/3] overflow-hidden rounded-xl bg-fox-surface shadow-lg ring-1 ring-white/5 group-hover:ring-fox-orange/50 transition-all duration-500 group-hover:shadow-xl group-hover:shadow-fox-orange/10">
+        {/* Image */}
         <img
           src={anime.image}
           alt={anime.title}
@@ -30,36 +32,74 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
           loading="lazy"
         />
 
-        {/* Subtle Play Icon on Hover */}
-        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
-          <div className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center">
-            <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+        {/* Gradient Overlay */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity duration-300" />
+
+        {/* Play Button Overlay */}
+        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
+          <div className="w-14 h-14 rounded-full bg-fox-orange/90 backdrop-blur-md flex items-center justify-center transform scale-75 group-hover:scale-100 transition-transform duration-300 shadow-lg shadow-fox-orange/40">
+            <Play className="w-6 h-6 text-white fill-white ml-1" />
           </div>
         </div>
 
-        {/* Minimal Badges */}
-        <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
-          {anime.rating && anime.rating > 0 && (
-            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10">
-              <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
-              <span className="text-[10px] font-bold text-white">{anime.rating.toFixed(1)}</span>
-            </div>
-          )}
+        {/* Rank Badge */}
+        {showRank && (
+          <div className="absolute top-2 left-2 w-8 h-8 rounded-lg bg-gradient-to-br from-fox-orange to-orange-600 flex items-center justify-center shadow-lg">
+            <span className="text-sm font-black text-white">#{showRank}</span>
+          </div>
+        )}
+
+        {/* Rating Badge */}
+        {anime.rating && anime.rating > 0 && (
+          <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10">
+            <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+            <span className="text-xs font-bold text-white">{anime.rating.toFixed(1)}</span>
+          </div>
+        )}
+
+        {/* Bottom Info Overlay */}
+        <div className="absolute bottom-0 left-0 right-0 p-3 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
+          <div className="flex items-center gap-2 text-[10px] text-white/80">
+            {anime.type && (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm">
+                <Tv className="w-2.5 h-2.5" />
+                {anime.type}
+              </span>
+            )}
+            {anime.episodes && (
+              <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm">
+                {anime.episodes} EP
+              </span>
+            )}
+            {anime.year && (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm">
+                <Calendar className="w-2.5 h-2.5" />
+                {anime.year}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Info - Only Title Visible */}
-      <div className="mt-3 px-1">
-        <h3 className="font-medium text-sm text-zinc-200 group-hover:text-white transition-colors duration-200 line-clamp-1">
+      {/* Title & Info */}
+      <div className="mt-3 px-1 space-y-1">
+        <h3 className="font-semibold text-sm text-zinc-200 group-hover:text-white transition-colors duration-200 line-clamp-2 leading-tight">
           {anime.title}
         </h3>
-        <div className="flex items-center gap-2 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">
-            {anime.type}
-          </span>
-          {anime.episodes && (
-            <span className="text-[10px] text-zinc-600 font-medium">
-              {anime.episodes} episodes
+        <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+          {anime.status && (
+            <span className={cn(
+              "px-1.5 py-0.5 rounded font-medium uppercase tracking-wider",
+              anime.status === 'Ongoing' && "bg-green-500/20 text-green-400",
+              anime.status === 'Completed' && "bg-blue-500/20 text-blue-400",
+              anime.status === 'Upcoming' && "bg-purple-500/20 text-purple-400"
+            )}>
+              {anime.status}
+            </span>
+          )}
+          {anime.genres && anime.genres.length > 0 && (
+            <span className="text-zinc-600 truncate">
+              {anime.genres.slice(0, 2).join(' • ')}
             </span>
           )}
         </div>

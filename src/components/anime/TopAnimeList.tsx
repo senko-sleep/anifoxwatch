@@ -21,25 +21,22 @@ export const TopAnimeList = ({ items, className }: TopAnimeListProps) => {
 
   return (
     <aside className={cn('w-full', className)}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-bold text-fox-orange">Top 10</h2>
-        <div className="flex items-center gap-1 bg-fox-surface rounded-lg p-1">
-          {filters.map((filter) => (
-            <button
-              key={filter.key}
-              onClick={() => setActiveFilter(filter.key)}
-              className={cn(
-                'px-3 py-1 text-xs font-medium rounded-md transition-all',
-                activeFilter === filter.key
-                  ? 'bg-fox-orange text-white'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {filter.label}
-            </button>
-          ))}
-        </div>
+      {/* Time Filter Tabs */}
+      <div className="flex items-center gap-1 p-1 bg-background/50 rounded-xl mb-4">
+        {filters.map((filter) => (
+          <button
+            key={filter.key}
+            onClick={() => setActiveFilter(filter.key)}
+            className={cn(
+              'flex-1 px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200',
+              activeFilter === filter.key
+                ? 'bg-fox-orange text-white shadow-md shadow-fox-orange/30'
+                : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+            )}
+          >
+            {filter.label}
+          </button>
+        ))}
       </div>
 
       {/* List */}
@@ -53,6 +50,13 @@ export const TopAnimeList = ({ items, className }: TopAnimeListProps) => {
           />
         ))}
       </div>
+
+      {/* Empty State */}
+      {items.length === 0 && (
+        <div className="text-center py-8 text-muted-foreground text-sm">
+          No rankings available
+        </div>
+      )}
     </aside>
   );
 };

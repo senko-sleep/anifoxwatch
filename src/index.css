@@ -208,4 +208,72 @@
     background-size: 200% 100%;
     animation: shimmer 1.5s ease-in-out infinite;
   }
+
+  /* Hide scrollbar utility */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Glass effect */
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10;
+  }
+
+  /* Premium card effect */
+  .premium-card {
+    @apply bg-gradient-to-br from-fox-surface/80 to-fox-surface/40 border border-white/5 backdrop-blur-xl;
+  }
+
+  /* Glow text effect */
+  .text-glow {
+    text-shadow: 0 0 20px hsl(var(--fox-orange) / 0.5);
+  }
+
+  /* Smooth scale on hover */
+  .hover-scale {
+    @apply transition-transform duration-300;
+  }
+
+  .hover-scale:hover {
+    @apply scale-105;
+  }
+
+  /* Animate in from bottom */
+  .animate-in-up {
+    animation: animate-in-up 0.4s ease-out forwards;
+  }
+
+  @keyframes animate-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Floating animation */
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+
+  @keyframes float {
+
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+
+    50% {
+      transform: translateY(-10px);
+    }
+  }
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Menu, X, Shuffle, Users } from 'lucide-react';
+import { Search, Menu, X, Shuffle } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,22 +44,6 @@ export const Navbar = () => {
           >
             Browse
           </Link>
-          <Link
-            to="/search?type=TV"
-            className="text-sm font-medium text-muted-foreground hover:text-fox-orange transition-colors"
-          >
-            TV Series
-          </Link>
-          <Link
-            to="/search?type=Movie"
-            className="text-sm font-medium text-muted-foreground hover:text-fox-orange transition-colors"
-          >
-            Movies
-          </Link>
-          <button className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-fox-orange transition-colors">
-            <Shuffle className="w-4 h-4" />
-            Random
-          </button>
           <Link
             to="/search?sort=trending"
             className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-fox-orange transition-colors"
@@ -111,14 +95,6 @@ export const Navbar = () => {
             )}
           </div>
 
-          {/* Login Button */}
-          <Button
-            variant="outline"
-            className="hidden sm:flex border-fox-orange text-fox-orange hover:bg-fox-orange hover:text-white"
-          >
-            Login
-          </Button>
-
           {/* Mobile Menu Toggle */}
           <Button
             variant="ghost"
@@ -163,31 +139,17 @@ export const Navbar = () => {
               >
                 Browse All
               </Link>
-              <Link
-                to="/search?type=TV"
-                className="px-3 py-2 rounded-lg text-sm font-medium hover:bg-fox-surface transition-colors"
-                onClick={() => setIsMobileMenuOpen(false)}
+              <button
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium hover:bg-fox-surface transition-colors text-left"
+                onClick={() => {
+                  navigate('/search?sort=trending');
+                  setIsMobileMenuOpen(false);
+                }}
               >
-                TV Series
-              </Link>
-              <Link
-                to="/search?type=Movie"
-                className="px-3 py-2 rounded-lg text-sm font-medium hover:bg-fox-surface transition-colors"
-                onClick={() => setIsMobileMenuOpen(false)}
-              >
-                Movies
-              </Link>
-              <button className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium hover:bg-fox-surface transition-colors text-left">
                 <Shuffle className="w-4 h-4" />
                 Random
               </button>
-
             </div>
-
-            {/* Mobile Login */}
-            <Button className="w-full bg-fox-orange hover:bg-fox-orange-dark text-white">
-              Login
-            </Button>
           </div>
         </div>
       )}
