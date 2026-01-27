@@ -14,7 +14,20 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "setup": "npm install && cd server && npm install"
+    "setup": "npm install && cd server && npm install",
+    "deploy": "npm run deploy:frontend",
+    "deploy:frontend": "npm run build && npx firebase deploy --only hosting",
+    "deploy:api": "echo 'Push to GitHub - Render.com auto-deploys'",
+    "deploy:firebase": "npx firebase deploy",
+    "deploy:firebase:hosting": "npx firebase deploy --only hosting",
+    "deploy:firebase:functions": "npx firebase deploy --only functions",
+    "deploy:render": "echo 'Configure Render.com service in dashboard'",
+    "start:api": "cd server && npm run start",
+    "build:api": "cd server && npm run build",
+    "build:functions": "cd functions && npm install",
+    "firebase:init": "npx firebase init",
+    "firebase:serve": "npx firebase serve",
+    "firebase:emulators": "npx firebase emulators:start"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

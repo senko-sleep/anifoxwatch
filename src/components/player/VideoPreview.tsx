@@ -29,7 +29,7 @@ export function VideoPreview({
 
   // Sample time to nearest 20-second interval
   const getSampledTime = useCallback((time: number) => {
-    return Math.round(time / 1) * 1; // Round to nearest 10 seconds
+    return Math.round(time / 20) * 20; // Round to nearest 20 seconds
   }, []);
 
   // Calculate preview time based on mouse position - instant

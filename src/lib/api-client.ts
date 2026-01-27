@@ -1,6 +1,8 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+// Use different API URLs based on environment
+const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.DEV ? 'http://localhost:3001' : 'https://anifoxwatch.onrender.com');
 
 // Streaming types
 export interface VideoSource {
@@ -44,9 +46,14 @@ interface ApiResponse<T> {
     error?: string;
 }
 
+interface CacheEntry<T = unknown> {
+    data: T;
+    expires: number;
+}
+
 class AnimeApiClient {
     private baseUrl: string;
-    private cache: Map<string, { data: any; expires: number }> = new Map();
+    private cache: Map<string, CacheEntry> = new Map();
 
     constructor(baseUrl: string = API_BASE_URL) {
         this.baseUrl = baseUrl;

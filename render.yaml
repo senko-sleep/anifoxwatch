@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: anifoxwatch
+    env: node
+    region: ohio
+    buildCommand: npm install; npm run build
+    startCommand: npm run start:api
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3001
+      - key: CORS_ORIGIN
+        value: https://anifoxwatch.onrender.com
+
+  - type: static_site
+    name: anifoxwatch-frontend
+    env: static
+    region: ohio
+    buildCommand: npm install; npm run build
+    publishPath: ./dist
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VITE_API_URL
+        value: https://anifoxwatch.onrender.com/api
+
+databases:
+  - name: anifoxwatch-cache
+    engine: redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
