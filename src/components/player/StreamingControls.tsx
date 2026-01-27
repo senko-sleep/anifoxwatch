@@ -49,6 +49,7 @@ interface StreamingControlsProps {
   onAutoPlayChange: (autoPlay: boolean) => void;
   currentSource?: string;
   hasDub?: boolean;
+  hasSub?: boolean;
 }
 
 const qualityLabels: Record<QualityType, string> = {
@@ -72,7 +73,8 @@ export function StreamingControls({
   autoPlay,
   onAutoPlayChange,
   currentSource,
-  hasDub = false
+  hasDub = false,
+  hasSub = true
 }: StreamingControlsProps) {
   // Get unique qualities
   const qualities: QualityType[] = ['auto', '1080p', '720p', '480p', '360p'].filter(q => 
@@ -82,6 +84,13 @@ export function StreamingControls({
   // Group servers by type
   const subServers = servers.filter(s => s.type === 'sub');
   const dubServers = servers.filter(s => s.type === 'dub');
+
+  const isSubAvailable = hasSub || subServers.length > 0;
+  const isDubAvailable = hasDub || dubServers.length > 0;
+
+  const visibleServers = (audioType === 'dub' ? dubServers : subServers).length
+    ? (audioType === 'dub' ? dubServers : subServers)
+    : servers;
 
   return (
     <div className="p-4 bg-fox-surface/30 rounded-xl space-y-4">
@@ -96,6 +105,7 @@ export function StreamingControls({
             variant={audioType === 'sub' ? 'default' : 'ghost'}
             size="sm"
             onClick={() => onAudioTypeChange('sub')}
+            disabled={!isSubAvailable}
             className={cn(
               "gap-2 h-8",
               audioType === 'sub' && "bg-fox-orange hover:bg-fox-orange/90"
@@ -109,9 +119,11 @@ export function StreamingControls({
             variant={audioType === 'dub' ? 'default' : 'ghost'}
             size="sm"
             onClick={() => onAudioTypeChange('dub')}
+            disabled={!isDubAvailable}
             className={cn(
               "gap-2 h-8",
-              audioType === 'dub' && "bg-green-600 hover:bg-green-600/90"
+              audioType === 'dub' && "bg-green-600 hover:bg-green-600/90",
+              !isDubAvailable && "opacity-50"
             )}
           >
             <Mic className="w-4 h-4" />
@@ -162,49 +174,17 @@ export function StreamingControls({
               <SelectValue placeholder="Select server" />
             </SelectTrigger>
             <SelectContent>
-              {subServers.length > 0 && (
-                <>
-                  <div className="px-2 py-1 text-xs text-muted-foreground flex items-center gap-1">
-                    <Subtitles className="w-3 h-3" />
-                    SUB Servers
+              {visibleServers.map(server => (
+                <SelectItem key={`${server.type}-${server.name}`} value={server.name}>
+                  <div className="flex items-center gap-2">
+                    {selectedServer === server.name && (
+                      <CheckCircle2 className="w-3 h-3 text-green-500" />
+                    )}
+                    {server.name}
                   </div>
-                  {subServers.map(server => (
-                    <SelectItem key={`sub-${server.name}`} value={server.name}>
-                      <div className="flex items-center gap-2">
-                        {selectedServer === server.name && (
-                          <CheckCircle2 className="w-3 h-3 text-green-500" />
-                        )}
-                        {server.name}
-                        {audioType === 'sub' && selectedServer === server.name && (
-                          <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">active</Badge>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </>
-              )}
-              {dubServers.length > 0 && (
-                <>
-                  <div className="px-2 py-1 text-xs text-muted-foreground flex items-center gap-1 mt-1">
-                    <Mic className="w-3 h-3" />
-                    DUB Servers
-                  </div>
-                  {dubServers.map(server => (
-                    <SelectItem key={`dub-${server.name}`} value={server.name}>
-                      <div className="flex items-center gap-2">
-                        {selectedServer === server.name && (
-                          <CheckCircle2 className="w-3 h-3 text-green-500" />
-                        )}
-                        {server.name}
-                        {audioType === 'dub' && selectedServer === server.name && (
-                          <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">active</Badge>
-                        )}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </>
-              )}
-              {servers.length === 0 && (
+                </SelectItem>
+              ))}
+              {visibleServers.length === 0 && (
                 <div className="px-2 py-4 text-center text-sm text-muted-foreground">
                   <AlertCircle className="w-4 h-4 mx-auto mb-1" />
                   No servers available

@@ -35,10 +35,12 @@ const Watch = () => {
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(1);
   const [audioType, setAudioType] = useState<AudioType>('sub');
+  const [audioManuallySet, setAudioManuallySet] = useState(false);
   const [quality, setQuality] = useState<QualityType>('auto');
   const [selectedServer, setSelectedServer] = useState<string>('');
   const [autoPlay, setAutoPlay] = useState(true);
   const [serverRetryCount, setServerRetryCount] = useState(0);
+  const [sourceRetryIndex, setSourceRetryIndex] = useState(0);
 
   // Refs
   const playerRef = useRef<HTMLDivElement>(null);
@@ -143,16 +145,45 @@ const Watch = () => {
       episode: selectedEpisode,
       retryCount: serverRetryCount
     });
-  }, [selectedServer, selectedEpisode, serverRetryCount]);
+
+    const sources = streamData?.sources || [];
+
+    // Try next source URL (same server) first
+    if (sourceRetryIndex + 1 < sources.length) {
+      console.log(`[Watch] 🔄 Trying next source (index ${sourceRetryIndex + 1}/${sources.length - 1})`);
+      setSourceRetryIndex(prev => prev + 1);
+      return;
+    }
+
+    // If we've exhausted sources, fail over to next server
+    if (servers?.length && serverRetryCount < servers.length) {
+      const currentIndex = servers.findIndex(s => s.name === selectedServer);
+      const nextServer = servers[(currentIndex + 1) % servers.length];
+      console.log(`[Watch] 🔄 Player failover to server: ${nextServer.name} (attempt ${serverRetryCount + 1}/${servers.length})`);
+      setSelectedServer(nextServer.name);
+      setServerRetryCount(prev => prev + 1);
+    }
+  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData]);
 
   // Reset retry count when episode changes
   useEffect(() => {
     setServerRetryCount(0);
   }, [selectedEpisode]);
 
+  // Reset source retries when stream changes
+  useEffect(() => {
+    setSourceRetryIndex(0);
+  }, [streamData, selectedServer, audioType, quality]);
+
   // Get best quality source
   const getVideoSource = useCallback(() => {
     if (!streamData?.sources?.length) return null;
+
+    const sources = streamData.sources;
+
+    // If the current URL failed, rotate through available sources
+    const fallbackSource = sources[sourceRetryIndex];
+    if (fallbackSource) return fallbackSource;
 
     // Find matching quality or best available
     const qualityOrder: QualityType[] = ['1080p', '720p', '480p', '360p', 'auto'];
@@ -165,7 +196,7 @@ const Watch = () => {
 
     // Fallback to first available
     return streamData.sources[0];
-  }, [streamData, quality]);
+  }, [streamData, quality, sourceRetryIndex]);
 
   // Episode navigation
   const handleEpisodeSelect = useCallback((episodeId: string, episodeNum: number) => {
@@ -197,6 +228,23 @@ const Watch = () => {
   const currentEpisode = episodes?.find(e => e.id === selectedEpisode);
   const hasPrev = episodes?.findIndex(e => e.id === selectedEpisode) > 0;
   const hasNext = episodes ? episodes.findIndex(e => e.id === selectedEpisode) < episodes.length - 1 : false;
+
+  // Default audio behavior (Sub first; fall back to Dub if Sub isn't available)
+  useEffect(() => {
+    if (!currentEpisode) return;
+    if (audioManuallySet) return;
+
+    if (currentEpisode.hasSub) {
+      setAudioType('sub');
+    } else if (currentEpisode.hasDub) {
+      setAudioType('dub');
+    }
+  }, [currentEpisode, audioManuallySet]);
+
+  // Reset manual audio choice when switching episodes
+  useEffect(() => {
+    setAudioManuallySet(false);
+  }, [selectedEpisode]);
 
   // Loading state
   if (animeLoading) {
@@ -373,7 +421,10 @@ const Watch = () => {
               {/* Streaming Controls */}
               <StreamingControls
                 audioType={audioType}
-                onAudioTypeChange={setAudioType}
+                onAudioTypeChange={(type) => {
+                  setAudioManuallySet(true);
+                  setAudioType(type);
+                }}
                 quality={quality}
                 onQualityChange={setQuality}
                 availableQualities={streamData?.sources?.map(s => s.quality) || []}
