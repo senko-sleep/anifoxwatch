@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Play, Info, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Anime } from '@/types/anime';
@@ -10,6 +11,7 @@ interface HeroSectionProps {
 
 export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const navigate = useNavigate();
   const currentAnime = featuredAnime[currentIndex];
 
   useEffect(() => {
@@ -30,67 +32,59 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
   if (!currentAnime) return null;
 
   return (
-    <section className="relative w-full h-[50vh] min-h-[400px] max-h-[600px] overflow-hidden">
+    <section className="relative w-full h-[75vh] min-h-[600px] overflow-hidden group">
       {/* Background Image */}
       <div className="absolute inset-0">
         <img
           src={currentAnime.cover || currentAnime.image}
           alt={currentAnime.title}
-          className="w-full h-full object-cover object-center"
+          className="w-full h-full object-cover object-top transition-all duration-1000 scale-105 group-hover:scale-100"
         />
-        {/* Gradient Overlays */}
-        <div className="absolute inset-0 bg-gradient-to-r from-background via-background/80 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
+        {/* Gradient Overlays - Optimized for visibility */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black via-black/40 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0a0a0a] via-transparent to-transparent" />
       </div>
 
       {/* Content */}
       <div className="relative container h-full flex items-center">
-        <div className="max-w-xl space-y-4 animate-fade-in" key={currentAnime.id}>
+        <div className="max-w-2xl space-y-6 animate-fade-in" key={currentAnime.id}>
           {/* Badges */}
-          <div className="flex items-center gap-2">
-            <span className="px-2 py-1 text-xs font-medium rounded bg-fox-orange text-white">
-              #{currentIndex + 1} Spotlight
-            </span>
-            <span className="px-2 py-1 text-xs font-medium rounded bg-fox-surface">
+          <div className="flex items-center gap-3">
+            <div className="px-2.5 py-1 text-[10px] font-bold tracking-widest uppercase rounded bg-fox-orange text-white shadow-lg shadow-fox-orange/20">
+              Spotlight #{currentIndex + 1}
+            </div>
+            <div className="px-2.5 py-1 text-[10px] font-bold tracking-widest uppercase rounded bg-white/10 backdrop-blur-md border border-white/10 text-white/80">
               {currentAnime.type}
-            </span>
-            {currentAnime.status === 'Ongoing' && (
-              <span className="px-2 py-1 text-xs font-medium rounded bg-badge-dub/20 text-badge-dub">
-                Ongoing
-              </span>
-            )}
+            </div>
           </div>
 
           {/* Title */}
-          <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold leading-tight">
+          <h1 className="text-4xl md:text-5xl lg:text-7xl font-black leading-tight tracking-tight text-white drop-shadow-2xl">
             {currentAnime.title}
           </h1>
 
           {/* Description */}
-          <p className="text-muted-foreground line-clamp-3 text-sm md:text-base">
+          <p className="text-zinc-300 line-clamp-3 text-base md:text-lg max-w-xl leading-relaxed font-medium">
             {currentAnime.description}
           </p>
 
-          {/* Genres */}
-          <div className="flex flex-wrap gap-2">
-            {currentAnime.genres.slice(0, 4).map((genre) => (
-              <span
-                key={genre}
-                className="px-3 py-1 text-xs rounded-full bg-fox-surface/80 text-muted-foreground"
-              >
-                {genre}
-              </span>
-            ))}
-          </div>
-
           {/* Actions */}
-          <div className="flex items-center gap-3 pt-2">
-            <Button className="bg-fox-orange hover:bg-fox-orange-dark text-white gap-2 glow-orange">
-              <Play className="w-4 h-4 fill-white" />
+          <div className="flex items-center gap-4 pt-4">
+            <Button
+              size="lg"
+              onClick={() => navigate(`/watch/${currentAnime.id}`)}
+              className="bg-white hover:bg-zinc-200 text-black font-bold h-12 px-8 rounded-full gap-2 transition-transform active:scale-95 shadow-xl shadow-white/10"
+            >
+              <Play className="w-5 h-5 fill-black" />
               Watch Now
             </Button>
-            <Button variant="outline" className="border-border hover:bg-fox-surface gap-2">
-              <Info className="w-4 h-4" />
+            <Button
+              variant="outline"
+              size="lg"
+              onClick={() => navigate(`/watch/${currentAnime.id}`)}
+              className="bg-white/5 hover:bg-white/10 border-white/20 text-white h-12 px-8 rounded-full gap-2 backdrop-blur-md"
+            >
+              <Info className="w-5 h-5" />
               Details
             </Button>
           </div>

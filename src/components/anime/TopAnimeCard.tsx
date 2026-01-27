@@ -14,7 +14,7 @@ export const TopAnimeCard = ({ item, className, style }: TopAnimeCardProps) => {
 
   return (
     <Link
-      to={`/anime/${anime.id}`}
+      to={`/watch/${anime.id}`}
       style={style}
       className={cn(
         'flex items-center gap-3 p-2 rounded-lg hover:bg-fox-surface transition-colors group',

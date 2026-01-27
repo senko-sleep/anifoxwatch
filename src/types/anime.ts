@@ -18,6 +18,7 @@ export interface Anime {
   subCount?: number;
   dubCount?: number;
   isMature?: boolean;
+  source?: string;
 }
 
 export interface Episode {
@@ -27,6 +28,7 @@ export interface Episode {
   isFiller?: boolean;
   hasSub: boolean;
   hasDub: boolean;
+  thumbnail?: string;
 }
 
 export interface StreamingSource {

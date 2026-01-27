@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Play, Captions, Mic } from 'lucide-react';
+import { Play, Star } from 'lucide-react';
 import { Anime } from '@/types/anime';
 import { cn } from '@/lib/utils';
 
@@ -7,71 +7,61 @@ interface AnimeCardProps {
   anime: Anime;
   className?: string;
   style?: React.CSSProperties;
+  onMouseEnter?: () => void;
 }
 
-export const AnimeCard = ({ anime, className, style }: AnimeCardProps) => {
+export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardProps) => {
   return (
     <Link
-      to={`/anime/${anime.id}`}
+      to={`/watch/${anime.id}`}
       style={style}
+      onMouseEnter={onMouseEnter}
       className={cn(
-        'group relative flex flex-col rounded-lg overflow-hidden bg-card card-hover',
+        'group relative flex flex-col hover:scale-[1.02] transition-all duration-300',
         className
       )}
     >
-      {/* Image Container */}
-      <div className="relative aspect-[3/4] overflow-hidden">
+      {/* Image Container - Extremely Clean */}
+      <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-900 shadow-md ring-1 ring-white/5 group-hover:ring-white/20 transition-all duration-300">
         <img
           src={anime.image}
           alt={anime.title}
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
           loading="lazy"
         />
-        
-        {/* Overlay on hover */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-14 h-14 rounded-full bg-fox-orange/90 flex items-center justify-center transform scale-0 group-hover:scale-100 transition-transform duration-300 delay-100">
-              <Play className="w-6 h-6 text-white fill-white ml-1" />
-            </div>
+
+        {/* Subtle Play Icon on Hover */}
+        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center">
+            <Play className="w-5 h-5 text-white fill-white ml-0.5" />
           </div>
         </div>
 
-        {/* Badges */}
-        <div className="absolute top-2 left-2 flex flex-col gap-1">
-          {anime.isMature && (
-            <span className="px-2 py-0.5 text-xs font-bold rounded bg-badge-mature text-white">
-              18+
-            </span>
-          )}
-        </div>
-
-        {/* Episode badges */}
-        <div className="absolute bottom-2 left-2 flex items-center gap-2">
-          {anime.subCount !== undefined && anime.subCount > 0 && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded bg-black/70 backdrop-blur-sm">
-              <Captions className="w-3 h-3 text-badge-sub" />
-              <span className="text-xs font-medium">{anime.subCount}</span>
-            </div>
-          )}
-          {anime.dubCount !== undefined && anime.dubCount > 0 && (
-            <div className="flex items-center gap-1 px-2 py-1 rounded bg-black/70 backdrop-blur-sm">
-              <Mic className="w-3 h-3 text-badge-dub" />
-              <span className="text-xs font-medium">{anime.dubCount}</span>
+        {/* Minimal Badges */}
+        <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
+          {anime.rating && anime.rating > 0 && (
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-black/60 backdrop-blur-md border border-white/10">
+              <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
+              <span className="text-[10px] font-bold text-white">{anime.rating.toFixed(1)}</span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Info */}
-      <div className="p-3 flex flex-col gap-1 flex-1">
-        <h3 className="font-medium text-sm line-clamp-2 group-hover:text-fox-orange transition-colors">
+      {/* Info - Only Title Visible */}
+      <div className="mt-3 px-1">
+        <h3 className="font-medium text-sm text-zinc-200 group-hover:text-white transition-colors duration-200 line-clamp-1">
           {anime.title}
         </h3>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-auto">
-          <span>{anime.type}</span>
-          <span>•</span>
-          <span>{anime.duration}</span>
+        <div className="flex items-center gap-2 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">
+            {anime.type}
+          </span>
+          {anime.episodes && (
+            <span className="text-[10px] text-zinc-600 font-medium">
+              {anime.episodes} episodes
+            </span>
+          )}
         </div>
       </div>
     </Link>
