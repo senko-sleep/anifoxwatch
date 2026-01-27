@@ -97,39 +97,39 @@ class AnimeApiClient {
     async search(query: string, page: number = 1, source?: string): Promise<AnimeSearchResult> {
         const params = new URLSearchParams({ q: query, page: String(page) });
         if (source) params.append('source', source);
-        return this.fetch<AnimeSearchResult>(`/anime/search?${params}`);
+        return this.fetch<AnimeSearchResult>(`/api/anime/search?${params}`);
     }
 
     async searchAll(query: string, page: number = 1): Promise<{ results: Anime[]; sources: string[] }> {
         const params = new URLSearchParams({ q: query, page: String(page) });
-        return this.fetch(`/anime/search-all?${params}`);
+        return this.fetch(`/api/anime/search-all?${params}`);
     }
 
     async getTrending(page: number = 1, source?: string): Promise<Anime[]> {
         const params = new URLSearchParams({ page: String(page) });
         if (source) params.append('source', source);
-        const response = await this.fetch<ApiResponse<Anime>>(`/anime/trending?${params}`);
+        const response = await this.fetch<ApiResponse<Anime>>(`/api/anime/trending?${params}`);
         return response.results || [];
     }
 
     async getLatest(page: number = 1, source?: string): Promise<Anime[]> {
         const params = new URLSearchParams({ page: String(page) });
         if (source) params.append('source', source);
-        const response = await this.fetch<ApiResponse<Anime>>(`/anime/latest?${params}`);
+        const response = await this.fetch<ApiResponse<Anime>>(`/api/anime/latest?${params}`);
         return response.results || [];
     }
 
     async getTopRated(page: number = 1, limit: number = 10, source?: string): Promise<TopAnime[]> {
         const params = new URLSearchParams({ page: String(page), limit: String(limit) });
         if (source) params.append('source', source);
-        const response = await this.fetch<{ results: TopAnime[] }>(`/anime/top-rated?${params}`);
+        const response = await this.fetch<{ results: TopAnime[] }>(`/api/anime/top-rated?${params}`);
         return response.results || [];
     }
 
     async getAnimeByGenre(genre: string, page: number = 1, source?: string): Promise<AnimeSearchResult> {
         const params = new URLSearchParams({ page: String(page) });
         if (source) params.append('source', source);
-        return this.fetch<AnimeSearchResult>(`/anime/genre/${encodeURIComponent(genre)}?${params}`);
+        return this.fetch<AnimeSearchResult>(`/api/anime/genre/${encodeURIComponent(genre)}?${params}`);
     }
 
     async getRandomAnime(source?: string): Promise<Anime | null> {
@@ -137,7 +137,7 @@ class AnimeApiClient {
             const params = new URLSearchParams();
             if (source) params.append('source', source);
             const queryString = params.toString() ? `?${params.toString()}` : '';
-            return await this.fetch<Anime>(`/anime/random${queryString}`);
+            return await this.fetch<Anime>(`/api/anime/random${queryString}`);
         } catch {
             return null;
         }
@@ -145,7 +145,7 @@ class AnimeApiClient {
 
     async getAnime(id: string): Promise<Anime | null> {
         try {
-            return await this.fetch<Anime>(`/anime/${encodeURIComponent(id)}`);
+            return await this.fetch<Anime>(`/api/anime/${encodeURIComponent(id)}`);
         } catch {
             return null;
         }
@@ -153,7 +153,7 @@ class AnimeApiClient {
 
     async getEpisodes(animeId: string): Promise<Episode[]> {
         const response = await this.fetch<{ episodes: Episode[] }>(
-            `/anime/${encodeURIComponent(animeId)}/episodes`
+            `/api/anime/${encodeURIComponent(animeId)}/episodes`
         );
         return response.episodes || [];
     }
@@ -162,7 +162,7 @@ class AnimeApiClient {
 
     async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
         const response = await this.fetch<{ servers: EpisodeServer[] }>(
-            `/stream/servers/${encodeURIComponent(episodeId)}`
+            `/api/stream/servers/${encodeURIComponent(episodeId)}`
         );
         return response.servers || [];
     }
@@ -178,7 +178,7 @@ class AnimeApiClient {
 
         try {
             const data = await this.fetch<StreamingData>(
-                `/stream/watch/${encodeURIComponent(episodeId)}${queryString}`
+                `/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`
             );
 
             console.log(`[API] ✅ Stream received:`, {
@@ -197,29 +197,29 @@ class AnimeApiClient {
     }
 
     getProxyUrl(hlsUrl: string): string {
-        return `${this.baseUrl}/stream/proxy?url=${encodeURIComponent(hlsUrl)}`;
+        return `${this.baseUrl}/api/stream/proxy?url=${encodeURIComponent(hlsUrl)}`;
     }
 
     // ============ SOURCE ENDPOINTS ============
 
     async getSources(): Promise<string[]> {
-        const response = await this.fetch<{ sources: string[] }>('/sources');
+        const response = await this.fetch<{ sources: string[] }>('/api/sources');
         return response.sources || [];
     }
 
     async getSourceHealth(): Promise<SourceHealth[]> {
-        const response = await this.fetch<{ sources: SourceHealth[] }>('/sources/health');
+        const response = await this.fetch<{ sources: SourceHealth[] }>('/api/sources/health');
         return response.sources || [];
     }
 
     async checkSourceHealth(): Promise<SourceHealth[]> {
-        const response = await fetch(`${this.baseUrl}/sources/check`, { method: 'POST' });
+        const response = await fetch(`${this.baseUrl}/api/sources/check`, { method: 'POST' });
         const data = await response.json();
         return data.sources || [];
     }
 
     async setPreferredSource(source: string): Promise<boolean> {
-        const response = await fetch(`${this.baseUrl}/sources/preferred`, {
+        const response = await fetch(`${this.baseUrl}/api/sources/preferred`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ source })

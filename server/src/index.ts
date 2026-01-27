@@ -136,14 +136,20 @@ process.on('SIGTERM', () => {
 // Start server
 const startServer = (port: number) => {
     const server = app.listen(port, () => {
+        const isProduction = process.env.NODE_ENV === 'production';
+        const baseUrl = isProduction 
+            ? `https://anifoxwatch.onrender.com` 
+            : `http://localhost:${port}`;
+        
         console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
 ║                                                                  ║
 ║   🎬 AniStream Hub API Server v1.0.0                             ║
 ║   ───────────────────────────────────────                        ║
-║   Server: http://localhost:${port}                                ║
-║   API Docs: http://localhost:${port}/api                          ║
-║   Health: http://localhost:${port}/health                         ║
+║   Server: ${baseUrl}                                ║
+║   API Docs: ${baseUrl}/api                          ║
+║   Health: ${baseUrl}/api/health                       ║
+║   Port: ${port} ${isProduction ? '(Render.com)' : '(Local)'}                 ║
 ║                                                                  ║
 ║   📡 Streaming Sources (Priority Order):                         ║
 ║   • 9Anime - Primary, HD Sub/Dub (Most Reliable)                 ║
@@ -160,7 +166,7 @@ const startServer = (port: number) => {
 ║   • HLS proxy for CORS                                           ║
 ║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝
-      `);
+        `);
     });
 
     server.on('error', (err: NodeJS.ErrnoException) => {
