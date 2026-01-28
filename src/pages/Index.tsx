@@ -108,28 +108,6 @@ const Index = () => {
         </div>
       )}
 
-      {/* Quick Categories Bar */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-6 relative z-10">
-        <div className="flex items-center gap-3 overflow-x-auto pb-4 scrollbar-hide">
-          {[
-            { label: 'Trending', icon: Flame },
-            { label: 'Action', icon: null },
-            { label: 'Romance', icon: null },
-            { label: 'Comedy', icon: null },
-            { label: 'Fantasy', icon: null },
-          ].map((cat) => (
-            <Link
-              key={cat.label}
-              to={`/search?genre=${cat.label.toLowerCase()}`}
-              className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap bg-fox-surface/60 hover:bg-fox-surface border border-white/5 hover:border-white/10 transition-all"
-            >
-              {cat.icon && <cat.icon className="w-4 h-4" />}
-              {cat.label}
-            </Link>
-          ))}
-        </div>
-      </div>
-
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-16">
         {/* Trending Now Section */}
@@ -144,15 +122,6 @@ const Index = () => {
                 <p className="text-muted-foreground text-sm mt-0.5">Most popular anime this week</p>
               </div>
             </div>
-            <Link to="/search?sort=trending">
-              <Button
-                variant="ghost"
-                className="text-muted-foreground hover:text-foreground hover:bg-fox-surface/80 transition-all h-10 px-4 rounded-xl"
-              >
-                View All
-                <span className="ml-2">→</span>
-              </Button>
-            </Link>
           </div>
 
           {trendingLoading ? (

@@ -90,7 +90,7 @@ const Watch = () => {
         setSelectedServer(servers[0].name);
       }
     }
-  }, [servers, audioType, selectedServer]);
+  }, [servers, audioType]);
 
   // Reset server and retry count when audio type changes
   useEffect(() => {

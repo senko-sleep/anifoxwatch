@@ -116,12 +116,14 @@ export const VideoPlayer = ({
   const retryLoad = useCallback(() => {
     if (retryCountRef.current < maxRetries) {
       retryCountRef.current++;
-      playerLog('info', `Retrying stream load (attempt ${retryCountRef.current}/${maxRetries})`);
+      playerLog('info', `Retrying stream load (${retryCountRef.current}/${maxRetries})`);
       setError(null);
       setIsLoading(true);
 
       if (hlsRef.current) {
-        hlsRef.current.startLoad();
+        // Don't call startLoad() as it restarts the stream from beginning
+        // Instead, recover the current stream
+        hlsRef.current.recoverMediaError();
       }
     } else {
       playerLog('error', 'Max retries reached');
@@ -231,9 +233,10 @@ export const VideoPlayer = ({
                 setError('Failed to load video manifest. The stream may be unavailable.');
                 onError?.('manifest_load_error');
               } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
-                // Try to recover from fragment loading errors
+                // Try to recover from fragment loading errors without restarting
                 playerLog('warn', 'Fragment load error, attempting recovery');
-                hls.startLoad();
+                // Don't call startLoad() as it restarts the stream
+                // Instead, let HLS handle the recovery automatically
               } else {
                 setError('Network error. Check your connection and try again.');
                 onError?.('network_error');
