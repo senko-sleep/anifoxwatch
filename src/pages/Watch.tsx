@@ -387,6 +387,8 @@ const Watch = () => {
                       onNextEpisode={handleNextEpisode}
                       hasNextEpisode={hasNext}
                       onCinemaModeChange={setIsCinemaMode}
+                      animeId={animeId}
+                      selectedEpisodeNum={selectedEpisodeNum}
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">

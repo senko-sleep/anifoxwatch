@@ -50,6 +50,8 @@ interface VideoPlayerProps {
   onNextEpisode?: () => void;
   hasNextEpisode?: boolean;
   onCinemaModeChange?: (isCinemaMode: boolean) => void;
+  animeId?: string;
+  selectedEpisodeNum?: number;
 }
 
 // Logger for video player events
@@ -81,7 +83,9 @@ export const VideoPlayer = ({
   poster,
   onNextEpisode,
   hasNextEpisode,
-  onCinemaModeChange
+  onCinemaModeChange,
+  animeId,
+  selectedEpisodeNum
 }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -94,6 +98,8 @@ export const VideoPlayer = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [savedPosition, setSavedPosition] = useState(0);
+  const [showPositionRestored, setShowPositionRestored] = useState(false);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -288,6 +294,34 @@ export const VideoPlayer = ({
     };
   }, []);
 
+  // Position persistence functions
+  const getPositionKey = useCallback(() => {
+    return `video-position-${animeId || 'unknown'}-${selectedEpisodeNum || 'unknown'}`;
+  }, [animeId, selectedEpisodeNum]);
+
+  const savePosition = useCallback((time: number) => {
+    const key = getPositionKey();
+    localStorage.setItem(key, time.toString());
+    setSavedPosition(time);
+  }, [getPositionKey]);
+
+  const loadSavedPosition = useCallback(() => {
+    const key = getPositionKey();
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      const position = parseFloat(saved);
+      setSavedPosition(position);
+      return position;
+    }
+    return 0;
+  }, [getPositionKey]);
+
+  const clearSavedPosition = useCallback(() => {
+    const key = getPositionKey();
+    localStorage.removeItem(key);
+    setSavedPosition(0);
+  }, [getPositionKey]);
+
   // Retry loading the stream
   const retryLoad = useCallback(() => {
     if (retryCountRef.current < maxRetries) {
@@ -364,6 +398,18 @@ export const VideoPlayer = ({
         video.play().catch((e) => {
           playerLog('warn', 'Autoplay blocked', e);
         });
+
+        // Restore saved position after video is ready
+        const savedPos = loadSavedPosition();
+        if (savedPos > 5) { // Only restore if more than 5 seconds
+          video.currentTime = savedPos;
+          setCurrentTime(savedPos);
+          setShowPositionRestored(true);
+          playerLog('info', `Restored saved position: ${savedPos.toFixed(2)}s`);
+          
+          // Hide notification after 3 seconds
+          setTimeout(() => setShowPositionRestored(false), 3000);
+        }
       });
 
       hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
@@ -451,7 +497,7 @@ export const VideoPlayer = ({
         hlsRef.current = null;
       }
     };
-  }, [src, isM3U8, onError]);
+  }, [src, isM3U8, onError, loadSavedPosition]);
 
   // Video event handlers
   useEffect(() => {
@@ -461,7 +507,13 @@ export const VideoPlayer = ({
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
     const handleTimeUpdate = () => {
-      setCurrentTime(video.currentTime);
+      const time = video.currentTime;
+      setCurrentTime(time);
+
+      // Save position every 5 seconds
+      if (Math.floor(time) % 5 === 0) {
+        savePosition(time);
+      }
 
       if (intro && video.currentTime >= intro.start && video.currentTime < intro.end) {
         setShowSkipIntro(true);
@@ -483,6 +535,9 @@ export const VideoPlayer = ({
     };
     const handleEnded = () => {
       setIsPlaying(false);
+      // Clear saved position when video ends
+      clearSavedPosition();
+      
       if (hasNextEpisode) {
         setShowNextEpisodeCountdown(prev => {
           if (!prev) {
@@ -515,7 +570,7 @@ export const VideoPlayer = ({
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('canplay', handleCanPlay);
     };
-  }, [intro, outro, hasNextEpisode]);
+  }, [intro, outro, hasNextEpisode, savePosition, clearSavedPosition]);
 
   // Fullscreen change handler
   useEffect(() => {
@@ -541,7 +596,7 @@ export const VideoPlayer = ({
     }
   }, [showNextEpisodeCountdown, nextEpisodeCountdown, onNextEpisode]);
 
-  // Picture-in-Picture handlers
+  // Picture-in-Picture handlers with mobile controls
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -549,11 +604,31 @@ export const VideoPlayer = ({
     const handleEnterPiP = () => {
       setIsPiPActive(true);
       playerLog('info', 'Entered Picture-in-Picture mode');
+      
+      // Add mobile PiP controls
+      if ('navigator' in window && 'mediaSession' in navigator) {
+        navigator.mediaSession.setActionHandler('play', () => video.play());
+        navigator.mediaSession.setActionHandler('pause', () => video.pause());
+        navigator.mediaSession.setActionHandler('seekbackward', () => {
+          video.currentTime = Math.max(0, video.currentTime - 10);
+        });
+        navigator.mediaSession.setActionHandler('seekforward', () => {
+          video.currentTime = Math.min(video.duration, video.currentTime + 10);
+        });
+      }
     };
     
     const handleLeavePiP = () => {
       setIsPiPActive(false);
       playerLog('info', 'Left Picture-in-Picture mode');
+      
+      // Reset media session handlers
+      if ('navigator' in window && 'mediaSession' in navigator) {
+        navigator.mediaSession.setActionHandler('play', togglePlay);
+        navigator.mediaSession.setActionHandler('pause', togglePlay);
+        navigator.mediaSession.setActionHandler('seekbackward', () => seekBackward());
+        navigator.mediaSession.setActionHandler('seekforward', () => seekForward());
+      }
     };
 
     video.addEventListener('enterpictureinpicture', handleEnterPiP);
@@ -563,7 +638,7 @@ export const VideoPlayer = ({
       video.removeEventListener('enterpictureinpicture', handleEnterPiP);
       video.removeEventListener('leavepictureinpicture', handleLeavePiP);
     };
-  }, []);
+  }, [togglePlay, seekBackward, seekForward]);
 
   // Controls visibility
   const showControlsTemporarily = useCallback(() => {
@@ -666,11 +741,38 @@ export const VideoPlayer = ({
     try {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
+        playerLog('info', 'Exited Picture-in-Picture');
       } else {
+        // Check if PiP is supported
+        if (!document.pictureInPictureEnabled) {
+          playerLog('warn', 'Picture-in-Picture not supported on this device');
+          return;
+        }
+        
+        // Ensure video is ready for PiP
+        if (video.readyState < 2) { // HAVE_CURRENT_DATA
+          playerLog('warn', 'Video not ready for PiP, waiting...');
+          await new Promise(resolve => {
+            video.addEventListener('loadeddata', resolve, { once: true });
+          });
+        }
+        
         await video.requestPictureInPicture();
+        playerLog('info', 'Entered Picture-in-Picture mode');
       }
     } catch (error) {
       playerLog('error', 'Picture-in-Picture error', error);
+      
+      // Show user-friendly error message
+      if (error instanceof Error) {
+        if (error.name === 'NotAllowedError') {
+          setError('Picture-in-Picture permission denied. Please enable PiP in your browser settings.');
+        } else if (error.name === 'NotSupportedError') {
+          setError('Picture-in-Picture not supported on this device or browser.');
+        } else {
+          setError('Failed to toggle Picture-in-Picture. Try refreshing the page.');
+        }
+      }
     }
   }, []);
 
@@ -798,6 +900,57 @@ export const VideoPlayer = ({
       onMouseMove={showControlsTemporarily}
       onMouseLeave={() => isPlaying && setShowControls(false)}
     >
+      {/* Mobile PiP Controls Overlay */}
+      {isPiPActive && (
+        <div className="absolute bottom-4 left-4 right-4 flex items-center justify-center gap-4 z-30 md:hidden">
+          <div className="bg-black/80 backdrop-blur-md rounded-full px-4 py-2 flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={seekBackward}
+              className="text-white hover:bg-white/20 h-8 w-8"
+              title="Skip backward 10s"
+            >
+              <SkipBack className="w-4 h-4" />
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={togglePlay}
+              className="text-white hover:bg-white/20 h-10 w-10"
+              title={isPlaying ? "Pause" : "Play"}
+            >
+              {isPlaying ? (
+                <Pause className="w-5 h-5" />
+              ) : (
+                <Play className="w-5 h-5" />
+              )}
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={seekForward}
+              className="text-white hover:bg-white/20 h-8 w-8"
+              title="Skip forward 10s"
+            >
+              <SkipForward className="w-4 h-4" />
+            </Button>
+            
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={togglePiP}
+              className="text-fox-orange hover:bg-fox-orange/20 h-8 w-8"
+              title="Exit Picture-in-Picture"
+            >
+              <PictureInPicture2 className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Exit Portal Mode Button */}
       {portalMode !== 'off' && (
         <button
@@ -836,6 +989,16 @@ export const VideoPlayer = ({
           />
         ))}
       </video>
+
+      {/* Position Restored Notification */}
+      {showPositionRestored && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-green-500/90 text-white px-4 py-2 rounded-lg backdrop-blur-sm z-20 animate-in slide-in-from-top fade-in">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4" />
+            <span className="text-sm font-medium">Position Restored: {formatTime(savedPosition)}</span>
+          </div>
+        </div>
+      )}
 
       {/* Loading spinner */}
       {isLoading && !error && (
@@ -1119,16 +1282,17 @@ export const VideoPlayer = ({
                 </DropdownMenu>
               )}
 
-              {/* Picture-in-Picture */}
+              {/* Picture-in-Picture - Enhanced for Mobile */}
               {document.pictureInPictureEnabled && (
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={togglePiP}
                   className={cn(
-                    "text-white hover:bg-white/20",
-                    isPiPActive && "text-fox-orange"
+                    "text-white hover:bg-white/20 transition-all",
+                    isPiPActive && "text-fox-orange bg-fox-orange/20"
                   )}
+                  title={isPiPActive ? "Exit Picture-in-Picture" : "Enter Picture-in-Picture"}
                 >
                   {isPiPActive ? (
                     <PictureInPicture2 className="w-5 h-5" />
