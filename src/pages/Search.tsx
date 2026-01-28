@@ -97,7 +97,13 @@ const Search = () => {
   // Use trending data as default when no search query, ensure minimum 50 results
   const data = useMemo(() => {
     if (hasSearchQuery) {
-      return isGenreSearch ? genreData : searchData;
+      const searchResult = isGenreSearch ? genreData : searchData;
+      return {
+        results: searchResult?.results || [],
+        totalPages: searchResult?.totalPages || 1,
+        currentPage: searchResult?.currentPage || 1,
+        hasNextPage: searchResult?.hasNextPage || false
+      };
     } else {
       // Always show trending data for browse, minimum 50 items
       const results = trendingData || [];
@@ -111,9 +117,8 @@ const Search = () => {
           while (allResults.length < 50 && currentPage <= 5) {
             try {
               const moreData = await apiClient.getTrending(currentPage, undefined, 50);
-              const moreResults = Array.isArray(moreData) ? moreData : (moreData?.results || []);
-              if (moreResults && moreResults.length > 0) {
-                allResults = [...allResults, ...moreResults];
+              if (moreData && moreData.length > 0) {
+                allResults = [...allResults, ...moreData];
                 // Update the query cache with new data
                 queryClient.setQueryData(['trending', 1, '50'], allResults);
               }
@@ -463,15 +468,16 @@ const Search = () => {
 
         {/* Browse Results */}
         {!debouncedQuery ? (
-          // Popular anime browsing
           <div className="space-y-8">
-            <div className="text-center">
-              <h2 className="text-2xl font-bold mb-3">Popular Anime</h2>
-              <p className="text-muted-foreground max-w-md text-lg">
-                Browse trending anime or use filters and search to find exactly what you're looking for.
-              </p>
-            </div>
-            <AnimeGrid anime={filteredResults} columns={gridSize === 'compact' ? 8 : 6} />
+            <AnimeGrid
+              anime={filteredResults}
+              isLoading={isLoading}
+              isFetching={isFetching}
+              currentPage={page}
+              totalPages={data?.totalPages || 1}
+              hasNextPage={data?.hasNextPage || false}
+              onPageChange={setPage}
+            />
           </div>
         ) : debouncedQuery.length < 2 ? (
           <div className="text-center py-16">

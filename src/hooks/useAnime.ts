@@ -22,16 +22,7 @@ export const queryKeys = {
 export function useTrending(page: number = 1, limit?: number) {
     return useQuery<Anime[], Error>({
         queryKey: queryKeys.trending(page, limit?.toString()),
-        queryFn: async () => {
-            const response = await apiClient.getTrending(page, undefined, limit);
-            // Handle both array and object with results property
-            if (Array.isArray(response)) {
-                return response;
-            }
-            // Type assertion for object with results property
-            const responseWithResults = response as { results?: Anime[] };
-            return responseWithResults.results || [];
-        },
+        queryFn: () => apiClient.getTrending(page, undefined, limit),
         staleTime: 5 * 60 * 1000,
         gcTime: 10 * 60 * 1000,
     });
@@ -40,16 +31,7 @@ export function useTrending(page: number = 1, limit?: number) {
 export function useLatest(page: number = 1, source?: string) {
     return useQuery<Anime[], Error>({
         queryKey: queryKeys.latest(page, source),
-        queryFn: async () => {
-            const response = await apiClient.getLatest(page, source);
-            // Handle both array and object with results property
-            if (Array.isArray(response)) {
-                return response;
-            }
-            // Type assertion for object with results property
-            const responseWithResults = response as { results?: Anime[] };
-            return responseWithResults.results || [];
-        },
+        queryFn: () => apiClient.getLatest(page, source),
         staleTime: 3 * 60 * 1000, // Shorter for latest
         gcTime: 5 * 60 * 1000,
     });
