@@ -5,6 +5,7 @@ import { AnimeGrid } from '@/components/anime/AnimeGrid';
 import { TopAnimeList } from '@/components/anime/TopAnimeList';
 import { useTrending, useLatest, useTopRated, useAnime } from '@/hooks/useAnime';
 import { apiClient } from '@/lib/api-client';
+import { AniListClient } from '@/lib/anilist-client';
 import { Loader2, AlertCircle, RefreshCw, TrendingUp, Clock, Award, Flame, Sparkles, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
@@ -22,7 +23,7 @@ const Index = () => {
   const isLoading = trendingLoading || latestLoading || topLoading || featuredLoading;
   const hasError = trendingError || latestError;
 
-  // Fetch detailed info for featured anime
+  // Fetch detailed info for featured anime with AniList images
   useEffect(() => {
     if (trendingAnime && trendingAnime.length > 0) {
       const fetchFeaturedDetails = async () => {
@@ -30,15 +31,20 @@ const Index = () => {
         const featuredIds = trendingAnime.slice(0, 5);
         
         try {
-          // Fetch detailed info for each featured anime
+          // Fetch detailed info for each featured anime with AniList enrichment
           const detailedAnime = await Promise.all(
             featuredIds.map(async (anime) => {
-              // Try to get detailed info, fallback to basic if fails
               try {
+                // First get detailed info from our API
                 const detailed = await apiClient.getAnime(anime.id);
-                return detailed || anime;
+                const baseAnime = detailed || anime;
+                
+                // Then enrich with AniList images
+                const enrichedAnime = await AniListClient.enrichAnimeWithImages(baseAnime);
+                return enrichedAnime;
               } catch {
-                return anime;
+                // Fallback to just AniList enrichment
+                return await AniListClient.enrichAnimeWithImages(anime);
               }
             })
           );

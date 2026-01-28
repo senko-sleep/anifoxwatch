@@ -20,6 +20,9 @@ export interface Anime {
   dubCount?: number;
   isMature?: boolean;
   source?: string;
+  // AniList specific fields
+  bannerImage?: string;
+  coverImage?: string;
 }
 
 export interface Episode {
