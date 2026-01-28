@@ -1,8 +1,20 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 
+interface BrowseFilters {
+    type?: string;
+    genre?: string;
+    status?: string;
+    year?: number;
+    startYear?: number;
+    endYear?: number;
+    sort?: 'popularity' | 'trending' | 'recently_released' | 'shuffle' | 'rating' | 'year' | 'title';
+    order?: 'asc' | 'desc';
+    source?: string;
+}
+
 // Use different API URLs based on environment
-const API_BASE_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.DEV ? 'http://localhost:3001' : 'https://anifoxwatch.onrender.com');
+const API_BASE_URL = import.meta.env.VITE_API_URL ||
+    (import.meta.env.DEV ? 'http://localhost:3001' : 'https://anifoxwatch.onrender.com');
 
 // Streaming types
 export interface VideoSource {
@@ -132,6 +144,22 @@ class AnimeApiClient {
         const params = new URLSearchParams({ page: String(page) });
         if (source) params.append('source', source);
         return this.fetch<AnimeSearchResult>(`/api/anime/genre/${encodeURIComponent(genre)}?${params}`);
+    }
+
+    async browseAnime(filters: BrowseFilters, page: number = 1): Promise<AnimeSearchResult> {
+        const params = new URLSearchParams({ page: String(page), limit: '25' });
+
+        if (filters.type) params.append('type', filters.type);
+        if (filters.genre) params.append('genre', filters.genre);
+        if (filters.status) params.append('status', filters.status);
+        if (filters.year) params.append('year', String(filters.year));
+        if (filters.startYear) params.append('startYear', String(filters.startYear));
+        if (filters.endYear) params.append('endYear', String(filters.endYear));
+        if (filters.sort) params.append('sort', filters.sort);
+        if (filters.order) params.append('order', filters.order);
+        if (filters.source) params.append('source', filters.source);
+
+        return this.fetch<AnimeSearchResult>(`/api/anime/browse?${params}`);
     }
 
     async getRandomAnime(source?: string): Promise<Anime | null> {

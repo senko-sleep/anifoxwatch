@@ -48,6 +48,7 @@ export interface AnimeSearchResult {
   totalPages: number;
   currentPage: number;
   hasNextPage: boolean;
+  totalResults?: number;
 }
 
 export interface TopAnime {

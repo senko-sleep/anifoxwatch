@@ -64,6 +64,32 @@ export function useGenre(genre: string, page: number = 1, source?: string, enabl
     });
 }
 
+// Browse filters interface
+interface BrowseFilters {
+    type?: string;
+    genre?: string;
+    status?: string;
+    year?: number;
+    startYear?: number;
+    endYear?: number;
+    sort?: 'popularity' | 'trending' | 'recently_released' | 'shuffle' | 'rating' | 'year' | 'title';
+    order?: 'asc' | 'desc';
+    source?: string;
+}
+
+export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boolean = true) {
+    // Create a stable query key from filters
+    const filterKey = JSON.stringify(filters);
+
+    return useQuery<AnimeSearchResult, Error>({
+        queryKey: ['browse', filterKey, page],
+        queryFn: () => apiClient.browseAnime(filters, page),
+        enabled,
+        staleTime: 2 * 60 * 1000,
+        gcTime: 5 * 60 * 1000,
+    });
+}
+
 export function useAnime(id: string, enabled: boolean = true) {
     return useQuery<Anime | null, Error>({
         queryKey: queryKeys.anime(id),

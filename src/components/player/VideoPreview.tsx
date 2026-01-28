@@ -25,11 +25,11 @@ export function VideoPreview({
   const [previewTime, setPreviewTime] = useState(0);
   const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
   const [isVideoReady, setIsVideoReady] = useState(false);
-  const [sampledTime, setSampledTime] = useState(0);
+  const [currentPreviewTime, setCurrentPreviewTime] = useState(0);
 
-  // Sample time to nearest 20-second interval
+  // Sample time to nearest 1-second interval for better accuracy
   const getSampledTime = useCallback((time: number) => {
-    return Math.round(time / 20) * 20; // Round to nearest 20 seconds
+    return Math.round(time); // Round to nearest second for better accuracy
   }, []);
 
   // Calculate preview time based on mouse position - instant
@@ -41,59 +41,66 @@ export function VideoPreview({
     const percentage = Math.max(0, Math.min(1, relativeX / rect.width));
     const time = percentage * duration;
     
-    // Sample to 20-second intervals
-    const sampled = getSampledTime(time);
     setPreviewTime(time);
-    setSampledTime(sampled);
     
     // Position preview above the slider (much closer)
     const previewX = relativeX;
     const previewY = -30; // Much closer to slider
     
     setPreviewPosition({ x: previewX, y: previewY });
-  }, [isHovering, mouseX, containerRef, duration, getSampledTime]);
+  }, [isHovering, mouseX, containerRef, duration]);
 
-  // Initialize video element - instant setup
+  // Initialize video element for direct frame preview
   useEffect(() => {
     if (!videoRef.current || !videoSrc) return;
 
     const video = videoRef.current;
     
-    // Set up video element for instant seeking
+    // Set up video element for direct preview
     video.src = videoSrc;
     video.crossOrigin = 'anonymous';
     video.muted = true;
     video.playsInline = true;
-    video.preload = 'auto'; // Preload for instant seeking
+    video.preload = 'metadata';
 
     const handleLoadedMetadata = () => {
       setIsVideoReady(true);
+      console.log('[VideoPreview] Preview video metadata loaded');
     };
 
-    const handleError = () => {
+    const handleError = (e: Event) => {
       setIsVideoReady(false);
-      console.error('Preview video failed to load');
+      console.error('Preview video failed to load:', e);
+    };
+
+    const handleSeeked = () => {
+      // Video is ready to show the current frame
     };
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
     video.addEventListener('error', handleError);
+    video.addEventListener('seeked', handleSeeked);
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
       video.removeEventListener('error', handleError);
+      video.removeEventListener('seeked', handleSeeked);
     };
   }, [videoSrc]);
 
-  // Seek to sampled preview time - 20s intervals only
+  // Update video time when hovering
   useEffect(() => {
-    if (!isHovering || !videoRef.current || !isVideoReady) return;
+    if (!isHovering || !videoRef.current || !isVideoReady || !duration) return;
 
+    const sampledTime = getSampledTime(previewTime);
     const video = videoRef.current;
     
-    // Only seek to 10-second intervals for performance
-    video.currentTime = sampledTime;
-    
-  }, [sampledTime, isHovering, isVideoReady]);
+    // Only seek if time is different and within valid range
+    if (Math.abs(video.currentTime - sampledTime) > 0.5 && sampledTime >= 0 && sampledTime <= duration) {
+      video.currentTime = sampledTime;
+      setCurrentPreviewTime(sampledTime);
+    }
+  }, [isHovering, previewTime, isVideoReady, duration, getSampledTime]);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -127,20 +134,24 @@ export function VideoPreview({
           opacity: isHovering ? 1 : 0,
         }}
       >
-        {/* Video preview - 20s interval sampling */}
+        {/* Video preview - direct video element */}
         <div className="relative w-full h-full">
-          {isVideoReady && videoRef.current ? (
+          {isVideoReady ? (
             <video
               className="w-full h-full object-cover"
               src={videoSrc}
               muted={true}
               playsInline={true}
               crossOrigin="anonymous"
-              preload="auto"
+              preload="metadata"
               ref={(video) => {
                 if (video) {
-                  video.currentTime = sampledTime; // Use sampled time
+                  video.currentTime = currentPreviewTime;
                 }
+              }}
+              onLoadedMetadata={(e) => {
+                const video = e.currentTarget;
+                video.currentTime = currentPreviewTime;
               }}
             />
           ) : poster ? (
@@ -151,19 +162,19 @@ export function VideoPreview({
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <div className="text-white/50 text-xs">Loading...</div>
+              <div className="text-white/50 text-xs">Loading preview...</div>
             </div>
           )}
           
-          {/* Time overlay - show actual time, not sampled time */}
+          {/* Time overlay */}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
             <span className="text-white text-xs font-medium">
               {formatTime(previewTime)}
             </span>
             {/* Show sampled time indicator */}
-            {Math.abs(previewTime - sampledTime) > 1 && (
+            {Math.abs(previewTime - getSampledTime(previewTime)) > 1 && (
               <span className="text-white/60 text-xs ml-1">
-                (~{formatTime(sampledTime)})
+                (~{formatTime(getSampledTime(previewTime))})
               </span>
             )}
           </div>

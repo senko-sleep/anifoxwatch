@@ -9,6 +9,7 @@ import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers } from '@/h
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
   Play,
@@ -45,6 +46,9 @@ const Watch = () => {
 
   // Refs
   const playerRef = useRef<HTMLDivElement>(null);
+  
+  // Cinema mode state for layout adaptation
+  const [isCinemaMode, setIsCinemaMode] = useState(false);
 
   // Data fetching
   const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(animeId || '', !!animeId);
@@ -323,23 +327,40 @@ const Watch = () => {
 
       <Navbar />
 
-      <main className="flex-1 relative z-10">
-        {/* Back button */}
+      <main className={cn(
+        "flex-1 relative z-10 transition-all duration-500",
+        isCinemaMode && "pt-[calc(56.25vw+2rem)] md:pt-[calc(56.25vw+3rem)] lg:pt-[calc(56.25vw+4rem)]"
+      )}>
+        {/* Back button - Hidden in cinema mode */}
 
-        <div className="max-w-[1800px] mx-auto px-4 pb-12 pt-6">
+        <div className={cn(
+          "max-w-[1800px] mx-auto px-4 pb-12 transition-all duration-500",
+          isCinemaMode ? "pt-6" : "pt-6"
+        )}>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigate('/search')}
-            className="text-muted-foreground hover:text-foreground hover:bg-white/10 mb-6"
+            className={cn(
+              "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-6 transition-all duration-300",
+              isCinemaMode && "opacity-0 pointer-events-none h-0 mb-0 overflow-hidden"
+            )}
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Browse
           </Button>
 
-          <div className="grid lg:grid-cols-12 gap-8">
+          <div className={cn(
+            "grid gap-8 transition-all duration-500",
+            isCinemaMode 
+              ? "lg:grid-cols-1 max-w-7xl mx-auto" 
+              : "lg:grid-cols-12"
+          )}>
             {/* Main Player Area */}
-            <div className="lg:col-span-9 space-y-6" ref={playerRef}>
+            <div className={cn(
+              "space-y-6 transition-all duration-500",
+              isCinemaMode ? "lg:col-span-1 w-full" : "lg:col-span-9"
+            )} ref={playerRef}>
               {/* Video Player Container */}
               <div className="relative group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-fox-orange/20 to-purple-600/20 rounded-2xl blur opacity-30 group-hover:opacity-60 transition duration-1000"></div>
@@ -365,6 +386,7 @@ const Watch = () => {
                       poster={anime.image}
                       onNextEpisode={handleNextEpisode}
                       hasNextEpisode={hasNext}
+                      onCinemaModeChange={setIsCinemaMode}
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
@@ -420,8 +442,11 @@ const Watch = () => {
                 </div>
               </div>
 
-              {/* Episode Navigation & Details */}
-              <div className="grid md:grid-cols-[1fr_auto] gap-4 items-center bg-card/30 backdrop-blur-md border border-white/5 p-4 rounded-xl">
+              {/* Episode Navigation & Details - Compact in cinema mode */}
+              <div className={cn(
+                "grid md:grid-cols-[1fr_auto] gap-4 items-center bg-card/30 backdrop-blur-md border border-white/5 p-4 rounded-xl transition-all duration-500",
+                isCinemaMode && "max-w-4xl mx-auto"
+              )}>
                 <div className="min-w-0">
                   <h2 className="text-xl font-bold truncate">
                     Episode {currentEpisode?.number || selectedEpisodeNum}
@@ -461,42 +486,53 @@ const Watch = () => {
                 </div>
               </div>
 
-              {/* Streaming Controls */}
-              <StreamingControls
-                audioType={audioType}
-                onAudioTypeChange={(type) => {
-                  setAudioManuallySet(true);
-                  setAudioType(type);
-                }}
-                quality={quality}
-                onQualityChange={setQuality}
-                availableQualities={streamData?.sources?.map(s => s.quality) || []}
-                servers={servers || []}
-                selectedServer={selectedServer}
-                onServerChange={(server) => {
-                  setSelectedServer(server);
-                  setServerRetryCount(0);
-                }}
-                serversLoading={serversLoading}
-                autoPlay={autoPlay}
-                onAutoPlayChange={setAutoPlay}
-                currentSource={streamData?.source}
-                hasDub={currentEpisode?.hasDub}
-              />
+              {/* Streaming Controls - Centered in cinema mode */}
+              <div className={cn(
+                "transition-all duration-500",
+                isCinemaMode && "max-w-4xl mx-auto"
+              )}>
+                <StreamingControls
+                  audioType={audioType}
+                  onAudioTypeChange={(type) => {
+                    setAudioManuallySet(true);
+                    setAudioType(type);
+                  }}
+                  quality={quality}
+                  onQualityChange={setQuality}
+                  availableQualities={streamData?.sources?.map(s => s.quality) || []}
+                  servers={servers || []}
+                  selectedServer={selectedServer}
+                  onServerChange={(server) => {
+                    setSelectedServer(server);
+                    setServerRetryCount(0);
+                  }}
+                  serversLoading={serversLoading}
+                  autoPlay={autoPlay}
+                  onAutoPlayChange={setAutoPlay}
+                  currentSource={streamData?.source}
+                  hasDub={currentEpisode?.hasDub}
+                />
+              </div>
 
-              {/* Anime Info Card */}
-              <div className="p-6 bg-card/30 backdrop-blur-md border border-white/5 rounded-xl space-y-6">
+              {/* Enhanced Anime Info Card - Centered in cinema mode */}
+              <div className={cn(
+                "p-6 bg-card/30 backdrop-blur-md border border-white/5 rounded-xl space-y-6 shadow-xl transition-all duration-500",
+                isCinemaMode && "max-w-4xl mx-auto"
+              )}>
                 <div className="flex flex-col sm:flex-row gap-6">
-                  <img
-                    src={anime.image}
-                    alt={anime.title}
-                    className="w-32 h-48 object-cover rounded-lg shadow-xl ring-1 ring-white/10 self-start shrink-0"
-                  />
+                  <div className="relative group">
+                    <img
+                      src={anime.image}
+                      alt={anime.title}
+                      className="w-32 h-48 object-cover rounded-lg shadow-xl ring-1 ring-white/10 self-start shrink-0 transition-transform duration-300 group-hover:scale-105"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  </div>
                   <div className="flex-1 min-w-0 space-y-4">
                     <div>
-                      <h1 className="text-2xl font-bold leading-tight">{anime.title}</h1>
+                      <h1 className="text-2xl font-bold leading-tight bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent">{anime.title}</h1>
                       {anime.titleJapanese && (
-                        <p className="text-sm text-muted-foreground mt-1">{anime.titleJapanese}</p>
+                        <p className="text-sm text-muted-foreground mt-1 italic">{anime.titleJapanese}</p>
                       )}
                     </div>
 
@@ -532,7 +568,7 @@ const Watch = () => {
                       )}
                       <span className="flex items-center gap-2">
                         <Tv className="w-4 h-4" />
-                        {anime.episodes || '?'} Videos
+                        {anime.episodes || '?'} Episodes
                       </span>
                     </div>
                   </div>
@@ -541,7 +577,7 @@ const Watch = () => {
                 {anime.genres?.length > 0 && (
                   <div className="flex flex-wrap gap-2 pt-4 border-t border-white/5">
                     {anime.genres.map(genre => (
-                      <Badge key={genre} variant="secondary" className="text-xs bg-white/5 hover:bg-white/10 transition-colors">
+                      <Badge key={genre} variant="secondary" className="text-xs bg-white/5 hover:bg-white/10 transition-colors hover:scale-105 transform">
                         {genre}
                       </Badge>
                     ))}
@@ -549,15 +585,18 @@ const Watch = () => {
                 )}
 
                 {anime.description && (
-                  <p className="text-sm text-muted-foreground leading-relaxed">
+                  <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3 hover:line-clamp-none transition-all duration-300">
                     {anime.description}
                   </p>
                 )}
               </div>
             </div>
 
-            {/* Episode List Sidebar */}
-            <div className="lg:col-span-3">
+            {/* Episode List Sidebar - Hidden in cinema mode */}
+            <div className={cn(
+              "lg:col-span-3 transition-all duration-500",
+              isCinemaMode && "hidden lg:hidden"
+            )}>
               <div className="bg-card/30 backdrop-blur-md border border-white/5 rounded-xl h-[800px] flex flex-col sticky top-24">
                 <div className="p-4 border-b border-white/5">
                   <h3 className="font-bold flex items-center gap-2">

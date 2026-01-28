@@ -158,10 +158,10 @@ router.get('/filter', async (req: Request, res: Response): Promise<void> => {
 
         const pageNum = parseInt(page as string, 10) || 1;
         const limitNum = parseInt(limit as string, 10) || 20;
-        
+
         // Parse multiple genres if comma-separated
         const genres = genre ? (genre as string).split(',').map(g => g.trim()) : [];
-        
+
         // Build filter object
         const filters = {
             type: type as string,
@@ -202,11 +202,15 @@ router.get('/filter', async (req: Request, res: Response): Promise<void> => {
 /**
  * @route GET /api/anime/browse
  * @query type - Anime type (TV, Movie, OVA, ONA, Special)
- * @query genre - Genre name
+ * @query genre - Genre name(s) - comma-separated for multiple
  * @query status - Anime status (Ongoing, Completed, Upcoming)
  * @query year - Release year
+ * @query startYear - Start year for date range filter
+ * @query endYear - End year for date range filter
  * @query page - Page number (default: 1)
- * @query limit - Results per page (default: 20)
+ * @query limit - Results per page (default: 25)
+ * @query sort - Sort by (popularity, trending, recently_released, shuffle, rating, year, title)
+ * @query order - Sort order (asc, desc) - default desc
  * @query source - Preferred source (optional)
  */
 router.get('/browse', async (req: Request, res: Response): Promise<void> => {
@@ -216,37 +220,52 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
             genre,
             status,
             year,
+            startYear,
+            endYear,
             page = '1',
-            limit = '20',
+            limit = '25',
+            sort = 'popularity',
+            order = 'desc',
             source
         } = req.query;
 
         const pageNum = parseInt(page as string, 10) || 1;
-        const limitNum = parseInt(limit as string, 10) || 20;
+        const limitNum = Math.min(parseInt(limit as string, 10) || 25, 50); // Cap at 50
 
-        // Get trending anime as base, then apply filters
-        let result = await sourceManager.getTrending(pageNum, source as string | undefined);
-        
-        // Apply filters if provided
-        if (type || genre || status || year) {
-            result = await sourceManager.getFilteredAnime({
-                type: type as string,
-                genre: genre as string,
-                status: status as string,
-                year: year ? parseInt(year as string, 10) : undefined,
-                page: pageNum,
-                limit: limitNum,
-                source: source as string
-            });
-        }
+        // Parse multiple genres if provided
+        const genres = genre ? (genre as string).split(',').map(g => g.trim()) : [];
+
+        // Build filter object
+        const filters = {
+            type: type as string,
+            genres: genres.length > 0 ? genres : undefined,
+            status: status as string,
+            year: year ? parseInt(year as string, 10) : undefined,
+            startYear: startYear ? parseInt(startYear as string, 10) : undefined,
+            endYear: endYear ? parseInt(endYear as string, 10) : undefined,
+            sort: sort as string,
+            order: order as string,
+            limit: limitNum,
+            page: pageNum,
+            source: source as string
+        };
+
+        // Remove undefined filters
+        Object.keys(filters).forEach(key => {
+            if (filters[key as keyof typeof filters] === undefined) {
+                delete filters[key as keyof typeof filters];
+            }
+        });
+
+        const result = await sourceManager.browseAnime(filters);
 
         res.json({
-            results: result.anime || result,
+            results: result.anime || [],
             currentPage: pageNum,
             totalPages: result.totalPages || 1,
             hasNextPage: result.hasNextPage || false,
-            totalResults: result.totalResults || result.length || 0,
-            filters: { type, genre, status, year },
+            totalResults: result.totalResults || 0,
+            filters: { type, genre, status, year, startYear, endYear, sort, order },
             source: source || 'default'
         });
     } catch (error) {
@@ -268,7 +287,7 @@ router.get('/types', async (req: Request, res: Response): Promise<void> => {
             { value: 'ONA', label: 'ONAs', description: 'Original Net Animation' },
             { value: 'Special', label: 'Specials', description: 'Special episodes' }
         ];
-        
+
         res.json({ types });
     } catch (error) {
         console.error('Types error:', error);
@@ -289,7 +308,7 @@ router.get('/genres', async (req: Request, res: Response): Promise<void> => {
             'Samurai', 'Shounen', 'Shoujo', 'Seinen', 'Josei', 'Kids', 'Police', 'Military',
             'School', 'Demons', 'Game', 'Magic', 'Vampire', 'Space', 'Time Travel', 'Martial Arts'
         ];
-        
+
         res.json({ genres });
     } catch (error) {
         console.error('Genres error:', error);
@@ -308,7 +327,7 @@ router.get('/statuses', async (req: Request, res: Response): Promise<void> => {
             { value: 'Completed', label: 'Completed', description: 'Finished airing' },
             { value: 'Upcoming', label: 'Upcoming', description: 'Not yet aired' }
         ];
-        
+
         res.json({ statuses });
     } catch (error) {
         console.error('Statuses error:', error);
@@ -328,7 +347,7 @@ router.get('/seasons', async (req: Request, res: Response): Promise<void> => {
             { value: 'Summer', label: 'Summer', months: 'Jul, Aug, Sep' },
             { value: 'Fall', label: 'Fall', months: 'Oct, Nov, Dec' }
         ];
-        
+
         res.json({ seasons });
     } catch (error) {
         console.error('Seasons error:', error);
@@ -344,7 +363,7 @@ router.get('/years', async (req: Request, res: Response): Promise<void> => {
     try {
         const currentYear = new Date().getFullYear();
         const years = [];
-        
+
         for (let year = currentYear; year >= 1970; year--) {
             years.push({
                 value: year,
@@ -352,7 +371,7 @@ router.get('/years', async (req: Request, res: Response): Promise<void> => {
                 decade: `${Math.floor(year / 10) * 10}s`
             });
         }
-        
+
         res.json({ years });
     } catch (error) {
         console.error('Years error:', error);

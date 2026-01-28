@@ -1,11 +1,9 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { AnimeGrid } from '@/components/anime/AnimeGrid';
-import { useSearch, useGenre, useTrending } from '@/hooks/useAnime';
-import { apiClient } from '@/lib/api-client';
+import { useSearch, useGenre, useBrowse } from '@/hooks/useAnime';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,11 +17,8 @@ import {
 } from '@/components/ui/select';
 import {
   Search as SearchIcon,
-  SlidersHorizontal,
   X,
-  ArrowUpDown,
   Loader2,
-  Sparkles,
   Filter,
   Grid3X3,
   LayoutGrid,
@@ -31,13 +26,16 @@ import {
   ChevronRight,
   Flame,
   Clock,
-  Star,
-  Tv
+  TrendingUp,
+  Shuffle,
+  Calendar
 } from 'lucide-react';
-import { Anime } from '@/types/anime';
 import { cn } from '@/lib/utils';
 
-type SortOption = 'relevance' | 'rating' | 'year' | 'title' | 'episodes';
+// Sort options for search results (when searching)
+type SearchSortOption = 'relevance' | 'rating' | 'year' | 'title' | 'episodes';
+// Sort options for browsing (when not searching)
+type BrowseSortOption = 'popularity' | 'trending' | 'recently_released' | 'shuffle';
 type TypeFilter = 'all' | 'TV' | 'Movie' | 'OVA' | 'ONA' | 'Special';
 type StatusFilter = 'all' | 'Ongoing' | 'Completed' | 'Upcoming';
 
@@ -50,6 +48,19 @@ const COMMON_GENRES = [
   'School', 'Demons', 'Game', 'Magic', 'Vampire', 'Space', 'Time Travel', 'Martial Arts'
 ];
 
+// Year ranges for date filter
+const currentYear = new Date().getFullYear();
+const YEAR_RANGES = [
+  { label: 'All Time', startYear: undefined, endYear: undefined },
+  { label: `${currentYear}`, startYear: currentYear, endYear: currentYear },
+  { label: `${currentYear - 1}`, startYear: currentYear - 1, endYear: currentYear - 1 },
+  { label: '2020s', startYear: 2020, endYear: currentYear },
+  { label: '2010s', startYear: 2010, endYear: 2019 },
+  { label: '2000s', startYear: 2000, endYear: 2009 },
+  { label: '90s', startYear: 1990, endYear: 1999 },
+  { label: '80s & Earlier', startYear: 1960, endYear: 1989 },
+];
+
 const Search = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQuery = searchParams.get('q') || '';
@@ -57,10 +68,12 @@ const Search = () => {
   const [query, setQuery] = useState(initialQuery);
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
   const [page, setPage] = useState(1);
-  const [sortBy, setSortBy] = useState<SortOption>('relevance');
+  const [searchSortBy, setSearchSortBy] = useState<SearchSortOption>('relevance');
+  const [browseSortBy, setBrowseSortBy] = useState<BrowseSortOption>('popularity');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [selectedYearRange, setSelectedYearRange] = useState<number>(0); // Index into YEAR_RANGES
   const [showFilters, setShowFilters] = useState(false);
   const [gridSize, setGridSize] = useState<'compact' | 'normal'>('normal');
 
@@ -82,110 +95,75 @@ const Search = () => {
     }
   }, [debouncedQuery, setSearchParams]);
 
-  // Always fetch trending data for browse (minimum 50 anime)
-  const { data: trendingData, isLoading: trendingLoading } = useTrending(1, 50);
-  const queryClient = useQueryClient();
-  
-  // Fetch search results or genre results
-  const searchQuery = selectedGenres.length > 0 ? selectedGenres[0] : debouncedQuery;
-  const isGenreSearch = selectedGenres.length > 0 && !debouncedQuery;
-  const hasSearchQuery = debouncedQuery.length >= 2 || selectedGenres.length > 0;
-  
-  const { data: searchData, isLoading: searchLoading, isFetching: searchFetching } = useSearch(searchQuery, page, undefined, !isGenreSearch && hasSearchQuery);
-  const { data: genreData, isLoading: genreLoading, isFetching: genreFetching } = useGenre(searchQuery, page, undefined, isGenreSearch);
-  
-  // Use trending data as default when no search query, ensure minimum 50 results
+  // Build browse filters for the API
+  const browseFilters = useMemo(() => {
+    const yearRange = YEAR_RANGES[selectedYearRange];
+    return {
+      type: typeFilter !== 'all' ? typeFilter : undefined,
+      genre: selectedGenres.length > 0 ? selectedGenres.join(',') : undefined,
+      status: statusFilter !== 'all' ? statusFilter : undefined,
+      startYear: yearRange.startYear,
+      endYear: yearRange.endYear,
+      sort: browseSortBy,
+    };
+  }, [typeFilter, selectedGenres, statusFilter, selectedYearRange, browseSortBy]);
+
+  // Use browse API for browsing (25 per page, with filters and sorting)
+  const { data: browseData, isLoading: browseLoading, isFetching: browseFetching } = useBrowse(
+    browseFilters,
+    page,
+    !debouncedQuery // Only enable browse when not searching
+  );
+
+  // Use search API when there's a search query
+  const hasSearchQuery = debouncedQuery.length >= 2;
+  const { data: searchData, isLoading: searchLoading, isFetching: searchFetching } = useSearch(
+    debouncedQuery,
+    page,
+    undefined,
+    hasSearchQuery
+  );
+
+  // Combine data from browse or search
   const data = useMemo(() => {
     if (hasSearchQuery) {
-      const searchResult = isGenreSearch ? genreData : searchData;
       return {
-        results: searchResult?.results || [],
-        totalPages: searchResult?.totalPages || 1,
-        currentPage: searchResult?.currentPage || 1,
-        hasNextPage: searchResult?.hasNextPage || false
+        results: searchData?.results || [],
+        totalPages: searchData?.totalPages || 1,
+        currentPage: searchData?.currentPage || 1,
+        hasNextPage: searchData?.hasNextPage || false,
+        totalResults: searchData?.totalResults || searchData?.results?.length || 0
       };
     } else {
-      // Always show trending data for browse, minimum 50 items
-      const results = trendingData || [];
-      
-      // If we have less than 50 items, fetch more pages
-      if (results.length < 50 && !trendingLoading) {
-        const fetchMoreData = async () => {
-          let allResults = [...results];
-          let currentPage = 2;
-          
-          while (allResults.length < 50 && currentPage <= 5) {
-            try {
-              const moreData = await apiClient.getTrending(currentPage, undefined, 50);
-              if (moreData && moreData.length > 0) {
-                allResults = [...allResults, ...moreData];
-                // Update the query cache with new data
-                queryClient.setQueryData(['trending', 1, '50'], allResults);
-              }
-              currentPage++;
-            } catch (error) {
-              console.error('Failed to fetch more trending anime:', error);
-              break;
-            }
-          }
-        };
-        
-        // Start fetching more data asynchronously
-        fetchMoreData().catch(console.error);
-      }
-      
+      // Use browse data with 25 per page pagination
       return {
-        results: results,
-        totalPages: 1,
-        currentPage: 1,
-        hasNextPage: false
+        results: browseData?.results || [],
+        totalPages: browseData?.totalPages || 1,
+        currentPage: browseData?.currentPage || page,
+        hasNextPage: browseData?.hasNextPage || false,
+        totalResults: browseData?.totalResults || browseData?.results?.length || 0
       };
     }
-  }, [hasSearchQuery, isGenreSearch, genreData, searchData, trendingData, trendingLoading, queryClient]);
-  
-  const isLoading = hasSearchQuery ? (isGenreSearch ? genreLoading : searchLoading) : trendingLoading;
-  const isFetching = hasSearchQuery ? (isGenreSearch ? genreFetching : searchFetching) : false;
+  }, [hasSearchQuery, searchData, browseData, page]);
 
-  // Filter and sort results
+  const isLoading = hasSearchQuery ? searchLoading : browseLoading;
+  const isFetching = hasSearchQuery ? searchFetching : browseFetching;
+
+  // Filter and sort results for search mode only
+  // Browse mode uses server-side filtering/sorting
   const filteredResults = useMemo(() => {
     if (!data?.results) return [];
 
+    // If browsing (not searching), data is already filtered/sorted by API
+    if (!hasSearchQuery) {
+      return data.results;
+    }
+
+    // For search results, apply client-side filtering and sorting
     let results = [...data.results];
 
-    // Apply type filter
-    if (typeFilter !== 'all') {
-      results = results.filter(anime => anime.type === typeFilter);
-    }
-
-    // Apply status filter
-    if (statusFilter !== 'all') {
-      results = results.filter(anime => anime.status === statusFilter);
-    }
-
-    // Apply genre filter (only if not using API genre filtering)
-    if (selectedGenres.length > 0 && debouncedQuery) {
-      results = results.filter(anime => 
-        selectedGenres.some(genre => 
-          anime.genres.some(animeGenre => 
-            animeGenre.toLowerCase() === genre.toLowerCase()
-          )
-        )
-      );
-    }
-    
-    // If this is a pure genre search (no text query), filter by all selected genres
-    if (selectedGenres.length > 0 && !debouncedQuery) {
-      results = results.filter(anime => 
-        selectedGenres.some(genre => 
-          anime.genres.some(animeGenre => 
-            animeGenre.toLowerCase() === genre.toLowerCase()
-          )
-        )
-      );
-    }
-
-    // Apply sorting
-    switch (sortBy) {
+    // Apply sorting for search results
+    switch (searchSortBy) {
       case 'rating':
         results.sort((a, b) => (b.rating || 0) - (a.rating || 0));
         break;
@@ -203,27 +181,27 @@ const Search = () => {
     }
 
     return results;
-  }, [data, typeFilter, statusFilter, sortBy, debouncedQuery, selectedGenres]);
+  }, [data, hasSearchQuery, searchSortBy]);
 
   // Clear all filters
   const clearFilters = () => {
     setTypeFilter('all');
     setStatusFilter('all');
-    setSortBy('relevance');
+    setBrowseSortBy('popularity');
+    setSearchSortBy('relevance');
     setSelectedGenres([]);
+    setSelectedYearRange(0);
+    setPage(1);
   };
 
-  const hasActiveFilters = typeFilter !== 'all' || statusFilter !== 'all' || sortBy !== 'relevance' || selectedGenres.length > 0;
+  // Handle shuffle button
+  const handleShuffle = () => {
+    setBrowseSortBy('shuffle');
+    setPage(1);
+  };
 
-  // Quick search suggestions
-  const quickSearches = [
-    { label: 'Trending', icon: Flame, query: 'popular' },
-    { label: 'New', icon: Clock, query: 'new anime 2024' },
-    { label: 'Top Rated', icon: Star, query: 'best anime' },
-    { label: 'Action', icon: null, query: 'action' },
-    { label: 'Romance', icon: null, query: 'romance' },
-    { label: 'Fantasy', icon: null, query: 'fantasy' },
-  ];
+  const hasActiveFilters = typeFilter !== 'all' || statusFilter !== 'all' ||
+    selectedGenres.length > 0 || selectedYearRange !== 0 || browseSortBy !== 'popularity';
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -284,7 +262,7 @@ const Search = () => {
             {hasSearchQuery ? 'Search Results' : 'Browse Anime'}
           </h1>
           <p className="text-muted-foreground">
-            {hasSearchQuery 
+            {hasSearchQuery
               ? `Found ${data?.results?.length || 0} results`
               : 'Discover new anime to watch'
             }
@@ -340,19 +318,84 @@ const Search = () => {
                 </SelectContent>
               </Select>
 
-              {/* Sort Filter */}
-              <Select value={sortBy} onValueChange={(value: SortOption) => setSortBy(value)}>
-                <SelectTrigger className="w-32 bg-background/50 border-white/10">
-                  <SelectValue placeholder="Sort" />
+              {/* Date Filter */}
+              <Select
+                value={String(selectedYearRange)}
+                onValueChange={(value) => {
+                  setSelectedYearRange(Number(value));
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="w-36 bg-background/50 border-white/10">
+                  <Calendar className="w-4 h-4 mr-2" />
+                  <SelectValue placeholder="Date" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="relevance">Relevance</SelectItem>
-                  <SelectItem value="rating">Rating</SelectItem>
-                  <SelectItem value="year">Year</SelectItem>
-                  <SelectItem value="title">Title</SelectItem>
-                  <SelectItem value="episodes">Episodes</SelectItem>
+                  {YEAR_RANGES.map((range, index) => (
+                    <SelectItem key={index} value={String(index)}>
+                      {range.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+
+              {/* Sort Options - Browse Mode */}
+              {!debouncedQuery && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant={browseSortBy === 'popularity' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => { setBrowseSortBy('popularity'); setPage(1); }}
+                    className="gap-2"
+                  >
+                    <Flame className="w-4 h-4" />
+                    Popular
+                  </Button>
+                  <Button
+                    variant={browseSortBy === 'trending' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => { setBrowseSortBy('trending'); setPage(1); }}
+                    className="gap-2"
+                  >
+                    <TrendingUp className="w-4 h-4" />
+                    Trending
+                  </Button>
+                  <Button
+                    variant={browseSortBy === 'recently_released' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => { setBrowseSortBy('recently_released'); setPage(1); }}
+                    className="gap-2"
+                  >
+                    <Clock className="w-4 h-4" />
+                    New
+                  </Button>
+                  <Button
+                    variant={browseSortBy === 'shuffle' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={handleShuffle}
+                    className="gap-2"
+                  >
+                    <Shuffle className="w-4 h-4" />
+                    Shuffle
+                  </Button>
+                </div>
+              )}
+
+              {/* Sort Options - Search Mode */}
+              {debouncedQuery && (
+                <Select value={searchSortBy} onValueChange={(value: SearchSortOption) => setSearchSortBy(value)}>
+                  <SelectTrigger className="w-32 bg-background/50 border-white/10">
+                    <SelectValue placeholder="Sort" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="relevance">Relevance</SelectItem>
+                    <SelectItem value="rating">Rating</SelectItem>
+                    <SelectItem value="year">Year</SelectItem>
+                    <SelectItem value="title">Title</SelectItem>
+                    <SelectItem value="episodes">Episodes</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
 
               {/* Grid Size Toggle */}
               <div className="flex items-center gap-2">
@@ -383,14 +426,14 @@ const Search = () => {
                 <h3 className="text-lg font-semibold text-white mb-2">Filter by Genres</h3>
                 <p className="text-sm text-muted-foreground">Select genres to narrow down your search</p>
               </div>
-              
+
               <div className="flex flex-wrap gap-2 mb-4">
                 {COMMON_GENRES.slice(0, 20).map((genre) => (
                   <button
                     key={genre}
                     onClick={() => {
-                      setSelectedGenres(prev => 
-                        prev.includes(genre) 
+                      setSelectedGenres(prev =>
+                        prev.includes(genre)
                           ? prev.filter(g => g !== genre)
                           : [...prev, genre]
                       );
@@ -469,15 +512,116 @@ const Search = () => {
         {/* Browse Results */}
         {!debouncedQuery ? (
           <div className="space-y-8">
-            <AnimeGrid
-              anime={filteredResults}
-              isLoading={isLoading}
-              isFetching={isFetching}
-              currentPage={page}
-              totalPages={data?.totalPages || 1}
-              hasNextPage={data?.hasNextPage || false}
-              onPageChange={setPage}
-            />
+            {/* Loading State */}
+            {isLoading ? (
+              <div className={cn(
+                "grid gap-5",
+                gridSize === 'compact'
+                  ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8"
+                  : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+              )}>
+                {[...Array(25)].map((_, i) => (
+                  <div key={i} className="space-y-3">
+                    <Skeleton className="aspect-[2/3] rounded-xl" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
+                  </div>
+                ))}
+              </div>
+            ) : filteredResults.length === 0 ? (
+              /* Empty State */
+              <div className="flex flex-col items-center justify-center py-24 text-center">
+                <div className="w-24 h-24 rounded-3xl bg-fox-surface/50 flex items-center justify-center mb-8">
+                  <Filter className="w-12 h-12 text-muted-foreground" />
+                </div>
+                <h2 className="text-2xl font-bold mb-3">No Anime Found</h2>
+                <p className="text-muted-foreground max-w-md text-lg mb-6">
+                  No anime matches your current filters. Try adjusting your filter criteria.
+                </p>
+                {hasActiveFilters && (
+                  <Button
+                    variant="outline"
+                    onClick={clearFilters}
+                    className="rounded-xl h-11 px-6"
+                  >
+                    <X className="w-4 h-4 mr-2" />
+                    Clear Filters
+                  </Button>
+                )}
+              </div>
+            ) : (
+              /* Results Grid */
+              <>
+                <AnimeGrid
+                  anime={filteredResults}
+                  columns={gridSize === 'compact' ? 8 : 6}
+                />
+
+                {/* Pagination - 25 per page */}
+                {data && data.totalPages > 1 && (
+                  <div className="flex items-center justify-center gap-4 mt-12">
+                    <Button
+                      variant="outline"
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      disabled={page === 1 || isFetching}
+                      className="h-12 px-6 rounded-xl gap-2"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                      Previous
+                    </Button>
+
+                    <div className="flex items-center gap-2">
+                      {Array.from({ length: Math.min(5, data.totalPages) }).map((_, i) => {
+                        let pageNum: number;
+                        if (data.totalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (page <= 3) {
+                          pageNum = i + 1;
+                        } else if (page >= data.totalPages - 2) {
+                          pageNum = data.totalPages - 4 + i;
+                        } else {
+                          pageNum = page - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setPage(pageNum)}
+                            className={cn(
+                              "w-10 h-10 rounded-xl font-medium transition-all",
+                              pageNum === page
+                                ? "bg-fox-orange text-white shadow-lg shadow-fox-orange/30"
+                                : "bg-fox-surface/50 hover:bg-fox-surface"
+                            )}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      onClick={() => setPage(p => p + 1)}
+                      disabled={!data.hasNextPage || isFetching}
+                      className="h-12 px-6 rounded-xl gap-2"
+                    >
+                      Next
+                      {isFetching ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <ChevronRight className="w-5 h-5" />
+                      )}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Results count */}
+                <div className="text-center text-muted-foreground text-sm">
+                  Showing {filteredResults.length} of {data?.totalResults || filteredResults.length} anime
+                  {data && data.totalPages > 1 && ` • Page ${page} of ${data.totalPages}`}
+                </div>
+              </>
+            )}
           </div>
         ) : debouncedQuery.length < 2 ? (
           <div className="text-center py-16">
