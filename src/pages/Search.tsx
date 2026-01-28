@@ -111,13 +111,11 @@ const Search = () => {
           while (allResults.length < 50 && currentPage <= 5) {
             try {
               const moreData = await apiClient.getTrending(currentPage, undefined, 50);
-              if (moreData && moreData.length > 0) {
-                allResults = [...allResults, ...moreData];
+              const moreResults = Array.isArray(moreData) ? moreData : (moreData?.results || []);
+              if (moreResults && moreResults.length > 0) {
+                allResults = [...allResults, ...moreResults];
                 // Update the query cache with new data
-                queryClient.setQueryData(['trending', 1, '50'], (old: any) => ({
-                  ...old,
-                  results: allResults
-                }));
+                queryClient.setQueryData(['trending', 1, '50'], allResults);
               }
               currentPage++;
             } catch (error) {
