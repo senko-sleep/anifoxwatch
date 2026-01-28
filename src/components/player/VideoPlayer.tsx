@@ -8,16 +8,13 @@ import {
   Maximize,
   Minimize,
   SkipForward,
-  SkipBack,
   Settings,
   Subtitles,
   AlertTriangle,
   RefreshCw,
   PictureInPicture,
   PictureInPicture2,
-  Check,
-  Eye,
-  EyeOff
+  Check
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -41,7 +38,7 @@ interface VideoSubtitle {
 interface VideoPlayerProps {
   src: string;
   isM3U8?: boolean;
-  subtitles?: VideoSubtitle[];
+  subtitles?: Array<{ lang: string; label?: string; url: string }>;
   intro?: { start: number; end: number };
   outro?: { start: number; end: number };
   onEnded?: () => void;
@@ -49,13 +46,12 @@ interface VideoPlayerProps {
   poster?: string;
   onNextEpisode?: () => void;
   hasNextEpisode?: boolean;
-  onCinemaModeChange?: (isCinemaMode: boolean) => void;
   animeId?: string;
   selectedEpisodeNum?: number;
 }
 
 // Logger for video player events
-const playerLog = (level: 'info' | 'warn' | 'error', message: string, data?: unknown) => {
+const playerLog = (level: 'info' | 'warn' | 'error', message: string, data?: any) => {
   const timestamp = new Date().toISOString();
   const prefix = `[VideoPlayer ${timestamp}]`;
 
@@ -83,7 +79,6 @@ export const VideoPlayer = ({
   poster,
   onNextEpisode,
   hasNextEpisode,
-  onCinemaModeChange,
   animeId,
   selectedEpisodeNum
 }: VideoPlayerProps) => {
@@ -98,8 +93,6 @@ export const VideoPlayer = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [savedPosition, setSavedPosition] = useState(0);
-  const [showPositionRestored, setShowPositionRestored] = useState(false);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -118,181 +111,14 @@ export const VideoPlayer = ({
   const [subtitleEnabled, setSubtitleEnabled] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [isPiPActive, setIsPiPActive] = useState(false);
-  
-  // Portal/Eye Mode State - affects the entire website
-  const [portalMode, setPortalMode] = useState<'off' | 'portal' | 'cinema' | 'focus'>('off');
-  const [audioEnhancement, setAudioEnhancement] = useState<'off' | 'bass' | 'surround' | 'immersive'>('off');
-  
-  // Audio context refs
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
-  const bassFilterRef = useRef<BiquadFilterNode | null>(null);
-  const trebleFilterRef = useRef<BiquadFilterNode | null>(null);
-  
-  // Portal overlay ref
-  const portalOverlayRef = useRef<HTMLDivElement | null>(null);
+
+  // Position persistence state
+  const [savedPosition, setSavedPosition] = useState(0);
+  const [showPositionRestored, setShowPositionRestored] = useState(false);
 
   // Video preview states
   const [isProgressHovering, setIsProgressHovering] = useState(false);
   const [progressMouseX, setProgressMouseX] = useState(0);
-
-  // Initialize Audio Context for enhancements
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    try {
-      const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      const source = audioCtx.createMediaElementSource(video);
-      const gain = audioCtx.createGain();
-      const bass = audioCtx.createBiquadFilter();
-      const treble = audioCtx.createBiquadFilter();
-
-      // Configure bass filter (low shelf)
-      bass.type = 'lowshelf';
-      bass.frequency.value = 100;
-      bass.gain.value = 0;
-
-      // Configure treble filter (high shelf)
-      treble.type = 'highshelf';
-      treble.frequency.value = 3000;
-      treble.gain.value = 0;
-
-      // Connect audio chain
-      source.connect(bass);
-      bass.connect(treble);
-      treble.connect(gain);
-      gain.connect(audioCtx.destination);
-
-      audioContextRef.current = audioCtx;
-      audioSourceRef.current = source;
-      gainNodeRef.current = gain;
-      bassFilterRef.current = bass;
-      trebleFilterRef.current = treble;
-
-      // Resume audio context on user interaction
-      const resumeAudio = () => {
-        if (audioCtx.state === 'suspended') {
-          audioCtx.resume();
-        }
-      };
-      
-      video.addEventListener('play', resumeAudio);
-      containerRef.current?.addEventListener('click', resumeAudio);
-
-      return () => {
-        video.removeEventListener('play', resumeAudio);
-        containerRef.current?.removeEventListener('click', resumeAudio);
-        source.disconnect();
-        audioCtx.close();
-      };
-    } catch (err) {
-      playerLog('warn', 'Audio context not supported', err);
-    }
-  }, []);
-
-  // Apply audio enhancements
-  useEffect(() => {
-    if (!bassFilterRef.current || !trebleFilterRef.current) return;
-
-    switch (audioEnhancement) {
-      case 'bass':
-        bassFilterRef.current.gain.value = 12;
-        trebleFilterRef.current.gain.value = 2;
-        break;
-      case 'surround':
-        bassFilterRef.current.gain.value = 6;
-        trebleFilterRef.current.gain.value = 8;
-        break;
-      case 'immersive':
-        bassFilterRef.current.gain.value = 10;
-        trebleFilterRef.current.gain.value = 10;
-        break;
-      default:
-        bassFilterRef.current.gain.value = 0;
-        trebleFilterRef.current.gain.value = 0;
-    }
-  }, [audioEnhancement]);
-
-  // Portal Mode Effect - Only affects video positioning, no overlay
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    // Reset container styles
-    container.style.position = '';
-    container.style.top = '';
-    container.style.left = '';
-    container.style.width = '';
-    container.style.height = '';
-    container.style.zIndex = '';
-    container.style.transform = '';
-
-    if (portalMode === 'off') {
-      onCinemaModeChange?.(false);
-      return;
-    }
-
-    // Apply portal styles based on mode (no overlay)
-    switch (portalMode) {
-      case 'portal':
-        container.style.position = 'fixed';
-        container.style.top = '50%';
-        container.style.left = '50%';
-        container.style.transform = 'translate(-50%, -50%)';
-        container.style.width = '90vw';
-        container.style.height = 'auto';
-        container.style.zIndex = '9999';
-        container.style.aspectRatio = '16/9';
-        onCinemaModeChange?.(false);
-        break;
-      case 'cinema':
-        // Cinema mode: Expanded width for landscape cinematic aspect ratio
-        // Video takes priority with content flexing around it
-        container.style.position = 'fixed';
-        container.style.top = '0';
-        container.style.left = '0';
-        container.style.width = '100vw';
-        container.style.height = '56.25vw'; // 16:9 aspect ratio (9/16 * 100)
-        container.style.maxHeight = '85vh';
-        container.style.zIndex = '9999';
-        container.style.transform = 'none';
-        onCinemaModeChange?.(true);
-        break;
-      case 'focus':
-        container.style.position = 'fixed';
-        container.style.top = '50%';
-        container.style.left = '50%';
-        container.style.transform = 'translate(-50%, -50%) scale(1.1)';
-        container.style.width = '80vw';
-        container.style.height = 'auto';
-        container.style.zIndex = '9999';
-        container.style.aspectRatio = '16/9';
-        onCinemaModeChange?.(false);
-        break;
-    }
-
-    return () => {
-      // Reset styles on cleanup
-      container.style.position = '';
-      container.style.top = '';
-      container.style.left = '';
-      container.style.width = '';
-      container.style.height = '';
-      container.style.zIndex = '';
-      container.style.transform = '';
-      onCinemaModeChange?.(false);
-    };
-  }, [portalMode, onCinemaModeChange]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      document.body.style.overflow = '';
-      document.documentElement.style.overflow = '';
-    };
-  }, []);
 
   // Position persistence functions
   const getPositionKey = useCallback(() => {
@@ -331,6 +157,8 @@ export const VideoPlayer = ({
       setIsLoading(true);
 
       if (hlsRef.current) {
+        // Don't call startLoad() as it restarts the stream from beginning
+        // Instead, recover the current stream
         hlsRef.current.recoverMediaError();
       }
     } else {
@@ -344,6 +172,7 @@ export const VideoPlayer = ({
     const video = videoRef.current;
     if (!video || !src) return;
 
+    // Reset state
     setIsLoading(true);
     setError(null);
     retryCountRef.current = 0;
@@ -355,6 +184,7 @@ export const VideoPlayer = ({
     });
 
     if (isM3U8 && Hls.isSupported()) {
+      // Cleanup previous instance
       if (hlsRef.current) {
         hlsRef.current.destroy();
       }
@@ -365,8 +195,8 @@ export const VideoPlayer = ({
         backBufferLength: 90,
         maxBufferLength: 30,
         maxMaxBufferLength: 600,
-        startLevel: -1,
-        abrEwmaDefaultEstimate: 5000000,
+        startLevel: -1, // Auto quality initially
+        abrEwmaDefaultEstimate: 5000000, // 5Mbps initial estimate for HD
         abrMaxWithRealBitrate: true,
         testBandwidth: true,
         fragLoadingMaxRetry: 6,
@@ -382,14 +212,17 @@ export const VideoPlayer = ({
       hls.loadSource(src);
       hls.attachMedia(video);
 
+      // Track quality levels
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
         playerLog('info', 'Manifest parsed', {
           levels: data.levels.length,
           qualities: data.levels.map(l => `${l.height}p`)
         });
 
+        // Store available levels
         setAvailableLevels(data.levels.map(l => ({ height: l.height, bitrate: l.bitrate })));
 
+        // Set to highest quality by default
         const maxLevel = data.levels.length - 1;
         hls.currentLevel = maxLevel;
         setCurrentLevel(maxLevel);
@@ -412,6 +245,7 @@ export const VideoPlayer = ({
         }
       });
 
+      // Track level switching
       hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
         const level = hls.levels[data.level];
         if (level) {
@@ -421,6 +255,7 @@ export const VideoPlayer = ({
         }
       });
 
+      // Track fragment loading
       hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
         playerLog('info', `Fragment loaded`, {
           sn: data.frag.sn,
@@ -429,6 +264,7 @@ export const VideoPlayer = ({
         });
       });
 
+      // Error handling with detailed logging
       hls.on(Hls.Events.ERROR, (_, data) => {
         playerLog('error', 'HLS error', {
           type: data.type,
@@ -444,6 +280,11 @@ export const VideoPlayer = ({
               if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR) {
                 setError('Failed to load video manifest. The stream may be unavailable.');
                 onError?.('manifest_load_error');
+              } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
+                // Try to recover from fragment loading errors without restarting
+                playerLog('warn', 'Fragment load error, attempting recovery');
+                // Don't call startLoad() as it restarts the stream
+                // Instead, let HLS handle the recovery automatically
               } else {
                 setError('Network error. Check your connection and try again.');
                 onError?.('network_error');
@@ -464,6 +305,7 @@ export const VideoPlayer = ({
 
       hlsRef.current = hls;
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS support (Safari)
       playerLog('info', 'Using native HLS support');
       video.src = src;
 
@@ -483,6 +325,7 @@ export const VideoPlayer = ({
         onError?.('native_error');
       });
     } else {
+      // Direct video source
       playerLog('info', 'Using direct video source');
       video.src = src;
       video.addEventListener('loadedmetadata', () => {
@@ -515,12 +358,14 @@ export const VideoPlayer = ({
         savePosition(time);
       }
 
+      // Check for intro skip
       if (intro && video.currentTime >= intro.start && video.currentTime < intro.end) {
         setShowSkipIntro(true);
       } else {
         setShowSkipIntro(false);
       }
 
+      // Check for outro skip
       if (outro && video.currentTime >= outro.start && video.currentTime < outro.end) {
         setShowSkipOutro(true);
       } else {
@@ -538,6 +383,8 @@ export const VideoPlayer = ({
       // Clear saved position when video ends
       clearSavedPosition();
       
+      // If video ended and there's a next episode, start countdown
+      // Only trigger if not already showing countdown
       if (hasNextEpisode) {
         setShowNextEpisodeCountdown(prev => {
           if (!prev) {
@@ -570,7 +417,7 @@ export const VideoPlayer = ({
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('canplay', handleCanPlay);
     };
-  }, [intro, outro, hasNextEpisode, savePosition, clearSavedPosition]);
+  }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown, savePosition, clearSavedPosition]);
 
   // Fullscreen change handler
   useEffect(() => {
@@ -590,46 +437,20 @@ export const VideoPlayer = ({
       }, 1000);
       return () => clearTimeout(timer);
     } else if (showNextEpisodeCountdown && nextEpisodeCountdown === 0) {
+      // Auto-play next episode
       setShowNextEpisodeCountdown(false);
       setNextEpisodeCountdown(10);
       onNextEpisode?.();
     }
   }, [showNextEpisodeCountdown, nextEpisodeCountdown, onNextEpisode]);
 
-  // Picture-in-Picture handlers with mobile controls
+  // Picture-in-Picture handlers
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const handleEnterPiP = () => {
-      setIsPiPActive(true);
-      playerLog('info', 'Entered Picture-in-Picture mode');
-      
-      // Add mobile PiP controls
-      if ('navigator' in window && 'mediaSession' in navigator) {
-        navigator.mediaSession.setActionHandler('play', () => video.play());
-        navigator.mediaSession.setActionHandler('pause', () => video.pause());
-        navigator.mediaSession.setActionHandler('seekbackward', () => {
-          video.currentTime = Math.max(0, video.currentTime - 10);
-        });
-        navigator.mediaSession.setActionHandler('seekforward', () => {
-          video.currentTime = Math.min(video.duration, video.currentTime + 10);
-        });
-      }
-    };
-    
-    const handleLeavePiP = () => {
-      setIsPiPActive(false);
-      playerLog('info', 'Left Picture-in-Picture mode');
-      
-      // Reset media session handlers
-      if ('navigator' in window && 'mediaSession' in navigator) {
-        navigator.mediaSession.setActionHandler('play', togglePlay);
-        navigator.mediaSession.setActionHandler('pause', togglePlay);
-        navigator.mediaSession.setActionHandler('seekbackward', () => seekBackward());
-        navigator.mediaSession.setActionHandler('seekforward', () => seekForward());
-      }
-    };
+    const handleEnterPiP = () => setIsPiPActive(true);
+    const handleLeavePiP = () => setIsPiPActive(false);
 
     video.addEventListener('enterpictureinpicture', handleEnterPiP);
     video.addEventListener('leavepictureinpicture', handleLeavePiP);
@@ -638,7 +459,18 @@ export const VideoPlayer = ({
       video.removeEventListener('enterpictureinpicture', handleEnterPiP);
       video.removeEventListener('leavepictureinpicture', handleLeavePiP);
     };
-  }, [togglePlay, seekBackward, seekForward]);
+  }, []);
+
+  // Subtitle track handler
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const tracks = video.textTracks;
+    for (let i = 0; i < tracks.length; i++) {
+      tracks[i].mode = subtitleEnabled && selectedSubtitle === tracks[i].language ? 'showing' : 'hidden';
+    }
+  }, [selectedSubtitle, subtitleEnabled]);
 
   // Controls visibility
   const showControlsTemporarily = useCallback(() => {
@@ -710,15 +542,11 @@ export const VideoPlayer = ({
   }, [intro]);
 
   const skipOutro = useCallback(() => {
-    if (hasNextEpisode) {
-      onNextEpisode?.();
-    } else if (outro) {
-      const video = videoRef.current;
-      if (!video) return;
-      video.currentTime = outro.end;
-    }
+    const video = videoRef.current;
+    if (!video || !outro) return;
+    video.currentTime = outro.end;
     setShowSkipOutro(false);
-  }, [outro, onNextEpisode, hasNextEpisode]);
+  }, [outro]);
 
   const handleQualityChange = useCallback((level: number) => {
     if (hlsRef.current) {
@@ -741,51 +569,12 @@ export const VideoPlayer = ({
     try {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
-        playerLog('info', 'Exited Picture-in-Picture');
       } else {
-        // Check if PiP is supported
-        if (!document.pictureInPictureEnabled) {
-          playerLog('warn', 'Picture-in-Picture not supported on this device');
-          return;
-        }
-        
-        // Ensure video is ready for PiP
-        if (video.readyState < 2) { // HAVE_CURRENT_DATA
-          playerLog('warn', 'Video not ready for PiP, waiting...');
-          await new Promise(resolve => {
-            video.addEventListener('loadeddata', resolve, { once: true });
-          });
-        }
-        
         await video.requestPictureInPicture();
-        playerLog('info', 'Entered Picture-in-Picture mode');
       }
     } catch (error) {
       playerLog('error', 'Picture-in-Picture error', error);
-      
-      // Show user-friendly error message
-      if (error instanceof Error) {
-        if (error.name === 'NotAllowedError') {
-          setError('Picture-in-Picture permission denied. Please enable PiP in your browser settings.');
-        } else if (error.name === 'NotSupportedError') {
-          setError('Picture-in-Picture not supported on this device or browser.');
-        } else {
-          setError('Failed to toggle Picture-in-Picture. Try refreshing the page.');
-        }
-      }
     }
-  }, []);
-
-  const seekForward = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = Math.min(video.duration, video.currentTime + 10);
-  }, []);
-
-  const seekBackward = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.currentTime = Math.max(0, video.currentTime - 10);
   }, []);
 
   const toggleSubtitles = useCallback(() => {
@@ -802,40 +591,6 @@ export const VideoPlayer = ({
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
-
-  // Android media session API
-  useEffect(() => {
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: 'Anime Stream',
-        artist: 'AniStream Hub',
-        album: 'Episode',
-        artwork: [{ src: poster || '', sizes: '192x192', type: 'image/jpeg' }]
-      });
-
-      navigator.mediaSession.setActionHandler('play', togglePlay);
-      navigator.mediaSession.setActionHandler('pause', togglePlay);
-      navigator.mediaSession.setActionHandler('seekbackward', () => seekBackward());
-      navigator.mediaSession.setActionHandler('seekforward', () => seekForward());
-      navigator.mediaSession.setActionHandler('previoustrack', seekBackward);
-      navigator.mediaSession.setActionHandler('nexttrack', () => {
-        if (hasNextEpisode) {
-          onNextEpisode?.();
-        } else {
-          seekForward();
-        }
-      });
-
-      return () => {
-        navigator.mediaSession.setActionHandler('play', null);
-        navigator.mediaSession.setActionHandler('pause', null);
-        navigator.mediaSession.setActionHandler('seekbackward', null);
-        navigator.mediaSession.setActionHandler('seekforward', null);
-        navigator.mediaSession.setActionHandler('previoustrack', null);
-        navigator.mediaSession.setActionHandler('nexttrack', null);
-      };
-    }
-  }, [togglePlay, seekBackward, seekForward, hasNextEpisode, onNextEpisode, poster]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -864,11 +619,11 @@ export const VideoPlayer = ({
           break;
         case 'arrowleft':
           e.preventDefault();
-          seekBackward();
+          if (videoRef.current) videoRef.current.currentTime -= 10;
           break;
         case 'arrowright':
           e.preventDefault();
-          seekForward();
+          if (videoRef.current) videoRef.current.currentTime += 10;
           break;
         case 'arrowup':
           e.preventDefault();
@@ -878,101 +633,23 @@ export const VideoPlayer = ({
           e.preventDefault();
           handleVolumeChange([Math.max(0, volume - 0.1)]);
           break;
-        case 'escape':
-          if (portalMode !== 'off') {
-            setPortalMode('off');
-          }
-          break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, toggleFullscreen, toggleMute, handleVolumeChange, volume, showSkipIntro, skipIntro, seekForward, seekBackward, portalMode]);
+  }, [togglePlay, toggleFullscreen, toggleMute, handleVolumeChange, volume, showSkipIntro, skipIntro]);
 
   return (
     <div
       ref={containerRef}
-      className={cn(
-        "relative w-full h-full bg-black group transition-all duration-500",
-        portalMode !== 'off' && "shadow-2xl"
-      )}
+      className="relative w-full h-full bg-black group"
       onMouseMove={showControlsTemporarily}
       onMouseLeave={() => isPlaying && setShowControls(false)}
     >
-      {/* Mobile PiP Controls Overlay */}
-      {isPiPActive && (
-        <div className="absolute bottom-4 left-4 right-4 flex items-center justify-center gap-4 z-30 md:hidden">
-          <div className="bg-black/80 backdrop-blur-md rounded-full px-4 py-2 flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={seekBackward}
-              className="text-white hover:bg-white/20 h-8 w-8"
-              title="Skip backward 10s"
-            >
-              <SkipBack className="w-4 h-4" />
-            </Button>
-            
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={togglePlay}
-              className="text-white hover:bg-white/20 h-10 w-10"
-              title={isPlaying ? "Pause" : "Play"}
-            >
-              {isPlaying ? (
-                <Pause className="w-5 h-5" />
-              ) : (
-                <Play className="w-5 h-5" />
-              )}
-            </Button>
-            
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={seekForward}
-              className="text-white hover:bg-white/20 h-8 w-8"
-              title="Skip forward 10s"
-            >
-              <SkipForward className="w-4 h-4" />
-            </Button>
-            
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={togglePiP}
-              className="text-fox-orange hover:bg-fox-orange/20 h-8 w-8"
-              title="Exit Picture-in-Picture"
-            >
-              <PictureInPicture2 className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Exit Portal Mode Button */}
-      {portalMode !== 'off' && (
-        <button
-          onClick={() => setPortalMode('off')}
-          className={cn(
-            "absolute z-[10000] bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg backdrop-blur-sm transition-all flex items-center gap-2",
-            portalMode === 'cinema' 
-              ? "top-4 right-4 bg-black/60 hover:bg-black/80" 
-              : "-top-12 right-0"
-          )}
-        >
-          <EyeOff className="w-4 h-4" />
-          {portalMode === 'cinema' ? 'Exit Cinema Mode' : 'Exit Portal Mode'}
-        </button>
-      )}
-
       <video
         ref={videoRef}
-        className={cn(
-          "w-full h-full transition-all duration-300",
-          portalMode === 'cinema' && "object-contain"
-        )}
+        className="w-full h-full"
         poster={poster}
         playsInline
         onClick={togglePlay}
@@ -985,7 +662,7 @@ export const VideoPlayer = ({
             src={sub.url}
             srcLang={sub.lang}
             label={sub.label || sub.lang}
-            default={selectedSubtitle === sub.lang}
+            default={i === 0}
           />
         ))}
       </video>
@@ -1004,7 +681,7 @@ export const VideoPlayer = ({
       {isLoading && !error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80">
           <div className="flex flex-col items-center gap-4">
-            <div className="w-16 h-16 border-4 border-fox-orange border-t-transparent rounded-full animate-spin" />
+            <div className="w-12 h-12 border-4 border-fox-orange/30 border-t-fox-orange rounded-full animate-spin"></div>
             <p className="text-white/80 text-sm">Loading stream...</p>
             {hlsStats && (
               <p className="text-white/60 text-xs">{hlsStats.level}p • {(hlsStats.bandwidth / 1000000).toFixed(1)} Mbps</p>
@@ -1090,21 +767,7 @@ export const VideoPlayer = ({
       )}
 
       {/* Skip Outro / Next Episode Button */}
-      {showSkipOutro && hasNextEpisode && (
-        <Button
-          onClick={() => {
-            onNextEpisode?.();
-            setShowSkipOutro(false);
-          }}
-          className="absolute bottom-24 right-4 bg-fox-orange hover:bg-fox-orange/90 text-white gap-2 animate-in slide-in-from-right z-20"
-        >
-          <SkipForward className="w-4 h-4" />
-          Next Episode
-        </Button>
-      )}
-      
-      {/* Regular Skip Outro Button (when no next episode) */}
-      {showSkipOutro && !hasNextEpisode && (
+      {showSkipOutro && (
         <Button
           onClick={skipOutro}
           className="absolute bottom-24 right-4 bg-fox-orange hover:bg-fox-orange/90 text-white gap-2 animate-in slide-in-from-right z-20"
@@ -1176,17 +839,6 @@ export const VideoPlayer = ({
           {/* Control buttons */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              {/* 10 Second Skip Backward */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={seekBackward}
-                className="text-white hover:bg-white/20"
-                title="Skip backward 10 seconds (←)"
-              >
-                <SkipBack className="w-5 h-5" />
-              </Button>
-
               <Button
                 variant="ghost"
                 size="icon"
@@ -1198,17 +850,6 @@ export const VideoPlayer = ({
                 ) : (
                   <Play className="w-5 h-5" />
                 )}
-              </Button>
-
-              {/* 10 Second Skip Forward */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={seekForward}
-                className="text-white hover:bg-white/20"
-                title="Skip forward 10 seconds (→)"
-              >
-                <SkipForward className="w-5 h-5" />
               </Button>
 
               <div className="flex items-center gap-2 group/volume">
@@ -1282,17 +923,16 @@ export const VideoPlayer = ({
                 </DropdownMenu>
               )}
 
-              {/* Picture-in-Picture - Enhanced for Mobile */}
+              {/* Picture-in-Picture */}
               {document.pictureInPictureEnabled && (
                 <Button
                   variant="ghost"
                   size="icon"
                   onClick={togglePiP}
                   className={cn(
-                    "text-white hover:bg-white/20 transition-all",
-                    isPiPActive && "text-fox-orange bg-fox-orange/20"
+                    "text-white hover:bg-white/20",
+                    isPiPActive && "text-fox-orange"
                   )}
-                  title={isPiPActive ? "Exit Picture-in-Picture" : "Enter Picture-in-Picture"}
                 >
                   {isPiPActive ? (
                     <PictureInPicture2 className="w-5 h-5" />
@@ -1301,67 +941,6 @@ export const VideoPlayer = ({
                   )}
                 </Button>
               )}
-
-              {/* Portal/Eye Mode */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={cn(
-                      "text-white hover:bg-white/20",
-                      portalMode !== 'off' && "text-fox-orange"
-                    )}
-                  >
-                    {portalMode === 'off' ? (
-                      <Eye className="w-5 h-5" />
-                    ) : (
-                      <EyeOff className="w-5 h-5" />
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel>Portal Mode (Affects Website)</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => setPortalMode('off')}>
-                    <span className="flex-1">Off</span>
-                    {portalMode === 'off' && <Check className="w-4 h-4 ml-2" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setPortalMode('portal')}>
-                    <span className="flex-1">Portal</span>
-                    <span className="text-xs text-white/50 ml-2">Centered</span>
-                    {portalMode === 'portal' && <Check className="w-4 h-4 ml-2" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setPortalMode('cinema')}>
-                    <span className="flex-1">Cinema</span>
-                    <span className="text-xs text-white/50 ml-2">Fullscreen</span>
-                    {portalMode === 'cinema' && <Check className="w-4 h-4 ml-2" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setPortalMode('focus')}>
-                    <span className="flex-1">Focus</span>
-                    <span className="text-xs text-white/50 ml-2">Zoomed</span>
-                    {portalMode === 'focus' && <Check className="w-4 h-4 ml-2" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  
-                  <DropdownMenuLabel>Audio Enhancement</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => setAudioEnhancement('off')}>
-                    <span className="flex-1">Normal</span>
-                    {audioEnhancement === 'off' && <Check className="w-4 h-4 ml-2" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setAudioEnhancement('bass')}>
-                    <span className="flex-1">Bass Boost</span>
-                    {audioEnhancement === 'bass' && <Check className="w-4 h-4 ml-2" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setAudioEnhancement('surround')}>
-                    <span className="flex-1">Virtual Surround</span>
-                    {audioEnhancement === 'surround' && <Check className="w-4 h-4 ml-2" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setAudioEnhancement('immersive')}>
-                    <span className="flex-1">Immersive</span>
-                    {audioEnhancement === 'immersive' && <Check className="w-4 h-4 ml-2" />}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
 
               {/* Settings */}
               <DropdownMenu>
@@ -1432,4 +1011,4 @@ export const VideoPlayer = ({
       </div>
     </div>
   );
-};
+}

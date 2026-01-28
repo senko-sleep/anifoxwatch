@@ -386,7 +386,6 @@ const Watch = () => {
                       poster={anime.image}
                       onNextEpisode={handleNextEpisode}
                       hasNextEpisode={hasNext}
-                      onCinemaModeChange={setIsCinemaMode}
                       animeId={animeId}
                       selectedEpisodeNum={selectedEpisodeNum}
                     />
