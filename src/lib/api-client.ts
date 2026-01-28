@@ -106,9 +106,10 @@ class AnimeApiClient {
         return this.fetch(`/api/anime/search-all?${params}`);
     }
 
-    async getTrending(page: number = 1, source?: string): Promise<Anime[]> {
+    async getTrending(page: number = 1, source?: string, limit?: number): Promise<Anime[]> {
         const params = new URLSearchParams({ page: String(page) });
         if (source) params.append('source', source);
+        if (limit) params.append('limit', String(limit));
         const response = await this.fetch<ApiResponse<Anime>>(`/api/anime/trending?${params}`);
         return response.results || [];
     }

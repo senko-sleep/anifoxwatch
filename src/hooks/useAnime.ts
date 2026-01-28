@@ -19,10 +19,10 @@ export const queryKeys = {
 
 // ============ ANIME DATA HOOKS ============
 
-export function useTrending(page: number = 1, source?: string) {
+export function useTrending(page: number = 1, limit?: number) {
     return useQuery<Anime[], Error>({
-        queryKey: queryKeys.trending(page, source),
-        queryFn: () => apiClient.getTrending(page, source),
+        queryKey: queryKeys.trending(page, limit?.toString()),
+        queryFn: () => apiClient.getTrending(page, undefined, limit),
         staleTime: 5 * 60 * 1000,
         gcTime: 10 * 60 * 1000,
     });

@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { AnimeGrid } from '@/components/anime/AnimeGrid';
 import { useSearch, useGenre, useTrending } from '@/hooks/useAnime';
+import { apiClient } from '@/lib/api-client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -80,6 +82,10 @@ const Search = () => {
     }
   }, [debouncedQuery, setSearchParams]);
 
+  // Always fetch trending data for browse (minimum 50 anime)
+  const { data: trendingData, isLoading: trendingLoading } = useTrending(1, 50);
+  const queryClient = useQueryClient();
+  
   // Fetch search results or genre results
   const searchQuery = selectedGenres.length > 0 ? selectedGenres[0] : debouncedQuery;
   const isGenreSearch = selectedGenres.length > 0 && !debouncedQuery;
@@ -87,12 +93,53 @@ const Search = () => {
   
   const { data: searchData, isLoading: searchLoading, isFetching: searchFetching } = useSearch(searchQuery, page, undefined, !isGenreSearch && hasSearchQuery);
   const { data: genreData, isLoading: genreLoading, isFetching: genreFetching } = useGenre(searchQuery, page, undefined, isGenreSearch);
-  const { data: trendingData, isLoading: trendingLoading } = useTrending(1, undefined);
   
-  // Use trending data as default when no search query
+  // Use trending data as default when no search query, ensure minimum 50 results
   const data = useMemo(() => {
-    return hasSearchQuery ? (isGenreSearch ? genreData : searchData) : { results: trendingData || [], totalPages: 1, currentPage: 1, hasNextPage: false };
-  }, [hasSearchQuery, isGenreSearch, genreData, searchData, trendingData]);
+    if (hasSearchQuery) {
+      return isGenreSearch ? genreData : searchData;
+    } else {
+      // Always show trending data for browse, minimum 50 items
+      const results = trendingData || [];
+      
+      // If we have less than 50 items, fetch more pages
+      if (results.length < 50 && !trendingLoading) {
+        const fetchMoreData = async () => {
+          let allResults = [...results];
+          let currentPage = 2;
+          
+          while (allResults.length < 50 && currentPage <= 5) {
+            try {
+              const moreData = await apiClient.getTrending(currentPage, undefined, 50);
+              if (moreData && moreData.length > 0) {
+                allResults = [...allResults, ...moreData];
+                // Update the query cache with new data
+                queryClient.setQueryData(['trending', 1, '50'], (old: any) => ({
+                  ...old,
+                  results: allResults
+                }));
+              }
+              currentPage++;
+            } catch (error) {
+              console.error('Failed to fetch more trending anime:', error);
+              break;
+            }
+          }
+        };
+        
+        // Start fetching more data asynchronously
+        fetchMoreData().catch(console.error);
+      }
+      
+      return {
+        results: results,
+        totalPages: 1,
+        currentPage: 1,
+        hasNextPage: false
+      };
+    }
+  }, [hasSearchQuery, isGenreSearch, genreData, searchData, trendingData, trendingLoading, queryClient]);
+  
   const isLoading = hasSearchQuery ? (isGenreSearch ? genreLoading : searchLoading) : trendingLoading;
   const isFetching = hasSearchQuery ? (isGenreSearch ? genreFetching : searchFetching) : false;
 

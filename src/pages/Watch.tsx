@@ -330,11 +330,11 @@ const Watch = () => {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate(`/anime/${animeId}`)}
+            onClick={() => navigate('/search')}
             className="text-muted-foreground hover:text-foreground hover:bg-white/10 mb-6"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Anime
+            Back to Browse
           </Button>
 
           <div className="grid lg:grid-cols-12 gap-8">
