@@ -134,13 +134,8 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
 
           {/* Clean description */}
           <div className="max-w-2xl">
-            <p className="text-white/90 text-base leading-relaxed line-clamp-2">
-              {currentAnime.description ? 
-                currentAnime.description.length > 150 
-                  ? currentAnime.description.substring(0, 150) + "..."
-                  : currentAnime.description
-                : "Start watching this amazing anime now!"
-              }
+            <p className="text-white/90 text-base leading-relaxed">
+              {currentAnime.description || "Discover this amazing anime and start watching now!"}
             </p>
           </div>
 

@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, Menu, X, Shuffle } from 'lucide-react';
+import { Search, Menu, X, Shuffle, Loader2 } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
 export const Navbar = () => {
@@ -11,6 +12,7 @@ export const Navbar = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isLoadingRandom, setIsLoadingRandom] = useState(false);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,6 +21,20 @@ export const Navbar = () => {
       setSearchQuery('');
       setIsSearchOpen(false);
       setIsMobileMenuOpen(false);
+    }
+  };
+
+  const handleRandomAnime = async () => {
+    setIsLoadingRandom(true);
+    try {
+      const randomAnime = await apiClient.getRandomAnime();
+      if (randomAnime) {
+        navigate(`/watch/${randomAnime.id}`);
+      }
+    } catch (error) {
+      console.error('Failed to get random anime:', error);
+    } finally {
+      setIsLoadingRandom(false);
     }
   };
 
@@ -44,13 +60,18 @@ export const Navbar = () => {
           >
             Browse
           </Link>
-          <Link
-            to="/search?sort=trending"
-            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-fox-orange transition-colors"
+          <button
+            onClick={handleRandomAnime}
+            disabled={isLoadingRandom}
+            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-fox-orange transition-colors disabled:opacity-50"
           >
-            <Shuffle className="w-4 h-4" />
+            {isLoadingRandom ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Shuffle className="w-4 h-4" />
+            )}
             Random
-          </Link>
+          </button>
         </div>
 
         {/* Search & Actions */}
@@ -140,13 +161,18 @@ export const Navbar = () => {
                 Browse All
               </Link>
               <button
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium hover:bg-fox-surface transition-colors text-left"
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium hover:bg-fox-surface transition-colors text-left disabled:opacity-50"
                 onClick={() => {
-                  navigate('/search?sort=trending');
+                  handleRandomAnime();
                   setIsMobileMenuOpen(false);
                 }}
+                disabled={isLoadingRandom}
               >
-                <Shuffle className="w-4 h-4" />
+                {isLoadingRandom ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Shuffle className="w-4 h-4" />
+                )}
                 Random
               </button>
             </div>
