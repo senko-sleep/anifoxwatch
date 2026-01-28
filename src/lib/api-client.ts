@@ -53,7 +53,7 @@ interface CacheEntry<T = unknown> {
 
 class AnimeApiClient {
     private baseUrl: string;
-    private cache: Map<string, CacheEntry> = new Map();
+    private cache: Map<string, CacheEntry<unknown>> = new Map();
 
     constructor(baseUrl: string = API_BASE_URL) {
         this.baseUrl = baseUrl;
@@ -64,7 +64,8 @@ class AnimeApiClient {
         const cacheKey = `${endpoint}`;
         const cached = this.cache.get(cacheKey);
         if (cached && cached.expires > Date.now()) {
-            return cached.data;
+            // Type assertion: we know the cached data matches type T because we stored it as T
+            return cached.data as T;
         }
 
         const response = await fetch(`${this.baseUrl}${endpoint}`, {
@@ -81,8 +82,8 @@ class AnimeApiClient {
 
         const data = await response.json();
 
-        // Cache for 2 minutes
-        this.cache.set(cacheKey, { data, expires: Date.now() + 2 * 60 * 1000 });
+        // Cache for 2 minutes - store with proper type
+        this.cache.set(cacheKey, { data, expires: Date.now() + 2 * 60 * 1000 } as CacheEntry<T>);
 
         return data;
     }
