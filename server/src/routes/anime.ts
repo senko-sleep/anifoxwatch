@@ -129,6 +129,238 @@ router.get('/genre/:genre', async (req: Request, res: Response): Promise<void> =
 });
 
 /**
+ * @route GET /api/anime/filter
+ * @query type - Anime type (TV, Movie, OVA, ONA, Special)
+ * @query genre - Genre name(s) - can be comma-separated for multiple
+ * @query status - Anime status (Ongoing, Completed, Upcoming)
+ * @query year - Release year
+ * @query season - Season (Winter, Spring, Summer, Fall)
+ * @query page - Page number (default: 1)
+ * @query limit - Results per page (default: 20)
+ * @query sort - Sort by (rating, year, title, episodes)
+ * @query order - Sort order (asc, desc)
+ * @query source - Preferred source (optional)
+ */
+router.get('/filter', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const {
+            type,
+            genre,
+            status,
+            year,
+            season,
+            page = '1',
+            limit = '20',
+            sort = 'rating',
+            order = 'desc',
+            source
+        } = req.query;
+
+        const pageNum = parseInt(page as string, 10) || 1;
+        const limitNum = parseInt(limit as string, 10) || 20;
+        
+        // Parse multiple genres if comma-separated
+        const genres = genre ? (genre as string).split(',').map(g => g.trim()) : [];
+        
+        // Build filter object
+        const filters = {
+            type: type as string,
+            genres: genres.length > 0 ? genres : undefined,
+            status: status as string,
+            year: year ? parseInt(year as string, 10) : undefined,
+            season: season as string,
+            sort: sort as string,
+            order: order as string,
+            limit: limitNum,
+            page: pageNum,
+            source: source as string
+        };
+
+        // Remove undefined filters
+        Object.keys(filters).forEach(key => {
+            if (filters[key as keyof typeof filters] === undefined) {
+                delete filters[key as keyof typeof filters];
+            }
+        });
+
+        const result = await sourceManager.getFilteredAnime(filters);
+        res.json({
+            results: result.anime || [],
+            currentPage: pageNum,
+            totalPages: result.totalPages || 1,
+            hasNextPage: result.hasNextPage || false,
+            totalResults: result.totalResults || 0,
+            filters: filters,
+            source: source || 'default'
+        });
+    } catch (error) {
+        console.error('Filter error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/browse
+ * @query type - Anime type (TV, Movie, OVA, ONA, Special)
+ * @query genre - Genre name
+ * @query status - Anime status (Ongoing, Completed, Upcoming)
+ * @query year - Release year
+ * @query page - Page number (default: 1)
+ * @query limit - Results per page (default: 20)
+ * @query source - Preferred source (optional)
+ */
+router.get('/browse', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const {
+            type,
+            genre,
+            status,
+            year,
+            page = '1',
+            limit = '20',
+            source
+        } = req.query;
+
+        const pageNum = parseInt(page as string, 10) || 1;
+        const limitNum = parseInt(limit as string, 10) || 20;
+
+        // Get trending anime as base, then apply filters
+        let result = await sourceManager.getTrending(pageNum, source as string | undefined);
+        
+        // Apply filters if provided
+        if (type || genre || status || year) {
+            result = await sourceManager.getFilteredAnime({
+                type: type as string,
+                genre: genre as string,
+                status: status as string,
+                year: year ? parseInt(year as string, 10) : undefined,
+                page: pageNum,
+                limit: limitNum,
+                source: source as string
+            });
+        }
+
+        res.json({
+            results: result.anime || result,
+            currentPage: pageNum,
+            totalPages: result.totalPages || 1,
+            hasNextPage: result.hasNextPage || false,
+            totalResults: result.totalResults || result.length || 0,
+            filters: { type, genre, status, year },
+            source: source || 'default'
+        });
+    } catch (error) {
+        console.error('Browse error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/types
+ * @description Get all available anime types
+ */
+router.get('/types', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const types = [
+            { value: 'TV', label: 'TV Series', description: 'Television series' },
+            { value: 'Movie', label: 'Movies', description: 'Feature films' },
+            { value: 'OVA', label: 'OVAs', description: 'Original Video Animation' },
+            { value: 'ONA', label: 'ONAs', description: 'Original Net Animation' },
+            { value: 'Special', label: 'Specials', description: 'Special episodes' }
+        ];
+        
+        res.json({ types });
+    } catch (error) {
+        console.error('Types error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/genres
+ * @description Get all available genres
+ */
+router.get('/genres', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const genres = [
+            'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance',
+            'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller', 'Yuri', 'Yaoi',
+            'Ecchi', 'Harem', 'Mecha', 'Music', 'Psychological', 'Historical', 'Parody',
+            'Samurai', 'Shounen', 'Shoujo', 'Seinen', 'Josei', 'Kids', 'Police', 'Military',
+            'School', 'Demons', 'Game', 'Magic', 'Vampire', 'Space', 'Time Travel', 'Martial Arts'
+        ];
+        
+        res.json({ genres });
+    } catch (error) {
+        console.error('Genres error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/statuses
+ * @description Get all available statuses
+ */
+router.get('/statuses', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const statuses = [
+            { value: 'Ongoing', label: 'Ongoing', description: 'Currently airing' },
+            { value: 'Completed', label: 'Completed', description: 'Finished airing' },
+            { value: 'Upcoming', label: 'Upcoming', description: 'Not yet aired' }
+        ];
+        
+        res.json({ statuses });
+    } catch (error) {
+        console.error('Statuses error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/seasons
+ * @description Get all available seasons
+ */
+router.get('/seasons', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const seasons = [
+            { value: 'Winter', label: 'Winter', months: 'Jan, Feb, Mar' },
+            { value: 'Spring', label: 'Spring', months: 'Apr, May, Jun' },
+            { value: 'Summer', label: 'Summer', months: 'Jul, Aug, Sep' },
+            { value: 'Fall', label: 'Fall', months: 'Oct, Nov, Dec' }
+        ];
+        
+        res.json({ seasons });
+    } catch (error) {
+        console.error('Seasons error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/years
+ * @description Get available years (current year back to 1970)
+ */
+router.get('/years', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const currentYear = new Date().getFullYear();
+        const years = [];
+        
+        for (let year = currentYear; year >= 1970; year--) {
+            years.push({
+                value: year,
+                label: year.toString(),
+                decade: `${Math.floor(year / 10) * 10}s`
+            });
+        }
+        
+        res.json({ years });
+    } catch (error) {
+        console.error('Years error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
  * @route GET /api/anime/random
  * @query source - Preferred source (optional)
  */
