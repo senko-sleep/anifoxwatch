@@ -284,6 +284,148 @@ export class SourceManager {
         }
     }
 
+    /**
+     * Get filtered anime based on various criteria
+     * Filters are applied client-side after fetching from source
+     */
+    async getFilteredAnime(filters: {
+        type?: string;
+        genres?: string[];
+        status?: string;
+        year?: number;
+        season?: string;
+        sort?: string;
+        order?: string;
+        limit?: number;
+        page?: number;
+        source?: string;
+    }): Promise<{
+        anime: AnimeBase[];
+        totalPages: number;
+        hasNextPage: boolean;
+        totalResults: number;
+    }> {
+        const timer = new PerformanceTimer('Filtered anime', filters);
+        const source = this.getAvailableSource(filters.source);
+
+        if (!source) {
+            logger.warn(`No available source for filtered anime`, filters, 'SourceManager');
+            return { anime: [], totalPages: 0, hasNextPage: false, totalResults: 0 };
+        }
+
+        try {
+            logger.sourceRequest(source.name, 'getFilteredAnime', filters);
+
+            // Fetch trending anime as base data
+            const page = filters.page || 1;
+            let allAnime: AnimeBase[] = [];
+
+            // Try to get more data for filtering by fetching multiple pages
+            const pagesToFetch = 3;
+            for (let i = 0; i < pagesToFetch; i++) {
+                try {
+                    const trending = await source.getTrending(page + i);
+                    allAnime.push(...trending);
+                } catch {
+                    break;
+                }
+            }
+
+            // Apply filters
+            let filtered = allAnime;
+
+            // Filter by type
+            if (filters.type) {
+                filtered = filtered.filter(a =>
+                    a.type?.toLowerCase() === filters.type?.toLowerCase()
+                );
+            }
+
+            // Filter by genres
+            if (filters.genres && filters.genres.length > 0) {
+                filtered = filtered.filter(a => {
+                    if (!a.genres || a.genres.length === 0) return false;
+                    return filters.genres!.some(g =>
+                        a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
+                    );
+                });
+            }
+
+            // Filter by status
+            if (filters.status) {
+                filtered = filtered.filter(a =>
+                    a.status?.toLowerCase() === filters.status?.toLowerCase()
+                );
+            }
+
+            // Filter by year
+            if (filters.year) {
+                filtered = filtered.filter(a => {
+                    if (!a.releaseDate) return false;
+                    const animeYear = parseInt(a.releaseDate);
+                    return !isNaN(animeYear) && animeYear === filters.year;
+                });
+            }
+
+            // Sort results
+            const sort = filters.sort || 'rating';
+            const order = filters.order || 'desc';
+
+            filtered.sort((a, b) => {
+                let comparison = 0;
+                switch (sort) {
+                    case 'rating':
+                        comparison = (b.rating || 0) - (a.rating || 0);
+                        break;
+                    case 'year':
+                        comparison = (parseInt(b.releaseDate || '0') || 0) - (parseInt(a.releaseDate || '0') || 0);
+                        break;
+                    case 'title':
+                        comparison = (a.title || '').localeCompare(b.title || '');
+                        break;
+                    case 'episodes':
+                        comparison = (b.episodes || 0) - (a.episodes || 0);
+                        break;
+                    default:
+                        comparison = (b.rating || 0) - (a.rating || 0);
+                }
+                return order === 'asc' ? -comparison : comparison;
+            });
+
+            // Paginate results
+            const limit = filters.limit || 20;
+            const startIndex = ((filters.page || 1) - 1) * limit;
+            const paginated = filtered.slice(startIndex, startIndex + limit);
+            const totalResults = filtered.length;
+            const totalPages = Math.ceil(totalResults / limit);
+            const hasNextPage = startIndex + limit < totalResults;
+
+            logger.sourceResponse(source.name, 'getFilteredAnime', true, {
+                totalFetched: allAnime.length,
+                totalFiltered: totalResults,
+                returned: paginated.length
+            });
+            timer.end();
+
+            return {
+                anime: paginated,
+                totalPages,
+                hasNextPage,
+                totalResults
+            };
+        } catch (error) {
+            logger.error(`Filtered anime failed for ${source.name}`, error as Error, filters, 'SourceManager');
+            // Try fallback
+            source.isAvailable = false;
+            const fallback = this.getAvailableSource();
+            if (fallback && fallback !== source) {
+                logger.failover(source.name, fallback.name, 'filtered anime failed', filters);
+                return this.getFilteredAnime({ ...filters, source: fallback.name });
+            }
+            return { anime: [], totalPages: 0, hasNextPage: false, totalResults: 0 };
+        }
+    }
+
     // ============ STREAMING METHODS ============
 
     /**
