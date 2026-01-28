@@ -223,206 +223,198 @@ const Search = () => {
                 )}
               </div>
             </div>
-
-            {/* Quick Search Tags */}
-            {!debouncedQuery && (
-              <div className="flex items-center justify-center gap-2 mt-6 flex-wrap">
-                <span className="text-sm text-muted-foreground mr-2">Quick search:</span>
-                {quickSearches.map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => setQuery(item.query)}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium bg-fox-surface/60 hover:bg-fox-surface border border-white/5 hover:border-white/10 transition-all hover:scale-105"
-                  >
-                    {item.icon && <item.icon className="w-3.5 h-3.5" />}
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       </div>
 
-      <main className="flex-1 max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
-        {/* Filters Bar */}
-        <div className="flex flex-wrap items-center gap-3 mb-8 p-4 rounded-2xl bg-fox-surface/30 border border-white/5">
-          <Button
-            variant={showFilters ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => setShowFilters(!showFilters)}
-            className={cn(
-              "h-10 px-4 rounded-xl gap-2",
-              showFilters && 'bg-fox-orange hover:bg-fox-orange/90'
-            )}
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-            Filters
-            {hasActiveFilters && (
-              <Badge className="ml-1 bg-white/20 text-xs">Active</Badge>
-            )}
-          </Button>
-
-          {/* Sort Dropdown */}
-          <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-            <SelectTrigger className="w-40 h-10 bg-fox-surface/50 border-white/10 rounded-xl">
-              <ArrowUpDown className="w-4 h-4 mr-2" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="relevance">Relevance</SelectItem>
-              <SelectItem value="rating">Rating</SelectItem>
-              <SelectItem value="year">Year</SelectItem>
-              <SelectItem value="title">Title</SelectItem>
-              <SelectItem value="episodes">Episodes</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {/* Grid Size Toggle */}
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-fox-surface/50 border border-white/10">
-            <button
-              onClick={() => setGridSize('normal')}
-              className={cn(
-                "p-2 rounded-lg transition-colors",
-                gridSize === 'normal' ? 'bg-fox-orange text-white' : 'hover:bg-white/10'
-              )}
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setGridSize('compact')}
-              className={cn(
-                "p-2 rounded-lg transition-colors",
-                gridSize === 'compact' ? 'bg-fox-orange text-white' : 'hover:bg-white/10'
-              )}
-            >
-              <Grid3X3 className="w-4 h-4" />
-            </button>
-          </div>
-
-          {hasActiveFilters && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearFilters}
-              className="text-muted-foreground hover:text-foreground h-10 px-4 rounded-xl"
-            >
-              <X className="w-4 h-4 mr-1" />
-              Clear filters
-            </Button>
-          )}
-
-          {/* Results count */}
-          <div className="ml-auto text-sm text-muted-foreground">
-            {data ? (
-              <>
-                <span className="font-semibold text-foreground">{filteredResults.length}</span> results
-                {data.totalPages > 1 && (
-                  <span className="ml-2">
-                    • Page <span className="font-semibold text-foreground">{page}</span> of {data.totalPages}
-                  </span>
-                )}
-              </>
-            ) : (selectedGenres.length > 0 || debouncedQuery.length >= 2) ? (
-              <span className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Searching...
-              </span>
-            ) : null}
-          </div>
+      <main className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+        {/* Professional Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-white mb-2">
+            {hasSearchQuery ? 'Search Results' : 'Browse Anime'}
+          </h1>
+          <p className="text-muted-foreground">
+            {hasSearchQuery 
+              ? `Found ${data?.results?.length || 0} results`
+              : 'Discover new anime to watch'
+            }
+          </p>
         </div>
 
-        {/* Expanded Filters */}
-        {showFilters && (
-          <div className="p-6 mb-8 bg-fox-surface/30 rounded-2xl border border-white/5 animate-in slide-in-from-top-2 duration-300">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {/* Genre Filter */}
-              <div className="lg:col-span-2">
-                <label className="text-sm font-semibold mb-3 block flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-purple-400" />
-                  Genres
-                </label>
-                <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-3 bg-background/50 rounded-xl border border-white/10">
-                  {COMMON_GENRES.map((genre) => (
-                    <button
-                      key={genre}
-                      onClick={() => {
-                        setSelectedGenres(prev => 
-                          prev.includes(genre) 
-                            ? prev.filter(g => g !== genre)
-                            : [...prev, genre]
-                        );
-                        setPage(1);
-                      }}
-                      className={cn(
-                        "px-3 py-1.5 rounded-lg text-sm font-medium transition-all",
-                        selectedGenres.includes(genre)
-                          ? "bg-fox-orange text-white shadow-lg shadow-fox-orange/30"
-                          : "bg-fox-surface/60 hover:bg-fox-surface border border-white/5 hover:border-white/10"
-                      )}
-                    >
-                      {genre}
-                    </button>
-                  ))}
-                </div>
-                {selectedGenres.length > 0 && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {selectedGenres.length} genre{selectedGenres.length > 1 ? 's' : ''} selected
-                    </span>
-                    <button
-                      onClick={() => {
-                        setSelectedGenres([]);
-                        setPage(1);
-                      }}
-                      className="text-xs text-fox-orange hover:text-fox-orange/80"
-                    >
-                      Clear genres
-                    </button>
-                  </div>
+        {/* Professional Filters Section */}
+        <div className="mb-8 space-y-6">
+          {/* Main Filter Controls */}
+          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+            {/* Filter Pills */}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                variant={showFilters ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setShowFilters(!showFilters)}
+                className="gap-2"
+              >
+                <Filter className="w-4 h-4" />
+                Filters
+                {(selectedGenres.length > 0 || typeFilter !== 'all' || statusFilter !== 'all') && (
+                  <span className="ml-1 px-2 py-0.5 bg-white/20 rounded-full text-xs">
+                    {selectedGenres.length + (typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0)}
+                  </span>
                 )}
-              </div>
+              </Button>
 
-              <div>
-                <label className="text-sm font-semibold mb-3 block flex items-center gap-2">
-                  <Tv className="w-4 h-4 text-fox-orange" />
-                  Type
-                </label>
-                <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as TypeFilter)}>
-                  <SelectTrigger className="bg-background/50 border-white/10 rounded-xl h-11">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    <SelectItem value="TV">TV Series</SelectItem>
-                    <SelectItem value="Movie">Movie</SelectItem>
-                    <SelectItem value="OVA">OVA</SelectItem>
-                    <SelectItem value="ONA">ONA</SelectItem>
-                    <SelectItem value="Special">Special</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Type Filter */}
+              <Select value={typeFilter} onValueChange={(value: TypeFilter) => setTypeFilter(value)}>
+                <SelectTrigger className="w-32 bg-background/50 border-white/10">
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="TV">TV Series</SelectItem>
+                  <SelectItem value="Movie">Movies</SelectItem>
+                  <SelectItem value="OVA">OVAs</SelectItem>
+                  <SelectItem value="ONA">ONAs</SelectItem>
+                  <SelectItem value="Special">Specials</SelectItem>
+                </SelectContent>
+              </Select>
 
-              <div>
-                <label className="text-sm font-semibold mb-3 block flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-blue-400" />
-                  Status
-                </label>
-                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-                  <SelectTrigger className="bg-background/50 border-white/10 rounded-xl h-11">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="Ongoing">Ongoing</SelectItem>
-                    <SelectItem value="Completed">Completed</SelectItem>
-                    <SelectItem value="Upcoming">Upcoming</SelectItem>
-                  </SelectContent>
-                </Select>
+              {/* Status Filter */}
+              <Select value={statusFilter} onValueChange={(value: StatusFilter) => setStatusFilter(value)}>
+                <SelectTrigger className="w-32 bg-background/50 border-white/10">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="Ongoing">Ongoing</SelectItem>
+                  <SelectItem value="Completed">Completed</SelectItem>
+                  <SelectItem value="Upcoming">Upcoming</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Sort Filter */}
+              <Select value={sortBy} onValueChange={(value: SortOption) => setSortBy(value)}>
+                <SelectTrigger className="w-32 bg-background/50 border-white/10">
+                  <SelectValue placeholder="Sort" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="relevance">Relevance</SelectItem>
+                  <SelectItem value="rating">Rating</SelectItem>
+                  <SelectItem value="year">Year</SelectItem>
+                  <SelectItem value="title">Title</SelectItem>
+                  <SelectItem value="episodes">Episodes</SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Grid Size Toggle */}
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={gridSize === 'compact' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGridSize('compact')}
+                  className="p-2"
+                >
+                  <Grid3X3 className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant={gridSize === 'normal' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGridSize('normal')}
+                  className="p-2"
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                </Button>
               </div>
             </div>
           </div>
-        )}
+
+          {/* Genre Filter Panel */}
+          {showFilters && (
+            <div className="p-6 bg-background/30 border border-white/10 rounded-xl backdrop-blur-sm">
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-white mb-2">Filter by Genres</h3>
+                <p className="text-sm text-muted-foreground">Select genres to narrow down your search</p>
+              </div>
+              
+              <div className="flex flex-wrap gap-2 mb-4">
+                {COMMON_GENRES.slice(0, 20).map((genre) => (
+                  <button
+                    key={genre}
+                    onClick={() => {
+                      setSelectedGenres(prev => 
+                        prev.includes(genre) 
+                          ? prev.filter(g => g !== genre)
+                          : [...prev, genre]
+                      );
+                    }}
+                    className={cn(
+                      "px-3 py-1.5 rounded-full text-sm font-medium transition-all",
+                      selectedGenres.includes(genre)
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-background/50 border border-white/10 hover:bg-background/70"
+                    )}
+                  >
+                    {genre}
+                  </button>
+                ))}
+              </div>
+
+              {/* Clear Filters */}
+              {(selectedGenres.length > 0 || typeFilter !== 'all' || statusFilter !== 'all') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedGenres([]);
+                    setTypeFilter('all');
+                    setStatusFilter('all');
+                  }}
+                  className="mt-2"
+                >
+                  Clear All Filters
+                </Button>
+              )}
+            </div>
+          )}
+
+          {/* Active Filters Display */}
+          {(selectedGenres.length > 0 || typeFilter !== 'all' || statusFilter !== 'all') && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-muted-foreground">Active filters:</span>
+              {selectedGenres.map(genre => (
+                <Badge key={genre} variant="secondary" className="gap-1">
+                  {genre}
+                  <button
+                    onClick={() => setSelectedGenres(prev => prev.filter(g => g !== genre))}
+                    className="ml-1 hover:text-destructive"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </Badge>
+              ))}
+              {typeFilter !== 'all' && (
+                <Badge variant="secondary" className="gap-1">
+                  Type: {typeFilter}
+                  <button
+                    onClick={() => setTypeFilter('all')}
+                    className="ml-1 hover:text-destructive"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </Badge>
+              )}
+              {statusFilter !== 'all' && (
+                <Badge variant="secondary" className="gap-1">
+                  Status: {statusFilter}
+                  <button
+                    onClick={() => setStatusFilter('all')}
+                    className="ml-1 hover:text-destructive"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </Badge>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Browse Results */}
         {!debouncedQuery ? (
