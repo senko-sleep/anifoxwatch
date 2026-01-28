@@ -2,7 +2,7 @@ import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 
 // Use different API URLs based on environment
 const API_BASE_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.DEV ? 'http://localhost:3001' : 'https://anifoxwatch.onrender.com');
+  (import.meta.env.DEV ? '' : 'https://anifoxwatch.onrender.com');
 
 // Streaming types
 export interface VideoSource {
