@@ -1,5 +1,6 @@
 export interface AnimeBase {
     id: string;
+    streamingId?: string; // The actual streaming source ID for navigation
     title: string;
     titleJapanese?: string;
     image: string;
@@ -58,4 +59,18 @@ export interface SourceHealth {
     status: 'online' | 'offline' | 'degraded';
     latency?: number;
     lastCheck: Date;
+}
+
+export interface BrowseFilters {
+    page?: number;
+    limit?: number;
+    type?: string;
+    genres?: string[];
+    status?: string;
+    year?: number;
+    startYear?: number;
+    endYear?: number;
+    sort?: string;
+    order?: string;
+    source?: string;
 }

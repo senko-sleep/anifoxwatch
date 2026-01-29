@@ -129,6 +129,33 @@ router.get('/genre/:genre', async (req: Request, res: Response): Promise<void> =
 });
 
 /**
+ * @route GET /api/anime/genre-anilist/:genre
+ * @param genre - Genre name
+ * @query page - Page number (default: 1)
+ * @description Search anime by genre using AniList API (most accurate)
+ */
+router.get('/genre-anilist/:genre', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { genre } = req.params;
+        const { page = '1' } = req.query;
+
+        if (!genre || typeof genre !== 'string') {
+            res.status(400).json({ error: 'Genre parameter is required' });
+            return;
+        }
+
+        const pageNum = parseInt(page as string, 10) || 1;
+        console.log(`[AnimeRoutes] Searching AniList for genre: ${genre}, page: ${pageNum}`);
+        
+        const result = await sourceManager.getAnimeByGenreAniList(genre, pageNum);
+        res.json(result);
+    } catch (error) {
+        console.error('AniList genre search error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
  * @route GET /api/anime/filter
  * @query type - Anime type (TV, Movie, OVA, ONA, Special)
  * @query genre - Genre name(s) - can be comma-separated for multiple
@@ -218,6 +245,7 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
         const {
             type,
             genre,
+            genres, // Support both "genre" and "genres" query params
             status,
             year,
             startYear,
@@ -232,13 +260,35 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
         const pageNum = parseInt(page as string, 10) || 1;
         const limitNum = Math.min(parseInt(limit as string, 10) || 25, 50); // Cap at 50
 
-        // Parse multiple genres if provided
-        const genres = genre ? (genre as string).split(',').map(g => g.trim()) : [];
+        // Parse multiple genres if provided - support both "genre" and "genres" params
+        const genreParam = (genres as string) || (genre as string);
+        const parsedGenres = genreParam ? genreParam.split(',').map(g => g.trim()) : [];
 
-        // Build filter object
+        // Check if this is a genre-only search (single genre with no other filters)
+        // In this case, use AniList for accurate genre results
+        const isGenreOnlySearch = parsedGenres.length === 1 && 
+            !type && !status && !year && !startYear && !endYear &&
+            sort === 'popularity' && order === 'desc';
+        
+        if (isGenreOnlySearch) {
+            console.log(`[AnimeRoutes] Using AniList for genre-only search: ${parsedGenres[0]}`);
+            const result = await sourceManager.getAnimeByGenreAniList(parsedGenres[0], pageNum);
+            res.json({
+                results: result.results || [],
+                currentPage: result.currentPage || pageNum,
+                totalPages: result.totalPages || 1,
+                hasNextPage: result.hasNextPage || false,
+                totalResults: (result.results?.length || 0) * (result.totalPages || 1),
+                filters: { type, genre: parsedGenres[0], status, year, startYear, endYear, sort, order },
+                source: 'AniList'
+            });
+            return;
+        }
+
+        // Build filter object for multi-filter or non-genre searches
         const filters = {
             type: type as string,
-            genres: genres.length > 0 ? genres : undefined,
+            genres: parsedGenres.length > 0 ? parsedGenres : undefined,
             status: status as string,
             year: year ? parseInt(year as string, 10) : undefined,
             startYear: startYear ? parseInt(startYear as string, 10) : undefined,
@@ -301,15 +351,27 @@ router.get('/types', async (req: Request, res: Response): Promise<void> => {
  */
 router.get('/genres', async (req: Request, res: Response): Promise<void> => {
     try {
+        // Comprehensive list of genres available on HiAnime
         const genres = [
             'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance',
             'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller', 'Yuri', 'Yaoi',
             'Ecchi', 'Harem', 'Mecha', 'Music', 'Psychological', 'Historical', 'Parody',
             'Samurai', 'Shounen', 'Shoujo', 'Seinen', 'Josei', 'Kids', 'Police', 'Military',
-            'School', 'Demons', 'Game', 'Magic', 'Vampire', 'Space', 'Time Travel', 'Martial Arts'
+            'School', 'Demons', 'Game', 'Magic', 'Vampire', 'Space', 'Martial Arts',
+            'Isekai', 'Gore', 'Survival', 'Cyberpunk', 'Super Power', 'Mythology',
+            'Work Life', 'Adult Cast', 'Anthropomorphic', 'CGDCT', 'Childcare', 'Combat Sports',
+            'Crossdressing', 'Delinquents', 'Detective', 'Educational', 'Gag Humor', 'Gender Bender',
+            'Gore', 'High Stakes Game', 'Idols (Female)', 'Idols (Male)', 'Isekai', 'Iyashikei',
+            'Love Polygon', 'Magical Sex Shift', 'Mahou Shoujo', 'Medical', 'Memoir', 'Mythology',
+            'Organized Crime', 'Otaku Culture', 'Performing Arts', 'Pets', 'Reincarnation', 'Reverse Harem',
+            'Romantic Subtext', 'Showbiz', 'Space', 'Strategy Game', 'Super Power', 'Survival',
+            'Team Sports', 'Time Travel', 'Vampire', 'Video Game', 'Visual Arts', 'Workplace'
         ];
 
-        res.json({ genres });
+        // Remove duplicates and sort alphabetically
+        const uniqueGenres = [...new Set(genres)].sort();
+
+        res.json({ genres: uniqueGenres });
     } catch (error) {
         console.error('Genres error:', error);
         res.status(500).json({ error: 'Internal server error' });

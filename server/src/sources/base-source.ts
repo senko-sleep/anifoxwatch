@@ -2,6 +2,13 @@ import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.
 import { logger } from '../utils/logger.js';
 
 /**
+ * Extended interface for sources that support genre-specific fetching
+ */
+export interface GenreAwareSource extends AnimeSource {
+    getByGenre(genre: string, page?: number): Promise<AnimeSearchResult>;
+}
+
+/**
  * Base interface for all anime sources
  * Each source must implement these methods
  */

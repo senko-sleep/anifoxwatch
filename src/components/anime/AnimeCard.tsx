@@ -12,9 +12,12 @@ interface AnimeCardProps {
 }
 
 export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: AnimeCardProps) => {
+  // Use streamingId if available (for AniList results), otherwise use id
+  const navigateId = anime.streamingId || anime.id;
+  
   return (
     <Link
-      to={`/watch/${anime.id}`}
+      to={`/watch/${navigateId}`}
       style={style}
       onMouseEnter={onMouseEnter}
       className={cn(

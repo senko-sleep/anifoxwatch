@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser API Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            border-bottom: 1px solid #334155;
+            padding-bottom: 20px;
+        }
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .test-card {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        .test-card:hover {
+            border-color: #64748b;
+            transform: translateY(-2px);
+        }
+        .test-name {
+            font-weight: bold;
+            color: #f59e0b;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        .test-endpoint {
+            font-family: monospace;
+            background: #0f172a;
+            padding: 8px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 12px;
+            border: 1px solid #334155;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .success {
+            background: #065f46;
+            border: 1px solid #10b981;
+            color: #d1fae5;
+        }
+        .error {
+            background: #7f1d1d;
+            border: 1px solid #ef4444;
+            color: #fecaca;
+        }
+        .loading {
+            background: #1e3a8a;
+            border: 1px solid #60a5fa;
+            color: #bfdbfe;
+        }
+        .stats {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+        .sample-results {
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        .sample-item {
+            background: #0f172a;
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border-left: 3px solid #3b82f6;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        button:disabled {
+            background: #64748b;
+            cursor: not-allowed;
+        }
+        .summary {
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #334155;
+        }
+        .summary-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧪 Browser API Test</h1>
+        <p>Testing different filter combinations for the browse endpoint</p>
+    </div>
+
+    <div class="controls">
+        <button onclick="runAllTests()">Run All Tests</button>
+        <button onclick="clearResults()">Clear Results</button>
+    </div>
+
+    <div class="summary" id="summary">
+        <h3>📊 Test Summary</h3>
+        <div class="summary-item">
+            <span>Total Tests:</span>
+            <span id="total-tests">0</span>
+        </div>
+        <div class="summary-item">
+            <span>Successful:</span>
+            <span id="successful-tests" style="color: #10b981">0</span>
+        </div>
+        <div class="summary-item">
+            <span>Failed:</span>
+            <span id="failed-tests" style="color: #ef4444">0</span>
+        </div>
+        <div class="summary-item">
+            <span>Success Rate:</span>
+            <span id="success-rate">0%</span>
+        </div>
+    </div>
+
+    <div class="test-grid" id="test-grid">
+        <!-- Test cards will be generated here -->
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        let isRunning = false;
+
+        const testCases = [
+            {
+                name: 'Basic Browse (No Filters)',
+                endpoint: '/anime/browse?sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Trending Sort',
+                endpoint: '/anime/browse?sort=trending&page=1&limit=25'
+            },
+            {
+                name: 'Recently Released Sort',
+                endpoint: '/anime/browse?sort=recently_released&page=1&limit=25'
+            },
+            {
+                name: 'Shuffle Sort',
+                endpoint: '/anime/browse?sort=shuffle&page=1&limit=25'
+            },
+            {
+                name: 'Type Filter (TV)',
+                endpoint: '/anime/browse?type=TV&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Type Filter (Movie)',
+                endpoint: '/anime/browse?type=Movie&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Status Filter (Ongoing)',
+                endpoint: '/anime/browse?status=Ongoing&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Status Filter (Completed)',
+                endpoint: '/anime/browse?status=Completed&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Genre Filter (Action)',
+                endpoint: '/anime/browse?genre=Action&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Genre Filter (Romance)',
+                endpoint: '/anime/browse?genre=Romance&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Year Filter (2024)',
+                endpoint: '/anime/browse?year=2024&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Year Filter (2023)',
+                endpoint: '/anime/browse?year=2023&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Date Range Filter (2020-2024)',
+                endpoint: '/anime/browse?startYear=2020&endYear=2024&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Multiple Filters (TV + Action + 2024)',
+                endpoint: '/anime/browse?type=TV&genre=Action&year=2024&sort=popularity&page=1&limit=25'
+            },
+            {
+                name: 'Multiple Filters (Movie + Romance + Completed)',
+                endpoint: '/anime/browse?type=Movie&genre=Romance&status=Completed&sort=popularity&page=1&limit=25'
+            }
+        ];
+
+        function createTestCard(testCase, index) {
+            const card = document.createElement('div');
+            card.className = 'test-card';
+            card.innerHTML = `
+                <div class="test-name">${index + 1}. ${testCase.name}</div>
+                <div class="test-endpoint">${testCase.endpoint}</div>
+                <div class="result loading" id="result-${index}">
+                    <span>⏳ Waiting to run...</span>
+                </div>
+            `;
+            return card;
+        }
+
+        function updateResult(index, status, message, data = null) {
+            const resultDiv = document.getElementById(`result-${index}`);
+            resultDiv.className = `result ${status}`;
+            resultDiv.innerHTML = `<span>${message}</span>`;
+
+            if (status === 'success' && data) {
+                const stats = document.createElement('div');
+                stats.className = 'stats';
+                stats.innerHTML = `
+                    <span>📊 Results: ${data.results?.length || 0}</span>
+                    <span>📄 Pages: ${data.totalPages || 0}</span>
+                    <span>📋 Total: ${data.totalResults || 0}</span>
+                `;
+                resultDiv.appendChild(stats);
+
+                if (data.results && data.results.length > 0) {
+                    const sampleDiv = document.createElement('div');
+                    sampleDiv.className = 'sample-results';
+                    sampleDiv.innerHTML = '<strong>🎯 Sample Results:</strong>';
+
+                    data.results.slice(0, 3).forEach((anime, i) => {
+                        const item = document.createElement('div');
+                        item.className = 'sample-item';
+                        item.textContent = `${i + 1}. ${anime.title} (${anime.type}, ${anime.year}, ${anime.status})`;
+                        sampleDiv.appendChild(item);
+                    });
+
+                    resultDiv.appendChild(sampleDiv);
+                }
+            }
+        }
+
+        async function runTest(testCase, index) {
+            updateResult(index, 'loading', '⏳ Testing...');
+
+            try {
+                const response = await fetch(`${API_BASE}${testCase.endpoint}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateResult(index, 'success', '✅ Success!', data);
+                    return true;
+                } else {
+                    updateResult(index, 'error', `❌ HTTP ${response.status}: ${response.statusText}`);
+                    return false;
+                }
+            } catch (error) {
+                updateResult(index, 'error', `❌ Network Error: ${error.message}`);
+                return false;
+            }
+        }
+
+        async function runAllTests() {
+            if (isRunning) return;
+            isRunning = true;
+
+            const buttons = document.querySelectorAll('button');
+            buttons.forEach(btn => btn.disabled = true);
+
+            // Create test cards
+            const grid = document.getElementById('test-grid');
+            grid.innerHTML = '';
+            testCases.forEach((testCase, index) => {
+                grid.appendChild(createTestCard(testCase, index));
+            });
+
+            // Run tests with delay to avoid overwhelming the server
+            let successCount = 0;
+            for (let i = 0; i < testCases.length; i++) {
+                const success = await runTest(testCases[i], i);
+                if (success) successCount++;
+                await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay between tests
+            }
+
+            // Update summary
+            updateSummary(testCases.length, successCount, testCases.length - successCount);
+
+            isRunning = false;
+            buttons.forEach(btn => btn.disabled = false);
+        }
+
+        function updateSummary(total, successful, failed) {
+            document.getElementById('total-tests').textContent = total;
+            document.getElementById('successful-tests').textContent = successful;
+            document.getElementById('failed-tests').textContent = failed;
+            const rate = total > 0 ? Math.round((successful / total) * 100) : 0;
+            document.getElementById('success-rate').textContent = `${rate}%`;
+        }
+
+        function clearResults() {
+            const grid = document.getElementById('test-grid');
+            grid.innerHTML = '';
+            updateSummary(0, 0, 0);
+        }
+
+        // Initialize
+        document.getElementById('test-grid').innerHTML = '';
+        testCases.forEach((testCase, index) => {
+            document.getElementById('test-grid').appendChild(createTestCard(testCase, index));
+        });
+        updateSummary(testCases.length, 0, 0);
+    </script>
+</body>
+</html>

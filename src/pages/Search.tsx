@@ -1,9 +1,11 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { AnimeGrid } from '@/components/anime/AnimeGrid';
 import { useSearch, useGenre, useBrowse } from '@/hooks/useAnime';
+import { Anime } from '@/types/anime';
+import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +34,31 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+// Scroll restoration key storage
+const SCROLL_POSITIONS_KEY = 'anistream_scroll_positions';
+const FILTER_STATE_KEY = 'anistream_filter_state';
+
+// Save scroll position for a given key
+const saveScrollPosition = (key: string, position: number) => {
+  try {
+    const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
+    positions[key] = position;
+    sessionStorage.setItem(SCROLL_POSITIONS_KEY, JSON.stringify(positions));
+  } catch (e) {
+    // Ignore storage errors
+  }
+};
+
+// Get scroll position for a given key
+const getScrollPosition = (key: string): number => {
+  try {
+    const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
+    return positions[key] || 0;
+  } catch (e) {
+    return 0;
+  }
+};
+
 // Sort options for search results (when searching)
 type SearchSortOption = 'relevance' | 'rating' | 'year' | 'title' | 'episodes';
 // Sort options for browsing (when not searching)
@@ -39,13 +66,21 @@ type BrowseSortOption = 'popularity' | 'trending' | 'recently_released' | 'shuff
 type TypeFilter = 'all' | 'TV' | 'Movie' | 'OVA' | 'ONA' | 'Special';
 type StatusFilter = 'all' | 'Ongoing' | 'Completed' | 'Upcoming';
 
-// Common anime genres
+// Comprehensive anime genres from HiAnime
 const COMMON_GENRES = [
   'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance',
   'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller', 'Yuri', 'Yaoi',
   'Ecchi', 'Harem', 'Mecha', 'Music', 'Psychological', 'Historical', 'Parody',
   'Samurai', 'Shounen', 'Shoujo', 'Seinen', 'Josei', 'Kids', 'Police', 'Military',
-  'School', 'Demons', 'Game', 'Magic', 'Vampire', 'Space', 'Time Travel', 'Martial Arts'
+  'School', 'Demons', 'Game', 'Magic', 'Vampire', 'Space', 'Martial Arts',
+  'Isekai', 'Gore', 'Survival', 'Cyberpunk', 'Super Power', 'Mythology',
+  'Work Life', 'Adult Cast', 'Anthropomorphic', 'CGDCT', 'Childcare', 'Combat Sports',
+  'Crossdressing', 'Delinquents', 'Detective', 'Educational', 'Gag Humor', 'Gender Bender',
+  'High Stakes Game', 'Idols (Female)', 'Idols (Male)', 'Iyashikei',
+  'Love Polygon', 'Magical Sex Shift', 'Mahou Shoujo', 'Medical', 'Memoir',
+  'Organized Crime', 'Otaku Culture', 'Performing Arts', 'Pets', 'Reincarnation', 'Reverse Harem',
+  'Romantic Subtext', 'Showbiz', 'Strategy Game', 'Team Sports', 'Time Travel',
+  'Video Game', 'Visual Arts', 'Workplace'
 ];
 
 // Year ranges for date filter
@@ -63,20 +98,53 @@ const YEAR_RANGES = [
 
 const Search = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const queryClient = useQueryClient();
+  
+  // Create a unique key for this filter state
+  const filterStateKey = location.pathname + '?' + Array.from(searchParams.entries()).map(([k, v]) => `${k}=${v}`).join('&');
+  
+  // Initialize state from URL params
   const initialQuery = searchParams.get('q') || '';
-
+  const initialGenres = searchParams.get('genres')?.split(',').filter(Boolean) || [];
+  const initialType = (searchParams.get('type') as TypeFilter) || 'all';
+  const initialStatus = (searchParams.get('status') as StatusFilter) || 'all';
+  const initialYear = parseInt(searchParams.get('year') || '0', 10);
+  const initialSort = (searchParams.get('sort') as BrowseSortOption) || 'popularity';
+  const initialPage = parseInt(searchParams.get('page') || '1', 10);
+  
   const [query, setQuery] = useState(initialQuery);
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initialPage);
   const [searchSortBy, setSearchSortBy] = useState<SearchSortOption>('relevance');
-  const [browseSortBy, setBrowseSortBy] = useState<BrowseSortOption>('popularity');
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
-  const [selectedYearRange, setSelectedYearRange] = useState<number>(0); // Index into YEAR_RANGES
+  const [browseSortBy, setBrowseSortBy] = useState<BrowseSortOption>(initialSort);
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>(initialType);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatus);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>(initialGenres);
+  const [selectedYearRange, setSelectedYearRange] = useState<number>(initialYear);
   const [showFilters, setShowFilters] = useState(false);
   const [gridSize, setGridSize] = useState<'compact' | 'normal'>('normal');
-
+  
+  // Scroll restoration on mount
+  useEffect(() => {
+    const savedPosition = getScrollPosition(filterStateKey);
+    if (savedPosition > 0) {
+      window.scrollTo(0, savedPosition);
+    }
+  }, [filterStateKey]);
+  
+  // Save scroll position on unmount/navigation
+  useEffect(() => {
+    const handleScroll = () => {
+      saveScrollPosition(filterStateKey, window.scrollY);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      saveScrollPosition(filterStateKey, window.scrollY);
+    };
+  }, [filterStateKey]);
+  
   // Debounce search query
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -85,15 +153,20 @@ const Search = () => {
     }, 300);
     return () => clearTimeout(timer);
   }, [query]);
-
-  // Update URL when query changes
+  
+  // Update URL when filters change (preserves state on back button)
   useEffect(() => {
-    if (debouncedQuery) {
-      setSearchParams({ q: debouncedQuery });
-    } else {
-      setSearchParams({});
-    }
-  }, [debouncedQuery, setSearchParams]);
+    const params: Record<string, string> = {};
+    if (debouncedQuery) params.q = debouncedQuery;
+    if (selectedGenres.length > 0) params.genres = selectedGenres.join(',');
+    if (typeFilter !== 'all') params.type = typeFilter;
+    if (statusFilter !== 'all') params.status = statusFilter;
+    if (selectedYearRange > 0) params.year = selectedYearRange.toString();
+    if (browseSortBy !== 'popularity') params.sort = browseSortBy;
+    if (page > 1) params.page = page.toString();
+    
+    setSearchParams(params);
+  }, [debouncedQuery, selectedGenres, typeFilter, statusFilter, selectedYearRange, browseSortBy, page, setSearchParams]);
 
   // Build browse filters for the API
   const browseFilters = useMemo(() => {
@@ -108,12 +181,65 @@ const Search = () => {
     };
   }, [typeFilter, selectedGenres, statusFilter, selectedYearRange, browseSortBy]);
 
-  // Use browse API for browsing (25 per page, with filters and sorting)
+  // Track if we need to bypass cache (for shuffle)
+  const [shuffleBypass, setShuffleBypass] = useState(0);
+
+  // Use browse API for browsing (50 per page, with filters and sorting)
   const { data: browseData, isLoading: browseLoading, isFetching: browseFetching } = useBrowse(
     browseFilters,
     page,
-    !debouncedQuery // Only enable browse when not searching
+    !debouncedQuery, // Only enable browse when not searching
+    shuffleBypass > 0 // Bypass cache when shuffleBypass is set
   );
+
+  // Infinite scroll state - accumulate results from multiple pages
+  const [accumulatedResults, setAccumulatedResults] = useState<Anime[]>([]);
+  const observerTarget = useRef<HTMLDivElement>(null);
+  const [hasMore, setHasMore] = useState(true);
+
+  // Reset accumulated results when filters change
+  useEffect(() => {
+    setAccumulatedResults([]);
+    setHasMore(true);
+    setPage(1);
+  }, [browseFilters.genre, browseFilters.type, browseFilters.status, browseFilters.sort, debouncedQuery]);
+
+  // Accumulate results from each page
+  useEffect(() => {
+    if (browseData?.results) {
+      if (page === 1) {
+        // Reset on first page
+        setAccumulatedResults(browseData.results);
+      } else {
+        // Append new results, avoiding duplicates
+        setAccumulatedResults(prev => {
+          const existingIds = new Set(prev.map(a => a.id));
+          const newResults = browseData.results.filter(a => !existingIds.has(a.id));
+          return [...prev, ...newResults];
+        });
+      }
+      setHasMore(browseData.hasNextPage);
+    }
+  }, [browseData, page]);
+
+  // Intersection Observer for infinite scroll
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !browseFetching && !browseLoading) {
+          // Load next page
+          setPage(prev => prev + 1);
+        }
+      },
+      { threshold: 0.1, rootMargin: '100px' }
+    );
+
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current);
+    }
+
+    return () => observer.disconnect();
+  }, [hasMore, browseFetching, browseLoading]);
 
   // Use search API when there's a search query
   const hasSearchQuery = debouncedQuery.length >= 2;
@@ -135,16 +261,16 @@ const Search = () => {
         totalResults: searchData?.totalResults || searchData?.results?.length || 0
       };
     } else {
-      // Use browse data with 25 per page pagination
+      // Use accumulated results for infinite scroll with 50 per page
       return {
-        results: browseData?.results || [],
+        results: accumulatedResults,
         totalPages: browseData?.totalPages || 1,
-        currentPage: browseData?.currentPage || page,
-        hasNextPage: browseData?.hasNextPage || false,
-        totalResults: browseData?.totalResults || browseData?.results?.length || 0
+        currentPage: page,
+        hasNextPage: hasMore,
+        totalResults: browseData?.totalResults || accumulatedResults.length
       };
     }
-  }, [hasSearchQuery, searchData, browseData, page]);
+  }, [hasSearchQuery, searchData, accumulatedResults, browseData, page, hasMore]);
 
   const isLoading = hasSearchQuery ? searchLoading : browseLoading;
   const isFetching = hasSearchQuery ? searchFetching : browseFetching;
@@ -196,8 +322,14 @@ const Search = () => {
 
   // Handle shuffle button
   const handleShuffle = () => {
+    // Always shuffle the current results, whether already in shuffle mode or not
     setBrowseSortBy('shuffle');
     setPage(1);
+    // Increment bypass counter to force a new API call with fresh timestamp
+    // This ensures different random results every time the button is clicked
+    setShuffleBypass(prev => prev + 1);
+    // Clear accumulated results to force a fresh fetch
+    setAccumulatedResults([]);
   };
 
   const hasActiveFilters = typeFilter !== 'all' || statusFilter !== 'all' ||
@@ -271,10 +403,10 @@ const Search = () => {
 
         {/* Professional Filters Section */}
         <div className="mb-8 space-y-6">
-          {/* Main Filter Controls */}
-          <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+          {/* Main Filter Controls - Compact with better wrapping */}
+          <div className="flex flex-col sm:flex-row flex-wrap gap-2 items-center justify-between">
             {/* Filter Pills */}
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant={showFilters ? 'default' : 'outline'}
                 size="sm"
@@ -290,35 +422,35 @@ const Search = () => {
                 )}
               </Button>
 
-              {/* Type Filter */}
+              {/* Type Filter - Compact */}
               <Select value={typeFilter} onValueChange={(value: TypeFilter) => setTypeFilter(value)}>
-                <SelectTrigger className="w-32 bg-background/50 border-white/10">
+                <SelectTrigger className="w-28 bg-background/50 border-white/10 h-9">
                   <SelectValue placeholder="Type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="TV">TV Series</SelectItem>
-                  <SelectItem value="Movie">Movies</SelectItem>
-                  <SelectItem value="OVA">OVAs</SelectItem>
-                  <SelectItem value="ONA">ONAs</SelectItem>
-                  <SelectItem value="Special">Specials</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="TV">TV</SelectItem>
+                  <SelectItem value="Movie">Movie</SelectItem>
+                  <SelectItem value="OVA">OVA</SelectItem>
+                  <SelectItem value="ONA">ONA</SelectItem>
+                  <SelectItem value="Special">Special</SelectItem>
                 </SelectContent>
               </Select>
 
-              {/* Status Filter */}
+              {/* Status Filter - Compact */}
               <Select value={statusFilter} onValueChange={(value: StatusFilter) => setStatusFilter(value)}>
-                <SelectTrigger className="w-32 bg-background/50 border-white/10">
+                <SelectTrigger className="w-28 bg-background/50 border-white/10 h-9">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
                   <SelectItem value="Ongoing">Ongoing</SelectItem>
                   <SelectItem value="Completed">Completed</SelectItem>
                   <SelectItem value="Upcoming">Upcoming</SelectItem>
                 </SelectContent>
               </Select>
 
-              {/* Date Filter */}
+              {/* Date Filter - Compact */}
               <Select
                 value={String(selectedYearRange)}
                 onValueChange={(value) => {
@@ -326,9 +458,9 @@ const Search = () => {
                   setPage(1);
                 }}
               >
-                <SelectTrigger className="w-36 bg-background/50 border-white/10">
-                  <Calendar className="w-4 h-4 mr-2" />
-                  <SelectValue placeholder="Date" />
+                <SelectTrigger className="w-28 bg-background/50 border-white/10 h-9">
+                  <Calendar className="w-3.5 h-3.5 mr-1.5" />
+                  <SelectValue placeholder="Year" />
                 </SelectTrigger>
                 <SelectContent>
                   {YEAR_RANGES.map((range, index) => (
@@ -339,44 +471,56 @@ const Search = () => {
                 </SelectContent>
               </Select>
 
-              {/* Sort Options - Browse Mode */}
+              {/* Sort Options - Browse Mode - Compact Icon Buttons */}
               {!debouncedQuery && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
                   <Button
-                    variant={browseSortBy === 'popularity' ? 'default' : 'outline'}
+                    variant={browseSortBy === 'popularity' ? 'default' : 'ghost'}
                     size="sm"
                     onClick={() => { setBrowseSortBy('popularity'); setPage(1); }}
-                    className="gap-2"
+                    className={cn(
+                      "p-2 transition-all",
+                      browseSortBy === 'popularity' ? "" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Popular"
                   >
                     <Flame className="w-4 h-4" />
-                    Popular
                   </Button>
                   <Button
-                    variant={browseSortBy === 'trending' ? 'default' : 'outline'}
+                    variant={browseSortBy === 'trending' ? 'default' : 'ghost'}
                     size="sm"
                     onClick={() => { setBrowseSortBy('trending'); setPage(1); }}
-                    className="gap-2"
+                    className={cn(
+                      "p-2 transition-all",
+                      browseSortBy === 'trending' ? "" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Trending"
                   >
                     <TrendingUp className="w-4 h-4" />
-                    Trending
                   </Button>
                   <Button
-                    variant={browseSortBy === 'recently_released' ? 'default' : 'outline'}
+                    variant={browseSortBy === 'recently_released' ? 'default' : 'ghost'}
                     size="sm"
                     onClick={() => { setBrowseSortBy('recently_released'); setPage(1); }}
-                    className="gap-2"
+                    className={cn(
+                      "p-2 transition-all",
+                      browseSortBy === 'recently_released' ? "" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="New Releases"
                   >
                     <Clock className="w-4 h-4" />
-                    New
                   </Button>
                   <Button
-                    variant={browseSortBy === 'shuffle' ? 'default' : 'outline'}
+                    variant={browseSortBy === 'shuffle' ? 'default' : 'ghost'}
                     size="sm"
                     onClick={handleShuffle}
-                    className="gap-2"
+                    className={cn(
+                      "p-2 transition-all",
+                      browseSortBy === 'shuffle' ? "" : "text-muted-foreground hover:text-foreground"
+                    )}
+                    title="Shuffle - Get Random Anime"
                   >
                     <Shuffle className="w-4 h-4" />
-                    Shuffle
                   </Button>
                 </div>
               )}
@@ -397,21 +541,29 @@ const Search = () => {
                 </Select>
               )}
 
-              {/* Grid Size Toggle */}
-              <div className="flex items-center gap-2">
+              {/* Grid Size Toggle - Compact Icon Buttons */}
+              <div className="flex items-center gap-1">
                 <Button
-                  variant={gridSize === 'compact' ? 'default' : 'outline'}
+                  variant={gridSize === 'compact' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setGridSize('compact')}
-                  className="p-2"
+                  className={cn(
+                    "p-2 transition-all",
+                    gridSize === 'compact' ? "" : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title="Compact Grid"
                 >
                   <Grid3X3 className="w-4 h-4" />
                 </Button>
                 <Button
-                  variant={gridSize === 'normal' ? 'default' : 'outline'}
+                  variant={gridSize === 'normal' ? 'default' : 'ghost'}
                   size="sm"
                   onClick={() => setGridSize('normal')}
-                  className="p-2"
+                  className={cn(
+                    "p-2 transition-all",
+                    gridSize === 'normal' ? "" : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title="Normal Grid"
                 >
                   <LayoutGrid className="w-4 h-4" />
                 </Button>
@@ -427,8 +579,8 @@ const Search = () => {
                 <p className="text-sm text-muted-foreground">Select genres to narrow down your search</p>
               </div>
 
-              <div className="flex flex-wrap gap-2 mb-4">
-                {COMMON_GENRES.slice(0, 20).map((genre) => (
+              <div className="flex flex-wrap gap-2 mb-4 max-h-48 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
+                {COMMON_GENRES.map((genre) => (
                   <button
                     key={genre}
                     onClick={() => {
@@ -557,68 +709,24 @@ const Search = () => {
                   columns={gridSize === 'compact' ? 8 : 6}
                 />
 
-                {/* Pagination - 25 per page */}
-                {data && data.totalPages > 1 && (
-                  <div className="flex items-center justify-center gap-4 mt-12">
-                    <Button
-                      variant="outline"
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={page === 1 || isFetching}
-                      className="h-12 px-6 rounded-xl gap-2"
-                    >
-                      <ChevronLeft className="w-5 h-5" />
-                      Previous
-                    </Button>
+                {/* Infinite Scroll Observer Target */}
+                <div ref={observerTarget} className="h-4" />
 
-                    <div className="flex items-center gap-2">
-                      {Array.from({ length: Math.min(5, data.totalPages) }).map((_, i) => {
-                        let pageNum: number;
-                        if (data.totalPages <= 5) {
-                          pageNum = i + 1;
-                        } else if (page <= 3) {
-                          pageNum = i + 1;
-                        } else if (page >= data.totalPages - 2) {
-                          pageNum = data.totalPages - 4 + i;
-                        } else {
-                          pageNum = page - 2 + i;
-                        }
-                        return (
-                          <button
-                            key={pageNum}
-                            onClick={() => setPage(pageNum)}
-                            className={cn(
-                              "w-10 h-10 rounded-xl font-medium transition-all",
-                              pageNum === page
-                                ? "bg-fox-orange text-white shadow-lg shadow-fox-orange/30"
-                                : "bg-fox-surface/50 hover:bg-fox-surface"
-                            )}
-                          >
-                            {pageNum}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <Button
-                      variant="outline"
-                      onClick={() => setPage(p => p + 1)}
-                      disabled={!data.hasNextPage || isFetching}
-                      className="h-12 px-6 rounded-xl gap-2"
-                    >
-                      Next
-                      {isFetching ? (
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                      ) : (
-                        <ChevronRight className="w-5 h-5" />
-                      )}
-                    </Button>
-                  </div>
-                )}
-
-                {/* Results count */}
+                {/* Results count - Auto-loading indicator */}
                 <div className="text-center text-muted-foreground text-sm">
-                  Showing {filteredResults.length} of {data?.totalResults || filteredResults.length} anime
-                  {data && data.totalPages > 1 && ` • Page ${page} of ${data.totalPages}`}
+                  {isFetching ? (
+                    <div className="flex items-center justify-center gap-2 py-4">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Loading more anime...</span>
+                    </div>
+                  ) : (
+                    <>
+                      Showing {filteredResults.length} of {data?.totalResults || filteredResults.length} anime
+                      {hasMore && filteredResults.length < (data?.totalResults || 0) && (
+                        <span className="ml-2 text-fox-orange">• Scroll for more</span>
+                      )}
+                    </>
+                  )}
                 </div>
               </>
             )}

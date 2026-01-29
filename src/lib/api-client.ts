@@ -146,8 +146,8 @@ class AnimeApiClient {
         return this.fetch<AnimeSearchResult>(`/api/anime/genre/${encodeURIComponent(genre)}?${params}`);
     }
 
-    async browseAnime(filters: BrowseFilters, page: number = 1): Promise<AnimeSearchResult> {
-        const params = new URLSearchParams({ page: String(page), limit: '25' });
+    async browseAnime(filters: BrowseFilters, page: number = 1, bypassCache: boolean = false): Promise<AnimeSearchResult> {
+        const params = new URLSearchParams({ page: String(page), limit: '50' });
 
         if (filters.type) params.append('type', filters.type);
         if (filters.genre) params.append('genre', filters.genre);
@@ -158,6 +158,11 @@ class AnimeApiClient {
         if (filters.sort) params.append('sort', filters.sort);
         if (filters.order) params.append('order', filters.order);
         if (filters.source) params.append('source', filters.source);
+
+        // Add cache-busting timestamp for shuffle requests
+        if (bypassCache || filters.sort === 'shuffle') {
+            params.append('_t', String(Date.now()));
+        }
 
         return this.fetch<AnimeSearchResult>(`/api/anime/browse?${params}`);
     }

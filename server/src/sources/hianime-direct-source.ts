@@ -6,12 +6,12 @@
  */
 
 import { HiAnime } from 'aniwatch';
-import { BaseAnimeSource } from './base-source.js';
+import { BaseAnimeSource, GenreAwareSource } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
 
-export class HiAnimeDirectSource extends BaseAnimeSource {
+export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'HiAnimeDirect';
     baseUrl = 'https://hianimez.to';
     private scraper: HiAnime.Scraper;
@@ -351,12 +351,35 @@ export class HiAnimeDirectSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const data = await this.scraper.getHomePage();
-            const trending = data.trendingAnimes || data.spotlightAnimes || [];
-            const results = trending.map((a: any) => this.mapAnime(a));
-
-            this.setCache(cacheKey, results, this.cacheTTL.home);
-            return results;
+            // Try to get more anime by fetching multiple pages from category
+            const allAnime: AnimeBase[] = [];
+            
+            // Fetch from top-airing category for more results
+            try {
+                const airingData = await this.scraper.getCategoryAnime('top-airing' as any, page);
+                if (airingData.animes && airingData.animes.length > 0) {
+                    allAnime.push(...airingData.animes.map((a: any) => this.mapAnime(a)));
+                }
+            } catch {
+                // Fallback to home page
+            }
+            
+            // If we don't have enough, also fetch from home page trending
+            if (allAnime.length < 24) {
+                try {
+                    const data = await this.scraper.getHomePage();
+                    const trending = data.trendingAnimes || data.spotlightAnimes || [];
+                    allAnime.push(...trending.map((a: any) => this.mapAnime(a)));
+                } catch {
+                    // Ignore error
+                }
+            }
+            
+            // Remove duplicates
+            const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
+            
+            this.setCache(cacheKey, uniqueAnime.slice(0, 48), this.cacheTTL.home);
+            return uniqueAnime.slice(0, 48);
         } catch (error) {
             this.handleError(error, 'getTrending');
             return [];
@@ -369,12 +392,34 @@ export class HiAnimeDirectSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const data = await this.scraper.getHomePage();
-            const latest = data.latestEpisodeAnimes || [];
-            const results = latest.map((a: any) => this.mapAnime(a));
-
-            this.setCache(cacheKey, results, this.cacheTTL.home);
-            return results;
+            const allAnime: AnimeBase[] = [];
+            
+            // Fetch from latest category for more results
+            try {
+                const latestData = await this.scraper.getCategoryAnime('latest' as any, page);
+                if (latestData.animes && latestData.animes.length > 0) {
+                    allAnime.push(...latestData.animes.map((a: any) => this.mapAnime(a)));
+                }
+            } catch {
+                // Fallback to home page
+            }
+            
+            // Also fetch from home page latest episodes
+            if (allAnime.length < 24) {
+                try {
+                    const data = await this.scraper.getHomePage();
+                    const latest = data.latestEpisodeAnimes || [];
+                    allAnime.push(...latest.map((a: any) => this.mapAnime(a)));
+                } catch {
+                    // Ignore error
+                }
+            }
+            
+            // Remove duplicates
+            const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
+            
+            this.setCache(cacheKey, uniqueAnime.slice(0, 48), this.cacheTTL.home);
+            return uniqueAnime.slice(0, 48);
         } catch (error) {
             this.handleError(error, 'getLatest');
             return [];
@@ -439,6 +484,97 @@ export class HiAnimeDirectSource extends BaseAnimeSource {
         } catch (error) {
             this.handleError(error, 'getTopAiring');
             return [];
+        }
+    }
+
+    /**
+     * Get anime by genre - DEEP SCRAPING
+     * Uses the genre endpoint to get anime specifically for that genre
+     * Falls back to search if genre endpoint fails, but only for niche/specific genres
+     */
+    async getByGenre(genre: string, page: number = 1): Promise<AnimeSearchResult> {
+        const cacheKey = `genre:${genre}:${page}`;
+        const cached = this.getCached<AnimeSearchResult>(cacheKey);
+        if (cached) return cached;
+
+        // List of generic genre names that would return wrong results from search
+        const genericGenres = ['action', 'adventure', 'comedy', 'drama', 'romance', 'sci-fi', 'fantasy', 'horror', 'slice-of-life', 'sports', 'supernatural', 'mystery', 'thriller', 'music', 'mecha'];
+        const isGenericGenre = genericGenres.includes(genre.toLowerCase());
+
+        try {
+            // Try the genre endpoint first
+            const data = await this.scraper.getGenreAnime(genre.toLowerCase(), page);
+            
+            const result: AnimeSearchResult = {
+                results: (data.animes || []).map((a: any) => this.mapAnime(a)),
+                totalPages: data.totalPages || 1,
+                currentPage: data.currentPage || page,
+                hasNextPage: data.hasNextPage || false,
+                source: this.name
+            };
+
+            // If we got results, return them
+            if (result.results && result.results.length > 0) {
+                this.setCache(cacheKey, result, this.cacheTTL.search);
+                return result;
+            }
+            
+            // If no results from genre endpoint
+            if (isGenericGenre) {
+                // For generic genres, don't use search fallback - return empty results
+                // This is because search would return anime with the genre name in the title
+                // which is not the same as anime that are actually in that genre
+                logger.info(`[${this.name}] Genre endpoint returned no results for generic genre: ${genre}, returning empty to avoid wrong results`);
+                return {
+                    results: [],
+                    totalPages: 0,
+                    currentPage: page,
+                    hasNextPage: false,
+                    source: this.name
+                };
+            }
+            
+            // For niche genres, fall back to search
+            throw new Error('No results from genre endpoint');
+        } catch (error) {
+            this.handleError(error, 'getByGenre');
+            
+            // For generic genres, don't try search fallback
+            if (isGenericGenre) {
+                return {
+                    results: [],
+                    totalPages: 0,
+                    currentPage: page,
+                    hasNextPage: false,
+                    source: this.name
+                };
+            }
+            
+            // Fallback: Use search for niche genres
+            try {
+                logger.info(`[${this.name}] Falling back to search for niche genre: ${genre}`);
+                const searchData = await this.scraper.search(genre, page);
+                
+                const result: AnimeSearchResult = {
+                    results: (searchData.animes || []).map((a: any) => this.mapAnime(a)),
+                    totalPages: searchData.totalPages || 1,
+                    currentPage: searchData.currentPage || page,
+                    hasNextPage: searchData.hasNextPage || false,
+                    source: this.name
+                };
+                
+                this.setCache(cacheKey, result, this.cacheTTL.search);
+                return result;
+            } catch (searchError) {
+                this.handleError(searchError, 'getByGenre-search-fallback');
+                return {
+                    results: [],
+                    totalPages: 0,
+                    currentPage: page,
+                    hasNextPage: false,
+                    source: this.name
+                };
+            }
         }
     }
 }

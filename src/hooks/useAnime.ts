@@ -77,16 +77,16 @@ interface BrowseFilters {
     source?: string;
 }
 
-export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boolean = true) {
+export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boolean = true, bypassCache: boolean = false) {
     // Create a stable query key from filters
     const filterKey = JSON.stringify(filters);
 
     return useQuery<AnimeSearchResult, Error>({
-        queryKey: ['browse', filterKey, page],
-        queryFn: () => apiClient.browseAnime(filters, page),
+        queryKey: ['browse', filterKey, page, bypassCache],
+        queryFn: () => apiClient.browseAnime(filters, page, bypassCache),
         enabled,
-        staleTime: 2 * 60 * 1000,
-        gcTime: 5 * 60 * 1000,
+        staleTime: bypassCache ? 0 : 2 * 60 * 1000,
+        gcTime: bypassCache ? 0 : 5 * 60 * 1000,
     });
 }
 

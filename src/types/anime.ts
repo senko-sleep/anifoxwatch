@@ -1,5 +1,6 @@
 export interface Anime {
   id: string;
+  streamingId?: string; // The actual streaming source ID for navigation
   title: string;
   titleJapanese?: string;
   image: string;
