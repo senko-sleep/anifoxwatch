@@ -580,23 +580,39 @@ export class SourceManager {
                         });
                     }
                 } else {
-                    // Multiple genres - enrich local data with AniList genres and filter
-                    logger.info(`[SourceManager] Multiple genres: ${filters.genres.join(', ')}, enriching with AniList`);
+                    // Multiple genres - use AniList's multi-genre search
+                    const genreQuery = filters.genres!.join(',');
+                    logger.info(`[SourceManager] Multiple genres: ${genreQuery}, using AniList multi-genre search`);
                     try {
-                        // Enrich anime with AniList genre data
-                        const enrichedAnime = await anilistService.enrichBatchWithGenres(filtered);
+                        // Use AniList's genre search with multiple genres
+                        const anilistResult = await anilistService.searchByGenre(genreQuery, page, 50);
                         
-                        // Filter by all specified genres (anime must match at least one)
-                        filtered = enrichedAnime.filter(a => {
-                            if (!a.genres || a.genres.length === 0) return false;
-                            return filters.genres!.some(g =>
-                                a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
-                            );
-                        });
-                        
-                        logger.info(`[SourceManager] After AniList enrichment: ${filtered.length} anime match genres`);
+                        if (anilistResult.results && anilistResult.results.length > 0) {
+                            // Enrich AniList results with streaming IDs using instant lookup
+                            await this.buildStreamingLookupTable();
+                            
+                            const enrichedResults = anilistResult.results.map(anime => {
+                                const streamingMatch = this.findStreamingMatchInstant(anime.title);
+                                return {
+                                    ...anime,
+                                    streamingId: streamingMatch?.id || undefined
+                                };
+                            });
+                            
+                            filtered = enrichedResults;
+                            logger.info(`[SourceManager] AniList multi-genre search returned ${filtered.length} results (${filtered.filter(a => a.streamingId).length} with streaming IDs)`);
+                        } else {
+                            // Fall back to local filtering
+                            logger.info(`[SourceManager] No AniList results for ${genreQuery}, using local filtering`);
+                            filtered = filtered.filter(a => {
+                                if (!a.genres || a.genres.length === 0) return false;
+                                return filters.genres!.some(g =>
+                                    a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
+                                );
+                            });
+                        }
                     } catch (error) {
-                        logger.warn(`AniList enrichment failed, using local filtering`, undefined, 'SourceManager');
+                        logger.warn(`AniList multi-genre search failed for ${genreQuery}, using local filtering`, undefined, 'SourceManager');
                         // Fall back to local filtering
                         filtered = filtered.filter(a => {
                             if (!a.genres || a.genres.length === 0) return false;

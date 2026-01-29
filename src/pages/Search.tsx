@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams, useLocation } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { AnimeGrid } from '@/components/anime/AnimeGrid';
 import { useSearch, useGenre, useBrowse } from '@/hooks/useAnime';
-import { Anime } from '@/types/anime';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -192,55 +191,6 @@ const Search = () => {
     shuffleBypass > 0 // Bypass cache when shuffleBypass is set
   );
 
-  // Infinite scroll state - accumulate results from multiple pages
-  const [accumulatedResults, setAccumulatedResults] = useState<Anime[]>([]);
-  const observerTarget = useRef<HTMLDivElement>(null);
-  const [hasMore, setHasMore] = useState(true);
-
-  // Reset accumulated results when filters change
-  useEffect(() => {
-    setAccumulatedResults([]);
-    setHasMore(true);
-    setPage(1);
-  }, [browseFilters.genre, browseFilters.type, browseFilters.status, browseFilters.sort, debouncedQuery]);
-
-  // Accumulate results from each page
-  useEffect(() => {
-    if (browseData?.results) {
-      if (page === 1) {
-        // Reset on first page
-        setAccumulatedResults(browseData.results);
-      } else {
-        // Append new results, avoiding duplicates
-        setAccumulatedResults(prev => {
-          const existingIds = new Set(prev.map(a => a.id));
-          const newResults = browseData.results.filter(a => !existingIds.has(a.id));
-          return [...prev, ...newResults];
-        });
-      }
-      setHasMore(browseData.hasNextPage);
-    }
-  }, [browseData, page]);
-
-  // Intersection Observer for infinite scroll
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !browseFetching && !browseLoading) {
-          // Load next page
-          setPage(prev => prev + 1);
-        }
-      },
-      { threshold: 0.1, rootMargin: '100px' }
-    );
-
-    if (observerTarget.current) {
-      observer.observe(observerTarget.current);
-    }
-
-    return () => observer.disconnect();
-  }, [hasMore, browseFetching, browseLoading]);
-
   // Use search API when there's a search query
   const hasSearchQuery = debouncedQuery.length >= 2;
   const { data: searchData, isLoading: searchLoading, isFetching: searchFetching } = useSearch(
@@ -250,7 +200,7 @@ const Search = () => {
     hasSearchQuery
   );
 
-  // Combine data from browse or search
+  // Get data based on mode
   const data = useMemo(() => {
     if (hasSearchQuery) {
       return {
@@ -261,16 +211,15 @@ const Search = () => {
         totalResults: searchData?.totalResults || searchData?.results?.length || 0
       };
     } else {
-      // Use accumulated results for infinite scroll with 50 per page
       return {
-        results: accumulatedResults,
+        results: browseData?.results || [],
         totalPages: browseData?.totalPages || 1,
-        currentPage: page,
-        hasNextPage: hasMore,
-        totalResults: browseData?.totalResults || accumulatedResults.length
+        currentPage: browseData?.currentPage || page,
+        hasNextPage: browseData?.hasNextPage || false,
+        totalResults: browseData?.totalResults || browseData?.results?.length || 0
       };
     }
-  }, [hasSearchQuery, searchData, accumulatedResults, browseData, page, hasMore]);
+  }, [hasSearchQuery, searchData, browseData, page]);
 
   const isLoading = hasSearchQuery ? searchLoading : browseLoading;
   const isFetching = hasSearchQuery ? searchFetching : browseFetching;
@@ -286,7 +235,7 @@ const Search = () => {
     }
 
     // For search results, apply client-side filtering and sorting
-    let results = [...data.results];
+    const results = [...data.results];
 
     // Apply sorting for search results
     switch (searchSortBy) {
@@ -328,8 +277,6 @@ const Search = () => {
     // Increment bypass counter to force a new API call with fresh timestamp
     // This ensures different random results every time the button is clicked
     setShuffleBypass(prev => prev + 1);
-    // Clear accumulated results to force a fresh fetch
-    setAccumulatedResults([]);
   };
 
   const hasActiveFilters = typeFilter !== 'all' || statusFilter !== 'all' ||
@@ -702,31 +649,74 @@ const Search = () => {
                 )}
               </div>
             ) : (
-              /* Results Grid */
+              /* Results Grid with Pagination */
               <>
                 <AnimeGrid
                   anime={filteredResults}
                   columns={gridSize === 'compact' ? 8 : 6}
                 />
 
-                {/* Infinite Scroll Observer Target */}
-                <div ref={observerTarget} className="h-4" />
+                {/* Pagination Controls */}
+                {data && data.totalPages > 1 && (
+                  <div className="flex items-center justify-center gap-4 mt-12">
+                    <Button
+                      variant="outline"
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      disabled={page === 1 || isFetching}
+                      className="h-12 px-6 rounded-xl gap-2"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                      Previous
+                    </Button>
 
-                {/* Results count - Auto-loading indicator */}
-                <div className="text-center text-muted-foreground text-sm">
-                  {isFetching ? (
-                    <div className="flex items-center justify-center gap-2 py-4">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Loading more anime...</span>
+                    <div className="flex items-center gap-2">
+                      {Array.from({ length: Math.min(5, data.totalPages) }).map((_, i) => {
+                        let pageNum: number;
+                        if (data.totalPages <= 5) {
+                          pageNum = i + 1;
+                        } else if (page <= 3) {
+                          pageNum = i + 1;
+                        } else if (page >= data.totalPages - 2) {
+                          pageNum = data.totalPages - 4 + i;
+                        } else {
+                          pageNum = page - 2 + i;
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setPage(pageNum)}
+                            className={cn(
+                              "w-10 h-10 rounded-xl font-medium transition-all",
+                              pageNum === page
+                                ? "bg-fox-orange text-white shadow-lg shadow-fox-orange/30"
+                                : "bg-fox-surface/50 hover:bg-fox-surface"
+                            )}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
                     </div>
-                  ) : (
-                    <>
-                      Showing {filteredResults.length} of {data?.totalResults || filteredResults.length} anime
-                      {hasMore && filteredResults.length < (data?.totalResults || 0) && (
-                        <span className="ml-2 text-fox-orange">• Scroll for more</span>
+
+                    <Button
+                      variant="outline"
+                      onClick={() => setPage(p => p + 1)}
+                      disabled={!data.hasNextPage || isFetching}
+                      className="h-12 px-6 rounded-xl gap-2"
+                    >
+                      Next
+                      {isFetching ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                      ) : (
+                        <ChevronRight className="w-5 h-5" />
                       )}
-                    </>
-                  )}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Results count */}
+                <div className="text-center text-muted-foreground text-sm mt-4">
+                  Showing {filteredResults.length} of {data?.totalResults || filteredResults.length} anime
                 </div>
               </>
             )}

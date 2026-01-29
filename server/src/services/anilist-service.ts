@@ -170,13 +170,21 @@ export class AniListService {
             });
 
             if (!response.ok) {
-                console.error(`[AniList] API error: ${response.status}`);
+                const errorText = await response.text();
+                console.error(`[AniList] API error: ${response.status}`, errorText);
                 return null;
             }
 
-            const data = await response.json() as T;
+            const data = await response.json();
+            
+            // Check for GraphQL errors
+            if (data && typeof data === 'object' && 'errors' in data) {
+                console.error('[AniList] GraphQL errors:', JSON.stringify((data as { errors: unknown }).errors));
+                return null;
+            }
+            
             this.setCache(cacheKey, data);
-            return data;
+            return data as T;
         } catch (error) {
             console.error('[AniList] Query failed:', error);
             return null;
@@ -248,82 +256,152 @@ export class AniListService {
     }
 
     /**
-     * Search anime by genre using AniList
+     * Search anime by genre(s) using AniList
+     * Supports single genre or multiple genres
      */
     async searchByGenre(genre: string, page: number = 1, perPage: number = 20): Promise<AnimeSearchResult> {
-        // First, try to get anime with the exact genre
-        const query = `
-            query ($genre: String, $page: Int, $perPage: Int) {
-                Page(page: $page, perPage: $perPage) {
-                    media(genre: $genre, type: ANIME, isAdult: false) {
-                        id
-                        idMal
-                        title {
-                            romaji
-                            english
-                            native
-                        }
-                        type
-                        format
-                        status
-                        description
-                        startDate {
-                            year
-                            month
-                            day
-                        }
-                        endDate {
-                            year
-                            month
-                            day
-                        }
-                        season
-                        seasonYear
-                        episodes
-                        duration
-                        averageScore
-                        genres
-                        tags {
+        // Support multiple genres (comma-separated)
+        const genres = genre.split(',').map(g => g.trim()).filter(Boolean);
+        const mainGenre = genres[0] || genre;
+        
+        // Build separate query for single vs multi-genre to avoid unused variable errors
+        let query: string;
+        let variables: Record<string, unknown>;
+        
+        if (genres.length > 1) {
+            // Multiple genres - use genre_in
+            query = `
+                query ($genreIn: [String], $page: Int, $perPage: Int) {
+                    Page(page: $page, perPage: $perPage) {
+                        media(genre_in: $genreIn, type: ANIME, isAdult: false) {
                             id
-                            name
-                            category
-                            rank
-                        }
-                        studios {
-                            nodes {
+                            idMal
+                            title {
+                                romaji
+                                english
+                                native
+                            }
+                            type
+                            format
+                            status
+                            description
+                            startDate {
+                                year
+                                month
+                                day
+                            }
+                            endDate {
+                                year
+                                month
+                                day
+                            }
+                            season
+                            seasonYear
+                            episodes
+                            duration
+                            averageScore
+                            genres
+                            tags {
                                 id
                                 name
+                                category
+                                rank
                             }
+                            studios {
+                                nodes {
+                                    id
+                                    name
+                                }
+                            }
+                            coverImage {
+                                large
+                                medium
+                            }
+                            bannerImage
+                            isAdult
                         }
-                        coverImage {
-                            large
-                            medium
+                        pageInfo {
+                            currentPage
+                            lastPage
+                            hasNextPage
+                            perPage
                         }
-                        bannerImage
-                        isAdult
-                    }
-                    pageInfo {
-                        currentPage
-                        lastPage
-                        hasNextPage
-                        perPage
                     }
                 }
-            }
-        `;
+            `;
+            variables = { genreIn: genres, page, perPage };
+        } else {
+            // Single genre - use genre
+            query = `
+                query ($genre: String, $page: Int, $perPage: Int) {
+                    Page(page: $page, perPage: $perPage) {
+                        media(genre: $genre, type: ANIME, isAdult: false) {
+                            id
+                            idMal
+                            title {
+                                romaji
+                                english
+                                native
+                            }
+                            type
+                            format
+                            status
+                            description
+                            startDate {
+                                year
+                                month
+                                day
+                            }
+                            endDate {
+                                year
+                                month
+                                day
+                            }
+                            season
+                            seasonYear
+                            episodes
+                            duration
+                            averageScore
+                            genres
+                            tags {
+                                id
+                                name
+                                category
+                                rank
+                            }
+                            studios {
+                                nodes {
+                                    id
+                                    name
+                                }
+                            }
+                            coverImage {
+                                large
+                                medium
+                            }
+                            bannerImage
+                            isAdult
+                        }
+                        pageInfo {
+                            currentPage
+                            lastPage
+                            hasNextPage
+                            perPage
+                        }
+                    }
+                }
+            `;
+            variables = { genre: mainGenre, page, perPage };
+        }
 
-        const response = await this.query<AniListSearchResponse>(query, { 
-            genre, 
-            page, 
-            perPage 
-        });
+        const response = await this.query<AniListSearchResponse>(query, variables);
 
         const pageData = response?.data?.Page;
         const media = pageData?.media || [];
 
         if (media.length === 0 && page === 1) {
             // Fallback: search by tag if genre not found
-            return this.searchByTag(genre, page, perPage);
+            return this.searchByTag(mainGenre, page, perPage);
         }
 
         return {

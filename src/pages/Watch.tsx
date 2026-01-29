@@ -83,6 +83,25 @@ const Watch = () => {
 
 
 
+  // Auto-switch to sub when dub is not available (only if user hasn't manually selected audio)
+  useEffect(() => {
+    if (!servers?.length) return;
+    
+    const hasDubServers = servers.some(s => s.type === 'dub');
+    const hasSubServers = servers.some(s => s.type === 'sub');
+    
+    // If user wants dub but no dub servers available, switch to sub
+    if (audioType === 'dub' && !hasDubServers && hasSubServers && !audioManuallySet) {
+      console.log('[Watch] 🔄 No dub servers available, auto-switching to sub');
+      setAudioType('sub');
+    }
+    // If user wants sub but no sub servers available, switch to dub
+    if (audioType === 'sub' && !hasSubServers && hasDubServers && !audioManuallySet) {
+      console.log('[Watch] 🔄 No sub servers available, auto-switching to dub');
+      setAudioType('dub');
+    }
+  }, [servers, audioType, audioManuallySet]);
+
   // Auto-select best server when servers load or audio type changes
   useEffect(() => {
     if (servers?.length) {
