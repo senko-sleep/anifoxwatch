@@ -137,10 +137,10 @@ process.on('SIGTERM', () => {
 const startServer = (port: number) => {
     const server = app.listen(port, () => {
         const isProduction = process.env.NODE_ENV === 'production';
-        const baseUrl = isProduction 
-            ? `https://anifoxwatch.onrender.com` 
+        const baseUrl = isProduction
+            ? `https://anifoxwatch.onrender.com`
             : `http://localhost:${port}`;
-        
+
         console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
 ║                                                                  ║
@@ -179,7 +179,11 @@ const startServer = (port: number) => {
     });
 };
 
-startServer(Number(PORT));
+import { fileURLToPath } from 'url';
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    startServer(Number(PORT));
+}
 
 export default app;
 

@@ -14,7 +14,8 @@ import { logger } from '../utils/logger.js';
 export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'HiAnimeDirect';
     baseUrl = 'https://hianimez.to';
-    private scraper: HiAnime.Scraper;
+    private scraper: HiAnime.Scraper | null = null;
+    private scraperInitialized = false;
 
     // Smart caching with TTL
     private cache: Map<string, { data: unknown; expires: number }> = new Map();
@@ -32,10 +33,19 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
     constructor() {
         super();
-        this.scraper = new HiAnime.Scraper();
+        // Lazy initialization - don't create scraper in constructor
+        // This is required for Cloudflare Workers compatibility
+    }
 
-        // Cleanup cache periodically
-        setInterval(() => this.cleanupCache(), 5 * 60 * 1000);
+    /**
+     * Initialize the scraper on first use (lazy initialization)
+     */
+    private getScraper(): HiAnime.Scraper {
+        if (!this.scraper) {
+            this.scraper = new HiAnime.Scraper();
+            this.scraperInitialized = true;
+        }
+        return this.scraper;
     }
 
     // ============ CACHING ============
@@ -54,6 +64,8 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
     }
 
     private cleanupCache(): void {
+        // Only cleanup if scraper was initialized (handler context exists)
+        if (!this.scraperInitialized) return;
         const now = Date.now();
         for (const [key, value] of this.cache.entries()) {
             if (value.expires < now) this.cache.delete(key);
@@ -124,7 +136,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
     async healthCheck(): Promise<boolean> {
         try {
-            const home = await this.scraper.getHomePage();
+            const home = await this.getScraper().getHomePage();
             this.isAvailable = !!(home.trendingAnimes && home.trendingAnimes.length > 0);
             return this.isAvailable;
         } catch (error) {
@@ -139,7 +151,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         if (cached) return cached;
 
         try {
-            const data = await this.scraper.search(query, page);
+            const data = await this.getScraper().search(query, page);
 
             const result: AnimeSearchResult = {
                 results: (data.animes || []).map((a: any) => this.mapAnime(a)),
@@ -164,7 +176,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
         try {
             const animeId = id.replace('hianime-', '');
-            const data = await this.scraper.getInfo(animeId);
+            const data = await this.getScraper().getInfo(animeId);
 
             if (!data.anime?.info) {
                 return null;
@@ -191,7 +203,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
         try {
             const id = animeId.replace('hianime-', '');
-            const data = await this.scraper.getEpisodes(id);
+            const data = await this.getScraper().getEpisodes(id);
 
             const episodes: Episode[] = (data.episodes || []).map((ep: any) => ({
                 id: ep.episodeId || `${id}?ep=${ep.number}`,
@@ -220,7 +232,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         if (cached) return cached;
 
         try {
-            const data = await this.scraper.getEpisodeServers(episodeId);
+            const data = await this.getScraper().getEpisodeServers(episodeId);
 
             const servers: EpisodeServer[] = [];
 
@@ -292,7 +304,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
                     logger.info(`[${this.name}] Trying server: ${currentServer}`);
 
-                    const data = await this.scraper.getEpisodeSources(
+                    const data = await this.getScraper().getEpisodeSources(
                         episodeId,
                         currentServer as HiAnime.AnimeServers,
                         category
@@ -353,31 +365,31 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         try {
             // Try to get more anime by fetching multiple pages from category
             const allAnime: AnimeBase[] = [];
-            
+
             // Fetch from top-airing category for more results
             try {
-                const airingData = await this.scraper.getCategoryAnime('top-airing' as any, page);
+                const airingData = await this.getScraper().getCategoryAnime('top-airing' as any, page);
                 if (airingData.animes && airingData.animes.length > 0) {
                     allAnime.push(...airingData.animes.map((a: any) => this.mapAnime(a)));
                 }
             } catch {
                 // Fallback to home page
             }
-            
+
             // If we don't have enough, also fetch from home page trending
             if (allAnime.length < 24) {
                 try {
-                    const data = await this.scraper.getHomePage();
+                    const data = await this.getScraper().getHomePage();
                     const trending = data.trendingAnimes || data.spotlightAnimes || [];
                     allAnime.push(...trending.map((a: any) => this.mapAnime(a)));
                 } catch {
                     // Ignore error
                 }
             }
-            
+
             // Remove duplicates
             const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
-            
+
             this.setCache(cacheKey, uniqueAnime.slice(0, 48), this.cacheTTL.home);
             return uniqueAnime.slice(0, 48);
         } catch (error) {
@@ -393,31 +405,31 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
         try {
             const allAnime: AnimeBase[] = [];
-            
+
             // Fetch from latest category for more results
             try {
-                const latestData = await this.scraper.getCategoryAnime('latest' as any, page);
+                const latestData = await this.getScraper().getCategoryAnime('latest' as any, page);
                 if (latestData.animes && latestData.animes.length > 0) {
                     allAnime.push(...latestData.animes.map((a: any) => this.mapAnime(a)));
                 }
             } catch {
                 // Fallback to home page
             }
-            
+
             // Also fetch from home page latest episodes
             if (allAnime.length < 24) {
                 try {
-                    const data = await this.scraper.getHomePage();
+                    const data = await this.getScraper().getHomePage();
                     const latest = data.latestEpisodeAnimes || [];
                     allAnime.push(...latest.map((a: any) => this.mapAnime(a)));
                 } catch {
                     // Ignore error
                 }
             }
-            
+
             // Remove duplicates
             const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
-            
+
             this.setCache(cacheKey, uniqueAnime.slice(0, 48), this.cacheTTL.home);
             return uniqueAnime.slice(0, 48);
         } catch (error) {
@@ -432,7 +444,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         if (cached) return cached;
 
         try {
-            const data = await this.scraper.getHomePage();
+            const data = await this.getScraper().getHomePage();
             const topAnimes = data.top10Animes?.today || data.top10Animes?.week || [];
             const results = topAnimes.slice(0, limit).map((a: any, i: number) => ({
                 rank: a.rank || ((page - 1) * limit + i + 1),
@@ -456,7 +468,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         if (cached) return cached;
 
         try {
-            const data = await this.scraper.getCategoryAnime('most-popular' as any, page);
+            const data = await this.getScraper().getCategoryAnime('most-popular' as any, page);
             const results = (data.animes || []).map((a: any) => this.mapAnime(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
@@ -476,7 +488,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         if (cached) return cached;
 
         try {
-            const data = await this.scraper.getCategoryAnime('top-airing' as any, page);
+            const data = await this.getScraper().getCategoryAnime('top-airing' as any, page);
             const results = (data.animes || []).map((a: any) => this.mapAnime(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
@@ -504,7 +516,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         try {
             // Try the genre endpoint first
             const data = await this.scraper.getGenreAnime(genre.toLowerCase(), page);
-            
+
             const result: AnimeSearchResult = {
                 results: (data.animes || []).map((a: any) => this.mapAnime(a)),
                 totalPages: data.totalPages || 1,
@@ -518,7 +530,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                 this.setCache(cacheKey, result, this.cacheTTL.search);
                 return result;
             }
-            
+
             // If no results from genre endpoint
             if (isGenericGenre) {
                 // For generic genres, don't use search fallback - return empty results
@@ -533,12 +545,12 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                     source: this.name
                 };
             }
-            
+
             // For niche genres, fall back to search
             throw new Error('No results from genre endpoint');
         } catch (error) {
             this.handleError(error, 'getByGenre');
-            
+
             // For generic genres, don't try search fallback
             if (isGenericGenre) {
                 return {
@@ -549,12 +561,12 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                     source: this.name
                 };
             }
-            
+
             // Fallback: Use search for niche genres
             try {
                 logger.info(`[${this.name}] Falling back to search for niche genre: ${genre}`);
                 const searchData = await this.scraper.search(genre, page);
-                
+
                 const result: AnimeSearchResult = {
                     results: (searchData.animes || []).map((a: any) => this.mapAnime(a)),
                     totalPages: searchData.totalPages || 1,
@@ -562,7 +574,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                     hasNextPage: searchData.hasNextPage || false,
                     source: this.name
                 };
-                
+
                 this.setCache(cacheKey, result, this.cacheTTL.search);
                 return result;
             } catch (searchError) {

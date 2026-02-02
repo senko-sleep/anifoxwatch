@@ -77,12 +77,10 @@ export class SourceManager {
         });
     }
 
-    private async startHealthMonitor(): Promise<void> {
-        // Initial health check
-        await this.checkAllHealth();
-
-        // Check health every 2 minutes
-        setInterval(() => this.checkAllHealth(), 2 * 60 * 1000);
+    private startHealthMonitor(): void {
+        // Note: setInterval is not allowed in Cloudflare Workers global scope
+        // Health checks will only run when explicitly called
+        logger.info('Health monitoring initialized (manual checks only)', undefined, 'SourceManager');
     }
 
     async checkAllHealth(): Promise<Map<string, SourceHealth>> {

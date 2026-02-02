@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import * as cheerio from 'cheerio';
-import puppeteer, { Browser, Page } from 'puppeteer';
+import type { Browser, Page } from 'puppeteer';
 import { BaseAnimeSource } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
@@ -44,9 +44,8 @@ export class NineAnimeSource extends BaseAnimeSource {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             }
         });
-
-        // Cleanup cache periodically
-        setInterval(() => this.cleanupCache(), 5 * 60 * 1000);
+        // Note: Cache cleanup is done on-demand in getCached/setCache
+        // setInterval is not allowed in Cloudflare Workers global scope
     }
 
     // ============ CACHING ============
@@ -134,6 +133,15 @@ export class NineAnimeSource extends BaseAnimeSource {
     // ============ PUPPETEER SCRAPING ============
 
     private async launchBrowser(): Promise<Browser> {
+        let puppeteer;
+        try {
+            // @ts-ignore
+            const puppeteerModule = 'puppeteer';
+            puppeteer = (await import(puppeteerModule)).default;
+        } catch (e) {
+            throw new Error('Puppeteer is not available in this environment');
+        }
+
         return puppeteer.launch({
             headless: true, // Use headless for server
             args: [

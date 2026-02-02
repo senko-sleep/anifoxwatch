@@ -94,6 +94,17 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
 };
 
 /**
+ * Helper to convert a stream to string
+ */
+async function streamToString(stream: any): Promise<string> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks).toString("utf-8");
+}
+
+/**
  * @route GET /api/stream/servers/:episodeId
  * @description Get available streaming servers for an episode
  */
@@ -258,7 +269,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 /**
  * @route GET /api/stream/proxy
  * @query url - HLS manifest or segment URL to proxy
- * @description Proxy HLS streams to avoid CORS issues and blocked domains
+ * @description Proxy HLS streams and videos to avoid CORS issues and blocked domains. Supports Range requests.
  */
 router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const { url } = req.query;
@@ -283,10 +294,11 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const domain = urlObj.hostname;
     const isM3u8 = url.includes('.m3u8');
     const isSegment = url.includes('.ts') || url.includes('.m4s');
+    const isVideo = url.endsWith('.mp4');
 
-    logger.info(`[PROXY] Proxying ${isM3u8 ? 'manifest' : isSegment ? 'segment' : 'resource'} from ${domain}`, {
+    logger.info(`[PROXY] Proxying ${isM3u8 ? 'manifest' : isVideo ? 'video' : 'resource'} from ${domain}`, {
         domain,
-        type: isM3u8 ? 'manifest' : isSegment ? 'segment' : 'other',
+        type: isM3u8 ? 'manifest' : isVideo ? 'video' : 'other',
         requestId
     });
 
@@ -328,13 +340,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Quick DNS check for unknown domains (with short timeout to not delay)
-        const dnsCheckStart = Date.now();
+        // Quick DNS check
         const isResolvable = await isDomainResolvable(domain);
-        const dnsCheckTime = Date.now() - dnsCheckStart;
-
         if (!isResolvable) {
-            logger.warn(`[PROXY] Domain not resolvable (DNS check: ${dnsCheckTime}ms): ${domain}`, { domain, requestId });
+            logger.warn(`[PROXY] Domain not resolvable: ${domain}`, { domain, requestId });
             res.status(502).json({
                 error: 'Domain not resolvable',
                 reason: 'dns_error',
@@ -344,23 +353,28 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const response = await axios.get(url, {
-            responseType: 'arraybuffer',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                'Accept': '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Referer': referer,
-                'Origin': origin,
-                'sec-ch-ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"Windows"',
-                'sec-fetch-dest': isM3u8 ? 'empty' : 'video',
-                'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'cross-site',
-                'Connection': 'keep-alive'
-            },
+        // Prepare headers for upstream request
+        const headers: any = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': referer,
+            'Origin': origin,
+            'Connection': 'keep-alive'
+        };
+
+        // Forward Range header if present (crucial for seeking in video players)
+        if (req.headers.range) {
+            headers['Range'] = req.headers.range;
+            logger.debug(`[PROXY] Forwarding Range header: ${req.headers.range}`, { requestId });
+        }
+
+        // Use stream response type to avoid memory issues with large files
+        const response = await axios({
+            method: 'get',
+            url: url,
+            responseType: 'stream',
+            headers: headers,
             timeout: 30000,
             maxRedirects: 5,
             validateStatus: (status) => status < 500 // Allow 4xx for error handling
@@ -373,6 +387,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 domain,
                 requestId
             });
+            // Consume the stream to avoid hanging
+            if (response.data && typeof response.data.resume === 'function') {
+                response.data.resume();
+            }
             res.status(response.status).json({
                 error: 'Upstream error',
                 status: response.status,
@@ -381,47 +399,79 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Set appropriate content type
-        const upstreamContentType = response.headers?.['content-type'];
+        // Determine content type
+        const upstreamContentType = response.headers['content-type'] || '';
+        const isUpstreamM3u8 = upstreamContentType.includes('x-mpegurl') || upstreamContentType.includes('vnd.apple.mpegurl') || url.includes('.m3u8');
+
+        // Handle M3U8 Manifests (Buffer & Rewrite)
+        if (isUpstreamM3u8) {
+            try {
+                const content = await streamToString(response.data);
+                const rewrittenContent = rewriteM3u8Content(content, url, proxyBase);
+
+                res.set('Content-Type', 'application/vnd.apple.mpegurl');
+                res.set('Cache-Control', 'private, max-age=5');
+                res.set('Access-Control-Allow-Origin', '*');
+                res.send(rewrittenContent);
+
+                logger.info(`[PROXY] Rewrote m3u8 manifest from ${domain}`, {
+                    domain,
+                    originalSize: content.length,
+                    requestId
+                });
+                return;
+            } catch (err) {
+                logger.error(`[PROXY] Failed to process m3u8 from ${domain}`, err as Error);
+                res.status(502).json({ error: 'Failed to process manifest' });
+                return;
+            }
+        }
+
+        // Handle Video/Binary content (Stream/Pipe)
+
+        // Forward content headers
+        if (response.headers['content-length']) res.set('Content-Length', response.headers['content-length']);
+        if (response.headers['content-range']) res.set('Content-Range', response.headers['content-range']);
+        if (response.headers['accept-ranges']) res.set('Accept-Ranges', response.headers['accept-ranges']);
+
+        // Set Content-Type
         if (upstreamContentType) {
             res.set('Content-Type', upstreamContentType);
-        } else if (isM3u8) {
-            res.set('Content-Type', 'application/vnd.apple.mpegurl');
         } else if (url.includes('.ts')) {
             res.set('Content-Type', 'video/MP2T');
-        } else if (url.includes('.m4s')) {
-            res.set('Content-Type', 'video/iso.segment');
+        } else if (url.endsWith('.mp4')) {
+            res.set('Content-Type', 'video/mp4');
         }
 
         // CORS headers
         res.set('Access-Control-Allow-Origin', '*');
         res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
         res.set('Access-Control-Allow-Headers', 'Range');
-        res.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range');
+        res.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
 
-        // Cache segments longer than manifests
-        if (isSegment) {
+        // Cache control
+        if (isSegment || isVideo) {
             res.set('Cache-Control', 'public, max-age=86400'); // 24 hours
-        } else if (isM3u8) {
-            res.set('Cache-Control', 'private, max-age=5'); // 5 seconds for live content
-        }
-
-        // If this is an m3u8 manifest, rewrite URLs inside it
-        if (isM3u8) {
-            const content = response.data.toString('utf-8');
-            const rewrittenContent = rewriteM3u8Content(content, url, proxyBase);
-            res.send(rewrittenContent);
-
-            logger.info(`[PROXY] Rewrote m3u8 manifest from ${domain}`, {
-                domain,
-                originalSize: content.length,
-                rewrittenSize: rewrittenContent.length,
-                requestId
-            });
         } else {
-            // Send binary data as-is for segments
-            res.send(response.data);
+            res.set('Cache-Control', 'public, max-age=3600');
         }
+
+        // Set status code (200 or 206)
+        res.status(response.status);
+
+        // Pipe the stream
+        response.data.pipe(res);
+
+        // Handle errors during streaming
+        response.data.on('error', (err: any) => {
+            logger.error(`[PROXY] Stream error from ${domain}`, err);
+            if (!res.headersSent) {
+                res.status(502).json({ error: 'Stream error' });
+            } else {
+                res.end();
+            }
+        });
+
     } catch (error: any) {
         const errorMessage = error.message || 'Unknown error';
         const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
@@ -435,12 +485,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             requestId
         });
 
-        res.status(502).json({
-            error: 'Failed to proxy stream',
-            reason: isTimeout ? 'timeout' : isBlocked ? 'blocked' : 'connection_error',
-            domain,
-            message: process.env.NODE_ENV === 'development' ? errorMessage : undefined
-        });
+        if (!res.headersSent) {
+            res.status(502).json({
+                error: 'Failed to proxy stream',
+                reason: isTimeout ? 'timeout' : isBlocked ? 'blocked' : 'connection_error',
+                domain,
+                message: process.env.NODE_ENV === 'development' ? errorMessage : undefined
+            });
+        }
     }
 });
 

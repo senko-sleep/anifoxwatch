@@ -2,7 +2,7 @@ import axios, { AxiosInstance } from 'axios';
 import { BaseAnimeSource } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
-import { Agent } from 'http';
+import { Agent } from 'node:http';
 import { logger } from '../utils/logger.js';
 
 // ============ API RESPONSE INTERFACES ============
@@ -187,8 +187,8 @@ export class HiAnimeSource extends BaseAnimeSource {
             maxSockets: 10
         });
 
-        // Cleanup cache periodically
-        setInterval(() => this.cleanupCache(), 5 * 60 * 1000);
+        // Note: Cache cleanup is done on-demand in getCached/setCache
+        // setInterval is not allowed in Cloudflare Workers global scope
     }
 
     // ============ CACHING ============
