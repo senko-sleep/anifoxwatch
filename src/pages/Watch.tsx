@@ -282,7 +282,11 @@ const Watch = () => {
     const newEpParam = String(episodeNum);
 
     if (currentEpParam !== newEpParam) {
-      setSearchParams({ ep: newEpParam }, { replace: true });
+      setSearchParams(prev => {
+        const newParams = new URLSearchParams(prev);
+        newParams.set('ep', newEpParam);
+        return newParams;
+      }, { replace: true });
     }
 
     setSelectedEpisode(episodeId);
