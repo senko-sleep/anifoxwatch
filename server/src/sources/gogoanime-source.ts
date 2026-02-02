@@ -22,7 +22,7 @@ export class GogoanimeSource extends BaseAnimeSource {
         }
     }
 
-    async search(query: string, page: number = 1): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any): Promise<AnimeSearchResult> {
         try {
             const response = await axios.get(`${this.baseUrl}/search.html`, {
                 params: { keyword: query, page }

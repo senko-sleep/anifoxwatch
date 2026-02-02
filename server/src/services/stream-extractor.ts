@@ -39,6 +39,7 @@ class StreamExtractor {
 
         this.browserLaunchPromise = puppeteer.launch({
             headless: true,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -47,7 +48,8 @@ class StreamExtractor {
                 '--disable-gpu',
                 '--window-size=1920,1080',
                 '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process'
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--js-flags="--max-old-space-size=256"'
             ]
         });
 

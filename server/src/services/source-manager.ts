@@ -797,40 +797,78 @@ export class SourceManager {
         const hasSingleGenre = filters.genres && filters.genres.length === 1;
         const skipGenreFallback = hasSingleGenre && !hasGenreSupport;
 
-        // Fetch data based on sort type
+        // Define sort type early
         const sortType = filters.sort || 'popularity';
 
-        // Determine how many pages to fetch to have enough data for filtering
-        const pagesToFetch = sortType === 'shuffle' ? 5 : 4;
+        // If we have a specific type filter, use search to get only that type
+        if (filters.type) {
+            logger.info(`[SourceManager] Using type-specific search for ${filters.type}`);
 
-        // Fetch anime based on primary sort type
-        for (let i = 0; i < pagesToFetch; i++) {
-            try {
-                let pageData: AnimeBase[] = [];
+            // Use search with type filter to get only the specific type
+            const typeMap: Record<string, string> = {
+                'TV': 'tv',
+                'Movie': 'movie',
+                'OVA': 'ova',
+                'ONA': 'ona',
+                'Special': 'special'
+            };
 
-                switch (sortType) {
-                    case 'trending':
-                        pageData = await source.getTrending(i + 1);
+            const searchType = typeMap[filters.type];
+            if (searchType) {
+                // Search for 'a' (common character) with type filter to get a broad range of results
+                const searchResult = await source.search('a', 1, { type: searchType });
+                allAnime.push(...searchResult.results);
+
+                // If we need more results, try additional pages
+                let page = 2;
+                while (allAnime.length < 100) { // Get at least 100 results for proper filtering
+                    try {
+                        const moreResults = await source.search('a', page, { type: searchType });
+                        if (moreResults.results.length === 0) break;
+                        allAnime.push(...moreResults.results);
+                        page++;
+                    } catch {
                         break;
-                    case 'recently_released':
-                        pageData = await source.getLatest(i + 1);
-                        break;
-                    case 'popularity':
-                    case 'shuffle':
-                    default:
-                        // For popularity and shuffle, get from trending (most popular source)
-                        pageData = await source.getTrending(i + 1);
-                        break;
+                    }
                 }
 
-                if (pageData && pageData.length > 0) {
-                    allAnime.push(...pageData);
-                }
+                logger.info(`[SourceManager] Found ${allAnime.length} ${filters.type} anime`);
+            }
+        } else {
+            // Fetch data based on sort type for general browse
 
-                // Stop if we have enough data
-                if (allAnime.length >= limit * 4) break;
-            } catch {
-                break;
+            // Determine how many pages to fetch to have enough data for filtering
+            const pagesToFetch = sortType === 'shuffle' ? 5 : 4;
+
+            // Fetch anime based on primary sort type
+            for (let i = 0; i < pagesToFetch; i++) {
+                try {
+                    let pageData: AnimeBase[] = [];
+
+                    switch (sortType) {
+                        case 'trending':
+                            pageData = await source.getTrending(i + 1);
+                            break;
+                        case 'recently_released':
+                            pageData = await source.getLatest(i + 1);
+                            break;
+                        case 'popularity':
+                        case 'shuffle':
+                        default:
+                            // For popularity and shuffle, get from trending (most popular source)
+                            pageData = await source.getTrending(i + 1);
+                            break;
+                    }
+
+                    if (pageData && pageData.length > 0) {
+                        allAnime.push(...pageData);
+                    }
+
+                    // Stop if we have enough data
+                    if (allAnime.length >= 100) break;
+                } catch {
+                    break;
+                }
             }
         }
 

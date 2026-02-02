@@ -157,7 +157,7 @@ export class ConsumetSource extends BaseAnimeSource {
         return statusMap[String(status)?.toLowerCase()] || 'Completed';
     }
 
-    async search(query: string, page: number = 1): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any): Promise<AnimeSearchResult> {
         const cacheKey = `search:${query}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;

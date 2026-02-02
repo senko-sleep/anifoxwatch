@@ -72,6 +72,17 @@ app.get('/health', (_req: Request, res: Response) => {
     });
 });
 
+// API health check endpoint
+app.get('/api/health', (_req: Request, res: Response) => {
+    res.set('Cache-Control', 'no-cache');
+    res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        version: '1.0.0',
+        uptime: process.uptime()
+    });
+});
+
 // API routes
 app.use('/api/anime', animeRoutes);
 app.use('/api/sources', sourcesRoutes);
@@ -137,9 +148,7 @@ process.on('SIGTERM', () => {
 const startServer = (port: number) => {
     const server = app.listen(port, () => {
         const isProduction = process.env.NODE_ENV === 'production';
-        const baseUrl = isProduction
-            ? `https://anifoxwatch.onrender.com`
-            : `http://localhost:${port}`;
+        const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
 
         console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
@@ -149,7 +158,7 @@ const startServer = (port: number) => {
 ║   Server: ${baseUrl}                                ║
 ║   API Docs: ${baseUrl}/api                          ║
 ║   Health: ${baseUrl}/api/health                       ║
-║   Port: ${port} ${isProduction ? '(Render.com)' : '(Local)'}                 ║
+║   Port: ${port} ${isProduction ? '(Production)' : '(Local)'}                 ║
 ║                                                                  ║
 ║   📡 Streaming Sources (Priority Order):                         ║
 ║   • 9Anime - Primary, HD Sub/Dub (Most Reliable)                 ║

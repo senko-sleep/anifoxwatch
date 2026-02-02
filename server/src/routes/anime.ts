@@ -298,7 +298,7 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
         } = req.query;
 
         const pageNum = parseInt(page as string, 10) || 1;
-        const limitNum = Math.min(parseInt(limit as string, 10) || 25, 50);
+        const limitNum = parseInt(limit as string, 10) || 25;
 
         const genreParam = (genres as string) || (genre as string);
         const parsedGenres = genreParam ? genreParam.split(',').map(g => g.trim()) : [];

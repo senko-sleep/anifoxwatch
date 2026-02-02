@@ -21,7 +21,7 @@ export interface AnimeSource {
     healthCheck(): Promise<boolean>;
 
     // Search
-    search(query: string, page?: number): Promise<AnimeSearchResult>;
+    search(query: string, page?: number, filters?: any): Promise<AnimeSearchResult>;
 
     // Get anime details
     getAnime(id: string): Promise<AnimeBase | null>;
@@ -48,7 +48,7 @@ export abstract class BaseAnimeSource implements AnimeSource {
     isAvailable: boolean = true;
 
     abstract healthCheck(): Promise<boolean>;
-    abstract search(query: string, page?: number): Promise<AnimeSearchResult>;
+    abstract search(query: string, page?: number, filters?: any): Promise<AnimeSearchResult>;
     abstract getAnime(id: string): Promise<AnimeBase | null>;
     abstract getEpisodes(animeId: string): Promise<Episode[]>;
     abstract getTrending(page?: number): Promise<AnimeBase[]>;

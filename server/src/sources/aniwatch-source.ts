@@ -8,8 +8,8 @@ type AniWatchApiAnime = {
     id?: string;
     name?: string;
     title?:
-        | string
-        | {
+    | string
+    | {
         english?: string;
         romaji?: string;
         native?: string;
@@ -150,7 +150,7 @@ export class AniwatchSource extends BaseAnimeSource {
         return 'Completed';
     }
 
-    async search(query: string, page: number = 1): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any): Promise<AnimeSearchResult> {
         const cacheKey = `search:${query}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
@@ -208,7 +208,7 @@ export class AniwatchSource extends BaseAnimeSource {
                     number: epNumber,
                     title: (e.title as string | undefined) || `Episode ${epNumber}`,
                     isFiller: Boolean(e.isFiller),
-                hasSub: true,
+                    hasSub: true,
                     hasDub: Boolean((e.hasDub as boolean | undefined) ?? response.data.hasDub),
                     thumbnail: e.image as string | undefined
                 };

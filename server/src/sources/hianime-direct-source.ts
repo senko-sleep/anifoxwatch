@@ -145,13 +145,13 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         }
     }
 
-    async search(query: string, page: number = 1): Promise<AnimeSearchResult> {
-        const cacheKey = `search:${query}:${page}`;
+    async search(query: string, page: number = 1, filters?: any): Promise<AnimeSearchResult> {
+        const cacheKey = `search:${query}:${page}:${JSON.stringify(filters || {})}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.getScraper().search(query, page);
+            const data = await this.getScraper().search(query, page, filters);
 
             const result: AnimeSearchResult = {
                 results: (data.animes || []).map((a: any) => this.mapAnime(a)),

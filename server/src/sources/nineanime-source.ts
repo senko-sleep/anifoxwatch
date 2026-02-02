@@ -144,11 +144,15 @@ export class NineAnimeSource extends BaseAnimeSource {
 
         return puppeteer.launch({
             headless: true, // Use headless for server
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-web-security',
                 '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--js-flags="--max-old-space-size=256"'
             ]
         });
     }
