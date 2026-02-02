@@ -6,7 +6,8 @@ import {
     GogoanimeSource,
     ConsumetSource,
     NineAnimeSource,
-    AniwaveSource
+    AniwaveSource,
+    WatchHentaiSource
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource } from '../sources/base-source.js';
@@ -33,7 +34,7 @@ export class SourceManager {
     private sources: Map<string, StreamingSource> = new Map();
     private primarySource: string = 'HiAnimeDirect';
     private healthStatus: Map<string, SourceHealth> = new Map();
-    private sourceOrder: string[] = ['HiAnimeDirect', 'HiAnime', 'Gogoanime', '9Anime', 'Aniwave', 'Aniwatch', 'Consumet'];
+    private sourceOrder: string[] = ['HiAnimeDirect', 'HiAnime', 'Gogoanime', '9Anime', 'Aniwave', 'Aniwatch', 'Consumet', 'WatchHentai'];
 
     // Concurrency control for API requests
     private globalActiveRequests = 0;
@@ -57,6 +58,8 @@ export class SourceManager {
         this.registerSource(new AniwaveSource());
         this.registerSource(new AniwatchSource());
         this.registerSource(new ConsumetSource());
+        // Adult Sources - WatchHentai (Deep Scraping)
+        this.registerSource(new WatchHentaiSource());
 
         // Start health monitoring
         this.startHealthMonitor();
@@ -137,19 +140,24 @@ export class SourceManager {
         // Try preferred source first
         if (preferred && this.sources.has(preferred)) {
             const source = this.sources.get(preferred)!;
+            // Allow explicit request for Hanime/HentaiHaven even if we might consider it "unavailable" via normal health checks if specific logic applies, but strictly for now rely on isAvailable
             if (source.isAvailable) return source;
         }
 
         // Try sources in priority order
         for (const name of this.sourceOrder) {
+            // Skip adult sources in general availability unless specifically requested (which is handled above)
+            if (name === 'WatchHentai') continue;
+
             if (this.sources.has(name)) {
                 const source = this.sources.get(name)!;
                 if (source.isAvailable) return source;
             }
         }
 
-        // Fallback to any available source
-        for (const source of this.sources.values()) {
+        // Fallback to any available source (excluding Adult)
+        for (const [name, source] of this.sources.entries()) {
+            if (name === 'WatchHentai') continue;
             if (source.isAvailable) return source;
         }
 
@@ -157,7 +165,21 @@ export class SourceManager {
     }
 
     private getStreamingSource(id: string): StreamingSource | null {
-        // Determine source from ID prefix
+        const lowerId = id.toLowerCase();
+
+        // Check for AniList IDs first - these need special handling
+        if (lowerId.startsWith('anilist-')) {
+            // AniList IDs don't have direct streaming links
+            // They'll need to be looked up by title or use fallback
+            // Return the primary source for title-based search fallback
+            const primarySource = this.getAvailableSource();
+            if (primarySource) {
+                logger.debug(`[SourceManager] AniList ID detected, using fallback source: ${primarySource.name}`);
+                return primarySource;
+            }
+            return null;
+        }
+
         // HiAnimeDirect is preferred for hianime- prefixed IDs (deep scraping)
         const prefixes = [
             { prefix: 'hianime-', source: 'HiAnimeDirect' },
@@ -166,10 +188,15 @@ export class SourceManager {
             { prefix: 'aniwatch-', source: 'Aniwatch' },
             { prefix: 'gogoanime-', source: 'Gogoanime' },
             { prefix: 'consumet-', source: 'Consumet' },
+            { prefix: 'hanime-', source: 'WatchHentai' },
+            { prefix: 'hh-', source: 'WatchHentai' },
+            { prefix: 'watchhentai-', source: 'WatchHentai' },
+            { prefix: 'watchhentai-series/', source: 'WatchHentai' },
+            { prefix: 'watchhentai-videos/', source: 'WatchHentai' },
         ];
 
         for (const { prefix, source } of prefixes) {
-            if (id.toLowerCase().startsWith(prefix)) {
+            if (lowerId.startsWith(prefix)) {
                 const preferredSource = this.sources.get(source);
                 if (preferredSource?.isAvailable) {
                     return preferredSource;
@@ -187,35 +214,279 @@ export class SourceManager {
 
     // ============ ANIME DATA METHODS ============
 
-    async search(query: string, page: number = 1, sourceName?: string): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, sourceName?: string, options?: { mode?: 'safe' | 'mixed' | 'adult' }): Promise<AnimeSearchResult> {
         const timer = new PerformanceTimer(`Search: ${query}`, { query, page });
-        const source = this.getAvailableSource(sourceName);
+        const mode = options?.mode || 'safe';
 
-        if (!source) {
-            logger.warn(`No available source for search`, { query, page }, 'SourceManager');
+        if (mode === 'adult') {
+            const adultSources = ['WatchHentai']
+                .map(name => this.getAvailableSource(name))
+                .filter(source => source && source.isAvailable) as StreamingSource[];
+
+            // Add Gogoanime as fallback if available, since it hosts some uncensored/hentai content
+            const gogo = this.getAvailableSource('Gogoanime');
+            if (gogo) adultSources.push(gogo);
+
+            if (adultSources.length === 0) {
+                // Try to force get them if getAvailableSource failed due to strict checks but we want to try?
+                // getAvailableSource uses isAvailable check.
+                throw new Error('Adult source (WatchHentai/Gogoanime) are not available');
+            }
+
+            try {
+                const searchPromises = adultSources.map(source =>
+                    source.search(query, page)
+                        .then(res => ({ ...res, sourceName: source.name }))
+                        .catch(e => ({ results: [], totalPages: 0, currentPage: page, hasNextPage: false, sourceName: source.name }))
+                );
+
+                const results = await Promise.all(searchPromises);
+
+                // Merge results
+                const combinedResults: AnimeBase[] = [];
+                let maxTotalPages = 0;
+                let hasNextPage = false;
+
+                results.forEach(r => {
+                    if (r.results) combinedResults.push(...r.results);
+                    if (r.totalPages > maxTotalPages) maxTotalPages = r.totalPages;
+                    if (r.hasNextPage) hasNextPage = true;
+                });
+
+                const uniqueResults = this.deduplicateResults(combinedResults);
+
+                timer.end();
+                return {
+                    results: uniqueResults,
+                    totalPages: maxTotalPages,
+                    currentPage: page,
+                    hasNextPage: hasNextPage,
+                    totalResults: uniqueResults.length,
+                    source: adultSources.map(s => s.name).join('+')
+                };
+            } catch (error) {
+                throw new Error('Adult search failed');
+            }
+        }
+
+        // Mixed Mode: Search both Preferred/Selected source AND Adult sources, then merge
+        if (mode === 'mixed') {
+            const standardSources = this.sourceOrder
+                .filter(name => name !== 'WatchHentai')
+                .map(name => this.sources.get(name))
+                .filter(source => source && source.isAvailable)
+                .slice(0, 2) as StreamingSource[];
+
+            const adultSources = ['WatchHentai']
+                .map(name => this.getAvailableSource(name))
+                .filter(source => source && source.isAvailable) as StreamingSource[];
+
+            const searchPromises: Promise<AnimeSearchResult>[] = [];
+
+            // Add standard sources
+            standardSources.forEach(source => {
+                searchPromises.push(source.search(query, page).catch(e => ({
+                    results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: source.name
+                })));
+            });
+
+            // Add adult sources
+            adultSources.forEach(source => {
+                searchPromises.push(source.search(query, page).catch(e => ({
+                    results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: source.name
+                })));
+            });
+
+            const results = await Promise.all(searchPromises);
+
+            // Merge results
+            const combinedResults: AnimeBase[] = [];
+            let maxTotalPages = 0;
+            let hasNextPage = false;
+
+            results.forEach(r => {
+                if (r.results) combinedResults.push(...r.results);
+                if (r.totalPages > maxTotalPages) maxTotalPages = r.totalPages;
+                if (r.hasNextPage) hasNextPage = true;
+            });
+
+            // Deduplicate
+            const uniqueResults = this.deduplicateResults(combinedResults);
+
+            timer.end();
+            return {
+                results: uniqueResults,
+                totalPages: maxTotalPages,
+                currentPage: page,
+                hasNextPage: hasNextPage,
+                totalResults: uniqueResults.length,
+                source: 'Mixed'
+            };
+        }
+
+        // Safe Mode (Default)
+        // If a specific source is requested, use it
+        if (sourceName) {
+            const source = this.getAvailableSource(sourceName);
+            if (!source) {
+                logger.warn(`Requested source ${sourceName} not available`, { query }, 'SourceManager');
+                return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
+            }
+            try {
+                const result = await source.search(query, page);
+                timer.end();
+                return result;
+            } catch (error) {
+                logger.error(`Search failed with source ${sourceName}`, error as Error, { query });
+                throw error;
+            }
+        }
+
+        // Multi-source search for robustness (Top 3 sources)
+        const sourcesToTry = this.sourceOrder
+            .filter(name => name !== 'WatchHentai') // Exclude adult sources
+            .map(name => this.sources.get(name))
+            .filter(source => source && source.isAvailable)
+            .slice(0, 3) as StreamingSource[]; // Use top 3 available sources
+
+        if (sourcesToTry.length === 0) {
+            logger.warn(`No available sources for search`, { query }, 'SourceManager');
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
         }
 
         try {
-            logger.sourceRequest(source.name, 'search', { query, page });
-            const result = await source.search(query, page);
-            logger.sourceResponse(source.name, 'search', true, { resultCount: result.results.length });
+            logger.info(`Starting multi-source search with: ${sourcesToTry.map(s => s.name).join(', ')}`, { query });
+
+            const searchPromises = sourcesToTry.map(source =>
+                source.search(query, page)
+                    .then(res => ({ ...res, sourceName: source.name }))
+                    .catch(error => {
+                        logger.warn(`Search failed on ${source.name}: ${error.message}`);
+                        return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, sourceName: source.name };
+                    })
+            );
+
+            const results = await Promise.all(searchPromises);
+
+            // Merge results
+            const combinedResults: AnimeBase[] = [];
+            let maxTotalPages = 0;
+            let hasNextPage = false;
+            let successfulSources: string[] = [];
+
+            results.forEach(r => {
+                if (r.results && r.results.length > 0) {
+                    combinedResults.push(...r.results);
+                    successfulSources.push(r.sourceName);
+                }
+                if (r.totalPages > maxTotalPages) maxTotalPages = r.totalPages;
+                if (r.hasNextPage) hasNextPage = true;
+            });
+
+            // Deduplicate
+            const uniqueResults = this.deduplicateResults(combinedResults);
+
             timer.end();
-            return result;
+            return {
+                results: uniqueResults,
+                totalPages: maxTotalPages,
+                currentPage: page,
+                hasNextPage: hasNextPage,
+                totalResults: uniqueResults.length,
+                source: successfulSources.join('+') || 'None'
+            };
+
         } catch (error) {
-            logger.error(`Search failed for ${source.name}`, error as Error, { query, page }, 'SourceManager');
-            // Try fallback
-            source.isAvailable = false;
-            const fallback = this.getAvailableSource();
-            if (fallback && fallback !== source) {
-                logger.failover(source.name, fallback.name, 'search failed', { query, page });
-                return fallback.search(query, page);
-            }
+            logger.error(`Multi-source search failed`, error as Error, { query });
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
         }
     }
 
+    /**
+     * Deduplicate anime results based on ID and title similarity
+     */
+    private deduplicateResults(results: AnimeBase[]): AnimeBase[] {
+        const unique = new Map<string, AnimeBase>();
+        const titles = new Set<string>();
+
+        for (const anime of results) {
+            // Check ID
+            if (unique.has(anime.id)) continue;
+
+            // Check title similarity (simple normalization)
+            const normalizedTitle = this.normalizeTitle(anime.title);
+            if (titles.has(normalizedTitle)) continue;
+
+            unique.set(anime.id, anime);
+            titles.add(normalizedTitle);
+        }
+
+        return Array.from(unique.values());
+    }
+
+    /**
+     * Get anime details by ID
+     * Handles both streaming IDs and AniList IDs
+     * For AniList IDs, does a title-based search to find the streaming source
+     */
     async getAnime(id: string): Promise<AnimeBase | null> {
+        const lowerId = id.toLowerCase();
+
+        // Handle AniList IDs specially - do title-based search
+        if (lowerId.startsWith('anilist-')) {
+            const anilistId = lowerId.replace('anilist-', '');
+            const numericId = parseInt(anilistId, 10);
+
+            if (isNaN(numericId)) {
+                logger.warn(`[SourceManager] Invalid AniList ID: ${anilistId}`);
+                return null;
+            }
+
+            logger.info(`[SourceManager] AniList ID detected: ${anilistId}, fetching by ID`);
+
+            try {
+                // Get anime info from AniList by ID directly
+                const anilistData = await anilistService.getAnimeById(numericId);
+                if (!anilistData) {
+                    logger.warn(`[SourceManager] Could not fetch AniList data for ID: ${anilistId}`);
+                    return null;
+                }
+
+                // Now search for streaming source using the title
+                const title = anilistData.title;
+                logger.info(`[SourceManager] Looking for streaming match for: ${title}`);
+                const streamingMatch = await this.findStreamingAnimeByTitle(title);
+
+                if (streamingMatch) {
+                    logger.info(`[SourceManager] Found streaming match: ${streamingMatch.id}`);
+                    // Return streaming data enriched with AniList info
+                    return {
+                        ...streamingMatch,
+                        genres: anilistData.genres,
+                        description: anilistData.description,
+                        rating: anilistData.rating || streamingMatch.rating,
+                        studios: anilistData.studios,
+                        season: anilistData.season,
+                        year: anilistData.year,
+                        source: 'HiAnimeDirect'
+                    };
+                }
+
+                // No streaming match found - return AniList data with proper ID
+                logger.warn(`[SourceManager] No streaming match found for AniList ID: ${anilistId}`);
+                return {
+                    ...anilistData,
+                    id: `anilist-${numericId}`,
+                    streamingId: undefined,
+                    source: 'AniList'
+                };
+            } catch (error) {
+                logger.error(`[SourceManager] getAnime failed for AniList ID ${anilistId}:`, error as Error);
+                return null;
+            }
+        }
+
+        // Regular streaming ID handling
         const source = this.getStreamingSource(id);
         if (!source) return null;
 
@@ -446,6 +717,7 @@ export class SourceManager {
         limit?: number;
         page?: number;
         source?: string;
+        mode?: 'safe' | 'mixed' | 'adult';
     }): Promise<{
         anime: AnimeBase[];
         totalPages: number;
@@ -453,7 +725,25 @@ export class SourceManager {
         totalResults: number;
     }> {
         const timer = new PerformanceTimer('Browse anime', filters);
-        const source = this.getAvailableSource(filters.source);
+        const mode = filters.mode || 'safe';
+
+        // Determine source based on mode
+        let effectiveSource = filters.source;
+
+        if (mode === 'adult') {
+            if (filters.source && ['WatchHentai'].includes(filters.source)) {
+                effectiveSource = filters.source;
+            } else {
+                effectiveSource = 'WatchHentai';
+            }
+        }
+
+        // For 'mixed' in Browse, it's harder because 'browse' logic is complex (uses Anilist sometimes).
+        // For simplicity in Browse, 'Mixed' might just allow standard sources but NOT exclude adult if they return it (which they don't/rarely do).
+        // OR we can't easily support Mixed browsing without massive refactor of `_executeBrowse`.
+        // Let's implement 'Adult' browse strictly first.
+
+        const source = this.getAvailableSource(effectiveSource);
 
         if (!source) {
             logger.warn(`No available source for browse`, filters, 'SourceManager');
@@ -463,165 +753,155 @@ export class SourceManager {
         try {
             logger.sourceRequest(source.name, 'browseAnime', filters);
 
-            const page = filters.page || 1;
-            const limit = filters.limit || 25;
-            const allAnime: AnimeBase[] = [];
+            // Wrap entire execution in a timeout
+            const result = await Promise.race([
+                this._executeBrowse(source, filters),
+                new Promise<any>((_, reject) =>
+                    setTimeout(() => reject(new Error(`Browse timeout after 15s`)), 15000)
+                )
+            ]);
 
-            // Type guard function to check if source supports getByGenre
-            const sourceSupportsGenre = (source: AnimeSource): source is GenreAwareSource => {
-                return 'getByGenre' in source && typeof (source as GenreAwareSource).getByGenre === 'function';
-            };
-            const hasGenreSupport = sourceSupportsGenre(source);
+            logger.sourceResponse(source.name, 'browseAnime', true, {
+                returned: result.anime.length,
+                page: filters.page,
+                totalPages: result.totalPages
+            });
+            timer.end();
 
-            // Check if we have a single genre filter and the source supports getByGenre
-            const hasSingleGenre = filters.genres && filters.genres.length === 1;
-            const skipGenreFallback = hasSingleGenre && !hasGenreSupport;
+            return result;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            logger.error(`Browse failed with source ${source.name}: ${errorMessage}`, error as Error, filters);
 
-            // Fetch data based on sort type
-            const sortType = filters.sort || 'popularity';
-
-            // Determine how many pages to fetch to have enough data for filtering
-            const pagesToFetch = sortType === 'shuffle' ? 5 : 4;
-
-            // Fetch anime based on primary sort type
-            for (let i = 0; i < pagesToFetch; i++) {
-                try {
-                    let pageData: AnimeBase[] = [];
-
-                    switch (sortType) {
-                        case 'trending':
-                            pageData = await source.getTrending(i + 1);
-                            break;
-                        case 'recently_released':
-                            pageData = await source.getLatest(i + 1);
-                            break;
-                        case 'popularity':
-                        case 'shuffle':
-                        default:
-                            // For popularity and shuffle, get from trending (most popular source)
-                            pageData = await source.getTrending(i + 1);
-                            break;
-                    }
-
-                    if (pageData && pageData.length > 0) {
-                        allAnime.push(...pageData);
-                    }
-
-                    // Stop if we have enough data
-                    if (allAnime.length >= limit * 4) break;
-                } catch {
-                    break;
-                }
+            // Failover
+            const fallback = this.getAvailableSource();
+            if (fallback && fallback.name !== source.name) {
+                logger.failover(source.name, fallback.name, 'filtered anime failed', filters);
+                return this.browseAnime({ ...filters, source: fallback.name });
             }
+            return { anime: [], totalPages: 0, hasNextPage: false, totalResults: 0 };
+        }
+    }
 
-            // Remove duplicates based on ID
-            const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
-            let filtered = [...uniqueAnime];
-            
-            logger.info(`[SourceManager] Genre filter check: filters.genres = ${JSON.stringify(filters.genres)}, filtered.length = ${filtered.length}`);
+    // Helper to keep browseAnime clean and timeout-wrappable
+    private async _executeBrowse(source: any, filters: any) {
+        const page = filters.page || 1;
+        const limit = filters.limit || 25;
+        const allAnime: AnimeBase[] = [];
 
-            // Apply type filter
+        // Type guard function to check if source supports getByGenre
+        const sourceSupportsGenre = (source: AnimeSource): source is GenreAwareSource => {
+            return 'getByGenre' in source && typeof (source as GenreAwareSource).getByGenre === 'function';
+        };
+        const hasGenreSupport = sourceSupportsGenre(source);
+
+        // Check if we have a single genre filter and the source supports getByGenre
+        const hasSingleGenre = filters.genres && filters.genres.length === 1;
+        const skipGenreFallback = hasSingleGenre && !hasGenreSupport;
+
+        // Fetch data based on sort type
+        const sortType = filters.sort || 'popularity';
+
+        // Determine how many pages to fetch to have enough data for filtering
+        const pagesToFetch = sortType === 'shuffle' ? 5 : 4;
+
+        // Fetch anime based on primary sort type
+        for (let i = 0; i < pagesToFetch; i++) {
+            try {
+                let pageData: AnimeBase[] = [];
+
+                switch (sortType) {
+                    case 'trending':
+                        pageData = await source.getTrending(i + 1);
+                        break;
+                    case 'recently_released':
+                        pageData = await source.getLatest(i + 1);
+                        break;
+                    case 'popularity':
+                    case 'shuffle':
+                    default:
+                        // For popularity and shuffle, get from trending (most popular source)
+                        pageData = await source.getTrending(i + 1);
+                        break;
+                }
+
+                if (pageData && pageData.length > 0) {
+                    allAnime.push(...pageData);
+                }
+
+                // Stop if we have enough data
+                if (allAnime.length >= limit * 4) break;
+            } catch {
+                break;
+            }
+        }
+
+        // Remove duplicates based on ID
+        const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
+        let filtered = [...uniqueAnime];
+
+        let isPaginatedResult = false;
+        let anilistTotalPages = 0;
+        let anilistHasNextPage = false;
+
+        logger.info(`[SourceManager] Genre filter check: filters.genres = ${JSON.stringify(filters.genres)}, filtered.length = ${filtered.length}`);
+
+        // Apply genres filter - use AniList for accurate genre matching
+        if (filters.genres && filters.genres.length > 0 && !skipGenreFallback) {
+            const genreQuery = filters.genres.join(',');
+            logger.info(`[SourceManager] Applying genre filter via AniList: ${genreQuery}`);
+
+            try {
+                // Use AniList's genre search with filters and pagination
+                const anilistResult = await anilistService.searchByGenre(genreQuery, page, limit, filters);
+
+                if (anilistResult.results && anilistResult.results.length > 0) {
+                    // Enrich AniList results with streaming IDs using instant lookup
+                    await this.buildStreamingLookupTable();
+
+                    const enrichedResults = anilistResult.results.map(anime => {
+                        const streamingMatch = this.findStreamingMatchInstant(anime.title);
+                        return {
+                            ...anime,
+                            streamingId: streamingMatch?.id || undefined
+                        };
+                    });
+
+                    filtered = enrichedResults;
+                    isPaginatedResult = true;
+                    anilistTotalPages = anilistResult.totalPages;
+                    anilistHasNextPage = anilistResult.hasNextPage;
+
+                    logger.info(`[SourceManager] AniList returned ${filtered.length} results (Page ${page}/${anilistTotalPages})`);
+                } else {
+                    // Fall back to local filtering
+                    logger.info(`[SourceManager] No AniList results for ${genreQuery}, using local filtering`);
+                    filtered = filtered.filter(a => {
+                        if (!a.genres || a.genres.length === 0) return false;
+                        return filters.genres!.some((g: string) =>
+                            a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
+                        );
+                    });
+                }
+            } catch (error) {
+                logger.warn(`AniList genre search failed for ${genreQuery}, using local filtering`, undefined, 'SourceManager');
+                // Fall back to local filtering
+                filtered = filtered.filter(a => {
+                    if (!a.genres || a.genres.length === 0) return false;
+                    return filters.genres!.some((g: string) =>
+                        a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
+                    );
+                });
+            }
+        }
+
+        // Apply local filters and sorting if NOT paginated by source
+        if (!isPaginatedResult) {
+            // Apply type filter (re-added here as it was removed from top)
             if (filters.type) {
                 filtered = filtered.filter(a =>
                     a.type?.toLowerCase() === filters.type?.toLowerCase()
                 );
-            }
-
-            // Apply genres filter - use AniList for accurate genre matching
-            if (filters.genres && filters.genres.length > 0 && !skipGenreFallback) {
-                logger.info(`[SourceManager] Applying genre filter: ${filters.genres.join(', ')}`);
-                
-                // For single genre, try AniList's genre search first (most accurate)
-                if (filters.genres.length === 1) {
-                    try {
-                        const anilistResult = await anilistService.searchByGenre(filters.genres[0], page, 50);
-                        if (anilistResult.results && anilistResult.results.length > 0) {
-                            // Enrich AniList results with streaming IDs
-                            logger.info(`[SourceManager] Enriching ${anilistResult.results.length} AniList results with streaming IDs...`);
-                            
-                            const enrichedResults = await Promise.all(
-                                anilistResult.results.map(async (anime) => {
-                                    // Find streaming ID for this anime by title
-                                    const streamingMatch = await this.findStreamingAnimeByTitle(anime.title);
-                                    return {
-                                        ...anime,
-                                        streamingId: streamingMatch?.id || undefined
-                                    };
-                                })
-                            );
-                            
-                            filtered = enrichedResults;
-                            logger.info(`[SourceManager] AniList returned ${filtered.length} results for genre: ${filters.genres[0]} (${enrichedResults.filter(a => a.streamingId).length} with streaming IDs)`);
-                        } else {
-                            // Fallback to AniList tag search
-                            const tagResult = await anilistService.searchByTag(filters.genres[0], page, 50);
-                            if (tagResult.results && tagResult.results.length > 0) {
-                                filtered = tagResult.results;
-                                logger.info(`[SourceManager] AniList tag search returned ${filtered.length} results for: ${filters.genres[0]}`);
-                            } else {
-                                // No results from AniList - fall back to local filtering
-                                logger.info(`[SourceManager] No AniList results for ${filters.genres[0]}, using local filtering`);
-                                filtered = filtered.filter(a => {
-                                    if (!a.genres || a.genres.length === 0) return false;
-                                    return filters.genres!.some(g =>
-                                        a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
-                                    );
-                                });
-                            }
-                        }
-                    } catch (error) {
-                        logger.warn(`AniList genre search failed for ${filters.genres[0]}, using local filtering`, undefined, 'SourceManager');
-                        // Fall back to local filtering
-                        filtered = filtered.filter(a => {
-                            if (!a.genres || a.genres.length === 0) return false;
-                            return filters.genres!.some(g =>
-                                a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
-                            );
-                        });
-                    }
-                } else {
-                    // Multiple genres - use AniList's multi-genre search
-                    const genreQuery = filters.genres!.join(',');
-                    logger.info(`[SourceManager] Multiple genres: ${genreQuery}, using AniList multi-genre search`);
-                    try {
-                        // Use AniList's genre search with multiple genres
-                        const anilistResult = await anilistService.searchByGenre(genreQuery, page, 50);
-                        
-                        if (anilistResult.results && anilistResult.results.length > 0) {
-                            // Enrich AniList results with streaming IDs using instant lookup
-                            await this.buildStreamingLookupTable();
-                            
-                            const enrichedResults = anilistResult.results.map(anime => {
-                                const streamingMatch = this.findStreamingMatchInstant(anime.title);
-                                return {
-                                    ...anime,
-                                    streamingId: streamingMatch?.id || undefined
-                                };
-                            });
-                            
-                            filtered = enrichedResults;
-                            logger.info(`[SourceManager] AniList multi-genre search returned ${filtered.length} results (${filtered.filter(a => a.streamingId).length} with streaming IDs)`);
-                        } else {
-                            // Fall back to local filtering
-                            logger.info(`[SourceManager] No AniList results for ${genreQuery}, using local filtering`);
-                            filtered = filtered.filter(a => {
-                                if (!a.genres || a.genres.length === 0) return false;
-                                return filters.genres!.some(g =>
-                                    a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
-                                );
-                            });
-                        }
-                    } catch (error) {
-                        logger.warn(`AniList multi-genre search failed for ${genreQuery}, using local filtering`, undefined, 'SourceManager');
-                        // Fall back to local filtering
-                        filtered = filtered.filter(a => {
-                            if (!a.genres || a.genres.length === 0) return false;
-                            return filters.genres!.some(g =>
-                                a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
-                            );
-                        });
-                    }
-                }
             }
 
             // Apply status filter
@@ -689,40 +969,33 @@ export class SourceManager {
                     return order === 'asc' ? -comparison : comparison;
                 });
             }
-
-            // Paginate results - 25 per page by default
-            const startIndex = (page - 1) * limit;
-            const paginated = filtered.slice(startIndex, startIndex + limit);
-            const totalResults = filtered.length;
-            const totalPages = Math.ceil(totalResults / limit) || 1;
-            const hasNextPage = startIndex + limit < totalResults;
-
-            logger.sourceResponse(source.name, 'browseAnime', true, {
-                totalFetched: uniqueAnime.length,
-                totalFiltered: totalResults,
-                returned: paginated.length,
-                page,
-                totalPages
-            });
-            timer.end();
-
-            return {
-                anime: paginated,
-                totalPages,
-                hasNextPage,
-                totalResults
-            };
-        } catch (error) {
-            logger.error(`Browse anime failed for ${source.name}`, error as Error, filters, 'SourceManager');
-            // Try fallback
-            source.isAvailable = false;
-            const fallback = this.getAvailableSource();
-            if (fallback && fallback !== source) {
-                logger.failover(source.name, fallback.name, 'browse anime failed', filters);
-                return this.browseAnime({ ...filters, source: fallback.name });
-            }
-            return { anime: [], totalPages: 0, hasNextPage: false, totalResults: 0 };
         }
+
+        // Paginate results
+        let paginated: AnimeBase[];
+        let totalResults: number;
+        let totalPages: number;
+        let hasNextPage: boolean;
+
+        if (isPaginatedResult) {
+            paginated = filtered;
+            totalResults = anilistTotalPages * limit; // Approximate total results
+            totalPages = anilistTotalPages;
+            hasNextPage = anilistHasNextPage;
+        } else {
+            const startIndex = (page - 1) * limit;
+            paginated = filtered.slice(startIndex, startIndex + limit);
+            totalResults = filtered.length;
+            totalPages = Math.ceil(totalResults / limit) || 1;
+            hasNextPage = startIndex + limit < totalResults;
+        }
+
+        return {
+            anime: paginated,
+            totalPages,
+            hasNextPage,
+            totalResults
+        };
     }
 
     // ============ STREAMING METHODS ============
@@ -750,7 +1023,14 @@ export class SourceManager {
         }
 
         // Try other sources in priority order
+        const isHentaiHavenId = episodeId.toLowerCase().startsWith('hh-');
+        const isHanimeId = episodeId.toLowerCase().startsWith('hanime-');
+
         for (const name of this.sourceOrder) {
+            // Skip incompatible fallback sources for specialized IDs
+            if (isHentaiHavenId && name !== 'HentaiHaven') continue;
+            if (isHanimeId && name !== 'Hanime') continue;
+
             const fallbackSource = this.sources.get(name) as StreamingSource;
             if (fallbackSource?.isAvailable && fallbackSource !== source && fallbackSource.getEpisodeServers) {
                 try {
@@ -805,11 +1085,18 @@ export class SourceManager {
         }
 
         // Try fallback sources in priority order
+        const isHentaiHavenId = episodeId.toLowerCase().startsWith('hh-');
+        const isHanimeId = episodeId.toLowerCase().startsWith('hanime-');
+
         for (const name of this.sourceOrder) {
+            // Skip incompatible fallback sources for specialized IDs
+            if (isHentaiHavenId && name !== 'HentaiHaven') continue;
+            if (isHanimeId && name !== 'Hanime') continue;
+
             const fallbackSource = this.sources.get(name) as StreamingSource;
             if (fallbackSource?.isAvailable && fallbackSource !== source && fallbackSource.getStreamingLinks) {
                 try {
-                    logger.failover(source?.name || 'unknown', fallbackSource.name, 'getStreamingLinks', { episodeId, server });
+                    logger.failover(source?.name || 'unknown', fallbackSource.name, 'getStreamingLinks', { episodeId, server, category });
                     const streamData = await fallbackSource.getStreamingLinks(episodeId, server, category);
 
                     if (streamData.sources.length > 0) {
@@ -921,42 +1208,83 @@ export class SourceManager {
 
     /**
      * Search anime by genre using AniList API (most accurate genre data)
-     * Uses instant lookup table for fast matching
+     * Uses instant lookup table for fast matching with fallback to API search
      */
     async getAnimeByGenreAniList(genre: string, page: number = 1): Promise<AnimeSearchResult> {
         try {
             // Build lookup table on first genre search (lazy initialization)
             await this.buildStreamingLookupTable();
-            
+
             const result = await anilistService.searchByGenre(genre, page, 50);
             logger.info(`[SourceManager] AniList genre search for "${genre}" returned ${result.results.length} results`);
-            
+
+            // Collect titles that need fallback search
+            const titlesNeedingSearch: string[] = [];
+            const titleToAnimeMap = new Map<string, AnimeBase>();
+
             // Process results with instant lookup (fast)
-            const enrichedResults = result.results.map(anime => {
+            const enrichedResults: AnimeBase[] = [];
+
+            for (const anime of result.results) {
                 // Find streaming match using pre-built table (O(1) lookup)
                 const match = this.findStreamingMatchInstant(anime.title);
-                
+
                 if (match) {
-                    return {
+                    // Found match in lookup table - use it
+                    enrichedResults.push({
                         ...match,
                         genres: anime.genres,
                         rating: anime.rating || match.rating,
                         streamingId: match.id,
                         source: 'HiAnimeDirect'
-                    };
+                    });
+                } else {
+                    // No instant match - need to search via API
+                    titlesNeedingSearch.push(anime.title);
+                    titleToAnimeMap.set(anime.title, anime);
+                    // Keep the AniList data temporarily
+                    enrichedResults.push({
+                        ...anime,
+                        streamingId: undefined,
+                        source: 'AniList'
+                    });
                 }
-                
-                // No streaming match - keep AniList data
-                return {
-                    ...anime,
-                    streamingId: undefined,
-                    source: 'AniList'
-                };
-            });
-            
+            }
+
+            // If we have titles without matches, do batch search (limit to 10 to avoid timeout)
+            if (titlesNeedingSearch.length > 0 && titlesNeedingSearch.length <= 10) {
+                logger.info(`[SourceManager] Doing fallback search for ${titlesNeedingSearch.length} titles without instant match`);
+
+                for (const title of titlesNeedingSearch) {
+                    try {
+                        const searchMatch = await this.findStreamingAnimeByTitle(title);
+                        if (searchMatch) {
+                            // Find and update the corresponding anime entry
+                            const animeIndex = enrichedResults.findIndex(a => a.title === title);
+                            if (animeIndex >= 0) {
+                                const originalAnime = titleToAnimeMap.get(title)!;
+                                enrichedResults[animeIndex] = {
+                                    ...searchMatch,
+                                    genres: originalAnime.genres,
+                                    rating: originalAnime.rating || searchMatch.rating,
+                                    streamingId: searchMatch.id,
+                                    source: 'HiAnimeDirect'
+                                };
+                                logger.debug(`[SourceManager] Fallback search found match for: ${title}`);
+                            }
+                        }
+                    } catch (e) {
+                        logger.warn(`[SourceManager] Fallback search failed for: ${title}`);
+                    }
+                }
+            } else if (titlesNeedingSearch.length > 10) {
+                logger.warn(`[SourceManager] Skipping fallback search - too many titles (${titlesNeedingSearch.length})`);
+            }
+
             const withStreamingIds = enrichedResults.filter(a => a.streamingId).length;
-            logger.info(`[SourceManager] Genre search: ${withStreamingIds}/${enrichedResults.length} results have streaming IDs`);
-            
+            const fromAniList = enrichedResults.filter(a => a.source === 'AniList').length;
+            logger.info(`[SourceManager] Genre search complete: ${withStreamingIds}/${enrichedResults.length} have streaming IDs, ${fromAniList} are AniList-only`);
+
             return {
                 ...result,
                 results: enrichedResults
@@ -966,29 +1294,29 @@ export class SourceManager {
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'AniList' };
         }
     }
-    
+
     /**
      * Pre-built streaming lookup table for instant genre matching
      */
     private streamingLookupTable: Map<string, AnimeBase> = new Map();
     private streamingLookupBuilt = false;
-    
+
     /**
      * Build streaming lookup table on first use (lazy initialization)
      */
     private async buildStreamingLookupTable(): Promise<void> {
         if (this.streamingLookupBuilt) return;
-        
+
         logger.info(`[SourceManager] Building streaming lookup table...`);
         const start = Date.now();
-        
+
         try {
             const source = this.getAvailableSource();
             if (!source) {
                 logger.warn(`[SourceManager] No available source for lookup table`);
                 return;
             }
-            
+
             // Fetch multiple pages to build comprehensive table
             const allAnime: AnimeBase[] = [];
             // Fetch 10 pages of trending for good coverage (faster build)
@@ -1002,32 +1330,32 @@ export class SourceManager {
                     // Continue with what we have
                 }
             }
-            
+
             // Build lookup table with normalized titles
             for (const anime of allAnime) {
                 // Add multiple normalized versions
                 const normalized = this.normalizeTitle(anime.title);
                 this.streamingLookupTable.set(normalized, anime);
-                
+
                 // Add common variations
                 const altTitle = this.normalizeTitle(anime.titleJapanese || '');
                 if (altTitle && altTitle !== normalized) {
                     this.streamingLookupTable.set(altTitle, anime);
                 }
-                
+
                 // Add version without year suffix
                 const noYear = normalized.replace(/\s*\(\d{4}\)$/, '').trim();
                 if (noYear && noYear !== normalized) {
                     this.streamingLookupTable.set(noYear, anime);
                 }
-                
+
                 // Add version without season info
                 const noSeason = normalized.replace(/\s*season\s*\d*/i, '').trim();
                 if (noSeason && noSeason !== normalized && noSeason.length > 5) {
                     this.streamingLookupTable.set(noSeason, anime);
                 }
             }
-            
+
             this.streamingLookupBuilt = true;
             const duration = Date.now() - start;
             logger.info(`[SourceManager] Built streaming lookup table with ${this.streamingLookupTable.size} entries in ${duration}ms`);
@@ -1035,7 +1363,7 @@ export class SourceManager {
             logger.warn(`[SourceManager] Failed to build streaming lookup table`, { error: String(error) });
         }
     }
-    
+
     /**
      * Normalize title for consistent lookup
      */
@@ -1045,19 +1373,19 @@ export class SourceManager {
             .replace(/\s+/g, ' ')
             .trim();
     }
-    
+
     /**
      * Find streaming match instantly using pre-built table
      */
     private findStreamingMatchInstant(title: string): AnimeBase | null {
         if (!title || !this.streamingLookupBuilt) return null;
-        
+
         const normalized = this.normalizeTitle(title);
-        
+
         // Direct lookup
         let match = this.streamingLookupTable.get(normalized);
         if (match) return match;
-        
+
         // Try with common suffixes removed
         const variations = [
             normalized.replace(/\s+(movie|ova|ona|special)$/i, '').trim(),
@@ -1067,17 +1395,17 @@ export class SourceManager {
             normalized.replace(/\s*-?\s*part\s*\d*/i, '').trim(),
             normalized.replace(/\s*-?\s*\d+(st|nd|rd|th)\s*season/i, '').trim(),
         ];
-        
+
         for (const variant of variations) {
             if (variant && variant !== normalized) {
                 match = this.streamingLookupTable.get(variant);
                 if (match) return match;
             }
         }
-        
+
         return null;
     }
-    
+
     /**
      * Find streaming match using search API (fallback for better matching)
      */
@@ -1085,10 +1413,10 @@ export class SourceManager {
         try {
             const source = this.getAvailableSource();
             if (!source) return null;
-            
+
             // Search for the title (get more results for better matching)
             const searchResult = await source.search(title, 3);
-            
+
             // Find best match
             const bestMatch = this.findBestMatch(title, searchResult.results || []);
             return bestMatch;
@@ -1113,7 +1441,7 @@ export class SourceManager {
             // Fetch multiple pages of trending anime to build a comprehensive lookup table
             const allAnime: AnimeBase[] = [];
             const pagesToFetch = 5; // Get 5 pages for better coverage
-            
+
             for (let page = 1; page <= pagesToFetch; page++) {
                 try {
                     const trending = await source.getTrending(page);
@@ -1128,10 +1456,10 @@ export class SourceManager {
 
             // Remove duplicates
             const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
-            
+
             // Cache for 10 minutes
             this.setCache(cacheKey, uniqueAnime, 10 * 60 * 1000);
-            
+
             logger.info(`[SourceManager] Built streaming lookup table with ${uniqueAnime.length} anime`);
             return uniqueAnime;
         } catch (error) {
@@ -1170,27 +1498,27 @@ export class SourceManager {
     private calculateSimilarity(str1: string, str2: string): number {
         const s1 = str1.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
         const s2 = str2.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-        
+
         // Exact match after normalization
         if (s1 === s2) return 1.0;
-        
+
         // Check if one contains the other
         if (s1.includes(s2) || s2.includes(s1)) {
             const shorter = s1.length < s2.length ? s1 : s2;
             const longer = s1.length < s2.length ? s2 : s1;
             return shorter.length / longer.length; // Ratio of containment
         }
-        
+
         // Word-based matching
         const words1 = s1.split(/\s+/).filter(w => w.length > 2);
         const words2 = s2.split(/\s+/).filter(w => w.length > 2);
-        
+
         if (words1.length === 0 || words2.length === 0) return 0;
-        
-        const matches = words1.filter(w => 
+
+        const matches = words1.filter(w =>
             words2.some(w2 => w.includes(w2) || w2.includes(w))
         );
-        
+
         return matches.length / Math.max(words1.length, words2.length);
     }
 
@@ -1199,7 +1527,7 @@ export class SourceManager {
      */
     private findBestMatch(title: string, results: AnimeBase[]): AnimeBase | null {
         if (!results || results.length === 0) return null;
-        
+
         // If only one result and it's a close match, use it
         if (results.length === 1) {
             const similarity = this.calculateSimilarity(title, results[0].title);
@@ -1208,11 +1536,11 @@ export class SourceManager {
             }
             return null;
         }
-        
+
         // Find best match
         let bestMatch: AnimeBase | null = null;
         let bestScore = 0;
-        
+
         for (const anime of results) {
             const score = this.calculateSimilarity(title, anime.title);
             if (score > bestScore) {
@@ -1220,12 +1548,12 @@ export class SourceManager {
                 bestMatch = anime;
             }
         }
-        
+
         // Only return if score is above threshold
         if (bestMatch && bestScore > 0.4) {
             return bestMatch;
         }
-        
+
         return null;
     }
 
@@ -1250,7 +1578,7 @@ export class SourceManager {
 
             // Search with the title (get more results for better matching)
             const searchResult = await source.search(title, 5);
-            
+
             // Cache the results
             this.searchCache.set(cacheKey, {
                 results: searchResult.results || [],
@@ -1258,7 +1586,7 @@ export class SourceManager {
             });
 
             const bestMatch = this.findBestMatch(title, searchResult.results || []);
-            
+
             if (bestMatch) {
                 logger.info(`[SourceManager] Found streaming match for "${title}": ${bestMatch.id}`);
                 return bestMatch;
@@ -1311,7 +1639,7 @@ export class SourceManager {
             const sourceSupportsGenre = (source: AnimeSource): source is GenreAwareSource => {
                 return 'getByGenre' in source && typeof (source as GenreAwareSource).getByGenre === 'function';
             };
-            
+
             if (sourceSupportsGenre(source)) {
                 const genreSource = source as GenreAwareSource;
                 const result = await genreSource.getByGenre(genre, page);
@@ -1402,3 +1730,5 @@ export class SourceManager {
 
 // Singleton instance
 export const sourceManager = new SourceManager();
+
+

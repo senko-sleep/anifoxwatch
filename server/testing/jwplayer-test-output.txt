@@ -1,0 +1,74 @@
+Testing WatchHentai JWPlayer page extraction...
+
+Fetching player page: https://watchhentai.net/jwplayer/?source=https%3A%2F%2Fhstorage.xyz%2Ffiles%2FA%2Fasa-made-shirudaku-oyakodon%2Fasa-made-shirudaku-oyakodon-1.mp4&id=39389&type=mp4&quality=1080p,480p,720p
+
+Got player HTML (13296 bytes)
+
+Saved HTML to testing/jwplayer-page.html
+
+Found JWPlayer setup sources:
+
+        
+    
+        {
+    file: "https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_1080p.mp4",
+    type: "video/mp4",
+    label: "1080p"
+},
+
+                {
+            file: "https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_720p.mp4",
+            type: "video/mp4",
+            label: "720p"
+        },
+        
+                {
+            file: "https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_480p.mp4",
+            type: "video/mp4",
+            label: "480p",
+            default: true
+        },
+        
+            
+
+Found file URLs in jwplayer config:
+  file: "https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_1080p.mp4"
+  file: "https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_720p.mp4"
+  file: "https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_480p.mp4"
+
+Found sources array:
+
+        
+    
+        {
+    file: "https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_1080p.mp4",
+    type: "video/mp4",
+    label: "1080p"
+},
+
+                {
+            file: "https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_720p.mp4",
+            type: "video/mp4",
+            label: "720p"
+        },
+        
+                {
+            file: "https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shir
+
+All video URLs found:
+  https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1.mp4
+  https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_1080p.mp4
+  https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_720p.mp4
+  https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_480p.mp4
+
+
+=== Testing URL accessibility ===
+
+Testing: https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1.mp4
+❌ Failed: Request failed with status code 404, Status: 404
+
+Testing: https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_1080p.mp4
+✅ Accessible! Status: 200, Content-Type: video/mp4
+
+Testing: https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_720p.mp4
+✅ Accessible! Status: 200, Content-Type: video/mp4

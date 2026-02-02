@@ -1,0 +1,10 @@
+Testing boku-no-pico stream extraction...
+
+Episode ID: videos/boku-no-pico-episode-1-id-01
+
+=== RESULT ===
+Source: WatchHentai
+Number of sources: 1
+
+Sources:
+  1. [auto] https://hstorage.xyz/files/B/boku-no-piko/boku-no-piko-1.mp4

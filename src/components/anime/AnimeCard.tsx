@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Play, Star, Tv, Calendar } from 'lucide-react';
 import { Anime } from '@/types/anime';
 import { cn } from '@/lib/utils';
@@ -14,14 +14,25 @@ interface AnimeCardProps {
 export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: AnimeCardProps) => {
   // Use streamingId if available (for AniList results), otherwise use id
   const navigateId = anime.streamingId || anime.id;
-  
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // Navigate to watch page with current location as state for preserving browse state
+    navigate(`/watch?id=${encodeURIComponent(navigateId)}`, {
+      state: { from: location.pathname + location.search }
+    });
+  };
+
   return (
-    <Link
-      to={`/watch/${navigateId}`}
+    <a
+      href={`/watch?id=${encodeURIComponent(navigateId)}`}
       style={style}
       onMouseEnter={onMouseEnter}
+      onClick={handleClick}
       className={cn(
-        'group relative flex flex-col',
+        'group relative flex flex-col cursor-pointer',
         className
       )}
     >
@@ -107,6 +118,6 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: A
           )}
         </div>
       </div>
-    </Link>
+    </a>
   );
 };

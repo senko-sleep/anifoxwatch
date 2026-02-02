@@ -1,0 +1,33 @@
+Testing Boku no Pico JWPlayer page extraction...
+
+Fetching player page: https://watchhentai.net/jwplayer/?source=https%3A%2F%2Fhstorage.xyz%2Ffiles%2FB%2Fboku-no-piko%2Fboku-no-piko-1.mp4&id=7028&type=mp4
+
+Got player HTML (12641 bytes)
+
+Saved HTML to testing/boku-player.html
+
+Found JWPlayer setup sources:
+
+                {
+            file: "https://hstorage.xyz/files/B/boku-no-piko/boku-no-piko-1.mp4",
+            type: "video/mp4",
+        },
+                
+            
+
+Found file URLs in jwplayer config:
+  file: "https://hstorage.xyz/files/B/boku-no-piko/boku-no-piko-1.mp4"
+
+Found sources array:
+
+                {
+            file: "https://hstorage.xyz/files/B/boku-no-piko/boku-no-piko-1.mp4",
+            type: "video/mp4",
+        },
+                
+            
+
+Extracted 0 sources using current logic:
+
+All video URLs found:
+  https://hstorage.xyz/files/B/boku-no-piko/boku-no-piko-1.mp4

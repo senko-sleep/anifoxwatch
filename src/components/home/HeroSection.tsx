@@ -60,10 +60,10 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
       <div className="absolute inset-0">
         <img
           src={
-            currentAnime.bannerImage || 
-            currentAnime.banner || 
-            currentAnime.coverImage || 
-            currentAnime.cover || 
+            currentAnime.bannerImage ||
+            currentAnime.banner ||
+            currentAnime.coverImage ||
+            currentAnime.cover ||
             currentAnime.image
           }
           alt={currentAnime.title}
@@ -71,7 +71,7 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
             "w-full h-full transition-all duration-1000 ease-in-out",
             isTransitioning ? "opacity-30 scale-105" : "opacity-50 scale-100"
           )}
-          style={{ 
+          style={{
             objectFit: 'cover',
             objectPosition: 'center 25%'
           }}
@@ -135,8 +135,8 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
           {/* Clean description - truncated for better UX */}
           <div className="max-w-2xl">
             <p className="text-white/90 text-base leading-relaxed line-clamp-3">
-              {currentAnime.description 
-                ? currentAnime.description.length > 150 
+              {currentAnime.description
+                ? currentAnime.description.length > 150
                   ? currentAnime.description.substring(0, 150) + '...'
                   : currentAnime.description
                 : "Discover this amazing anime and start watching now!"
@@ -148,7 +148,7 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
           <div className="flex items-center gap-4 pt-2">
             <Button
               size="lg"
-              onClick={() => navigate(`/watch/${currentAnime.id}`)}
+              onClick={() => navigate(`/watch?id=${encodeURIComponent(currentAnime.id)}`)}
               className="bg-white hover:bg-gray-100 text-black font-semibold px-8 py-3 rounded-lg gap-2"
             >
               <Play className="w-5 h-5" />

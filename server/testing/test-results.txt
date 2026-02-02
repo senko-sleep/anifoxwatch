@@ -1,0 +1,89 @@
+
+================================================================================
+TEST RESULTS SUMMARY
+================================================================================
+
+📊 Total Sources Tested: 55
+✅ Working (with m3u8): 0
+⚠️  Working (no m3u8): 1
+❌ Failed/Unavailable: 21
+⚠️  No Streams Found: 33
+
+================================================================================
+⚠️  SOURCES WITH STREAMS (no m3u8 detected)
+================================================================================
+
+📺 HentaiFox (https://hentaifox.com)
+   Response Time: 423ms
+   Working URLs:
+   ⚠️  https://hentaifox.com/242529197.mp4
+
+================================================================================
+❌ FAILED/UNAVAILABLE SOURCES
+================================================================================
+
+📺 HentaiVA (https://hentaiva.com)
+   Error: Error: getaddrinfo ENOTFOUND hentaiva.com
+
+📺 HentaiShentai (https://hentaishentai.org)
+   Error: Error: getaddrinfo ENOTFOUND hentaishentai.org
+
+📺 HentaiWorld (https://hentaiworld.tv)
+   Error: Error: write EPROTO 086D0000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\ws\deps\openssl\openssl\ssl\record\ssl3_record.c:355:
+
+
+📺 HentaiPlus (https://hentaiplus.co)
+   Error: Error: socket hang up
+
+📺 HanimeRaws (https://hanimeraws.com)
+   Error: Error: getaddrinfo ENOTFOUND hanimeraws.com
+
+📺 HentaiDB (https://hentaidb.org)
+   Error: AxiosError: timeout of 10000ms exceeded
+
+📺 GogoAnime (https://gogoanime.cm)
+   Error: Error: getaddrinfo ENOTFOUND gogoanime.cm
+
+📺 AniWave (https://aniwave.to)
+   Error: Error: write EPROTO 086D0000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\ws\deps\openssl\openssl\ssl\record\ssl3_record.c:355:
+
+
+📺 HentaiMaster (https://hentaimaster.com)
+   Error: AxiosError: timeout of 10000ms exceeded
+
+📺 Hentai4Free (https://hentai4free.com)
+   Error: Error: getaddrinfo ENOTFOUND hentai4free.com
+
+📺 NewHentai (https://newhentai.com)
+   Error: Error: certificate has expired
+
+📺 FreeHentai (https://freehentai.org)
+   Error: Error: getaddrinfo ENOTFOUND freehentai.org
+
+📺 SimplyHentai (https://simplyhentai.com)
+   Error: Error: certificate has expired
+
+📺 FListHentai (https://flisthentai.com)
+   Error: Error: getaddrinfo ENOTFOUND flisthentai.com
+
+📺 HentaiArcade (https://hentaiarcade.net)
+   Error: Error: getaddrinfo ENOTFOUND hentaiarcade.net
+
+📺 StreamHentai (https://streamhentai.com)
+   Error: Error: self-signed certificate
+
+📺 HentaiPlay (https://hentaiplay.net)
+   Error: Error: write EPROTO 086D0000:error:0A00010B:SSL routines:ssl3_get_record:wrong version number:c:\ws\deps\openssl\openssl\ssl\record\ssl3_record.c:355:
+
+
+📺 VidStreaming (https://vidstreaming.io)
+   Error: Error: socket hang up
+
+📺 Streamlare (https://streamlare.com)
+   Error: Error: socket hang up
+
+📺 Upstream (https://upstream.to)
+   Error: Error: self-signed certificate
+
+📺 HentaiVault (https://hentaivault.net)
+   Error: Error: getaddrinfo ENOTFOUND hentaivault.net

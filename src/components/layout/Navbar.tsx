@@ -29,7 +29,7 @@ export const Navbar = () => {
     try {
       const randomAnime = await apiClient.getRandomAnime();
       if (randomAnime) {
-        navigate(`/watch/${randomAnime.id}`);
+        navigate(`/watch?id=${encodeURIComponent(randomAnime.id)}`);
       }
     } catch (error) {
       console.error('Failed to get random anime:', error);

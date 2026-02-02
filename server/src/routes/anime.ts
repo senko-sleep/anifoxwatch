@@ -10,20 +10,58 @@ const router = Router();
  * @query source - Preferred source (optional)
  */
 router.get('/search', async (req: Request, res: Response): Promise<void> => {
+    const startTime = Date.now();
     try {
-        const { q, page = '1', source } = req.query;
+        const { q, page = '1', source, mode = 'safe' } = req.query;
 
         if (!q || typeof q !== 'string') {
-            res.status(400).json({ error: 'Query parameter "q" is required' });
+            res.status(400).json({
+                error: 'Query parameter "q" is required',
+                results: [],
+                totalPages: 0,
+                currentPage: 1,
+                hasNextPage: false
+            });
             return;
         }
 
         const pageNum = parseInt(page as string, 10) || 1;
-        const result = await sourceManager.search(q, pageNum, source as string | undefined);
-        res.json(result);
+        const query = q.trim();
+        const searchMode = (mode as 'safe' | 'mixed' | 'adult');
+
+        console.log(`[AnimeRoutes] 🔍 Search: "${query}" page ${pageNum} source: ${source || 'auto'} mode: ${searchMode}`);
+
+        const result = await sourceManager.search(query, pageNum, source as string | undefined, { mode: searchMode });
+
+        const duration = Date.now() - startTime;
+        console.log(`[AnimeRoutes] ✅ Search completed: "${query}" returned ${result.results?.length || 0} results in ${duration}ms`);
+
+        const totalResults = result.results?.length ? result.results.length * (result.totalPages || 1) : 0;
+        res.json({
+            results: result.results || [],
+            totalPages: result.totalPages || 0,
+            currentPage: result.currentPage || pageNum,
+            hasNextPage: result.hasNextPage || false,
+            totalResults,
+            source: result.source || 'unknown'
+        });
     } catch (error) {
-        console.error('Search error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        const duration = Date.now() - startTime;
+        const { q } = req.query;
+        console.error(`[AnimeRoutes] ❌ Search error for "${q}":`, error);
+
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const isTimeout = errorMessage.includes('timeout');
+
+        res.status(isTimeout ? 504 : 500).json({
+            error: isTimeout ? 'Search timed out. Please try again.' : 'Search failed. Please try again.',
+            details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+            results: [],
+            totalPages: 0,
+            currentPage: 1,
+            hasNextPage: false,
+            retryAfter: 5
+        });
     }
 });
 
@@ -146,7 +184,7 @@ router.get('/genre-anilist/:genre', async (req: Request, res: Response): Promise
 
         const pageNum = parseInt(page as string, 10) || 1;
         console.log(`[AnimeRoutes] Searching AniList for genre: ${genre}, page: ${pageNum}`);
-        
+
         const result = await sourceManager.getAnimeByGenreAniList(genre, pageNum);
         res.json(result);
     } catch (error) {
@@ -241,11 +279,12 @@ router.get('/filter', async (req: Request, res: Response): Promise<void> => {
  * @query source - Preferred source (optional)
  */
 router.get('/browse', async (req: Request, res: Response): Promise<void> => {
+    const startTime = Date.now();
     try {
         const {
             type,
             genre,
-            genres, // Support both "genre" and "genres" query params
+            genres,
             status,
             year,
             startYear,
@@ -254,24 +293,25 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
             limit = '25',
             sort = 'popularity',
             order = 'desc',
-            source
+            source,
+            mode = 'safe'
         } = req.query;
 
         const pageNum = parseInt(page as string, 10) || 1;
-        const limitNum = Math.min(parseInt(limit as string, 10) || 25, 50); // Cap at 50
+        const limitNum = Math.min(parseInt(limit as string, 10) || 25, 50);
 
-        // Parse multiple genres if provided - support both "genre" and "genres" params
         const genreParam = (genres as string) || (genre as string);
         const parsedGenres = genreParam ? genreParam.split(',').map(g => g.trim()) : [];
+        const browseMode = (mode as 'safe' | 'mixed' | 'adult');
 
-        // Check if this is a genre-only search (single genre with no other filters)
-        // In this case, use AniList for accurate genre results
-        const isGenreOnlySearch = parsedGenres.length === 1 && 
+        console.log(`[AnimeRoutes] 📋 Browse: type=${type || 'all'} genres=${parsedGenres.join(',') || 'none'} sort=${sort} mode=${browseMode}`);
+
+        const isGenreOnlySearch = parsedGenres.length === 1 &&
             !type && !status && !year && !startYear && !endYear &&
             sort === 'popularity' && order === 'desc';
-        
+
         if (isGenreOnlySearch) {
-            console.log(`[AnimeRoutes] Using AniList for genre-only search: ${parsedGenres[0]}`);
+            console.log(`[AnimeRoutes] 🎯 Using AniList for genre-only: ${parsedGenres[0]}`);
             const result = await sourceManager.getAnimeByGenreAniList(parsedGenres[0], pageNum);
             res.json({
                 results: result.results || [],
@@ -285,7 +325,6 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Build filter object for multi-filter or non-genre searches
         const filters = {
             type: type as string,
             genres: parsedGenres.length > 0 ? parsedGenres : undefined,
@@ -297,10 +336,10 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
             order: order as string,
             limit: limitNum,
             page: pageNum,
-            source: source as string
+            source: source as string,
+            mode: browseMode
         };
 
-        // Remove undefined filters
         Object.keys(filters).forEach(key => {
             if (filters[key as keyof typeof filters] === undefined) {
                 delete filters[key as keyof typeof filters];
@@ -308,19 +347,34 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
         });
 
         const result = await sourceManager.browseAnime(filters);
+        const duration = Date.now() - startTime;
+        console.log(`[AnimeRoutes] ✅ Browse completed: ${result.anime?.length || 0} results in ${duration}ms`);
 
         res.json({
             results: result.anime || [],
             currentPage: pageNum,
             totalPages: result.totalPages || 1,
             hasNextPage: result.hasNextPage || false,
-            totalResults: result.totalResults || 0,
+            totalResults: result.totalResults || result.anime?.length || 0,
             filters: { type, genre, status, year, startYear, endYear, sort, order },
             source: source || 'default'
         });
     } catch (error) {
-        console.error('Browse error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        const duration = Date.now() - startTime;
+        console.error(`[AnimeRoutes] ❌ Browse error after ${duration}ms:`, error);
+
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const isTimeout = errorMessage.includes('timeout');
+
+        res.status(isTimeout ? 504 : 500).json({
+            error: isTimeout ? 'Browse operation timed out' : 'Internal server error',
+            details: process.env.NODE_ENV === 'development' ? errorMessage : undefined,
+            results: [],
+            currentPage: 1,
+            totalPages: 0,
+            hasNextPage: false,
+            retryAfter: 5
+        });
     }
 });
 
@@ -463,12 +517,63 @@ router.get('/random', async (req: Request, res: Response): Promise<void> => {
 });
 
 /**
+ * @route GET /api/anime
+ * @query id - Anime ID (as query param to handle IDs with /)
+ */
+router.get('/', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const id = req.query.id as string;
+
+        if (!id) {
+            res.status(400).json({ error: 'Query parameter "id" is required' });
+            return;
+        }
+
+        const result = await sourceManager.getAnime(id);
+
+        if (!result) {
+            res.status(404).json({ error: 'Anime not found' });
+            return;
+        }
+
+        res.json(result);
+    } catch (error) {
+        console.error('Get anime error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
  * @route GET /api/anime/:id
  * @param id - Anime ID
+ * @deprecated Use GET /api/anime?id=... instead for IDs with / characters
+ */
+router.get('/episodes', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const id = req.query.id as string;
+
+        if (!id) {
+            res.status(400).json({ error: 'Query parameter "id" is required' });
+            return;
+        }
+
+        const result = await sourceManager.getEpisodes(id);
+        res.json({ episodes: result });
+    } catch (error) {
+        console.error('Get episodes error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/:id
+ * @param id - Anime ID
+ * @deprecated Use GET /api/anime?id=... instead for IDs with / characters
  */
 router.get('/:id', async (req: Request, res: Response): Promise<void> => {
     try {
-        const id = req.params.id as string;
+        // Decode the ID - Express doesn't automatically decode URL-encoded params
+        const id = decodeURIComponent(req.params.id as string);
         const result = await sourceManager.getAnime(id);
 
         if (!result) {
@@ -486,10 +591,12 @@ router.get('/:id', async (req: Request, res: Response): Promise<void> => {
 /**
  * @route GET /api/anime/:id/episodes
  * @param id - Anime ID
+ * @deprecated Use GET /api/anime/episodes?id=... instead for IDs with / characters
  */
 router.get('/:id/episodes', async (req: Request, res: Response): Promise<void> => {
     try {
-        const id = req.params.id as string;
+        // Decode the ID - Express doesn't automatically decode URL-encoded params
+        const id = decodeURIComponent(req.params.id as string);
         const result = await sourceManager.getEpisodes(id);
         res.json({ episodes: result });
     } catch (error) {

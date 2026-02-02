@@ -2,8 +2,46 @@ import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
 import { logger } from '../utils/logger.js';
 import axios from 'axios';
+import { lookup } from 'dns/promises';
 
 const router = Router();
+
+// Known dead/unresolvable domains that should be filtered out
+const DEAD_DOMAINS = [
+    'streamable.cloud',
+    'streamable.video',
+    'streamable.host',
+    'dead-cdn.example'
+];
+
+/**
+ * Check if a domain is resolvable (has valid DNS)
+ */
+async function isDomainResolvable(hostname: string): Promise<boolean> {
+    try {
+        await lookup(hostname);
+        return true;
+    } catch (error: any) {
+        // DNS errors: ENOTFOUND, EAI_AGAIN, etc.
+        if (error.code === 'ENOTFOUND' || error.code === 'EAI_AGAIN' || error.code === 'ENODATA') {
+            return false;
+        }
+        // For other errors, assume it might work
+        return true;
+    }
+}
+
+/**
+ * Check if a URL's domain is on the dead domains list
+ */
+function isDeadDomain(url: string): boolean {
+    try {
+        const hostname = new URL(url).hostname;
+        return DEAD_DOMAINS.some(dead => hostname.includes(dead));
+    } catch {
+        return false;
+    }
+}
 
 // Base URL for proxy - used to rewrite stream URLs
 const getProxyBaseUrl = (req: Request): string => {
@@ -27,10 +65,10 @@ const proxyUrl = (url: string, proxyBase: string): string => {
 const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: string): string => {
     const baseUrl = originalUrl.substring(0, originalUrl.lastIndexOf('/') + 1);
     const lines = content.split('\n');
-    
+
     return lines.map(line => {
         const trimmedLine = line.trim();
-        
+
         // Skip empty lines and comments (except URI in comments)
         if (!trimmedLine || (trimmedLine.startsWith('#') && !trimmedLine.includes('URI='))) {
             // Handle URI in EXT-X-KEY or EXT-X-MAP tags
@@ -42,15 +80,15 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
             }
             return line;
         }
-        
+
         // Handle segment URLs
         if (!trimmedLine.startsWith('#')) {
-            const absoluteUrl = trimmedLine.startsWith('http') 
-                ? trimmedLine 
+            const absoluteUrl = trimmedLine.startsWith('http')
+                ? trimmedLine
                 : `${baseUrl}${trimmedLine}`;
             return proxyUrl(absoluteUrl, proxyBase);
         }
-        
+
         return line;
     }).join('\n');
 };
@@ -60,21 +98,22 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
  * @description Get available streaming servers for an episode
  */
 router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<void> => {
-    const episodeId = req.params.episodeId as string;
+    // Decode the episodeId - Express doesn't automatically decode URL-encoded params
+    const episodeId = decodeURIComponent(req.params.episodeId as string);
     const requestId = (req as any).id;
-    
+
     logger.info(`[STREAM] Getting servers for episode: ${episodeId}`, { episodeId, requestId });
-    
+
     try {
         const servers = await sourceManager.getEpisodeServers(episodeId);
-        
+
         logger.info(`[STREAM] Found ${servers.length} servers for episode: ${episodeId}`, {
             episodeId,
             serverCount: servers.length,
             servers: servers.map(s => `${s.name}(${s.type})`).join(', '),
             requestId
         });
-        
+
         res.json({ servers });
     } catch (error: any) {
         logger.error(`[STREAM] Failed to get servers for episode: ${episodeId}`, error, {
@@ -99,13 +138,14 @@ const SERVER_PRIORITY = ['hd-2', 'hd-1', 'hd-3'];
  * @description Get streaming URLs for an episode
  */
 router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<void> => {
-    const episodeId = req.params.episodeId as string;
+    // Decode the episodeId - Express doesn't automatically decode URL-encoded params
+    const episodeId = decodeURIComponent(req.params.episodeId as string);
     const { server, category, proxy: useProxy = 'true', tryAll = 'true' } = req.query;
     const requestId = (req as any).id;
     const shouldProxy = useProxy !== 'false';
     const shouldTryAll = tryAll !== 'false' && !server; // Only try all if no specific server requested
     const proxyBase = getProxyBaseUrl(req);
-    
+
     logger.info(`[STREAM] Fetching stream for episode: ${episodeId}`, {
         episodeId,
         server,
@@ -147,7 +187,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         } catch (error: any) {
             lastError = error.message;
             logger.warn(`[STREAM] Server ${currentServer} failed: ${error.message}`, { episodeId, requestId });
-            
+
             if (!shouldTryAll) {
                 break;
             }
@@ -264,14 +304,46 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'biananset': { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
             'anicdnstream': { referer: 'https://hianimez.to/' },
             'gogocdn': { referer: 'https://gogoanime.run/' },
+            'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
+            'hstorage.xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
+            'xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
+            'googlevideo': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'default': { referer: 'https://hianimez.to/' }
         };
-        
+
         const matchedConfig = Object.entries(cdnConfig).find(([key]) => domain.includes(key));
         const config = matchedConfig ? matchedConfig[1] : cdnConfig.default;
         const referer = config.referer;
         const origin = config.origin || referer.replace(/\/$/, '');
-        
+
+        // Check if domain is dead/unresolvable before making request
+        if (isDeadDomain(url)) {
+            logger.warn(`[PROXY] Skipping dead domain: ${domain}`, { domain, requestId });
+            res.status(502).json({
+                error: 'Dead domain',
+                reason: 'dead_domain',
+                domain,
+                message: `Domain ${domain} is known to be non-functional`
+            });
+            return;
+        }
+
+        // Quick DNS check for unknown domains (with short timeout to not delay)
+        const dnsCheckStart = Date.now();
+        const isResolvable = await isDomainResolvable(domain);
+        const dnsCheckTime = Date.now() - dnsCheckStart;
+
+        if (!isResolvable) {
+            logger.warn(`[PROXY] Domain not resolvable (DNS check: ${dnsCheckTime}ms): ${domain}`, { domain, requestId });
+            res.status(502).json({
+                error: 'Domain not resolvable',
+                reason: 'dns_error',
+                domain,
+                message: `Domain ${domain} cannot be resolved`
+            });
+            return;
+        }
+
         const response = await axios.get(url, {
             responseType: 'arraybuffer',
             headers: {
@@ -301,10 +373,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 domain,
                 requestId
             });
-            res.status(response.status).json({ 
-                error: 'Upstream error', 
+            res.status(response.status).json({
+                error: 'Upstream error',
                 status: response.status,
-                domain 
+                domain
             });
             return;
         }
@@ -339,7 +411,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             const content = response.data.toString('utf-8');
             const rewrittenContent = rewriteM3u8Content(content, url, proxyBase);
             res.send(rewrittenContent);
-            
+
             logger.info(`[PROXY] Rewrote m3u8 manifest from ${domain}`, {
                 domain,
                 originalSize: content.length,
@@ -354,7 +426,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         const errorMessage = error.message || 'Unknown error';
         const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
         const isBlocked = errorMessage.includes('blocked') || errorMessage.includes('forbidden');
-        
+
         logger.error(`[PROXY] Failed to proxy from ${domain}`, error, {
             domain,
             errorMessage,
@@ -363,7 +435,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             requestId
         });
 
-        res.status(502).json({ 
+        res.status(502).json({
             error: 'Failed to proxy stream',
             reason: isTimeout ? 'timeout' : isBlocked ? 'blocked' : 'connection_error',
             domain,

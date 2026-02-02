@@ -90,6 +90,10 @@ export const VideoPlayer = ({
   const retryCountRef = useRef(0);
   const maxRetries = 3;
 
+  // Track if we've already fired an error for the current source to prevent infinite loops
+  const errorFiredRef = useRef(false);
+  const lastErrorTimeRef = useRef(0);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -176,6 +180,7 @@ export const VideoPlayer = ({
     setIsLoading(true);
     setError(null);
     retryCountRef.current = 0;
+    errorFiredRef.current = false; // Reset error flag for new source
 
     playerLog('info', 'Initializing video player', {
       src: src.substring(0, 100) + '...',
@@ -239,7 +244,7 @@ export const VideoPlayer = ({
           setCurrentTime(savedPos);
           setShowPositionRestored(true);
           playerLog('info', `Restored saved position: ${savedPos.toFixed(2)}s`);
-          
+
           // Hide notification after 3 seconds
           setTimeout(() => setShowPositionRestored(false), 3000);
         }
@@ -316,6 +321,16 @@ export const VideoPlayer = ({
       });
 
       video.addEventListener('error', () => {
+        // Debounce error handling to prevent infinite loops
+        const now = Date.now();
+        if (errorFiredRef.current && (now - lastErrorTimeRef.current) < 1000) {
+          // Ignore rapid-fire errors for the same source
+          return;
+        }
+
+        errorFiredRef.current = true;
+        lastErrorTimeRef.current = now;
+
         const err = video.error;
         playerLog('error', 'Native video error', {
           code: err?.code,
@@ -382,7 +397,7 @@ export const VideoPlayer = ({
       setIsPlaying(false);
       // Clear saved position when video ends
       clearSavedPosition();
-      
+
       // If video ended and there's a next episode, start countdown
       // Only trigger if not already showing countdown
       if (hasNextEpisode) {
@@ -799,7 +814,7 @@ export const VideoPlayer = ({
         {/* Bottom controls */}
         <div className="absolute bottom-0 left-0 right-0 p-4 space-y-2">
           {/* Progress bar */}
-          <div 
+          <div
             ref={progressContainerRef}
             className="relative group/progress"
             onMouseEnter={() => setIsProgressHovering(true)}
@@ -823,7 +838,7 @@ export const VideoPlayer = ({
               onValueChange={handleSeek}
               className="absolute bottom-0 left-0 right-0 opacity-0 group-hover/progress:opacity-100 transition-opacity cursor-pointer"
             />
-            
+
             {/* Video Preview */}
             <VideoPreview
               videoSrc={src}

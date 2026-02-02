@@ -1,0 +1,19 @@
+Testing WatchHentai stream extraction after fix...
+
+Getting streams for: videos/asa-made-shirudaku-oyakodon-episode-1-id-01
+
+=== RESULT ===
+Source: WatchHentai
+Number of sources: 3
+
+Sources:
+  1. [1080p] https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_1080p.mp4
+  2. [720p] https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_720p.mp4
+  3. [480p] https://hstorage.xyz/files/A/asa-made-shirudaku-oyakodon/asa-made-shirudaku-oyakodon-1_480p.mp4
+
+✅ SUCCESS! Stream URLs extracted correctly.
+
+=== Verifying URL accessibility ===
+✅ [1080p] Status: 200, Content-Type: video/mp4
+✅ [720p] Status: 200, Content-Type: video/mp4
+✅ [480p] Status: 200, Content-Type: video/mp4

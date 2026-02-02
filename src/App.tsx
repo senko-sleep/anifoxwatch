@@ -15,10 +15,13 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
+      <BrowserRouter future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true
+      }}>
         <Routes>
           <Route path="/" element={<Index />} />
-          <Route path="/watch/:animeId" element={<Watch />} />
+          <Route path="/watch" element={<Watch />} />
           <Route path="/search" element={<Search />} />
           <Route path="/browse" element={<Search />} />
           <Route path="*" element={<NotFound />} />

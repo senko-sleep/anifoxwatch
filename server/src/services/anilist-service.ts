@@ -113,6 +113,13 @@ const statusMapping: Record<string, AnimeBase['status']> = {
     'CANCELLED': 'Completed'
 };
 
+const GENRE_MAPPINGS: Record<string, string> = {
+    'Yuri': 'Girls\' Love',
+    'Yaoi': 'Boys\' Love',
+    'Shounen Ai': 'Boys\' Love',
+    'Shoujo Ai': 'Girls\' Love'
+};
+
 /**
  * Normalize genre names for matching
  */
@@ -176,13 +183,13 @@ export class AniListService {
             }
 
             const data = await response.json();
-            
+
             // Check for GraphQL errors
             if (data && typeof data === 'object' && 'errors' in data) {
                 console.error('[AniList] GraphQL errors:', JSON.stringify((data as { errors: unknown }).errors));
                 return null;
             }
-            
+
             this.setCache(cacheKey, data);
             return data as T;
         } catch (error) {
@@ -194,10 +201,10 @@ export class AniListService {
     /**
      * Search for anime by title and get accurate genre information
      */
-    async searchByTitle(title: string): Promise<AnimeBase | null> {
+    async searchByTitle(title: string, isAdult: boolean = false): Promise<AnimeBase | null> {
         const query = `
-            query ($search: String) {
-                Media(search: $search, type: ANIME) {
+            query ($search: String, $isAdult: Boolean) {
+                Media(search: $search, type: ANIME, isAdult: $isAdult) {
                     id
                     idMal
                     title {
@@ -247,7 +254,7 @@ export class AniListService {
             }
         `;
 
-        const response = await this.query<AniListResponse>(query, { search: title });
+        const response = await this.query<AniListResponse>(query, { search: title, isAdult });
         const media = response?.data?.Media;
 
         if (!media) return null;
@@ -258,169 +265,53 @@ export class AniListService {
     /**
      * Search anime by genre(s) using AniList
      * Supports single genre or multiple genres
+     * Note: Adult content is allowed for genres like Yuri, Yaoi
      */
-    async searchByGenre(genre: string, page: number = 1, perPage: number = 20): Promise<AnimeSearchResult> {
-        // Support multiple genres (comma-separated)
-        const genres = genre.split(',').map(g => g.trim()).filter(Boolean);
-        const mainGenre = genres[0] || genre;
-        
-        // Build separate query for single vs multi-genre to avoid unused variable errors
-        let query: string;
-        let variables: Record<string, unknown>;
-        
+    async searchByGenre(genre: string, page: number = 1, perPage: number = 20, filters?: { type?: string; status?: string; year?: number; isAdult?: boolean }): Promise<AnimeSearchResult> {
+        // Map genres using GENRE_MAPPINGS
+        const rawGenres = genre.split(',').map(g => g.trim()).filter(Boolean);
+        const genres = rawGenres.map(g => GENRE_MAPPINGS[g] || g);
+        const mainGenre = genres[0];
+
+        // Check if any raw genre implies adult content
+        const adultGenres = ['Yuri', 'Yaoi', 'Shounen Ai', 'Shoujo Ai', 'Girls Love', 'Boys Love', 'BL', 'GL', 'Hentai', 'Ecchi'];
+        const isAdultContent = rawGenres.some(g => adultGenres.some(ag => g.toLowerCase().includes(ag.toLowerCase())));
+
+        let queryArgs = '$page: Int, $perPage: Int';
+        let queryBodyArgs = 'page: $page, perPage: $perPage';
+        let mediaArgs = 'type: ANIME';
+
+        // Add isAdult argument - allow adult content for adult genres
+        const allowAdult = filters?.isAdult !== undefined ? filters.isAdult : isAdultContent;
+        queryArgs += ', $isAdult: Boolean';
+        mediaArgs += ', isAdult: $isAdult';
+
         if (genres.length > 1) {
-            // Multiple genres - use genre_in
-            query = `
-                query ($genreIn: [String], $page: Int, $perPage: Int) {
-                    Page(page: $page, perPage: $perPage) {
-                        media(genre_in: $genreIn, type: ANIME, isAdult: false) {
-                            id
-                            idMal
-                            title {
-                                romaji
-                                english
-                                native
-                            }
-                            type
-                            format
-                            status
-                            description
-                            startDate {
-                                year
-                                month
-                                day
-                            }
-                            endDate {
-                                year
-                                month
-                                day
-                            }
-                            season
-                            seasonYear
-                            episodes
-                            duration
-                            averageScore
-                            genres
-                            tags {
-                                id
-                                name
-                                category
-                                rank
-                            }
-                            studios {
-                                nodes {
-                                    id
-                                    name
-                                }
-                            }
-                            coverImage {
-                                large
-                                medium
-                            }
-                            bannerImage
-                            isAdult
-                        }
-                        pageInfo {
-                            currentPage
-                            lastPage
-                            hasNextPage
-                            perPage
-                        }
-                    }
-                }
-            `;
-            variables = { genreIn: genres, page, perPage };
+            queryArgs += ', $genreIn: [String]';
+            mediaArgs += ', genre_in: $genreIn';
         } else {
-            // Single genre - use genre
-            query = `
-                query ($genre: String, $page: Int, $perPage: Int) {
-                    Page(page: $page, perPage: $perPage) {
-                        media(genre: $genre, type: ANIME, isAdult: false) {
-                            id
-                            idMal
-                            title {
-                                romaji
-                                english
-                                native
-                            }
-                            type
-                            format
-                            status
-                            description
-                            startDate {
-                                year
-                                month
-                                day
-                            }
-                            endDate {
-                                year
-                                month
-                                day
-                            }
-                            season
-                            seasonYear
-                            episodes
-                            duration
-                            averageScore
-                            genres
-                            tags {
-                                id
-                                name
-                                category
-                                rank
-                            }
-                            studios {
-                                nodes {
-                                    id
-                                    name
-                                }
-                            }
-                            coverImage {
-                                large
-                                medium
-                            }
-                            bannerImage
-                            isAdult
-                        }
-                        pageInfo {
-                            currentPage
-                            lastPage
-                            hasNextPage
-                            perPage
-                        }
-                    }
-                }
-            `;
-            variables = { genre: mainGenre, page, perPage };
+            queryArgs += ', $genre: String';
+            mediaArgs += ', genre: $genre';
         }
 
-        const response = await this.query<AniListSearchResponse>(query, variables);
-
-        const pageData = response?.data?.Page;
-        const media = pageData?.media || [];
-
-        if (media.length === 0 && page === 1) {
-            // Fallback: search by tag if genre not found
-            return this.searchByTag(mainGenre, page, perPage);
+        // Add additional filters
+        if (filters?.type) {
+            queryArgs += ', $format: MediaFormat';
+            mediaArgs += ', format: $format';
+        }
+        if (filters?.status) {
+            queryArgs += ', $status: MediaStatus';
+            mediaArgs += ', status: $status';
+        }
+        if (filters?.year) {
+            queryArgs += ', $year: Int';
+            mediaArgs += ', seasonYear: $year';
         }
 
-        return {
-            results: media.map(m => this.mapToAnimeBase(m)),
-            totalPages: pageData?.pageInfo?.lastPage || 1,
-            currentPage: page,
-            hasNextPage: pageData?.pageInfo?.hasNextPage || false,
-            source: 'AniList'
-        };
-    }
-
-    /**
-     * Search anime by tag (fallback for genre searches)
-     */
-    async searchByTag(tag: string, page: number = 1, perPage: number = 20): Promise<AnimeSearchResult> {
         const query = `
-            query ($tag: String, $page: Int, $perPage: Int) {
-                Page(page: $page, perPage: $perPage) {
-                    media(tag: $tag, type: ANIME, isAdult: false) {
+            query (${queryArgs}) {
+                Page(${queryBodyArgs}) {
+                    media(${mediaArgs}) {
                         id
                         idMal
                         title {
@@ -477,10 +368,124 @@ export class AniListService {
             }
         `;
 
-        const response = await this.query<AniListSearchResponse>(query, { 
-            tag, 
-            page, 
-            perPage 
+        const variables: any = { page, perPage };
+        variables.isAdult = allowAdult;
+
+        if (genres.length > 1) {
+            variables.genreIn = genres;
+        } else {
+            variables.genre = mainGenre;
+        }
+
+        if (filters?.type) {
+            // Reverse map type to AniList format
+            const typeMap: Record<string, string> = { 'TV': 'TV', 'Movie': 'MOVIE', 'OVA': 'OVA', 'ONA': 'ONA', 'Special': 'SPECIAL' };
+            variables.format = typeMap[filters.type] || undefined;
+        }
+        if (filters?.status) {
+            // Reverse map status
+            const statusMap: Record<string, string> = { 'Ongoing': 'RELEASING', 'Completed': 'FINISHED', 'Upcoming': 'NOT_YET_RELEASED' };
+            variables.status = statusMap[filters.status] || undefined;
+        }
+        if (filters?.year) {
+            variables.year = filters.year;
+        }
+
+        const response = await this.query<AniListSearchResponse>(query, variables);
+
+        const pageData = response?.data?.Page;
+        const media = pageData?.media || [];
+
+        if (media.length === 0 && page === 1 && !filters) {
+            // Fallback: search by tag if genre not found (only if no other filters applied)
+            return this.searchByTag(mainGenre, page, perPage);
+        }
+
+        return {
+            results: media.map(m => this.mapToAnimeBase(m)),
+            totalPages: pageData?.pageInfo?.lastPage || 1,
+            currentPage: page,
+            hasNextPage: pageData?.pageInfo?.hasNextPage || false,
+            source: 'AniList'
+        };
+    }
+
+    /**
+     * Search anime by tag (fallback for genre searches)
+     * Note: Adult content is allowed for specific tags
+     */
+    async searchByTag(tag: string, page: number = 1, perPage: number = 20): Promise<AnimeSearchResult> {
+        // Allow adult content for specific tags
+        const adultTags = ['Yuri', 'Yaoi', 'Girls Love', 'Boys Love', 'BL', 'GL', 'Shoujo Ai', 'Shounen Ai'];
+        const allowAdult = adultTags.some(t =>
+            tag.toLowerCase().includes(t.toLowerCase())
+        );
+
+        const query = `
+            query ($tag: String, $page: Int, $perPage: Int, $isAdult: Boolean) {
+                Page(page: $page, perPage: $perPage) {
+                    media(tag: $tag, type: ANIME, isAdult: $isAdult) {
+                        id
+                        idMal
+                        title {
+                            romaji
+                            english
+                            native
+                        }
+                        type
+                        format
+                        status
+                        description
+                        startDate {
+                            year
+                            month
+                            day
+                        }
+                        endDate {
+                            year
+                            month
+                            day
+                        }
+                        season
+                        seasonYear
+                        episodes
+                        duration
+                        averageScore
+                        genres
+                        tags {
+                            id
+                            name
+                            category
+                            rank
+                        }
+                        studios {
+                            nodes {
+                                id
+                                name
+                            }
+                        }
+                        coverImage {
+                            large
+                            medium
+                        }
+                        bannerImage
+                        isAdult
+                    }
+                    pageInfo {
+                        currentPage
+                        lastPage
+                        hasNextPage
+                        perPage
+                    }
+                }
+            }
+        `;
+
+        const response = await this.query<AniListSearchResponse>(query, {
+            tag,
+            page,
+            perPage,
+            isAdult: allowAdult
         });
 
         const pageData = response?.data?.Page;
@@ -534,6 +539,76 @@ export class AniListService {
     }
 
     /**
+     * Get full anime data by AniList ID
+     */
+    async getAnimeById(id: number): Promise<AnimeBase | null> {
+        const query = `
+            query ($id: Int) {
+                Media(id: $id, type: ANIME) {
+                    id
+                    idMal
+                    title {
+                        romaji
+                        english
+                        native
+                    }
+                    type
+                    format
+                    status
+                    description
+                    startDate {
+                        year
+                        month
+                        day
+                    }
+                    endDate {
+                        year
+                        month
+                        day
+                    }
+                    season
+                    seasonYear
+                    episodes
+                    duration
+                    averageScore
+                    genres
+                    tags {
+                        id
+                        name
+                        category
+                        rank
+                    }
+                    studios {
+                        nodes {
+                            id
+                            name
+                        }
+                    }
+                    coverImage {
+                        large
+                        medium
+                    }
+                    bannerImage
+                    isAdult
+                }
+            }
+        `;
+
+        interface MediaResponse {
+            data: {
+                Media: AniListMedia | null;
+            };
+        }
+
+        const response = await this.query<MediaResponse>(query, { id });
+        const media = response?.data?.Media;
+
+        if (!media) return null;
+
+        return this.mapToAnimeBase(media);
+    }
+
+    /**
      * Enrich local anime with AniList genre data
      */
     async enrichWithGenres(anime: AnimeBase): Promise<AnimeBase> {
@@ -573,7 +648,7 @@ export class AniListService {
         for (const anime of animeList) {
             const enrichedAnime = await this.enrichWithGenres(anime);
             enriched.push(enrichedAnime);
-            
+
             // Small delay to avoid rate limiting
             await new Promise(resolve => setTimeout(resolve, 100));
         }

@@ -206,7 +206,7 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
           <div className="flex items-center gap-8 pt-8">
             <Button
               size="lg"
-              onClick={() => navigate(`/watch/${currentAnime.id}`)}
+              onClick={() => navigate(`/watch?id=${encodeURIComponent(currentAnime.id)}`)}
               className="group relative bg-white hover:bg-zinc-100 text-black font-black h-20 px-12 rounded-2xl gap-4 transition-all duration-400 hover:scale-105 active:scale-95 shadow-2xl shadow-white/30 overflow-hidden"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />

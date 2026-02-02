@@ -10,6 +10,7 @@ interface BrowseFilters {
     sort?: 'popularity' | 'trending' | 'recently_released' | 'shuffle' | 'rating' | 'year' | 'title';
     order?: 'asc' | 'desc';
     source?: string;
+    mode?: 'safe' | 'mixed' | 'adult';
 }
 
 // Use different API URLs based on environment
@@ -76,28 +77,45 @@ class AnimeApiClient {
         const cacheKey = `${endpoint}`;
         const cached = this.cache.get(cacheKey);
         if (cached && cached.expires > Date.now()) {
-            // Type assertion: we know the cached data matches type T because we stored it as T
             return cached.data as T;
         }
 
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
-            ...options,
-            headers: {
-                'Accept': 'application/json',
-                ...options?.headers
+        try {
+            const response = await fetch(`${this.baseUrl}${endpoint}`, {
+                ...options,
+                headers: {
+                    'Accept': 'application/json',
+                    ...options?.headers
+                }
+            });
+
+            if (!response.ok) {
+                // Try to parse error response
+                const errorText = await response.text();
+                let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+
+                try {
+                    const errorData = JSON.parse(errorText);
+                    if (errorData.error) {
+                        errorMessage = errorData.error;
+                    }
+                } catch {
+                    // Ignore JSON parse errors
+                }
+
+                throw new Error(errorMessage);
             }
-        });
 
-        if (!response.ok) {
-            throw new Error(`API Error: ${response.status} ${response.statusText}`);
+            const data = await response.json();
+
+            // Cache for 2 minutes - store with proper type
+            this.cache.set(cacheKey, { data, expires: Date.now() + 2 * 60 * 1000 } as CacheEntry<T>);
+
+            return data;
+        } catch (error) {
+            console.error(`[API] Fetch error for ${endpoint}:`, error);
+            throw error;
         }
-
-        const data = await response.json();
-
-        // Cache for 2 minutes - store with proper type
-        this.cache.set(cacheKey, { data, expires: Date.now() + 2 * 60 * 1000 } as CacheEntry<T>);
-
-        return data;
     }
 
     // Clear cache for fresh data
@@ -107,9 +125,10 @@ class AnimeApiClient {
 
     // ============ ANIME ENDPOINTS ============
 
-    async search(query: string, page: number = 1, source?: string): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, source?: string, mode: 'safe' | 'mixed' | 'adult' = 'safe'): Promise<AnimeSearchResult> {
         const params = new URLSearchParams({ q: query, page: String(page) });
         if (source) params.append('source', source);
+        if (mode) params.append('mode', mode);
         return this.fetch<AnimeSearchResult>(`/api/anime/search?${params}`);
     }
 
@@ -158,6 +177,7 @@ class AnimeApiClient {
         if (filters.sort) params.append('sort', filters.sort);
         if (filters.order) params.append('order', filters.order);
         if (filters.source) params.append('source', filters.source);
+        if (filters.mode) params.append('mode', filters.mode);
 
         // Add cache-busting timestamp for shuffle requests
         if (bypassCache || filters.sort === 'shuffle') {
@@ -180,7 +200,7 @@ class AnimeApiClient {
 
     async getAnime(id: string): Promise<Anime | null> {
         try {
-            return await this.fetch<Anime>(`/api/anime/${encodeURIComponent(id)}`);
+            return await this.fetch<Anime>(`/api/anime?id=${encodeURIComponent(id)}`);
         } catch {
             return null;
         }
@@ -188,7 +208,7 @@ class AnimeApiClient {
 
     async getEpisodes(animeId: string): Promise<Episode[]> {
         const response = await this.fetch<{ episodes: Episode[] }>(
-            `/api/anime/${encodeURIComponent(animeId)}/episodes`
+            `/api/anime/episodes?id=${encodeURIComponent(animeId)}`
         );
         return response.episodes || [];
     }

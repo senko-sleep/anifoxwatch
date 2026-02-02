@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { VideoPlayer } from '../components/player/VideoPlayer';
@@ -30,7 +30,41 @@ type QualityType = '1080p' | '720p' | '480p' | '360p' | 'auto';
 const Watch = () => {
   const { animeId } = useParams<{ animeId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  // Get anime ID from search param (use route param as fallback for backwards compatibility)
+  const cleanAnimeId = searchParams.get('id') || animeId || '';
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Store the referrer URL (browse URL with params) for going back
+  const [backUrl, setBackUrl] = useState<string>('/browse');
+
+  useEffect(() => {
+    // Try to get referrer from navigation state first, then fall back to searchParams
+    if (location.state?.from) {
+      setBackUrl(location.state.from);
+    } else {
+      // Build back URL from searchParams
+      const params = new URLSearchParams();
+      const genre = searchParams.get('genre');
+      const type = searchParams.get('type');
+      const status = searchParams.get('status');
+      const year = searchParams.get('year');
+      const sort = searchParams.get('sort');
+      const page = searchParams.get('page');
+      const mode = searchParams.get('mode');
+
+      if (genre) params.set('genre', genre);
+      if (type) params.set('type', type);
+      if (status) params.set('status', status);
+      if (year) params.set('year', year);
+      if (sort && sort !== 'popularity') params.set('sort', sort);
+      if (page && page !== '1') params.set('page', page);
+      if (mode && mode !== 'safe') params.set('mode', mode);
+
+      const queryString = params.toString();
+      setBackUrl(queryString ? `/browse?${queryString}` : '/browse');
+    }
+  }, [location.state, searchParams]);
 
   // State
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
@@ -46,13 +80,15 @@ const Watch = () => {
 
   // Refs
   const playerRef = useRef<HTMLDivElement>(null);
-  
+  const lastPlayerErrorTimeRef = useRef<number>(0);
+  const playerErrorDebounceMs = 2000; // Minimum time between retry attempts
+
   // Cinema mode state for layout adaptation
   const [isCinemaMode, setIsCinemaMode] = useState(false);
 
   // Data fetching
-  const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(animeId || '', !!animeId);
-  const { data: episodes, isLoading: episodesLoading } = useEpisodes(animeId || '', !!animeId);
+  const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId);
+  const { data: episodes, isLoading: episodesLoading } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId);
   const { data: servers, isLoading: serversLoading } = useEpisodeServers(selectedEpisode || '', !!selectedEpisode);
   const {
     data: streamData,
@@ -64,7 +100,7 @@ const Watch = () => {
   // Initialize episode from URL or first episode (runs once on mount)
   useEffect(() => {
     if (!episodes?.length || selectedEpisode) return;
-    
+
     const epParam = searchParams.get('ep');
     if (epParam) {
       const epNum = parseInt(epParam, 10);
@@ -86,10 +122,10 @@ const Watch = () => {
   // Auto-switch to sub when dub is not available (only if user hasn't manually selected audio)
   useEffect(() => {
     if (!servers?.length) return;
-    
+
     const hasDubServers = servers.some(s => s.type === 'dub');
     const hasSubServers = servers.some(s => s.type === 'sub');
-    
+
     // If user wants dub but no dub servers available, switch to sub
     if (audioType === 'dub' && !hasDubServers && hasSubServers && !audioManuallySet) {
       console.log('[Watch] 🔄 No dub servers available, auto-switching to sub');
@@ -160,6 +196,14 @@ const Watch = () => {
 
   // Handle video player errors
   const handlePlayerError = useCallback((error: string) => {
+    // Debounce: prevent rapid-fire retries
+    const now = Date.now();
+    if (now - lastPlayerErrorTimeRef.current < playerErrorDebounceMs) {
+      console.log('[Watch] ⏳ Debouncing player error (too soon since last retry)');
+      return;
+    }
+    lastPlayerErrorTimeRef.current = now;
+
     console.error('[Watch] 🎬 Player error:', error, {
       server: selectedServer,
       episode: selectedEpisode,
@@ -167,6 +211,13 @@ const Watch = () => {
     });
 
     const sources = streamData?.sources || [];
+    const maxServerRetries = servers?.length || 1;
+
+    // Check if we've exhausted ALL retry options (all sources on all servers)
+    if (serverRetryCount >= maxServerRetries) {
+      console.log('[Watch] ❌ All servers exhausted, stopping retries');
+      return;
+    }
 
     // Try next source URL (same server) first
     if (sourceRetryIndex + 1 < sources.length) {
@@ -222,23 +273,23 @@ const Watch = () => {
   const handleEpisodeSelect = useCallback((episodeId: string, episodeNum: number) => {
     // Prevent unnecessary re-renders if same episode
     if (episodeId === selectedEpisode) return;
-    
+
     // Set switching state to prevent URL conflicts
     setIsSwitchingEpisode(true);
-    
+
     // Update URL first, then state
     const currentEpParam = searchParams.get('ep');
     const newEpParam = String(episodeNum);
-    
+
     if (currentEpParam !== newEpParam) {
       setSearchParams({ ep: newEpParam }, { replace: true });
     }
-    
+
     setSelectedEpisode(episodeId);
     setSelectedEpisodeNum(episodeNum);
     setSelectedServer(''); // Reset server for new episode
     playerRef.current?.scrollIntoView({ behavior: 'smooth' });
-    
+
     // Clear switching state after a delay
     setTimeout(() => {
       setIsSwitchingEpisode(false);
@@ -359,7 +410,7 @@ const Watch = () => {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate('/search')}
+            onClick={() => navigate(backUrl, { replace: true })}
             className={cn(
               "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-6 transition-all duration-300",
               isCinemaMode && "opacity-0 pointer-events-none h-0 mb-0 overflow-hidden"
@@ -371,8 +422,8 @@ const Watch = () => {
 
           <div className={cn(
             "grid gap-8 transition-all duration-500",
-            isCinemaMode 
-              ? "lg:grid-cols-1 max-w-7xl mx-auto" 
+            isCinemaMode
+              ? "lg:grid-cols-1 max-w-7xl mx-auto"
               : "lg:grid-cols-12"
           )}>
             {/* Main Player Area */}
@@ -405,7 +456,7 @@ const Watch = () => {
                       poster={anime.image}
                       onNextEpisode={handleNextEpisode}
                       hasNextEpisode={hasNext}
-                      animeId={animeId}
+                      animeId={cleanAnimeId}
                       selectedEpisodeNum={selectedEpisodeNum}
                     />
                   ) : (

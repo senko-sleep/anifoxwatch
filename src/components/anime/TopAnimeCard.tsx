@@ -22,7 +22,7 @@ export const TopAnimeCard = ({ item, className, style }: TopAnimeCardProps) => {
 
   return (
     <Link
-      to={`/watch/${anime.id}`}
+      to={`/watch?id=${encodeURIComponent(anime.id)}`}
       style={style}
       className={cn(
         'flex items-center gap-3 p-2.5 rounded-xl hover:bg-fox-surface/80 transition-all duration-200 group',

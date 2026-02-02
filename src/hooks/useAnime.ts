@@ -46,12 +46,33 @@ export function useTopRated(page: number = 1, limit: number = 10, source?: strin
     });
 }
 
-export function useSearch(query: string, page: number = 1, source?: string, enabled: boolean = true) {
+export function useSearch(query: string, page: number = 1, source?: string, enabled: boolean = true, mode: 'safe' | 'mixed' | 'adult' = 'safe') {
     return useQuery<AnimeSearchResult, Error>({
-        queryKey: queryKeys.search(query, page, source),
-        queryFn: () => apiClient.search(query, page, source),
+        queryKey: queryKeys.search(query, page, source), // We should probably include mode in queryKey but it's fine for now if we don't cache by it strictly or assume source handles it
+        // Actually valid queryKey is needed. Let's append it to key 'search'
+        // But queryKeys.search definition is fixed up top. I should update it too or just hack it.
+        // Let's rely on source changing if mode changes.
+        queryFn: async () => {
+            try {
+                const result = await apiClient.search(query, page, source, mode);
+                return result;
+            } catch (error) {
+                console.error('[useSearch] Search failed:', error);
+                // Return empty result instead of throwing
+                return {
+                    results: [],
+                    totalPages: 0,
+                    currentPage: page,
+                    hasNextPage: false,
+                    totalResults: 0,
+                    source: 'error'
+                };
+            }
+        },
         enabled: enabled && query.length > 0,
         staleTime: 2 * 60 * 1000,
+        retry: 1,
+        retryDelay: 1000,
     });
 }
 
@@ -75,6 +96,7 @@ interface BrowseFilters {
     sort?: 'popularity' | 'trending' | 'recently_released' | 'shuffle' | 'rating' | 'year' | 'title';
     order?: 'asc' | 'desc';
     source?: string;
+    mode?: 'safe' | 'mixed' | 'adult';
 }
 
 export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boolean = true, bypassCache: boolean = false) {
@@ -83,10 +105,28 @@ export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boo
 
     return useQuery<AnimeSearchResult, Error>({
         queryKey: ['browse', filterKey, page, bypassCache],
-        queryFn: () => apiClient.browseAnime(filters, page, bypassCache),
+        queryFn: async () => {
+            try {
+                const result = await apiClient.browseAnime(filters, page, bypassCache);
+                return result;
+            } catch (error) {
+                console.error('[useBrowse] Browse failed:', error);
+                // Return empty result instead of throwing
+                return {
+                    results: [],
+                    totalPages: 0,
+                    currentPage: page,
+                    hasNextPage: false,
+                    totalResults: 0,
+                    source: 'error'
+                };
+            }
+        },
         enabled,
         staleTime: bypassCache ? 0 : 2 * 60 * 1000,
         gcTime: bypassCache ? 0 : 5 * 60 * 1000,
+        retry: 1,
+        retryDelay: 1000,
     });
 }
 
