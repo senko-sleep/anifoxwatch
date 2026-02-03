@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { Search, Menu, X, Shuffle, Loader2 } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 
 export const Navbar = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,7 +30,9 @@ export const Navbar = () => {
     try {
       const randomAnime = await apiClient.getRandomAnime();
       if (randomAnime) {
-        navigate(`/watch?id=${encodeURIComponent(randomAnime.id)}`);
+        navigate(`/watch?id=${encodeURIComponent(randomAnime.id)}`, {
+          state: { from: location.pathname + location.search }
+        });
       }
     } catch (error) {
       console.error('Failed to get random anime:', error);

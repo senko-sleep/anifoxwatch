@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Play, X, Clock } from 'lucide-react';
 import { WatchHistoryItem } from '@/lib/watch-history';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ interface ContinueWatchingProps {
 }
 
 export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => {
+    const location = useLocation();
+
     if (!items || items.length === 0) return null;
 
     return (
@@ -23,7 +25,11 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                 {items.map((item) => (
                     <div key={item.animeId} className="group relative flex gap-4 p-3 rounded-xl bg-fox-surface/40 hover:bg-fox-surface/60 transition-colors border border-white/5">
                         {/* Image */}
-                        <Link to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}`} className="shrink-0 relative w-20 h-28 rounded-lg overflow-hidden block">
+                        <Link
+                            to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}`}
+                            state={{ from: location.pathname + location.search }}
+                            className="shrink-0 relative w-20 h-28 rounded-lg overflow-hidden block"
+                        >
                             <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors z-10" />
                             <img
                                 src={item.animeImage}
@@ -45,7 +51,10 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
 
                         {/* Info */}
                         <div className="flex-1 min-w-0 flex flex-col justify-center">
-                            <Link to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}`}>
+                            <Link
+                                to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}`}
+                                state={{ from: location.pathname + location.search }}
+                            >
                                 <h4 className="font-semibold text-sm text-zinc-200 group-hover:text-fox-orange transition-colors line-clamp-2 leading-tight mb-1">
                                     {item.animeTitle}
                                 </h4>
@@ -53,6 +62,12 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
 
                             <div className="text-xs text-muted-foreground mb-2">
                                 <span className="text-fox-orange font-medium">Episode {item.episodeNumber}</span>
+                                {item.animeSeason && (
+                                    <>
+                                        <span className="mx-1">•</span>
+                                        <span className="capitalize">{item.animeSeason}</span>
+                                    </>
+                                )}
                                 <span className="mx-1">•</span>
                                 <span>{Math.floor((item.duration - item.timestamp) / 60)}m left</span>
                             </div>

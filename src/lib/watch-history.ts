@@ -4,6 +4,7 @@ export interface WatchHistoryItem {
     animeId: string;
     animeTitle: string;
     animeImage: string;
+    animeSeason?: string;
     episodeId: string;
     episodeNumber: number;
     timestamp: number;
@@ -35,6 +36,7 @@ export const WatchHistory = {
                 animeId: anime.id,
                 animeTitle: anime.title,
                 animeImage: anime.image,
+                animeSeason: anime.season,
                 episodeId,
                 episodeNumber,
                 timestamp,

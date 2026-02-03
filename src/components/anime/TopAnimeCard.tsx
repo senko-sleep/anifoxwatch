@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Captions, Mic, Play } from 'lucide-react';
 import { TopAnime } from '@/types/anime';
 import { cn } from '@/lib/utils';
@@ -11,6 +11,7 @@ interface TopAnimeCardProps {
 
 export const TopAnimeCard = ({ item, className, style }: TopAnimeCardProps) => {
   const { rank, anime } = item;
+  const location = useLocation();
 
   // Rank colors for top 3
   const getRankStyle = (rank: number) => {
@@ -24,6 +25,7 @@ export const TopAnimeCard = ({ item, className, style }: TopAnimeCardProps) => {
     <Link
       to={`/watch?id=${encodeURIComponent(anime.id)}`}
       style={style}
+      state={{ from: location.pathname + location.search }}
       className={cn(
         'flex items-center gap-3 p-2.5 rounded-xl hover:bg-fox-surface/80 transition-all duration-200 group',
         className

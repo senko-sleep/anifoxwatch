@@ -11,7 +11,7 @@ import { apiClient } from '@/lib/api-client';
 import { AniListClient } from '@/lib/anilist-client';
 import { Loader2, AlertCircle, RefreshCw, TrendingUp, Clock, Award, Flame, Sparkles, Calendar, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
 import { SectionHeader } from '@/components/shared/SectionHeader';
@@ -24,6 +24,10 @@ const Index = () => {
   const { data: leaderboardData, isLoading: leaderboardLoading } = useLeaderboard('trending');
   const { data: seasonalData, isLoading: seasonalLoading } = useSeasonal();
   const { history, removeFromHistory } = useWatchHistory();
+  const location = useLocation();
+
+  const SCROLL_POSITIONS_KEY = 'anistream_scroll_positions';
+  const pageKey = 'home_page';
 
   const [featuredAnime, setFeaturedAnime] = useState([]);
   const [featuredLoading, setFeaturedLoading] = useState(false);
@@ -83,6 +87,33 @@ const Index = () => {
     refetchLatest();
     refetchTop();
   };
+
+  // Save/Restore scroll position
+  useEffect(() => {
+    if (!isLoading) {
+      try {
+        const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
+        const pos = positions[pageKey];
+        if (pos > 0) {
+          setTimeout(() => {
+            window.scrollTo({ top: pos, behavior: 'instant' });
+          }, 100);
+        }
+      } catch (e) { /* ignore */ }
+    }
+  }, [isLoading]);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      try {
+        const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
+        positions[pageKey] = window.scrollY;
+        sessionStorage.setItem(SCROLL_POSITIONS_KEY, JSON.stringify(positions));
+      } catch (e) { /* ignore */ }
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const bestAnime = topAnimeList?.map(item => item.anime) || [];
 
@@ -266,7 +297,12 @@ const Index = () => {
                     <div key={i} className="h-16 bg-fox-surface/50 rounded-lg animate-pulse" />
                   ))
                 ) : bestAnime.slice(0, 5).map((anime, i) => (
-                  <Link key={anime.id} to={`/watch?id=${encodeURIComponent(anime.id)}`} className="flex gap-3 items-center group p-2 rounded-lg hover:bg-fox-surface/50 transition-colors">
+                  <Link
+                    key={anime.id}
+                    to={`/watch?id=${encodeURIComponent(anime.id)}`}
+                    state={{ from: location.pathname + location.search }}
+                    className="flex gap-3 items-center group p-2 rounded-lg hover:bg-fox-surface/50 transition-colors"
+                  >
                     <span className={cn(
                       "w-6 text-center font-bold text-lg",
                       i === 0 ? "text-yellow-500" : "text-muted-foreground"

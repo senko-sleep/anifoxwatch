@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Star, TrendingUp } from 'lucide-react';
 import { Anime } from '@/types/anime';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,8 @@ interface WeeklyLeaderboardProps {
 }
 
 export const WeeklyLeaderboard = ({ anime, isLoading }: WeeklyLeaderboardProps) => {
+    const location = useLocation();
+
     if (isLoading) {
         return (
             <div className="space-y-4">
@@ -59,7 +61,11 @@ export const WeeklyLeaderboard = ({ anime, isLoading }: WeeklyLeaderboardProps) 
                         </div>
 
                         {/* Image */}
-                        <Link to={`/watch?id=${encodeURIComponent(item.id)}`} className="shrink-0 relative w-12 h-16 rounded-lg overflow-hidden">
+                        <Link
+                            to={`/watch?id=${encodeURIComponent(item.id)}`}
+                            state={{ from: location.pathname + location.search }}
+                            className="shrink-0 relative w-12 h-16 rounded-lg overflow-hidden"
+                        >
                             <img
                                 src={item.image}
                                 alt={item.title}
@@ -69,7 +75,10 @@ export const WeeklyLeaderboard = ({ anime, isLoading }: WeeklyLeaderboardProps) 
 
                         {/* Info */}
                         <div className="flex-1 min-w-0">
-                            <Link to={`/watch?id=${encodeURIComponent(item.id)}`}>
+                            <Link
+                                to={`/watch?id=${encodeURIComponent(item.id)}`}
+                                state={{ from: location.pathname + location.search }}
+                            >
                                 <h4 className="font-medium text-sm text-zinc-200 group-hover:text-fox-orange transition-colors truncate">
                                     {item.title}
                                 </h4>

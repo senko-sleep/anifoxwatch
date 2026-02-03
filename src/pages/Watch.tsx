@@ -39,11 +39,17 @@ const Watch = () => {
   const [backUrl, setBackUrl] = useState<string>('/browse');
 
   useEffect(() => {
-    // Try to get referrer from navigation state first, then fall back to searchParams
+    // Try to get referrer from navigation state first, 
+    // then fall back to sessionStorage (saved by Search page)
+    // then fall back to searchParams
+    const savedBrowseUrl = sessionStorage.getItem('last_browse_url');
+
     if (location.state?.from) {
       setBackUrl(location.state.from);
+    } else if (savedBrowseUrl) {
+      setBackUrl(savedBrowseUrl);
     } else {
-      // Build back URL from searchParams
+      // Build back URL from searchParams of current page (legacy fallback)
       const params = new URLSearchParams();
       const genre = searchParams.get('genre');
       const type = searchParams.get('type');
@@ -286,7 +292,7 @@ const Watch = () => {
         const newParams = new URLSearchParams(prev);
         newParams.set('ep', newEpParam);
         return newParams;
-      }, { replace: true });
+      }, { replace: true, state: location.state });
     }
 
     setSelectedEpisode(episodeId);
@@ -414,7 +420,7 @@ const Watch = () => {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate(backUrl, { replace: true })}
+            onClick={() => navigate(backUrl)}
             className={cn(
               "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-6 transition-all duration-300",
               isCinemaMode && "opacity-0 pointer-events-none h-0 mb-0 overflow-hidden"
@@ -464,6 +470,7 @@ const Watch = () => {
                       selectedEpisodeNum={selectedEpisodeNum}
                       animeTitle={anime.title}
                       animeImage={anime.image}
+                      animeSeason={anime.season}
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">

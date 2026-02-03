@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Play, Info, ChevronLeft, ChevronRight, Star, Calendar, Tv, Flame, Clock, TrendingUp, Shuffle, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Anime } from '@/types/anime';
@@ -18,6 +18,7 @@ const COMMON_GENRES = [
 
 export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const location = useLocation();
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [scrollY, setScrollY] = useState(0);
@@ -206,7 +207,9 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
           <div className="flex items-center gap-8 pt-8">
             <Button
               size="lg"
-              onClick={() => navigate(`/watch?id=${encodeURIComponent(currentAnime.id)}`)}
+              onClick={() => navigate(`/watch?id=${encodeURIComponent(currentAnime.id)}`, {
+                state: { from: location.pathname + location.search }
+              })}
               className="group relative bg-white hover:bg-zinc-100 text-black font-black h-20 px-12 rounded-2xl gap-4 transition-all duration-400 hover:scale-105 active:scale-95 shadow-2xl shadow-white/30 overflow-hidden"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />

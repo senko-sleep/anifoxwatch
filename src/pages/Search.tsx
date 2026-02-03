@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useLocation } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
@@ -123,12 +123,18 @@ const Search = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
 
-  // Create a unique key for this filter state
-  const filterStateKey = location.pathname + '?' + Array.from(searchParams.entries()).map(([k, v]) => `${k}=${v} `).join('&');
+  // Create a unique key for this filter state to store scroll position
+  const filterStateKey = useMemo(() => {
+    const params = Array.from(searchParams.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([k, v]) => `${k}=${v}`)
+      .join('&');
+    return `${location.pathname}?${params}`;
+  }, [location.pathname, searchParams]);
 
   // Initialize state from URL params
   const initialQuery = searchParams.get('q') || '';
-  const initialGenres = searchParams.get('genres')?.split(',').filter(Boolean) || [];
+  const initialGenres = searchParams.get('genres')?.split(',').filter(Boolean) || searchParams.get('genre')?.split(',').filter(Boolean) || [];
   const initialType = (searchParams.get('type') as TypeFilter) || 'all';
   const initialStatus = (searchParams.get('status') as StatusFilter) || 'all';
   const initialYear = parseInt(searchParams.get('year') || '0', 10);
@@ -148,9 +154,12 @@ const Search = () => {
   const [gridSize, setGridSize] = useState<'compact' | 'normal'>('normal');
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [mode, setMode] = useState<'safe' | 'mixed' | 'adult'>(initialMode);
+  const [jumpPage, setJumpPage] = useState("");
 
   // Use ref to track if we're currently updating from URL (to avoid infinite loops)
   const isUpdatingFromUrl = useRef(false);
+  const isFirstMount = useRef(true);
+  const scrollRestored = useRef(false);
 
   // Sync state with URL params when they change (e.g., after navigating back from watch page)
   useEffect(() => {
@@ -204,17 +213,6 @@ const Search = () => {
     }
   }, [searchParams]);
 
-  // Restore scroll position
-  useEffect(() => {
-    try {
-      const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
-      if (positions[filterStateKey] > 0) {
-        window.scrollTo(0, positions[filterStateKey]);
-      }
-    } catch (e) { /* ignore */ }
-  }, [filterStateKey]);
-
-  // Save scroll position
   useEffect(() => {
     const handleScroll = () => {
       try {
@@ -230,11 +228,32 @@ const Search = () => {
   // Debounce search query
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedQuery(query);
-      setPage(1);
-    }, 500); // Slightly longer debounce for better performance
+      // Only update if query changed
+      if (query !== debouncedQuery) {
+        setDebouncedQuery(query);
+        // Only reset page if it's not the first mount or if the query actually changed later
+        if (!isFirstMount.current) {
+          setPage(1);
+        }
+      }
+    }, 500);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, debouncedQuery]);
+
+  // Handle first mount flag
+  useEffect(() => {
+    // Set a small timeout to allow initial state to stabilize
+    const timer = setTimeout(() => {
+      isFirstMount.current = false;
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Scroll to top on page change (skip on first mount to allow scroll restoration)
+  useEffect(() => {
+    if (isFirstMount.current) return;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [page]);
 
   // Update URL params
   useEffect(() => {
@@ -247,8 +266,15 @@ const Search = () => {
     if (browseSortBy !== 'popularity') params.sort = browseSortBy;
     if (page > 1) params.page = page.toString();
     if (mode !== 'safe') params.mode = mode;
+
+    const newSearch = new URLSearchParams(params).toString();
+    const fullUrl = `${location.pathname}${newSearch ? `?${newSearch}` : ''}`;
+
+    // Save current browse URL as last browse URL for the watch page back button
+    sessionStorage.setItem('last_browse_url', fullUrl);
+
     setSearchParams(params, { replace: true });
-  }, [debouncedQuery, selectedGenres, typeFilter, statusFilter, selectedYearRange, browseSortBy, page, mode, setSearchParams]);
+  }, [debouncedQuery, selectedGenres, typeFilter, statusFilter, selectedYearRange, browseSortBy, page, mode, setSearchParams, location.pathname]);
 
   // Build filters
   const browseFilters = useMemo(() => ({
@@ -320,6 +346,37 @@ const Search = () => {
       hasNextPage: rawData.hasNextPage || false
     };
   }, [hasSearchQuery, searchData, browseData, searchSortBy]);
+
+  // Save/Restore scroll position
+  useEffect(() => {
+    // Only restore once when not loading and data is present
+    if (!isLoading && processedData.results.length > 0 && !scrollRestored.current) {
+      try {
+        const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
+        const pos = positions[filterStateKey];
+        if (pos > 0) {
+          // Use multiple attempts to ensure rendering is complete across various devices/loads
+          const attempts = [0, 20, 50, 100, 200, 400, 600, 800, 1000];
+          attempts.forEach(delay => {
+            setTimeout(() => {
+              // Only scroll if we haven't manually scrolled away yet (approximate)
+              if (window.scrollY < pos + 100) {
+                window.scrollTo({ top: pos, behavior: 'instant' });
+              }
+            }, delay);
+          });
+          scrollRestored.current = true;
+        } else {
+          scrollRestored.current = true;
+        }
+      } catch (e) { /* ignore */ }
+    }
+  }, [filterStateKey, isLoading, processedData.results.length]);
+
+  // Reset scroll restoration flag when filters change
+  useEffect(() => {
+    scrollRestored.current = false;
+  }, [filterStateKey]);
 
   // Actions
   const clearFilters = () => {
@@ -616,28 +673,110 @@ const Search = () => {
 
               {/* Pagination */}
               {processedData.totalPages > 1 && (
-                <div className="mt-12 flex justify-center items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setPage(p => Math.max(1, p - 1))}
-                    disabled={page === 1 || isFetching}
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </Button>
+                <div className="mt-12 mb-20 flex flex-col items-center gap-6">
+                  <div className="flex flex-wrap justify-center items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage(p => Math.max(1, p - 1))}
+                      disabled={page === 1 || isFetching}
+                      className="rounded-xl border-white/10 hover:border-fox-orange/50 hover:text-fox-orange"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </Button>
 
-                  <span className="text-sm font-medium mx-4">
-                    Page {page} of {processedData.totalPages}
-                  </span>
+                    <div className="flex items-center gap-1">
+                      {(() => {
+                        const total = processedData.totalPages;
+                        const current = page;
+                        const delta = 1;
+                        const range = [];
+                        const rangeWithDots = [];
 
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setPage(p => p + 1)}
-                    disabled={!processedData.hasNextPage || isFetching}
+                        for (let i = Math.max(2, current - delta); i <= Math.min(total - 1, current + delta); i++) {
+                          range.push(i);
+                        }
+
+                        if (current - delta > 2) {
+                          rangeWithDots.push(1, "...");
+                        } else {
+                          rangeWithDots.push(1);
+                        }
+
+                        rangeWithDots.push(...range);
+
+                        if (current + delta < total - 1) {
+                          rangeWithDots.push("...", total);
+                        } else if (total > 1) {
+                          rangeWithDots.push(total);
+                        }
+
+                        return rangeWithDots.map((p, i) => (
+                          <React.Fragment key={i}>
+                            {p === "..." ? (
+                              <span className="px-2 text-muted-foreground">...</span>
+                            ) : (
+                              <Button
+                                variant={page === p ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => setPage(p as number)}
+                                className={cn(
+                                  "min-w-[40px] h-10 rounded-xl transition-all font-medium",
+                                  page === p
+                                    ? "bg-fox-orange text-white hover:bg-fox-orange/90 shadow-[0_0_15px_rgba(255,102,0,0.3)]"
+                                    : "border-white/10 hover:border-fox-orange/50 hover:text-fox-orange bg-secondary/30"
+                                )}
+                              >
+                                {p}
+                              </Button>
+                            )}
+                          </React.Fragment>
+                        ));
+                      })()}
+                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => setPage(p => p + 1)}
+                      disabled={!processedData.hasNextPage || isFetching}
+                      className="rounded-xl border-white/10 hover:border-fox-orange/50 hover:text-fox-orange"
+                    >
+                      {isFetching ? <Loader2 className="w-4 h-4 animate-spin text-fox-orange" /> : <ChevronRight className="w-4 h-4" />}
+                    </Button>
+                  </div>
+
+                  {/* Jump to page */}
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const p = parseInt(jumpPage);
+                      if (!isNaN(p) && p >= 1 && p <= processedData.totalPages) {
+                        setPage(p);
+                        setJumpPage("");
+                      }
+                    }}
+                    className="flex items-center gap-3 bg-secondary/30 p-1.5 pl-4 rounded-xl border border-white/5"
                   >
-                    {isFetching ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronRight className="w-4 h-4" />}
-                  </Button>
+                    <span className="text-sm text-muted-foreground font-medium">Jump to page</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={processedData.totalPages}
+                      value={jumpPage}
+                      onChange={(e) => setJumpPage(e.target.value)}
+                      className="w-16 h-8 bg-background/50 border-white/10 text-center text-sm rounded-lg"
+                      placeholder="#"
+                    />
+                    <Button
+                      type="submit"
+                      size="sm"
+                      className="h-8 rounded-lg bg-fox-orange hover:bg-fox-orange/90"
+                      disabled={!jumpPage || parseInt(jumpPage) < 1 || parseInt(jumpPage) > processedData.totalPages}
+                    >
+                      Go
+                    </Button>
+                  </form>
                 </div>
               )}
             </>

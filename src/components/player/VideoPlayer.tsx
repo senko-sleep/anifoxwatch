@@ -50,6 +50,7 @@ interface VideoPlayerProps {
   selectedEpisodeNum?: number;
   animeTitle?: string;
   animeImage?: string;
+  animeSeason?: string;
 }
 
 // Logger for video player events
@@ -84,7 +85,8 @@ export const VideoPlayer = ({
   animeId,
   selectedEpisodeNum,
   animeTitle,
-  animeImage
+  animeImage,
+  animeSeason
 }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -409,7 +411,7 @@ export const VideoPlayer = ({
         if (animeId && animeTitle && animeImage && selectedEpisodeNum) {
           import('@/lib/watch-history').then(({ WatchHistory }) => {
             WatchHistory.save(
-              { id: animeId, title: animeTitle, image: animeImage } as any,
+              { id: animeId, title: animeTitle, image: animeImage, season: animeSeason } as any,
               selectedEpisodeNum.toString(),
               selectedEpisodeNum,
               time,

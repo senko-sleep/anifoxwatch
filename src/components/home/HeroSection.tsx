@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Play, Info, ChevronLeft, ChevronRight, Star, Calendar, Tv } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Anime } from '@/types/anime';
@@ -13,6 +13,7 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const currentAnime = featuredAnime[currentIndex];
 
   useEffect(() => {
@@ -148,7 +149,9 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
           <div className="flex items-center gap-4 pt-2">
             <Button
               size="lg"
-              onClick={() => navigate(`/watch?id=${encodeURIComponent(currentAnime.id)}`)}
+              onClick={() => navigate(`/watch?id=${encodeURIComponent(currentAnime.id)}`, {
+                state: { from: location.pathname + location.search }
+              })}
               className="bg-white hover:bg-gray-100 text-black font-semibold px-8 py-3 rounded-lg gap-2"
             >
               <Play className="w-5 h-5" />

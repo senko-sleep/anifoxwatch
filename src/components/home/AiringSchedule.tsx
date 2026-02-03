@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Clock, Calendar } from 'lucide-react';
 import { ScheduleItem } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,7 @@ interface AiringScheduleProps {
 }
 
 export const AiringSchedule = ({ schedule, isLoading }: AiringScheduleProps) => {
+    const location = useLocation();
     // Filter only for today (if needed, but usually the API returns relevant sorted data)
     // For this component we'll take the first 4-5 items or just list what's passed
 
@@ -58,7 +59,11 @@ export const AiringSchedule = ({ schedule, isLoading }: AiringScheduleProps) => 
                     className="group relative flex gap-3 p-2 rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/5"
                 >
                     {/* Image */}
-                    <Link to={`/watch?id=${encodeURIComponent(item.id)}`} className="shrink-0 relative w-16 h-20 rounded-lg overflow-hidden">
+                    <Link
+                        to={`/watch?id=${encodeURIComponent(item.id)}`}
+                        state={{ from: location.pathname + location.search }}
+                        className="shrink-0 relative w-16 h-20 rounded-lg overflow-hidden"
+                    >
                         <img
                             src={item.media?.thumbnail}
                             alt={item.title}
@@ -69,7 +74,10 @@ export const AiringSchedule = ({ schedule, isLoading }: AiringScheduleProps) => 
 
                     {/* Info */}
                     <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
-                        <Link to={`/watch?id=${encodeURIComponent(item.id)}`}>
+                        <Link
+                            to={`/watch?id=${encodeURIComponent(item.id)}`}
+                            state={{ from: location.pathname + location.search }}
+                        >
                             <h4 className="font-medium text-sm text-zinc-200 group-hover:text-fox-orange transition-colors truncate">
                                 {item.title}
                             </h4>
@@ -93,7 +101,10 @@ export const AiringSchedule = ({ schedule, isLoading }: AiringScheduleProps) => 
 
                     {/* Quick Action */}
                     <div className="flex flex-col justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Link to={`/watch?id=${encodeURIComponent(item.id)}`}>
+                        <Link
+                            to={`/watch?id=${encodeURIComponent(item.id)}`}
+                            state={{ from: location.pathname + location.search }}
+                        >
                             <Button size="sm" variant="ghost" className="h-8 w-8 p-0 rounded-full hover:bg-fox-orange hover:text-white">
                                 <Clock className="w-4 h-4" />
                             </Button>

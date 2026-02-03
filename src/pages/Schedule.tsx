@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useLocation } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { useSchedule } from '@/hooks/useAnime';
@@ -69,6 +69,7 @@ interface ReminderSettings {
 }
 
 export const Schedule = () => {
+    const location = useLocation();
     const [searchParams, setSearchParams] = useSearchParams();
     const [selectedDay, setSelectedDay] = useState<string>(
         searchParams.get('day') || getCurrentDayKey()
@@ -260,6 +261,7 @@ export const Schedule = () => {
                                     {/* Thumbnail */}
                                     <Link
                                         to={`/watch?id=${encodeURIComponent(item.id)}`}
+                                        state={{ from: location.pathname + location.search }}
                                         className="shrink-0 relative w-20 h-28 rounded-lg overflow-hidden"
                                     >
                                         <img
@@ -278,6 +280,7 @@ export const Schedule = () => {
                                     <div className="flex-1 min-w-0">
                                         <Link
                                             to={`/watch?id=${encodeURIComponent(item.id)}`}
+                                            state={{ from: location.pathname + location.search }}
                                             className="text-lg font-semibold hover:text-fox-orange transition-colors line-clamp-1"
                                         >
                                             {item.title}
