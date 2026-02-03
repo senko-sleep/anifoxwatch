@@ -462,7 +462,6 @@ export class SourceManager {
                         studios: anilistData.studios,
                         season: anilistData.season,
                         year: anilistData.year,
-                        source: 'HiAnimeDirect'
                     };
                 }
 
@@ -719,7 +718,7 @@ export class SourceManager {
         totalResults: number;
     }> {
         const timer = new PerformanceTimer('Browse anime', filters);
-        const mode = filters.mode || 'mixed'; // Changed default from 'safe' to 'mixed'
+        const mode = filters.mode || 'safe';
 
         // Determine source based on mode
         let effectiveSource = filters.source;
@@ -830,17 +829,12 @@ export class SourceManager {
         let hasNextPage = false;
         let finalResults: AnimeBase[] = [];
 
-        // STRATEGY: Prefer AniList for browsing because it supports rich filtering and pagination
-        // Then we map the results to streaming IDs. This avoids the "100 item limit" of local scraping.
-        // We use this strategy if:
-        // 1. Source is not explicitly forced to a scraper (or is default/mixed)
-        // 2. Filters are compatible with AniList (standard filters)
-
-        const canUseAniList = (!filters.source || filters.source === 'HiAnimeDirect' || filters.source === 'AniList')
-            && filters.mode !== 'adult'; // Skip AniList for adult content mode
+        // STRATEGY: Use source-native browse/filter capabilities first.
+        // We avoid AniList for browsing because it often returns results without streaming matches.
+        const canUseAniList = filters.source === 'AniList';
 
         if (canUseAniList) {
-            logger.info(`[SourceManager] Using AniList-first strategy for browse`, filters);
+            logger.info(`[SourceManager] Using AniList-only strategy for browse`, filters);
             try {
                 // Build lookup table lazily
                 this.buildStreamingLookupTable();
@@ -883,8 +877,6 @@ export class SourceManager {
                 if (anilistResult?.results && anilistResult.results.length > 0) {
                     // Enrich with streaming IDs
                     const enrichedResults: AnimeBase[] = [];
-                    const titlesNeedingSearch: string[] = [];
-                    const titleToAnimeMap = new Map<string, AnimeBase>();
 
                     for (const anime of anilistResult.results) {
                         const match = this.findStreamingMatchInstant(anime.title);
@@ -898,19 +890,14 @@ export class SourceManager {
                                 source: 'HiAnimeDirect'
                             });
                         } else {
-                            // Queue for fallback search if needed, but for now just use AniList data
-                            // Ideally we would search for these, but to keep page load fast we skip
-                            // deep searching for every single item on a browse page.
-                            // We return them as "AniList" source items. The UI will have to handle 'anilist-' IDs 
-                            // by doing a lookup when the user CLICKs them (which getAnime already handles).
+                            // If we use AniList strategy explicitly, we still return them even without instant match
+                            // they will be resolved via search on the details page.
                             enrichedResults.push({
                                 ...anime,
-                                streamingId: undefined, // Will be resolved on details page
+                                streamingId: undefined,
                                 source: 'AniList',
-                                id: `anilist-${anime.id}` // Ensure ID is marked
+                                id: `anilist-${anime.id}`
                             });
-
-                            // We could do a quick check against normalized map just in case
                         }
                     }
 
@@ -920,19 +907,16 @@ export class SourceManager {
                     let filteredResults = enrichedResults;
 
                     if (mode === 'safe') {
-                        // Exclude adult content
                         filteredResults = enrichedResults.filter(a => {
                             if (!a.genres || a.genres.length === 0) return true;
                             return !a.genres.some(g => adultGenres.includes(g.toLowerCase()));
                         });
                     } else if (mode === 'adult') {
-                        // Only show adult content
                         filteredResults = enrichedResults.filter(a => {
                             if (!a.genres || a.genres.length === 0) return false;
                             return a.genres.some(g => adultGenres.includes(g.toLowerCase()));
                         });
                     }
-                    // mixed mode: show everything (no filtering)
 
                     finalResults = filteredResults;
                     totalResults = anilistResult.totalResults || 5000;
@@ -943,107 +927,145 @@ export class SourceManager {
                     logger.info(`[SourceManager] AniList browse success: ${finalResults.length} items (Page ${page})`);
                 }
             } catch (e) {
-                logger.warn(`[SourceManager] AniList browse strategy failed, falling back to usage of scraper`, { error: String(e) });
+                logger.warn(`[SourceManager] AniList browse strategy failed`, { error: String(e) });
             }
         }
 
-        // Fallback: If AniList strategy failed or wasn't used, perform the old local scraping loop
+
+        // Fallback: Use local scraping or source-native filter
         if (!isPaginatedResult) {
-            logger.info(`[SourceManager] Using local scraping strategy for browse`);
+            logger.info(`[SourceManager] Using source-native strategy for browse with ${source.name}`);
             const allAnime: AnimeBase[] = [];
             const sortType = filters.sort || 'popularity';
 
-            // Determine how many pages to fetch to have enough data for filtering
-            const pagesToFetch = sortType === 'shuffle' ? 5 : 4;
-
-            // Fetch anime based on primary sort type
-            for (let i = 0; i < pagesToFetch; i++) {
+            // Special Case 1: Genre-only browsing with source support
+            if (filters.genres && filters.genres.length > 0 && typeof (source as any).getByGenre === 'function') {
                 try {
-                    let pageData: AnimeBase[] = [];
-                    // Use the specific source logic
-                    switch (sortType) {
-                        case 'trending':
-                            pageData = await source.getTrending(i + 1);
-                            break;
-                        case 'recently_released':
-                            pageData = await source.getLatest(i + 1);
-                            break;
-                        case 'popularity':
-                        case 'shuffle':
-                        default:
-                            pageData = await source.getTrending(i + 1);
-                            break;
+                    const genre = filters.genres[0];
+                    const genreResult = await (source as any).getByGenre(genre, page);
+                    if (genreResult.results && genreResult.results.length > 0) {
+                        finalResults = genreResult.results;
+                        totalResults = genreResult.totalResults || 1000;
+                        totalPages = genreResult.totalPages || 100; // Boosted as requested
+                        hasNextPage = genreResult.hasNextPage;
+                        isPaginatedResult = true;
+                        logger.info(`[SourceManager] Genre browse success via ${source.name} for genre: ${genre}`);
                     }
-                    if (pageData && pageData.length > 0) allAnime.push(...pageData);
-                    if (allAnime.length >= 100) break;
-                } catch { break; }
-            }
-
-            // Remove duplicates
-            const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
-            let filtered = [...uniqueAnime];
-
-            // Apply local filters (Type, Status, Year, etc.)
-            // ... (keeping existing logic roughly, simplified for brevity as we are replacing the block) ...
-            if (filters.type) {
-                filtered = filtered.filter(a => a.type?.toLowerCase() === filters.type?.toLowerCase());
-            }
-            if (filters.status) {
-                filtered = filtered.filter(a => a.status?.toLowerCase() === filters.status?.toLowerCase());
-            }
-            if (filters.year) {
-                filtered = filtered.filter(a => a.year === filters.year);
-            }
-            // Genres (local filter)
-            if (filters.genres && filters.genres.length > 0) {
-                filtered = filtered.filter(a => {
-                    if (!a.genres || a.genres.length === 0) return false;
-                    return filters.genres!.some((g: string) =>
-                        a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
-                    );
-                });
-            }
-
-            // Content mode filtering
-            const mode = filters.mode || 'mixed';
-            const adultGenres = ['hentai', 'ecchi', 'yaoi', 'yuri'];
-
-            if (mode === 'safe') {
-                // Exclude adult content
-                filtered = filtered.filter(a => {
-                    if (!a.genres || a.genres.length === 0) return true;
-                    return !a.genres.some(g => adultGenres.includes(g.toLowerCase()));
-                });
-            } else if (mode === 'adult') {
-                // Only show adult content
-                filtered = filtered.filter(a => {
-                    if (!a.genres || a.genres.length === 0) return false;
-                    return a.genres.some(g => adultGenres.includes(g.toLowerCase()));
-                });
-            }
-            // mixed mode: show everything (no filtering)
-
-            // Shuffle or Sort
-            if (sortType === 'shuffle') {
-                const seed = Date.now();
-                const random = (i: number) => {
-                    const x = Math.sin(seed + i) * 10000;
-                    return x - Math.floor(x);
-                };
-                for (let i = filtered.length - 1; i > 0; i--) {
-                    const j = Math.floor(random(i) * (i + 1));
-                    [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
+                } catch (e) {
+                    logger.warn(`[SourceManager] Genre browse failed on ${source.name}, falling back to type or trending`);
                 }
-            } else if (sortType === 'recently_released') {
-                filtered.sort((a, b) => (b.year || 0) - (a.year || 0));
             }
 
-            // Paginate
-            const startIndex = (page - 1) * limit;
-            finalResults = filtered.slice(startIndex, startIndex + limit);
-            totalResults = filtered.length;
-            totalPages = Math.ceil(totalResults / limit) || 1;
-            hasNextPage = startIndex + limit < totalResults;
+            // Special Case 2: Type-only browsing with source support
+            if (!isPaginatedResult && filters.type && typeof (source as any).getByType === 'function') {
+                try {
+                    const typeResult = await (source as any).getByType(filters.type, page);
+                    if (typeResult.results && typeResult.results.length > 0) {
+                        finalResults = typeResult.results;
+                        totalResults = typeResult.totalResults || 1000;
+                        totalPages = typeResult.totalPages || 100; // Boosted as requested
+                        hasNextPage = typeResult.hasNextPage;
+                        isPaginatedResult = true;
+                        logger.info(`[SourceManager] Type browse success via ${source.name} for type: ${filters.type}`);
+                    }
+                } catch (e) {
+                    logger.warn(`[SourceManager] Type browse failed on ${source.name}, falling back to trending`);
+                }
+            }
+
+            // Normal Case: Trending / Popular / Latest + Local Filtering
+            if (!isPaginatedResult) {
+                // Determine how many pages to fetch to have enough data for filtering
+                const pagesToFetch = sortType === 'shuffle' ? 5 : 4;
+
+                // Fetch anime based on primary sort type
+                for (let i = 0; i < pagesToFetch; i++) {
+                    try {
+                        let pageData: AnimeBase[] = [];
+                        // Use the specific source logic
+                        switch (sortType) {
+                            case 'trending':
+                                pageData = await source.getTrending(page + i);
+                                break;
+                            case 'recently_released':
+                                pageData = await source.getLatest(page + i);
+                                break;
+                            case 'popularity':
+                            case 'shuffle':
+                            default:
+                                pageData = await source.getTrending(page + i);
+                                break;
+                        }
+                        if (pageData && pageData.length > 0) allAnime.push(...pageData);
+                        if (allAnime.length >= 100) break;
+                    } catch { break; }
+                }
+
+                // Remove duplicates
+                const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
+                let filtered = [...uniqueAnime];
+
+                // Apply local filters (Type, Status, Year, etc.)
+                if (filters.type) {
+                    filtered = filtered.filter(a => a.type?.toLowerCase() === filters.type?.toLowerCase());
+                }
+                if (filters.status) {
+                    filtered = filtered.filter(a => a.status?.toLowerCase() === filters.status?.toLowerCase());
+                }
+                if (filters.year) {
+                    filtered = filtered.filter(a => a.year === filters.year);
+                }
+                // Genres (local filter)
+                if (filters.genres && filters.genres.length > 0) {
+                    filtered = filtered.filter(a => {
+                        if (!a.genres || a.genres.length === 0) return false;
+                        return filters.genres!.some((g: string) =>
+                            a.genres!.some(ag => ag.toLowerCase().includes(g.toLowerCase()))
+                        );
+                    });
+                }
+
+                // Content mode filtering
+                const mode = filters.mode || 'mixed';
+                const adultGenres = ['hentai', 'ecchi', 'yaoi', 'yuri'];
+
+                if (mode === 'safe') {
+                    // Exclude adult content
+                    filtered = filtered.filter(a => {
+                        if (!a.genres || a.genres.length === 0) return true;
+                        return !a.genres.some(g => adultGenres.includes(g.toLowerCase()));
+                    });
+                } else if (mode === 'adult') {
+                    // Only show adult content
+                    filtered = filtered.filter(a => {
+                        if (!a.genres || a.genres.length === 0) return false;
+                        return a.genres.some(g => adultGenres.includes(g.toLowerCase()));
+                    });
+                }
+                // mixed mode: show everything (no filtering)
+
+                // Shuffle or Sort
+                if (sortType === 'shuffle') {
+                    const seed = Date.now();
+                    const random = (i: number) => {
+                        const x = Math.sin(seed + i) * 10000;
+                        return x - Math.floor(x);
+                    };
+                    for (let i = filtered.length - 1; i > 0; i--) {
+                        const j = Math.floor(random(i) * (i + 1));
+                        [filtered[i], filtered[j]] = [filtered[j], filtered[i]];
+                    }
+                } else if (sortType === 'recently_released') {
+                    filtered.sort((a, b) => (b.year || 0) - (a.year || 0));
+                }
+
+                // Paginate
+                const startIndex = (page - 1) * limit;
+                finalResults = filtered.slice(startIndex, startIndex + limit);
+                totalResults = filtered.length;
+                totalPages = Math.ceil(totalResults / limit) || 1;
+                hasNextPage = startIndex + limit < totalResults;
+            }
         }
 
         return {
@@ -1626,8 +1648,17 @@ export class SourceManager {
                 return this.findBestMatch(title, cached.results);
             }
 
-            // Get available source
-            const source = this.getAvailableSource();
+            // Prioritize HiAnime for title search (used for AniList resolution)
+            let source = this.sources.get('HiAnimeDirect');
+            if (!source || !source.isAvailable) {
+                source = this.sources.get('HiAnime');
+            }
+
+            // Fallback to any available source if HiAnime is down
+            if (!source || !source.isAvailable) {
+                source = this.getAvailableSource() as any;
+            }
+
             if (!source) {
                 return null;
             }

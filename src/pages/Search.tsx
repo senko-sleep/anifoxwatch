@@ -134,7 +134,7 @@ const Search = () => {
   const initialYear = parseInt(searchParams.get('year') || '0', 10);
   const initialSort = (searchParams.get('sort') as BrowseSortOption) || 'popularity';
   const initialPage = parseInt(searchParams.get('page') || '1', 10);
-  const initialMode = (searchParams.get('mode') as 'safe' | 'mixed' | 'adult') || 'mixed';
+  const initialMode = (searchParams.get('mode') as 'safe' | 'mixed' | 'adult') || 'safe';
 
   const [query, setQuery] = useState(initialQuery);
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
@@ -162,7 +162,7 @@ const Search = () => {
     const urlStatus = (searchParams.get('status') as StatusFilter) || 'all';
     const urlYear = parseInt(searchParams.get('year') || '0', 10);
     const urlSort = (searchParams.get('sort') as BrowseSortOption) || 'popularity';
-    const urlMode = (searchParams.get('mode') as 'safe' | 'mixed' | 'adult') || 'mixed';
+    const urlMode = (searchParams.get('mode') as 'safe' | 'mixed' | 'adult') || 'safe';
     const urlGenres = searchParams.get('genres')?.split(',').filter(Boolean) || searchParams.get('genre')?.split(',').filter(Boolean) || [];
 
     // Check if any values differ
@@ -246,7 +246,7 @@ const Search = () => {
     if (selectedYearRange > 0) params.year = selectedYearRange.toString();
     if (browseSortBy !== 'popularity') params.sort = browseSortBy;
     if (page > 1) params.page = page.toString();
-    if (mode !== 'mixed') params.mode = mode;
+    if (mode !== 'safe') params.mode = mode;
     setSearchParams(params, { replace: true });
   }, [debouncedQuery, selectedGenres, typeFilter, statusFilter, selectedYearRange, browseSortBy, page, mode, setSearchParams]);
 
@@ -331,7 +331,7 @@ const Search = () => {
     setSelectedYearRange(0);
     setPage(1);
     setQuery(''); // Also clear query
-    setMode('mixed');
+    setMode('safe');
   };
 
   const handleShuffle = () => {

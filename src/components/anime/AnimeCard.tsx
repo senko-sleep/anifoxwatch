@@ -2,6 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Play, Star, Tv, Calendar, Clock } from 'lucide-react';
 import { Anime } from '@/types/anime';
 import { cn } from '@/lib/utils';
+import { WatchHistory } from '@/lib/watch-history';
 
 interface AnimeCardProps {
   anime: Anime;
@@ -19,8 +20,14 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: A
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
+
+    // Check watch history for last watched episode
+    const history = WatchHistory.get();
+    const historyItem = history.find(item => item.animeId === anime.id);
+    const episodeParam = historyItem ? `&ep=${historyItem.episodeNumber}` : '';
+
     // Navigate to watch page with current location as state for preserving browse state
-    navigate(`/watch?id=${encodeURIComponent(navigateId)}`, {
+    navigate(`/watch?id=${encodeURIComponent(navigateId)}${episodeParam}`, {
       state: { from: location.pathname + location.search }
     });
   };

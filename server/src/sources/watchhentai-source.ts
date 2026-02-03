@@ -277,7 +277,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             }
 
             // Decode HTML entities if needed
-            playerUrl = playerUrl.replace(/&amp;/g, '&');
+            playerUrl = playerUrl.replace(/&/g, '&');
 
             logger.info(`[WatchHentai] Found player URL: ${playerUrl.substring(0, 100)}...`);
 

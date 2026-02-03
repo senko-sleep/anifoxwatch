@@ -25,10 +25,10 @@ const proxyUrl = (url: string, proxyBase: string): string => {
 const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: string): string => {
     const baseUrl = originalUrl.substring(0, originalUrl.lastIndexOf('/') + 1);
     const lines = content.split('\n');
-    
+
     return lines.map(line => {
         const trimmedLine = line.trim();
-        
+
         // Skip empty lines and comments (except URI in comments)
         if (!trimmedLine || (trimmedLine.startsWith('#') && !trimmedLine.includes('URI='))) {
             // Handle URI in EXT-X-KEY or EXT-X-MAP tags
@@ -40,15 +40,15 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
             }
             return line;
         }
-        
+
         // Handle segment URLs
         if (!trimmedLine.startsWith('#')) {
-            const absoluteUrl = trimmedLine.startsWith('http') 
-                ? trimmedLine 
+            const absoluteUrl = trimmedLine.startsWith('http')
+                ? trimmedLine
                 : `${baseUrl}${trimmedLine}`;
             return proxyUrl(absoluteUrl, proxyBase);
         }
-        
+
         return line;
     }).join('\n');
 };
@@ -60,19 +60,19 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
 router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<void> => {
     const episodeId = req.params.episodeId as string;
     const requestId = (req as any).id;
-    
+
     logger.info(`[STREAM] Getting servers for episode: ${episodeId}`, { episodeId, requestId });
-    
+
     try {
         const servers = await sourceManager.getEpisodeServers(episodeId);
-        
+
         logger.info(`[STREAM] Found ${servers.length} servers for episode: ${episodeId}`, {
             episodeId,
             serverCount: servers.length,
             servers: servers.map(s => `${s.name}(${s.type})`).join(', '),
             requestId
         });
-        
+
         res.json({ servers });
     } catch (error: any) {
         logger.error(`[STREAM] Failed to get servers for episode: ${episodeId}`, error, {
@@ -103,7 +103,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     const shouldProxy = useProxy !== 'false';
     const shouldTryAll = tryAll !== 'false' && !server; // Only try all if no specific server requested
     const proxyBase = getProxyBaseUrl(req);
-    
+
     logger.info(`[STREAM] Fetching stream for episode: ${episodeId}`, {
         episodeId,
         server,
@@ -145,7 +145,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         } catch (error: any) {
             lastError = error.message;
             logger.warn(`[STREAM] Server ${currentServer} failed: ${error.message}`, { episodeId, requestId });
-            
+
             if (!shouldTryAll) {
                 break;
             }
@@ -254,8 +254,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'sunshinerays': { referer: 'https://rapid-cloud.co/' },
             'sunburst': { referer: 'https://rapid-cloud.co/' },
             'rainveil': { referer: 'https://rapid-cloud.co/' },
-            'lightningspark': { referer: 'https://megacloud.tv/' },
-            'megacloud': { referer: 'https://megacloud.tv/' },
+            'lightningspark': { referer: 'https://megacloud.blog/' },
+            'megacloud': { referer: 'https://megacloud.blog/' },
             'vidcloud': { referer: 'https://vidcloud9.com/' },
             'rapid-cloud': { referer: 'https://rapid-cloud.co/' },
             'netmagcdn': { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
@@ -264,12 +264,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'gogocdn': { referer: 'https://gogoanime.run/' },
             'default': { referer: 'https://hianimez.to/' }
         };
-        
+
         const matchedConfig = Object.entries(cdnConfig).find(([key]) => domain.includes(key));
         const config = matchedConfig ? matchedConfig[1] : cdnConfig.default;
         const referer = config.referer;
         const origin = config.origin || referer.replace(/\/$/, '');
-        
+
         const response = await axios.get(url, {
             responseType: 'arraybuffer',
             headers: {
@@ -299,10 +299,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 domain,
                 requestId
             });
-            res.status(response.status).json({ 
-                error: 'Upstream error', 
+            res.status(response.status).json({
+                error: 'Upstream error',
                 status: response.status,
-                domain 
+                domain
             });
             return;
         }
@@ -337,7 +337,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             const content = response.data.toString('utf-8');
             const rewrittenContent = rewriteM3u8Content(content, url, proxyBase);
             res.send(rewrittenContent);
-            
+
             logger.info(`[PROXY] Rewrote m3u8 manifest from ${domain}`, {
                 domain,
                 originalSize: content.length,
@@ -352,7 +352,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         const errorMessage = error.message || 'Unknown error';
         const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
         const isBlocked = errorMessage.includes('blocked') || errorMessage.includes('forbidden');
-        
+
         logger.error(`[PROXY] Failed to proxy from ${domain}`, error, {
             domain,
             errorMessage,
@@ -361,7 +361,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             requestId
         });
 
-        res.status(502).json({ 
+        res.status(502).json({
             error: 'Failed to proxy stream',
             reason: isTimeout ? 'timeout' : isBlocked ? 'blocked' : 'connection_error',
             domain,

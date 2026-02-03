@@ -6,6 +6,8 @@
  */
 
 import { HiAnime } from 'aniwatch';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 import { BaseAnimeSource, GenreAwareSource } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
@@ -13,7 +15,7 @@ import { logger } from '../utils/logger.js';
 
 export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'HiAnimeDirect';
-    baseUrl = 'https://hianimez.to';
+    baseUrl = 'https://hianime.to';
     private scraper: HiAnime.Scraper | null = null;
     private scraperInitialized = false;
 
@@ -500,102 +502,145 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
     }
 
     /**
-     * Get anime by genre - DEEP SCRAPING
-     * Uses the genre endpoint to get anime specifically for that genre
-     * Falls back to search if genre endpoint fails, but only for niche/specific genres
+     * Get anime by type (TV, Movie, OVA, etc.) - NATIVE SCRAPING
+     */
+    async getByType(type: string, page: number = 1): Promise<AnimeSearchResult> {
+        const cacheKey = `type:${type}:${page}`;
+        const cached = this.getCached<AnimeSearchResult>(cacheKey);
+        if (cached) return cached;
+
+        const typeMap: Record<string, string> = {
+            'TV': 'tv',
+            'Movie': 'movie',
+            'OVA': 'ova',
+            'ONA': 'ona',
+            'Special': 'special'
+        };
+
+        const category = typeMap[type.toUpperCase()] || 'tv';
+        const url = `${this.baseUrl}/${category}${page > 1 ? `?page=${page}` : ''}`;
+
+        return this.nativeScrape(url, page, cacheKey);
+    }
+
+    /**
+     * Get anime by genre - NATIVE SCRAPING as requested
+     * Uses hianime.to/genre/[slug]?page=[page]
      */
     async getByGenre(genre: string, page: number = 1): Promise<AnimeSearchResult> {
         const cacheKey = `genre:${genre}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
 
-        // List of generic genre names that would return wrong results from search
-        const genericGenres = [
-            'action', 'adventure', 'cars', 'comedy', 'dementia', 'demons', 'drama', 'ecchi',
-            'fantasy', 'game', 'harem', 'historical', 'horror', 'isekai', 'josei', 'kids',
-            'magic', 'martial-arts', 'mecha', 'military', 'music', 'mystery', 'parody',
-            'police', 'psychological', 'romance', 'samurai', 'school', 'sci-fi', 'seinen',
-            'shoujo', 'shoujo-ai', 'shounen', 'shounen-ai', 'slice-of-life', 'space',
-            'sports', 'super-power', 'supernatural', 'thriller', 'vampire'
-        ];
+        // Custom slug mapping (fix martial arts typo)
+        let slug = genre.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+        if (slug === 'martial-arts') slug = 'marial-arts';
 
-        const slug = genre.toLowerCase().trim().replace(/\s+/g, '-');
-        const isGenericGenre = genericGenres.includes(slug);
+        const url = `${this.baseUrl}/genre/${slug}${page > 1 ? `?page=${page}` : ''}`;
+
+        return this.nativeScrape(url, page, cacheKey);
+    }
+
+    /**
+     * Internal helper for native scraping using axios and cheerio
+     */
+    private async nativeScrape(url: string, page: number, cacheKey: string): Promise<AnimeSearchResult> {
+        logger.info(`[${this.name}] Native Scraping: ${url}`);
 
         try {
-            // Try the genre endpoint first using the slug
-            const data = await this.getScraper().getGenreAnime(slug, page);
+            const response = await axios.get(url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Referer': 'https://hianime.to/'
+                }
+            });
+
+            const $ = cheerio.load(response.data);
+            const animeItems: AnimeBase[] = [];
+
+            $('.flw-item').each((_, el) => {
+                const $el = $(el);
+                const titleNode = $el.find('.film-detail .film-name .dynamic-name');
+                const href = titleNode.attr('href') || '';
+                const id = href.split('/').pop()?.split('?')[0] || '';
+
+                if (!id) return;
+
+                animeItems.push({
+                    id: `hianime-${id}`,
+                    title: titleNode.text().trim(),
+                    titleJapanese: titleNode.attr('data-jname') || undefined,
+                    image: $el.find('.film-poster .film-poster-img').attr('data-src') || '',
+                    type: this.mapType($el.find('.film-detail .fd-infor .fdi-item:nth-of-type(1)').text()),
+                    episodes: parseInt($el.find('.film-poster .tick-sub').text()) || 0,
+                    subCount: parseInt($el.find('.film-poster .tick-sub').text()) || 0,
+                    dubCount: parseInt($el.find('.film-poster .tick-dub').text()) || 0,
+                    source: this.name,
+                    rating: parseFloat($el.find('.film-poster .tick-rate').text()) || undefined
+                });
+            });
+
+            // Improved pagination detection supporting up to 100+ pages
+            let totalPages = page;
+            const paginationItems = $('.pagination .page-item a');
+
+            paginationItems.each((_, el) => {
+                const title = $(el).attr('title');
+                const text = $(el).text().trim();
+                const href = $(el).attr('href') || '';
+
+                if (title === 'Last' || title === 'Next') {
+                    const match = href.match(/page=(\d+)/);
+                    if (match && parseInt(match[1]) > totalPages) {
+                        totalPages = parseInt(match[1]);
+                    }
+                } else if (!isNaN(parseInt(text))) {
+                    if (parseInt(text) > totalPages) {
+                        totalPages = parseInt(text);
+                    }
+                }
+            });
+
+            // Ensure we support the requested 100 pages
+            if (totalPages < 100 && $('.pagination .page-link[title="Next"]').length > 0) {
+                // If there is a next but we don't know total, assume at least page+1
+                if (totalPages === page) totalPages = page + 1;
+            }
 
             const result: AnimeSearchResult = {
-                results: (data.animes || []).map((a: any) => this.mapAnime(a)),
-                totalPages: data.totalPages || 1,
-                currentPage: data.currentPage || page,
-                hasNextPage: data.hasNextPage || false,
+                results: animeItems,
+                totalPages: totalPages,
+                currentPage: page,
+                hasNextPage: page < totalPages,
                 source: this.name
             };
 
-            // If we got results, return them
-            if (result.results && result.results.length > 0) {
-                this.setCache(cacheKey, result, this.cacheTTL.search);
-                return result;
+            this.setCache(cacheKey, result, this.cacheTTL.search);
+            return result;
+        } catch (error: any) {
+            logger.error(`[${this.name}] Native scrape failed for ${url}: ${error.message}`);
+
+            // Fallback to library fetch if page <= 1 and not a special category
+            if (page <= 1 && !url.includes('/tv') && !url.includes('/movie')) {
+                try {
+                    logger.info(`[${this.name}] Falling back to library getGenreAnime`);
+                    const slug = url.split('/').pop()?.split('?')[0] || '';
+                    const data = await this.getScraper().getGenreAnime(slug, page);
+                    const result: AnimeSearchResult = {
+                        results: (data.animes || []).map((a: any) => this.mapAnime(a)),
+                        totalPages: data.totalPages || 1,
+                        currentPage: data.currentPage || page,
+                        hasNextPage: data.hasNextPage || false,
+                        source: this.name
+                    };
+                    return result;
+                } catch (e) {
+                    return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
+                }
             }
 
-            // If no results from genre endpoint
-            if (isGenericGenre) {
-                // For generic genres, don't use search fallback - return empty results
-                // This is because search would return anime with the genre name in the title
-                // which is not the same as anime that are actually in that genre
-                logger.info(`[${this.name}] Genre endpoint returned no results for generic genre: ${genre}, returning empty to avoid wrong results`);
-                return {
-                    results: [],
-                    totalPages: 0,
-                    currentPage: page,
-                    hasNextPage: false,
-                    source: this.name
-                };
-            }
-
-            // For niche genres, fall back to search
-            throw new Error('No results from genre endpoint');
-        } catch (error) {
-            this.handleError(error, 'getByGenre');
-
-            // For generic genres, don't try search fallback
-            if (isGenericGenre) {
-                return {
-                    results: [],
-                    totalPages: 0,
-                    currentPage: page,
-                    hasNextPage: false,
-                    source: this.name
-                };
-            }
-
-            // Fallback: Use search for niche genres
-            try {
-                logger.info(`[${this.name}] Falling back to search for niche genre: ${genre}`);
-                const searchData = await this.getScraper().search(genre, page);
-
-                const result: AnimeSearchResult = {
-                    results: (searchData.animes || []).map((a: any) => this.mapAnime(a)),
-                    totalPages: searchData.totalPages || 1,
-                    currentPage: searchData.currentPage || page,
-                    hasNextPage: searchData.hasNextPage || false,
-                    source: this.name
-                };
-
-                this.setCache(cacheKey, result, this.cacheTTL.search);
-                return result;
-            } catch (searchError) {
-                this.handleError(searchError, 'getByGenre-search-fallback');
-                return {
-                    results: [],
-                    totalPages: 0,
-                    currentPage: page,
-                    hasNextPage: false,
-                    source: this.name
-                };
-            }
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
         }
     }
 }

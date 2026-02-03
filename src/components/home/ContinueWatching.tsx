@@ -54,7 +54,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                             <div className="text-xs text-muted-foreground mb-2">
                                 <span className="text-fox-orange font-medium">Episode {item.episodeNumber}</span>
                                 <span className="mx-1">•</span>
-                                <span>{Math.floor(item.timestamp / 60)}m left</span>
+                                <span>{Math.floor((item.duration - item.timestamp) / 60)}m left</span>
                             </div>
 
                             {/* Remove Button */}

@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 
 interface VideoPreviewProps {
-  videoSrc: string;
+  videoElement: HTMLVideoElement | null;
   currentTime: number;
   duration: number;
   isHovering: boolean;
@@ -12,7 +12,7 @@ interface VideoPreviewProps {
 }
 
 export function VideoPreview({
-  videoSrc,
+  videoElement,
   currentTime,
   duration,
   isHovering,
@@ -21,18 +21,14 @@ export function VideoPreview({
   poster
 }: VideoPreviewProps) {
   const previewRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [previewTime, setPreviewTime] = useState(0);
   const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
-  const [isVideoReady, setIsVideoReady] = useState(false);
-  const [currentPreviewTime, setCurrentPreviewTime] = useState(0);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sample time to nearest 1-second interval for better accuracy
-  const getSampledTime = useCallback((time: number) => {
-    return Math.round(time); // Round to nearest second for better accuracy
-  }, []);
-
-  // Calculate preview time based on mouse position - instant
+  // Calculate preview time based on mouse position
   useEffect(() => {
     if (!isHovering || !containerRef.current || !duration) return;
 
@@ -43,71 +39,95 @@ export function VideoPreview({
 
     setPreviewTime(time);
 
-    // Position preview above the slider (much closer)
+    // Position preview above the slider
     const previewX = relativeX;
-    const previewY = -30; // Much closer to slider
+    const previewY = -30;
 
     setPreviewPosition({ x: previewX, y: previewY });
   }, [isHovering, mouseX, containerRef, duration]);
 
-  // Initialize video element for direct frame preview
+  // Debounced frame capture to prevent performance issues
+  const captureFrameDebounced = useCallback((time: number) => {
+    if (!videoElement || !canvasRef.current) {
+      setPreviewImage(null);
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) return;
+
+    // Set canvas dimensions to match preview size
+    canvas.width = 140;
+    canvas.height = 100;
+
+    const captureFrame = () => {
+      try {
+        // Temporarily seek to preview time to capture frame
+        videoElement.currentTime = time;
+        setIsLoading(true);
+      } catch (error) {
+        console.error('Error seeking video for preview:', error);
+        setIsLoading(false);
+      }
+    };
+
+    // Debounce seek operations
+    if (seekTimeoutRef.current) {
+      clearTimeout(seekTimeoutRef.current);
+    }
+
+    seekTimeoutRef.current = setTimeout(captureFrame, 100);
+  }, [videoElement]);
+
+  // Capture video frame for preview
   useEffect(() => {
-    if (!videoRef.current || !videoSrc) return;
+    if (!isHovering) {
+      setPreviewImage(null);
+      if (seekTimeoutRef.current) {
+        clearTimeout(seekTimeoutRef.current);
+      }
+      return;
+    }
 
-    const video = videoRef.current;
-
-    // Reset state when video source changes
-    setIsVideoReady(false);
-    console.log('[VideoPreview] Video source changed, reinitializing');
-
-    // Set up video element for direct preview
-    video.src = videoSrc;
-    video.crossOrigin = 'anonymous';
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = 'metadata';
-
-    const handleLoadedMetadata = () => {
-      setIsVideoReady(true);
-      console.log('[VideoPreview] Preview video metadata loaded');
-    };
-
-    const handleError = (e: Event) => {
-      setIsVideoReady(false);
-      console.error('Preview video failed to load:', e);
-    };
-
-    const handleSeeked = () => {
-      // Video is ready to show the current frame
-    };
-
-    video.addEventListener('loadedmetadata', handleLoadedMetadata);
-    video.addEventListener('error', handleError);
-    video.addEventListener('seeked', handleSeeked);
+    captureFrameDebounced(previewTime);
 
     return () => {
-      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
-      video.removeEventListener('error', handleError);
-      video.removeEventListener('seeked', handleSeeked);
-    };
-  }, [videoSrc]);
-
-  // Update video time when hovering
-  useEffect(() => {
-    if (!isHovering || !videoRef.current || !isVideoReady || !duration) return;
-
-    const sampledTime = getSampledTime(previewTime);
-    const video = videoRef.current;
-
-    // Seek to the correct time whenever previewTime changes
-    if (sampledTime >= 0 && sampledTime <= duration) {
-      // Ensure we're not already at the correct time
-      if (Math.abs(video.currentTime - sampledTime) > 0.5) {
-        video.currentTime = sampledTime;
-        setCurrentPreviewTime(sampledTime);
+      if (seekTimeoutRef.current) {
+        clearTimeout(seekTimeoutRef.current);
       }
-    }
-  }, [isHovering, previewTime, isVideoReady, duration, getSampledTime]);
+    };
+  }, [isHovering, previewTime, captureFrameDebounced]);
+
+  // Listen for seeked event to capture the frame
+  useEffect(() => {
+    if (!videoElement || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) return;
+
+    const handleSeeked = () => {
+      try {
+        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+        const imageData = canvas.toDataURL('image/jpeg', 0.8);
+        setPreviewImage(imageData);
+      } catch (error) {
+        console.error('Error capturing video frame:', error);
+        setPreviewImage(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    videoElement.addEventListener('seeked', handleSeeked);
+
+    return () => {
+      videoElement.removeEventListener('seeked', handleSeeked);
+    };
+  }, [videoElement]);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -119,6 +139,9 @@ export function VideoPreview({
 
   return (
     <>
+      {/* Hidden canvas for capturing video frames */}
+      <canvas ref={canvasRef} className="hidden" />
+
       {/* Preview popup */}
       <div
         ref={previewRef}
@@ -134,27 +157,27 @@ export function VideoPreview({
           opacity: isHovering ? 1 : 0,
         }}
       >
-        {/* Video preview - direct video element */}
+        {/* Preview image */}
         <div className="relative w-full h-full">
-          {isVideoReady ? (
-            <video
-              ref={videoRef}
+          {previewImage ? (
+            <img
+              src={previewImage}
+              alt="Video preview"
               className="w-full h-full object-cover"
-              src={videoSrc}
-              muted={true}
-              playsInline={true}
-              crossOrigin="anonymous"
-              preload="metadata"
             />
+          ) : isLoading ? (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+            </div>
           ) : poster ? (
             <img
               src={poster}
-              alt="Video poster"
-              className="w-full h-full object-cover opacity-60"
+              alt="Video preview"
+              className="w-full h-full object-cover opacity-80"
             />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <div className="text-white/50 text-xs">Loading preview...</div>
+              <div className="text-white/50 text-xs">Preview</div>
             </div>
           )}
 
@@ -163,12 +186,6 @@ export function VideoPreview({
             <span className="text-white text-xs font-medium">
               {formatTime(previewTime)}
             </span>
-            {/* Show sampled time indicator */}
-            {Math.abs(previewTime - getSampledTime(previewTime)) > 1 && (
-              <span className="text-white/60 text-xs ml-1">
-                (~{formatTime(getSampledTime(previewTime))})
-              </span>
-            )}
           </div>
         </div>
 

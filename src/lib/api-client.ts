@@ -236,7 +236,7 @@ class AnimeApiClient {
 
     // ============ ANIME ENDPOINTS ============
 
-    async search(query: string, page: number = 1, source?: string, mode: 'safe' | 'mixed' | 'adult' = 'mixed'): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, source?: string, mode: 'safe' | 'mixed' | 'adult' = 'safe'): Promise<AnimeSearchResult> {
         const params = new URLSearchParams({ q: query, page: String(page) });
         if (source) params.append('source', source);
         if (mode) params.append('mode', mode);

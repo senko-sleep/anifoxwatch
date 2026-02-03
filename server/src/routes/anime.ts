@@ -13,7 +13,7 @@ const router = Router();
 router.get('/search', async (req: Request, res: Response): Promise<void> => {
     const startTime = Date.now();
     try {
-        const { q, page = '1', source, mode = 'mixed' } = req.query;
+        const { q, page = '1', source, mode = 'safe' } = req.query;
 
         if (!q || typeof q !== 'string') {
             res.status(400).json({
@@ -131,20 +131,14 @@ router.get('/latest', async (req: Request, res: Response): Promise<void> => {
  */
 router.get('/top-rated', async (req: Request, res: Response): Promise<void> => {
     try {
-        const { page = '1', limit = '10' } = req.query;
+        const { page = '1', limit = '10', source } = req.query;
         const pageNum = parseInt(page as string, 10) || 1;
         const limitNum = parseInt(limit as string, 10) || 10;
 
-        // Use AniList for top rated as it provides better "All Time Best" data with ratings
-        const result = await anilistService.getTopRated(75, pageNum, limitNum);
+        // Use SourceManager for top rated to ensure results are playable
+        const result = await sourceManager.getTopRated(pageNum, limitNum, source as string | undefined);
 
-        // Map to TopAnime structure expected by frontend
-        const topAnime = result.results.map((anime, index) => ({
-            rank: ((pageNum - 1) * limitNum) + index + 1,
-            anime
-        }));
-
-        res.json({ results: topAnime, source: 'AniList', pageInfo: result.pageInfo });
+        res.json({ results: result, source: source || 'default', currentPage: pageNum });
     } catch (error) {
         console.error('Top-rated error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -478,7 +472,7 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
             sort = 'popularity',
             order = 'desc',
             source,
-            mode = 'mixed'
+            mode = 'safe'
         } = req.query;
 
         const pageNum = parseInt(page as string, 10) || 1;
@@ -490,24 +484,8 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
 
         console.log(`[AnimeRoutes] 📋 Browse: type=${type || 'all'} genres=${parsedGenres.join(',') || 'none'} sort=${sort} mode=${browseMode}`);
 
-        const isGenreOnlySearch = parsedGenres.length === 1 &&
-            !type && !status && !year && !startYear && !endYear &&
-            sort === 'popularity' && order === 'desc';
-
-        if (isGenreOnlySearch) {
-            console.log(`[AnimeRoutes] 🎯 Using AniList for genre-only: ${parsedGenres[0]}`);
-            const result = await sourceManager.getAnimeByGenreAniList(parsedGenres[0], pageNum);
-            res.json({
-                results: result.results || [],
-                currentPage: result.currentPage || pageNum,
-                totalPages: result.totalPages || 1,
-                hasNextPage: result.hasNextPage || false,
-                totalResults: (result.results?.length || 0) * (result.totalPages || 1),
-                filters: { type, genre: parsedGenres[0], status, year, startYear, endYear, sort, order },
-                source: 'AniList'
-            });
-            return;
-        }
+        // We no longer shortcut to AniList for genre searches as it returned results without streaming providers.
+        // Falling through to browseAnime handles this using source-native methods or AniList with instant matching.
 
         const filters = {
             type: type as string,

@@ -49,7 +49,7 @@ export function useTopRated(page: number = 1, limit: number = 10, source?: strin
     });
 }
 
-export function useSearch(query: string, page: number = 1, source?: string, enabled: boolean = true, mode: 'safe' | 'mixed' | 'adult' = 'mixed') {
+export function useSearch(query: string, page: number = 1, source?: string, enabled: boolean = true, mode: 'safe' | 'mixed' | 'adult' = 'safe') {
     return useQuery<AnimeSearchResult, Error>({
         queryKey: queryKeys.search(query, page, source, mode),
         queryFn: async () => {
