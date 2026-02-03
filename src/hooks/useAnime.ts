@@ -200,6 +200,7 @@ export function useEpisodeServers(episodeId: string, enabled: boolean = true) {
         queryFn: () => apiClient.getEpisodeServers(episodeId),
         enabled: enabled && episodeId.length > 0,
         staleTime: 60 * 60 * 1000, // 1 hour
+        refetchOnWindowFocus: false,
     });
 }
 
@@ -212,6 +213,7 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
         gcTime: 10 * 60 * 1000,
         retry: 2,
         retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
+        refetchOnWindowFocus: false,
     });
 }
 

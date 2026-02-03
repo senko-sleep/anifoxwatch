@@ -321,6 +321,16 @@ export const VideoPlayer = ({
       video.addEventListener('loadedmetadata', () => {
         playerLog('info', 'Video metadata loaded (native)');
         setIsLoading(false);
+
+        // Restore saved position
+        const savedPos = loadSavedPosition();
+        if (savedPos > 5) {
+          video.currentTime = savedPos;
+          setCurrentTime(savedPos);
+          setShowPositionRestored(true);
+          setTimeout(() => setShowPositionRestored(false), 3000);
+        }
+
         video.play().catch(() => { });
       });
 
@@ -349,6 +359,17 @@ export const VideoPlayer = ({
       video.src = src;
       video.addEventListener('loadedmetadata', () => {
         setIsLoading(false);
+
+        // Restore saved position
+        const savedPos = loadSavedPosition();
+        if (savedPos > 5) {
+          video.currentTime = savedPos;
+          setCurrentTime(savedPos);
+          setShowPositionRestored(true);
+          setTimeout(() => setShowPositionRestored(false), 3000);
+        }
+
+        video.play().catch(() => { });
       });
     }
 
@@ -367,13 +388,21 @@ export const VideoPlayer = ({
     if (!video) return;
 
     const handlePlay = () => setIsPlaying(true);
-    const handlePause = () => setIsPlaying(false);
+    const handlePause = () => {
+      setIsPlaying(false);
+      // Save position on pause
+      if (video.currentTime > 5 && video.duration - video.currentTime > 10) {
+        savePosition(video.currentTime);
+      }
+    };
+
     const handleTimeUpdate = () => {
       const time = video.currentTime;
       setCurrentTime(time);
 
-      // Save position every 5 seconds
-      if (Math.floor(time) % 5 === 0) {
+      // Save position every 2 seconds for better precision
+      // Only if not near the end (within last 10 seconds)
+      if (Math.floor(time) % 2 === 0 && time > 5 && video.duration - time > 10) {
         savePosition(time);
 
         // Save to global watch history if anime details are available
@@ -381,7 +410,7 @@ export const VideoPlayer = ({
           import('@/lib/watch-history').then(({ WatchHistory }) => {
             WatchHistory.save(
               { id: animeId, title: animeTitle, image: animeImage } as any,
-              selectedEpisodeNum.toString(), // Using episodeNum as ID for simplicity in history
+              selectedEpisodeNum.toString(),
               selectedEpisodeNum,
               time,
               video.duration
@@ -416,7 +445,6 @@ export const VideoPlayer = ({
       clearSavedPosition();
 
       // If video ended and there's a next episode, start countdown
-      // Only trigger if not already showing countdown
       if (hasNextEpisode) {
         setShowNextEpisodeCountdown(prev => {
           if (!prev) {
@@ -430,6 +458,13 @@ export const VideoPlayer = ({
     const handleWaiting = () => setIsLoading(true);
     const handleCanPlay = () => setIsLoading(false);
 
+    // Save on tab visibility change
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && video.currentTime > 5) {
+        savePosition(video.currentTime);
+      }
+    };
+
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
     video.addEventListener('timeupdate', handleTimeUpdate);
@@ -438,6 +473,7 @@ export const VideoPlayer = ({
     video.addEventListener('ended', handleEnded);
     video.addEventListener('waiting', handleWaiting);
     video.addEventListener('canplay', handleCanPlay);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       video.removeEventListener('play', handlePlay);
@@ -448,6 +484,7 @@ export const VideoPlayer = ({
       video.removeEventListener('ended', handleEnded);
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('canplay', handleCanPlay);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage]);
 
