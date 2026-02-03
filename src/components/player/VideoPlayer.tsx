@@ -895,7 +895,8 @@ export const VideoPlayer = ({
 
             {/* Video Preview */}
             <VideoPreview
-              videoElement={videoRef.current}
+              src={src}
+              isM3U8={isM3U8}
               currentTime={currentTime}
               duration={duration}
               isHovering={isProgressHovering}

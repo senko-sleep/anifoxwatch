@@ -1,133 +1,105 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import Hls from 'hls.js';
 import { cn } from '@/lib/utils';
 
-interface VideoPreviewProps {
-  videoElement: HTMLVideoElement | null;
+export interface VideoPreviewProps {
+  src: string;
+  isM3U8: boolean;
   currentTime: number;
   duration: number;
   isHovering: boolean;
   mouseX: number;
   containerRef: React.RefObject<HTMLDivElement>;
-  poster?: string;
+  poster: string;
 }
 
-export function VideoPreview({
-  videoElement,
+export const VideoPreview = ({
+  src,
+  isM3U8,
   currentTime,
   duration,
   isHovering,
   mouseX,
   containerRef,
   poster
-}: VideoPreviewProps) {
-  const previewRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+}: VideoPreviewProps) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [previewTime, setPreviewTime] = useState(0);
-  const [previewPosition, setPreviewPosition] = useState({ x: 0, y: 0 });
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const seekTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [position, setPosition] = useState(0);
+  const [isReady, setIsReady] = useState(false);
 
-  // Calculate preview time based on mouse position
+  // Calculate preview time and position based on mouseX
   useEffect(() => {
-    if (!isHovering || !containerRef.current || !duration) return;
+    if (!containerRef.current || !isHovering) return;
 
     const rect = containerRef.current.getBoundingClientRect();
-    const relativeX = mouseX - rect.left;
-    const percentage = Math.max(0, Math.min(1, relativeX / rect.width));
+    const x = Math.max(0, Math.min(mouseX - rect.left, rect.width));
+    const percentage = x / rect.width;
     const time = percentage * duration;
 
     setPreviewTime(time);
+    setPosition(x);
 
-    // Position preview above the slider
-    const previewX = relativeX;
-    const previewY = -30;
+    if (videoRef.current && isReady) {
+      videoRef.current.currentTime = time;
+    }
+  }, [mouseX, isHovering, duration, containerRef, isReady]);
 
-    setPreviewPosition({ x: previewX, y: previewY });
-  }, [isHovering, mouseX, containerRef, duration]);
-
-  // Debounced frame capture to prevent performance issues
-  const captureFrameDebounced = useCallback((time: number) => {
-    if (!videoElement || !canvasRef.current) {
-      setPreviewImage(null);
+  // Initialize preview video
+  useEffect(() => {
+    if (!src || !isHovering) {
+      setIsReady(false);
       return;
     }
 
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const video = videoRef.current;
+    if (!video) return;
 
-    if (!ctx) return;
-
-    // Set canvas dimensions to match preview size
-    canvas.width = 140;
-    canvas.height = 100;
-
-    const captureFrame = () => {
-      try {
-        // Temporarily seek to preview time to capture frame
-        videoElement.currentTime = time;
-        setIsLoading(true);
-      } catch (error) {
-        console.error('Error seeking video for preview:', error);
-        setIsLoading(false);
+    if (isM3U8 && Hls.isSupported()) {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
       }
-    };
 
-    // Debounce seek operations
-    if (seekTimeoutRef.current) {
-      clearTimeout(seekTimeoutRef.current);
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        maxBufferLength: 1,
+        maxMaxBufferLength: 2,
+        backBufferLength: 0,
+        startLevel: 0, // Lowest quality for fastest scrubbing
+      });
+
+      hls.loadSource(src);
+      hls.attachMedia(video);
+      hlsRef.current = hls;
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setIsReady(true);
+      });
+
+      hls.on(Hls.Events.ERROR, (_, data) => {
+        if (data.fatal) {
+          console.error("Preview HLS Error:", data);
+          setIsReady(false);
+        }
+      });
+    } else {
+      video.src = src;
+      video.onloadeddata = () => setIsReady(true);
+      video.onerror = () => setIsReady(false);
     }
 
-    seekTimeoutRef.current = setTimeout(captureFrame, 100);
-  }, [videoElement]);
-
-  // Capture video frame for preview
-  useEffect(() => {
-    if (!isHovering) {
-      setPreviewImage(null);
-      if (seekTimeoutRef.current) {
-        clearTimeout(seekTimeoutRef.current);
-      }
-      return;
-    }
-
-    captureFrameDebounced(previewTime);
-
     return () => {
-      if (seekTimeoutRef.current) {
-        clearTimeout(seekTimeoutRef.current);
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
       }
+      setIsReady(false);
     };
-  }, [isHovering, previewTime, captureFrameDebounced]);
+  }, [src, isM3U8, isHovering]);
 
-  // Listen for seeked event to capture the frame
-  useEffect(() => {
-    if (!videoElement || !canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-
-    if (!ctx) return;
-
-    const handleSeeked = () => {
-      try {
-        ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-        const imageData = canvas.toDataURL('image/jpeg', 0.8);
-        setPreviewImage(imageData);
-      } catch (error) {
-        console.error('Error capturing video frame:', error);
-        setPreviewImage(null);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    videoElement.addEventListener('seeked', handleSeeked);
-
-    return () => {
-      videoElement.removeEventListener('seeked', handleSeeked);
-    };
-  }, [videoElement]);
+  if (!isHovering) return null;
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -135,72 +107,56 @@ export function VideoPreview({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  if (!isHovering || !duration) return null;
-
   return (
-    <>
-      {/* Hidden canvas for capturing video frames */}
-      <canvas ref={canvasRef} className="hidden" />
+    <div
+      className="absolute bottom-6 pointer-events-none transform -translate-x-1/2 flex flex-col items-center z-50 transition-all duration-200"
+      style={{
+        left: position,
+        opacity: isHovering ? 1 : 0,
+        scale: isHovering ? 1 : 0.95
+      }}
+    >
+      <div className="relative w-48 aspect-video bg-black/90 rounded-xl border-2 border-white/20 overflow-hidden shadow-[0_10px_40px_rgba(0,0,0,0.6)] backdrop-blur-xl">
+        {/* Glow effect */}
+        <div className="absolute inset-0 bg-gradient-to-br from-fox-orange/20 via-transparent to-transparent opacity-50" />
 
-      {/* Preview popup */}
-      <div
-        ref={previewRef}
-        className={cn(
-          "absolute z-50 bg-black/90 backdrop-blur-sm rounded-lg overflow-hidden border border-white/20 shadow-2xl transition-all duration-75 pointer-events-none",
-          "transform -translate-x-1/2"
-        )}
-        style={{
-          left: `${previewPosition.x}px`,
-          bottom: `${Math.abs(previewPosition.y)}px`,
-          width: '140px',
-          height: '100px',
-          opacity: isHovering ? 1 : 0,
-        }}
-      >
-        {/* Preview image */}
-        <div className="relative w-full h-full">
-          {previewImage ? (
-            <img
-              src={previewImage}
-              alt="Video preview"
-              className="w-full h-full object-cover"
-            />
-          ) : isLoading ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-            </div>
-          ) : poster ? (
-            <img
-              src={poster}
-              alt="Video preview"
-              className="w-full h-full object-cover opacity-80"
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-              <div className="text-white/50 text-xs">Preview</div>
-            </div>
+        <video
+          ref={videoRef}
+          className={cn(
+            "w-full h-full object-cover transition-opacity duration-300",
+            isReady ? "opacity-100" : "opacity-0"
           )}
+          muted
+          playsInline
+        />
 
-          {/* Time overlay */}
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-            <span className="text-white text-xs font-medium">
-              {formatTime(previewTime)}
-            </span>
+        {/* Fallback/Loading poster */}
+        {!isReady && (
+          <img
+            src={poster}
+            className="absolute inset-0 w-full h-full object-cover blur-md opacity-40 scale-110"
+            alt="Loading preview..."
+          />
+        )}
+
+        {/* Loading Spinner */}
+        {!isReady && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-8 h-8 border-[3px] border-fox-orange/20 border-t-fox-orange rounded-full animate-spin" />
           </div>
+        )}
+
+        {/* Time Badge */}
+        <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-bold text-white border border-white/10 shadow-lg">
+          {formatTime(previewTime)}
         </div>
 
-        {/* Triangle pointer */}
-        <div
-          className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full"
-          style={{
-            width: 0,
-            height: 0,
-            borderLeft: '6px solid transparent',
-            borderRight: '6px solid transparent',
-            borderTop: '6px solid rgba(0, 0, 0, 0.9)',
-          }}
-        />
+        {/* Scanline Effect */}
+        <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.03),rgba(0,255,0,0.01),rgba(0,0,255,0.03))] bg-[length:100%_2px,3px_100%] opacity-20" />
       </div>
-    </>
+
+      {/* Tooltip Arrow */}
+      <div className="w-3 h-3 bg-black/90 border-r border-b border-white/10 rotate-45 -mt-1.5 shadow-xl" />
+    </div>
   );
-}
+};
