@@ -33,6 +33,17 @@ export interface AnimeSource {
 }
 
 /**
+ * Interface for sources that support genre filtering
+ */
+export interface GenreAwareSource extends AnimeSource {
+    // Get all available genres
+    getGenres(): Promise<string[]>;
+
+    // Get anime by genre
+    getByGenre(genre: string, page?: number): Promise<AnimeSearchResult>;
+}
+
+/**
  * Abstract base class with common functionality
  */
 export abstract class BaseAnimeSource implements AnimeSource {
