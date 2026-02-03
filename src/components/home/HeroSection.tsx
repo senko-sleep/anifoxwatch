@@ -113,7 +113,7 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
             {currentAnime.rating && currentAnime.rating > 0 && (
               <div className="flex items-center gap-2">
                 <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-                <span className="text-sm">{currentAnime.rating.toFixed(1)}</span>
+                <span className="text-sm">{(currentAnime.rating > 10 ? currentAnime.rating / 10 : currentAnime.rating).toFixed(1)}</span>
               </div>
             )}
           </div>

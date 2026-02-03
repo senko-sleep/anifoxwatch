@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
+import { anilistService } from '../services/anilist-service.js';
 
 const router = Router();
 
@@ -12,7 +13,7 @@ const router = Router();
 router.get('/search', async (req: Request, res: Response): Promise<void> => {
     const startTime = Date.now();
     try {
-        const { q, page = '1', source, mode = 'safe' } = req.query;
+        const { q, page = '1', source, mode = 'mixed' } = req.query;
 
         if (!q || typeof q !== 'string') {
             res.status(400).json({
@@ -130,13 +131,196 @@ router.get('/latest', async (req: Request, res: Response): Promise<void> => {
  */
 router.get('/top-rated', async (req: Request, res: Response): Promise<void> => {
     try {
-        const { page = '1', limit = '10', source } = req.query;
+        const { page = '1', limit = '10' } = req.query;
         const pageNum = parseInt(page as string, 10) || 1;
         const limitNum = parseInt(limit as string, 10) || 10;
-        const result = await sourceManager.getTopRated(pageNum, limitNum, source as string | undefined);
-        res.json({ results: result, source: source || 'default' });
+
+        // Use AniList for top rated as it provides better "All Time Best" data with ratings
+        const result = await anilistService.getTopRated(75, pageNum, limitNum);
+
+        // Map to TopAnime structure expected by frontend
+        const topAnime = result.results.map((anime, index) => ({
+            rank: ((pageNum - 1) * limitNum) + index + 1,
+            anime
+        }));
+
+        res.json({ results: topAnime, source: 'AniList', pageInfo: result.pageInfo });
     } catch (error) {
         console.error('Top-rated error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/schedule
+ * @query start_date - Start date in YYYY-MM-DD format (default: Monday of current week)
+ * @query end_date - End date in YYYY-MM-DD format (default: Sunday of current week)
+ * @query page - Page number (default: 1)
+ * @description Get anime airing schedule for a date range from AniList with daily groupings
+ */
+router.get('/schedule', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { start_date, end_date, page = '1' } = req.query;
+        const pageNum = parseInt(page as string, 10) || 1;
+
+        console.log(`[AnimeRoutes] 📅 Fetching airing schedule, start: ${start_date || 'current week'}, end: ${end_date || 'current week'}, page ${pageNum}`);
+
+        const result = await anilistService.getAiringSchedule(
+            start_date as string | undefined,
+            end_date as string | undefined,
+            pageNum,
+            50
+        );
+
+        // Group schedule by day of week using lowercase keys for frontend
+        const groupedByDay: Record<string, typeof result.schedule> = {
+            monday: [],
+            tuesday: [],
+            wednesday: [],
+            thursday: [],
+            friday: [],
+            saturday: [],
+            sunday: []
+        };
+        const dayMapping: Record<number, string> = {
+            0: 'sunday',
+            1: 'monday',
+            2: 'tuesday',
+            3: 'wednesday',
+            4: 'thursday',
+            5: 'friday',
+            6: 'saturday'
+        };
+
+        result.schedule.forEach(item => {
+            const date = new Date(item.airingAt * 1000);
+            const dayName = dayMapping[date.getDay()];
+            if (groupedByDay[dayName]) {
+                groupedByDay[dayName].push(item);
+            }
+        });
+
+        // Sort each day's schedule by air time
+        Object.keys(groupedByDay).forEach(day => {
+            groupedByDay[day].sort((a, b) => a.airingAt - b.airingAt);
+        });
+
+        // Calculate countdown data for each item
+        const now = Date.now() / 1000;
+        const scheduleWithCountdown = result.schedule.map(item => ({
+            ...item,
+            countdown: Math.max(0, item.airingAt - now),
+            timeUntilAiring: item.airingAt - now
+        }));
+
+        res.json({
+            schedule: scheduleWithCountdown,
+            groupedByDay,
+            metadata: {
+                totalShows: result.schedule.length,
+                dateRange: {
+                    start: start_date || 'current-week-start',
+                    end: end_date || 'current-week-end'
+                },
+                pageInfo: result.pageInfo
+            },
+            hasNextPage: result.hasNextPage,
+            currentPage: pageNum
+        });
+    } catch (error) {
+        console.error('Schedule error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/leaderboard
+ * @query page - Page number (default: 1)
+ * @query type - Leaderboard type: 'trending' or 'top-rated' (default: 'trending')
+ * @description Get weekly leaderboard from AniList with movement indicators
+ */
+router.get('/leaderboard', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { page = '1', type = 'trending' } = req.query;
+        const pageNum = parseInt(page as string, 10) || 1;
+
+        console.log(`[AnimeRoutes] 🏆 Fetching leaderboard, type: ${type}, page ${pageNum}`);
+
+        let result;
+        if (type === 'top-rated') {
+            result = await anilistService.getTopRatedAnime(pageNum, 10);
+        } else {
+            result = await anilistService.getTrendingThisWeek(pageNum, 10);
+        }
+
+        // Handle both old AnimeSearchResult and new pageInfo format
+        const pageInfo = 'pageInfo' in result ? result.pageInfo : {
+            hasNextPage: result.hasNextPage,
+            currentPage: result.currentPage,
+            totalCount: (result.results?.length || 0) * (result.totalPages || 1)
+        };
+
+        res.json({
+            results: result.results,
+            pageInfo: {
+                hasNextPage: pageInfo.hasNextPage,
+                currentPage: pageInfo.currentPage,
+                totalPages: 'totalPages' in result ? result.totalPages : Math.ceil(pageInfo.totalCount / 10)
+            },
+            type,
+            source: 'AniList'
+        });
+    } catch (error) {
+        console.error('Leaderboard error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/seasonal
+ * @query year - Year (default: current year)
+ * @query season - Season: 'winter', 'spring', 'summer', 'fall' (default: current season)
+ * @query page - Page number (default: 1)
+ * @description Get seasonal anime from AniList with pagination metadata
+ */
+router.get('/seasonal', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { year, season, page = '1' } = req.query;
+        const pageNum = parseInt(page as string, 10) || 1;
+        const yearNum = year ? parseInt(year as string, 10) : undefined;
+
+        console.log(`[AnimeRoutes] 🌸 Fetching seasonal anime: ${season || 'current'} ${yearNum || 'current'}, page ${pageNum}`);
+
+        const result = await anilistService.getSeasonalAnime(yearNum, season as string | undefined, pageNum, 25);
+
+        // Extract results and pageInfo based on the response structure
+        const seasonalResult = result as {
+            results: import('../types/anime.js').AnimeBase[];
+            pageInfo?: { hasNextPage: boolean; currentPage: number; totalCount: number };
+            seasonInfo?: { year: number; season: string };
+            hasNextPage?: boolean;
+            currentPage?: number;
+            totalPages?: number;
+        };
+
+        res.json({
+            results: seasonalResult.results,
+            pageInfo: {
+                hasNextPage: seasonalResult.pageInfo?.hasNextPage ?? seasonalResult.hasNextPage ?? false,
+                currentPage: seasonalResult.pageInfo?.currentPage ?? seasonalResult.currentPage ?? pageNum,
+                totalPages: seasonalResult.pageInfo?.totalCount
+                    ? Math.ceil(seasonalResult.pageInfo.totalCount / 25)
+                    : (seasonalResult.totalPages ?? 1),
+                totalItems: seasonalResult.pageInfo?.totalCount ?? seasonalResult.results?.length ?? 0
+            },
+            seasonInfo: seasonalResult.seasonInfo ?? {
+                year: yearNum ?? new Date().getFullYear(),
+                season: (season as string) ?? 'current'
+            },
+            source: 'AniList'
+        });
+    } catch (error) {
+        console.error('Seasonal error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -294,7 +478,7 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
             sort = 'popularity',
             order = 'desc',
             source,
-            mode = 'safe'
+            mode = 'mixed'
         } = req.query;
 
         const pageNum = parseInt(page as string, 10) || 1;

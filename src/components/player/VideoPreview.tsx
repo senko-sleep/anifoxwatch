@@ -11,14 +11,14 @@ interface VideoPreviewProps {
   poster?: string;
 }
 
-export function VideoPreview({ 
-  videoSrc, 
-  currentTime, 
-  duration, 
-  isHovering, 
+export function VideoPreview({
+  videoSrc,
+  currentTime,
+  duration,
+  isHovering,
   mouseX,
   containerRef,
-  poster 
+  poster
 }: VideoPreviewProps) {
   const previewRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -40,13 +40,13 @@ export function VideoPreview({
     const relativeX = mouseX - rect.left;
     const percentage = Math.max(0, Math.min(1, relativeX / rect.width));
     const time = percentage * duration;
-    
+
     setPreviewTime(time);
-    
+
     // Position preview above the slider (much closer)
     const previewX = relativeX;
     const previewY = -30; // Much closer to slider
-    
+
     setPreviewPosition({ x: previewX, y: previewY });
   }, [isHovering, mouseX, containerRef, duration]);
 
@@ -55,7 +55,11 @@ export function VideoPreview({
     if (!videoRef.current || !videoSrc) return;
 
     const video = videoRef.current;
-    
+
+    // Reset state when video source changes
+    setIsVideoReady(false);
+    console.log('[VideoPreview] Video source changed, reinitializing');
+
     // Set up video element for direct preview
     video.src = videoSrc;
     video.crossOrigin = 'anonymous';
@@ -94,11 +98,14 @@ export function VideoPreview({
 
     const sampledTime = getSampledTime(previewTime);
     const video = videoRef.current;
-    
-    // Only seek if time is different and within valid range
-    if (Math.abs(video.currentTime - sampledTime) > 0.5 && sampledTime >= 0 && sampledTime <= duration) {
-      video.currentTime = sampledTime;
-      setCurrentPreviewTime(sampledTime);
+
+    // Seek to the correct time whenever previewTime changes
+    if (sampledTime >= 0 && sampledTime <= duration) {
+      // Ensure we're not already at the correct time
+      if (Math.abs(video.currentTime - sampledTime) > 0.5) {
+        video.currentTime = sampledTime;
+        setCurrentPreviewTime(sampledTime);
+      }
     }
   }, [isHovering, previewTime, isVideoReady, duration, getSampledTime]);
 
@@ -112,13 +119,6 @@ export function VideoPreview({
 
   return (
     <>
-      {/* Hidden video element for preview */}
-      <video
-        ref={videoRef}
-        className="hidden"
-        poster={poster}
-      />
-      
       {/* Preview popup */}
       <div
         ref={previewRef}
@@ -138,21 +138,13 @@ export function VideoPreview({
         <div className="relative w-full h-full">
           {isVideoReady ? (
             <video
+              ref={videoRef}
               className="w-full h-full object-cover"
               src={videoSrc}
               muted={true}
               playsInline={true}
               crossOrigin="anonymous"
               preload="metadata"
-              ref={(video) => {
-                if (video) {
-                  video.currentTime = currentPreviewTime;
-                }
-              }}
-              onLoadedMetadata={(e) => {
-                const video = e.currentTarget;
-                video.currentTime = currentPreviewTime;
-              }}
             />
           ) : poster ? (
             <img
@@ -165,7 +157,7 @@ export function VideoPreview({
               <div className="text-white/50 text-xs">Loading preview...</div>
             </div>
           )}
-          
+
           {/* Time overlay */}
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
             <span className="text-white text-xs font-medium">
@@ -179,9 +171,9 @@ export function VideoPreview({
             )}
           </div>
         </div>
-        
+
         {/* Triangle pointer */}
-        <div 
+        <div
           className="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-full"
           style={{
             width: 0,

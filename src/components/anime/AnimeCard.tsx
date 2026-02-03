@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Play, Star, Tv, Calendar } from 'lucide-react';
+import { Play, Star, Tv, Calendar, Clock } from 'lucide-react';
 import { Anime } from '@/types/anime';
 import { cn } from '@/lib/utils';
 
@@ -67,7 +67,9 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: A
         {anime.rating && anime.rating > 0 && (
           <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10">
             <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
-            <span className="text-xs font-bold text-white">{anime.rating.toFixed(1)}</span>
+            <span className="text-xs font-bold text-white">
+              {(anime.rating > 10 ? anime.rating / 10 : anime.rating).toFixed(1)}
+            </span>
           </div>
         )}
 
@@ -103,12 +105,25 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: A
         <div className="flex items-center gap-2 text-[10px] text-zinc-500">
           {anime.status && (
             <span className={cn(
-              "px-1.5 py-0.5 rounded font-medium uppercase tracking-wider",
-              anime.status === 'Ongoing' && "bg-green-500/20 text-green-400",
-              anime.status === 'Completed' && "bg-blue-500/20 text-blue-400",
-              anime.status === 'Upcoming' && "bg-purple-500/20 text-purple-400"
+              "flex items-center gap-1.5 px-2 py-0.5 rounded-md font-medium uppercase tracking-wider text-[10px]",
+              anime.status === 'Ongoing' && "bg-green-500/10 text-green-400 border border-green-500/20",
+              anime.status === 'Completed' && "bg-blue-500/10 text-blue-400 border border-blue-500/20",
+              anime.status === 'Upcoming' && "bg-purple-500/10 text-purple-400 border border-purple-500/20"
             )}>
+              <span className={cn(
+                "w-1.5 h-1.5 rounded-full animate-pulse",
+                anime.status === 'Ongoing' ? "bg-green-500" :
+                  anime.status === 'Completed' ? "bg-blue-500" : "bg-purple-500"
+              )} />
               {anime.status}
+            </span>
+          )} and
+
+          {/* Next Episode Countdown */}
+          {anime.status === 'Ongoing' && anime.timeUntilAiring && anime.timeUntilAiring > 0 && (
+            <span className="flex items-center gap-1 text-[10px] text-zinc-400 bg-zinc-800/50 px-2 py-0.5 rounded-md border border-white/5">
+              <Clock className="w-3 h-3" />
+              EP {anime.nextAiringEpisode || '?'} in {Math.floor(anime.timeUntilAiring / 3600)}h
             </span>
           )}
           {anime.genres && anime.genres.length > 0 && (

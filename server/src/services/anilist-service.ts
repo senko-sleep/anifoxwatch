@@ -39,6 +39,8 @@ interface AniListMedia {
     duration?: number;
     averageScore?: number;
     meanScore?: number;
+    trending?: number;
+    popularity?: number;
     genres: string[];
     tags?: Array<{
         id: number;
@@ -75,6 +77,7 @@ interface AniListSearchResponse {
                 lastPage: number;
                 hasNextPage: boolean;
                 perPage: number;
+                total: number;
             };
         };
     };
@@ -196,6 +199,158 @@ export class AniListService {
             console.error('[AniList] Query failed:', error);
             return null;
         }
+    }
+
+    /**
+     * Advanced search for anime with multiple filters
+     */
+    async advancedSearch(filters: {
+        page?: number;
+        perPage?: number;
+        sort?: string[];
+        type?: string;
+        status?: string;
+        season?: string;
+        year?: number;
+        yearGreater?: number;
+        yearLesser?: number;
+        format?: string;
+        genres?: string[];
+    }): Promise<AnimeSearchResult> {
+        const page = filters.page || 1;
+        const perPage = filters.perPage || 20;
+
+        let queryArgs = '$page: Int, $perPage: Int';
+        let queryBodyArgs = 'page: $page, perPage: $perPage';
+        let mediaArgs = 'type: ANIME, isAdult: false'; // Default no adult for general browse
+
+        const variables: any = { page, perPage };
+
+        // Sort
+        if (filters.sort && filters.sort.length > 0) {
+            queryArgs += ', $sort: [MediaSort]';
+            mediaArgs += ', sort: $sort';
+            variables.sort = filters.sort;
+        }
+
+        // Format/Type
+        if (filters.format || filters.type) {
+            queryArgs += ', $format: MediaFormat';
+            mediaArgs += ', format: $format';
+
+            // Map types if needed
+            const type = (filters.format || filters.type || '').toUpperCase();
+            const typeMap: Record<string, string> = {
+                'TV': 'TV', 'MOVIE': 'MOVIE', 'OVA': 'OVA', 'ONA': 'ONA', 'SPECIAL': 'SPECIAL',
+                'MOVI': 'MOVIE', 'Specials': 'SPECIAL'
+            };
+            variables.format = typeMap[type] || type;
+        }
+
+        // Status
+        if (filters.status) {
+            queryArgs += ', $status: MediaStatus';
+            mediaArgs += ', status: $status';
+            const status = filters.status.toUpperCase();
+            const statusMap: Record<string, string> = {
+                'ONGOING': 'RELEASING', 'COMPLETED': 'FINISHED', 'UPCOMING': 'NOT_YET_RELEASED'
+            };
+            variables.status = statusMap[status] || status;
+        }
+
+        // Season
+        if (filters.season) {
+            queryArgs += ', $season: MediaSeason';
+            mediaArgs += ', season: $season';
+            variables.season = filters.season;
+        }
+
+        // Year
+        if (filters.year) {
+            queryArgs += ', $year: Int';
+            mediaArgs += ', seasonYear: $year';
+            variables.year = filters.year;
+        }
+
+        // Year Range
+        if (filters.yearGreater) {
+            queryArgs += ', $yearGreater: Int';
+            mediaArgs += ', startDate_greater: $yearGreater';
+            variables.yearGreater = filters.yearGreater * 10000; // YYYY0000
+        }
+        if (filters.yearLesser) {
+            queryArgs += ', $yearLesser: Int';
+            mediaArgs += ', startDate_lesser: $yearLesser';
+            variables.yearLesser = filters.yearLesser * 10000 + 1231; // YYYY1231
+        }
+
+        // Genres
+        if (filters.genres && filters.genres.length > 0) {
+            if (filters.genres.length === 1) {
+                queryArgs += ', $genre: String';
+                mediaArgs += ', genre: $genre';
+                variables.genre = filters.genres[0];
+            } else {
+                queryArgs += ', $genreIn: [String]';
+                mediaArgs += ', genre_in: $genreIn';
+                variables.genreIn = filters.genres;
+            }
+        }
+
+        const query = `
+            query (${queryArgs}) {
+                Page(${queryBodyArgs}) {
+                    media(${mediaArgs}) {
+                        id
+                        idMal
+                        title {
+                            romaji
+                            english
+                            native
+                        }
+                        type
+                        format
+                        status
+                        description
+                        startDate {
+                            year
+                            month
+                            day
+                        }
+                        episodes
+                        duration
+                        averageScore
+                        genres
+                        coverImage {
+                            large
+                            medium
+                        }
+                        bannerImage
+                        isAdult
+                    }
+                    pageInfo {
+                        currentPage
+                        lastPage
+                        hasNextPage
+                        total
+                        perPage
+                    }
+                }
+            }
+        `;
+
+        const response = await this.query<AniListSearchResponse>(query, variables);
+        const pageData = response?.data?.Page;
+        const media = pageData?.media || [];
+
+        return {
+            results: media.map(m => this.mapToAnimeBase(m)),
+            totalPages: pageData?.pageInfo?.lastPage || 1,
+            currentPage: page,
+            hasNextPage: pageData?.pageInfo?.hasNextPage || false,
+            totalResults: pageData?.pageInfo?.total || 0,
+            source: 'AniList'
+        };
     }
 
     /**
@@ -688,6 +843,557 @@ export class AniListService {
 
         const response = await this.query<CollectionResponse>(query);
         return response?.data?.GenreCollection || [];
+    }
+
+    /**
+     * Get airing schedule for a specific time range with date parameters
+     * Returns anime episodes airing within the given time range
+     * @param startDate ISO 8601 format start date
+     * @param endDate ISO 8601 format end date
+     * @param page Page number for pagination
+     * @param perPage Items per page
+     */
+    async getAiringSchedule(startDate?: string, endDate?: string, page: number = 1, perPage: number = 50): Promise<{
+        schedule: Array<{
+            id: number;
+            title: string;
+            episode: number;
+            airingAt: number;
+            media: {
+                thumbnail: string;
+                format: string;
+                genres: string[];
+            };
+        }>;
+        hasNextPage: boolean;
+        pageInfo: {
+            currentPage: number;
+            totalCount: number;
+        };
+    }> {
+        // Parse dates or default to current week (Monday to Sunday)
+        const now = new Date();
+        const start = startDate ? new Date(startDate) : new Date(now);
+        const end = endDate ? new Date(endDate) : new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+        // If using default (no startDate provided), default to start of current week (Monday)
+        if (!startDate) {
+            const dayOfWeek = now.getDay();
+            const diff = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+            start.setDate(now.getDate() - diff);
+            start.setHours(0, 0, 0, 0);
+        }
+
+        // If using default (no endDate provided), default to end of current week (Sunday)
+        if (!endDate) {
+            const dayOfWeek = start.getDay();
+            const daysUntilSunday = 7 - dayOfWeek;
+            end.setTime(start.getTime() + daysUntilSunday * 24 * 60 * 60 * 1000);
+            end.setHours(23, 59, 59, 999);
+        }
+
+        const startTimestamp = Math.floor(start.getTime() / 1000);
+        const endTimestamp = Math.floor(end.getTime() / 1000);
+
+        const query = `
+            query ($page: Int, $perPage: Int, $airingAtGreater: Int, $airingAtLesser: Int) {
+                Page(page: $page, perPage: $perPage) {
+                    airingSchedules(airingAt_greater: $airingAtGreater, airingAt_lesser: $airingAtLesser, sort: TIME) {
+                        id
+                        episode
+                        airingAt
+                        media {
+                            id
+                            title {
+                                romaji
+                                english
+                            }
+                            format
+                            genres
+                            coverImage {
+                                large
+                                medium
+                            }
+                        }
+                    }
+                    pageInfo {
+                        currentPage
+                        lastPage
+                        hasNextPage
+                        total
+                    }
+                }
+            }
+        `;
+
+        interface ScheduleResponse {
+            data: {
+                Page: {
+                    airingSchedules: Array<{
+                        id: number;
+                        episode: number;
+                        airingAt: number;
+                        media: {
+                            id: number;
+                            title: {
+                                romaji: string;
+                                english?: string;
+                            };
+                            format: string;
+                            genres: string[];
+                            coverImage: {
+                                large: string;
+                                medium: string;
+                            };
+                        };
+                    }>;
+                    pageInfo: {
+                        currentPage: number;
+                        lastPage: number;
+                        hasNextPage: boolean;
+                        total: number;
+                    };
+                };
+            };
+        }
+
+        const response = await this.query<ScheduleResponse>(query, {
+            page,
+            perPage,
+            airingAtGreater: startTimestamp,
+            airingAtLesser: endTimestamp
+        });
+
+        const schedules = response?.data?.Page?.airingSchedules || [];
+        const pageInfo = response?.data?.Page?.pageInfo;
+
+        return {
+            schedule: schedules.map(s => ({
+                id: s.id,
+                title: s.media.title.english || s.media.title.romaji,
+                episode: s.episode,
+                airingAt: s.airingAt,
+                media: {
+                    thumbnail: s.media.coverImage.large || s.media.coverImage.medium,
+                    format: s.media.format,
+                    genres: s.media.genres
+                }
+            })),
+            hasNextPage: pageInfo?.hasNextPage || false,
+            pageInfo: {
+                currentPage: pageInfo?.currentPage || page,
+                totalCount: pageInfo?.total || 0
+            }
+        };
+    }
+
+    /**
+     * Get trending anime this week (sorted by trending score)
+     * Fetches anime with high trending score
+     * @param page Page number for pagination
+     * @param perPage Items per page
+     */
+    async getTrendingThisWeek(page: number = 1, perPage: number = 10): Promise<{
+        results: AnimeBase[];
+        pageInfo: {
+            hasNextPage: boolean;
+            currentPage: number;
+            totalCount: number;
+        };
+    }> {
+        const query = `
+            query ($page: Int, $perPage: Int) {
+                Page(page: $page, perPage: $perPage) {
+                    media(
+                        type: ANIME
+                        sort: TRENDING_DESC
+                        status_in: [RELEASING, FINISHED]
+                    ) {
+                        id
+                        idMal
+                        title {
+                            romaji
+                            english
+                            native
+                        }
+                        type
+                        format
+                        status
+                        description
+                        startDate {
+                            year
+                            month
+                            day
+                        }
+                        episodes
+                        duration
+                        averageScore
+                        trending
+                        popularity
+                        genres
+                        tags {
+                            id
+                            name
+                            category
+                            rank
+                        }
+                        studios {
+                            nodes {
+                                id
+                                name
+                            }
+                        }
+                        coverImage {
+                            large
+                            medium
+                        }
+                        bannerImage
+                        isAdult
+                    }
+                    pageInfo {
+                        currentPage
+                        lastPage
+                        hasNextPage
+                        perPage
+                        total
+                    }
+                }
+            }
+        `;
+
+        interface TrendingResponse {
+            data: {
+                Page: {
+                    media: AniListMedia[];
+                    pageInfo: {
+                        currentPage: number;
+                        lastPage: number;
+                        hasNextPage: boolean;
+                        perPage: number;
+                        total: number;
+                    };
+                };
+            };
+        }
+
+        const response = await this.query<TrendingResponse>(query, {
+            page,
+            perPage
+        });
+
+        const pageData = response?.data?.Page;
+        const media = pageData?.media || [];
+
+        return {
+            results: media.map(m => this.mapToAnimeBase(m)),
+            pageInfo: {
+                hasNextPage: pageData?.pageInfo?.hasNextPage || false,
+                currentPage: pageData?.pageInfo?.currentPage || page,
+                totalCount: pageData?.pageInfo?.total || media.length
+            }
+        };
+    }
+
+    /**
+     * Get seasonal anime for a specific year and season
+     * If not provided, uses current season with fallback to Winter
+     * Returns anime sorted by popularity with enhanced metadata
+     */
+    async getSeasonalAnime(year?: number, season?: string, page: number = 1, perPage: number = 25): Promise<{
+        results: AnimeBase[];
+        pageInfo: {
+            hasNextPage: boolean;
+            currentPage: number;
+            totalCount: number;
+        };
+        seasonInfo: {
+            year: number;
+            season: string;
+        };
+    }> {
+        // Determine current season if not provided with fallback to Winter
+        const now = new Date();
+        const currentYear = year || now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+
+        let currentSeason = season?.toUpperCase();
+        if (!currentSeason) {
+            if (currentMonth >= 1 && currentMonth <= 3) currentSeason = 'WINTER';
+            else if (currentMonth >= 4 && currentMonth <= 6) currentSeason = 'SPRING';
+            else if (currentMonth >= 7 && currentMonth <= 9) currentSeason = 'SUMMER';
+            else currentSeason = 'FALL';
+        }
+
+        const query = `
+            query ($page: Int, $perPage: Int, $season: MediaSeason, $year: Int) {
+                Page(page: $page, perPage: $perPage) {
+                    media(type: ANIME, season: $season, seasonYear: $year, sort: POPULARITY_DESC) {
+                        id
+                        idMal
+                        title {
+                            romaji
+                            english
+                            native
+                        }
+                        type
+                        format
+                        status
+                        description
+                        startDate {
+                            year
+                            month
+                            day
+                        }
+                        episodes
+                        duration
+                        averageScore
+                        popularity
+                        season
+                        seasonYear
+                        genres
+                        tags {
+                            id
+                            name
+                            category
+                            rank
+                        }
+                        studios {
+                            nodes {
+                                id
+                                name
+                            }
+                        }
+                        coverImage {
+                            large
+                            medium
+                        }
+                        bannerImage
+                        isAdult
+                    }
+                    pageInfo {
+                        currentPage
+                        lastPage
+                        hasNextPage
+                        perPage
+                        total
+                    }
+                }
+            }
+        `;
+
+        interface SeasonalResponse {
+            data: {
+                Page: {
+                    media: AniListMedia[];
+                    pageInfo: {
+                        currentPage: number;
+                        lastPage: number;
+                        hasNextPage: boolean;
+                        perPage: number;
+                        total: number;
+                    };
+                };
+            };
+        }
+
+        const response = await this.query<SeasonalResponse>(query, {
+            page,
+            perPage,
+            season: currentSeason,
+            year: currentYear
+        });
+
+        const pageData = response?.data?.Page;
+        const media = pageData?.media || [];
+
+        return {
+            results: media.map(m => this.mapToAnimeBase(m)),
+            pageInfo: {
+                hasNextPage: pageData?.pageInfo?.hasNextPage || false,
+                currentPage: pageData?.pageInfo?.currentPage || page,
+                totalCount: pageData?.pageInfo?.total || 0
+            },
+            seasonInfo: {
+                year: currentYear,
+                season: currentSeason.toLowerCase()
+            }
+        };
+    }
+
+    /**
+     * Get top rated anime with minimum rating threshold and vote count
+     * Returns anime with consistently high ratings sorted by score descending
+     * @param minimumRating Minimum average score threshold (default: 75)
+     * @param page Page number for pagination
+     * @param perPage Items per page
+     */
+    async getTopRated(minimumRating: number = 75, page: number = 1, perPage: number = 10): Promise<{
+        results: AnimeBase[];
+        pageInfo: {
+            hasNextPage: boolean;
+            currentPage: number;
+            totalCount: number;
+        };
+    }> {
+        const query = `
+            query ($page: Int, $perPage: Int, $minRating: Int, $minVotes: Int) {
+                Page(page: $page, perPage: $perPage) {
+                    media(
+                        type: ANIME
+                        sort: SCORE_DESC
+                        averageScore_greater: $minRating
+                        popularity_greater: $minVotes
+                        status_in: [FINISHED, RELEASING]
+                    ) {
+                        id
+                        idMal
+                        title {
+                            romaji
+                            english
+                            native
+                        }
+                        type
+                        format
+                        status
+                        description
+                        startDate {
+                            year
+                            month
+                            day
+                        }
+                        episodes
+                        duration
+                        averageScore
+                        popularity
+                        genres
+                        tags {
+                            id
+                            name
+                            category
+                            rank
+                        }
+                        studios {
+                            nodes {
+                                id
+                                name
+                            }
+                        }
+                        coverImage {
+                            large
+                            medium
+                        }
+                        bannerImage
+                        isAdult
+                    }
+                    pageInfo {
+                        currentPage
+                        lastPage
+                        hasNextPage
+                        perPage
+                        total
+                    }
+                }
+            }
+        `;
+
+        interface TopRatedResponse {
+            data: {
+                Page: {
+                    media: AniListMedia[];
+                    pageInfo: {
+                        currentPage: number;
+                        lastPage: number;
+                        hasNextPage: boolean;
+                        perPage: number;
+                        total: number;
+                    };
+                };
+            };
+        }
+
+        const response = await this.query<TopRatedResponse>(query, {
+            page,
+            perPage,
+            minRating: minimumRating,
+            minVotes: 500 // Minimum 500 votes for statistical significance
+        });
+
+        const pageData = response?.data?.Page;
+        const media = pageData?.media || [];
+
+        return {
+            results: media.filter(m => m.averageScore != null).map(m => this.mapToAnimeBase(m)),
+            pageInfo: {
+                hasNextPage: pageData?.pageInfo?.hasNextPage || false,
+                currentPage: pageData?.pageInfo?.currentPage || page,
+                totalCount: pageData?.pageInfo?.total || 0
+            }
+        };
+    }
+
+    /**
+     * Get top rated anime of all time (for leaderboard - backward compatibility)
+     */
+    async getTopRatedAnime(page: number = 1, perPage: number = 10): Promise<AnimeSearchResult> {
+        const query = `
+            query ($page: Int, $perPage: Int) {
+                Page(page: $page, perPage: $perPage) {
+                    media(type: ANIME, sort: SCORE_DESC, averageScore_greater: 70) {
+                        id
+                        idMal
+                        title {
+                            romaji
+                            english
+                            native
+                        }
+                        type
+                        format
+                        status
+                        description
+                        startDate {
+                            year
+                            month
+                            day
+                        }
+                        episodes
+                        duration
+                        averageScore
+                        popularity
+                        genres
+                        studios {
+                            nodes {
+                                id
+                                name
+                            }
+                        }
+                        coverImage {
+                            large
+                            medium
+                        }
+                        bannerImage
+                        isAdult
+                    }
+                    pageInfo {
+                        currentPage
+                        lastPage
+                        hasNextPage
+                        perPage
+                    }
+                }
+            }
+        `;
+
+        const response = await this.query<AniListSearchResponse>(query, { page, perPage });
+        const pageData = response?.data?.Page;
+        const media = pageData?.media || [];
+
+        return {
+            results: media.filter(m => m.averageScore != null).map(m => this.mapToAnimeBase(m)),
+            totalPages: pageData?.pageInfo?.lastPage || 1,
+            currentPage: page,
+            hasNextPage: pageData?.pageInfo?.hasNextPage || false,
+            source: 'AniList'
+        };
     }
 
     /**

@@ -8,9 +8,10 @@ import * as cheerio from 'cheerio';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming';
 import { BaseAnimeSource } from './base-source';
+import { GenreAwareSource } from './base-source';
 import { logger } from '../utils/logger';
 
-export class WatchHentaiSource extends BaseAnimeSource {
+export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'WatchHentai';
     baseUrl = 'https://watchhentai.net';
 
@@ -412,5 +413,54 @@ export class WatchHentaiSource extends BaseAnimeSource {
             rank: index + 1,
             anime
         }));
+    }
+
+    async getByGenre(genre: string, page: number = 1): Promise<AnimeSearchResult> {
+        const cacheKey = `genre:${genre}:${page}`;
+        const cached = this.getCached<AnimeSearchResult>(cacheKey);
+        if (cached) return cached;
+
+        try {
+            // WatchHentai URL structure: /genre/{genre}/ or /genre/{genre}/page/{page}/
+            const genreSlug = genre.toLowerCase().replace(/\s+/g, '-');
+            const url = page > 1
+                ? `${this.baseUrl}/genre/${genreSlug}/page/${page}/`
+                : `${this.baseUrl}/genre/${genreSlug}/`;
+
+            logger.info(`[WatchHentai] Fetching genre: ${url}`);
+
+            const response = await axios.get(url, {
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            });
+            const $ = cheerio.load(response.data);
+            const results = this.parseAnimeItems($);
+
+            // Determine if there's a next page
+            const hasNextPage = !!$('.pagination .next').length || !!$('a.next.page-numbers').length;
+
+            // Try to extract total pages if possible, otherwise guess based on next page
+            let totalPages = page;
+            if (hasNextPage) totalPages = page + 1;
+
+            // Try to find the last page number
+            const lastPageText = $('.pagination .page-numbers:not(.next)').last().text();
+            if (lastPageText && !isNaN(parseInt(lastPageText))) {
+                totalPages = parseInt(lastPageText);
+            }
+
+            const result: AnimeSearchResult = {
+                results,
+                totalPages,
+                currentPage: page,
+                hasNextPage,
+                source: this.name
+            };
+
+            this.setCache(cacheKey, result, this.cacheTTL.search);
+            return result;
+        } catch (error: any) {
+            logger.error(`[WatchHentai] Genre fetch failed for ${genre}: ${error.message}`);
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
+        }
     }
 }

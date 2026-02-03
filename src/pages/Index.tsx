@@ -2,23 +2,39 @@ import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { HeroSection } from '@/components/home/HeroSection';
 import { AnimeGrid } from '@/components/anime/AnimeGrid';
-import { TopAnimeList } from '@/components/anime/TopAnimeList';
-import { useTrending, useLatest, useTopRated, useAnime } from '@/hooks/useAnime';
+import { AiringSchedule } from '@/components/home/AiringSchedule';
+import { WeeklyLeaderboard } from '@/components/home/WeeklyLeaderboard';
+import { ContinueWatching } from '@/components/home/ContinueWatching';
+import { useTrending, useLatest, useTopRated, useSchedule, useLeaderboard, useSeasonal } from '@/hooks/useAnime';
+import { useWatchHistory } from '@/hooks/useWatchHistory';
 import { apiClient } from '@/lib/api-client';
 import { AniListClient } from '@/lib/anilist-client';
-import { Loader2, AlertCircle, RefreshCw, TrendingUp, Clock, Award, Flame, Sparkles, Star } from 'lucide-react';
+import { Loader2, AlertCircle, RefreshCw, TrendingUp, Clock, Award, Flame, Sparkles, Calendar, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
+import { SectionHeader } from '@/components/shared/SectionHeader';
 
 const Index = () => {
   const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useTrending();
   const { data: latestAnime, isLoading: latestLoading, error: latestError, refetch: refetchLatest } = useLatest();
-  const { data: topAnimeList, isLoading: topLoading, refetch: refetchTop } = useTopRated(1, 24);
+  const { data: topAnimeList, isLoading: topLoading, refetch: refetchTop } = useTopRated(1, 12);
+  const { data: scheduleData, isLoading: scheduleLoading } = useSchedule();
+  const { data: leaderboardData, isLoading: leaderboardLoading } = useLeaderboard('trending');
+  const { data: seasonalData, isLoading: seasonalLoading } = useSeasonal();
+  const { history, removeFromHistory } = useWatchHistory();
 
   const [featuredAnime, setFeaturedAnime] = useState([]);
   const [featuredLoading, setFeaturedLoading] = useState(false);
+
+  // Filter schedule for today
+  const todaySchedule = scheduleData?.schedule?.filter(item => {
+    // Only show items airing in next 24h
+    const now = Date.now() / 1000;
+    const timeUntil = item.airingAt - now;
+    return timeUntil < 86400 && timeUntil > -3600;
+  }).slice(0, 5) || [];
 
   const isLoading = trendingLoading || latestLoading || topLoading || featuredLoading;
   const hasError = trendingError || latestError;
@@ -29,7 +45,7 @@ const Index = () => {
       const fetchFeaturedDetails = async () => {
         setFeaturedLoading(true);
         const featuredIds = trendingAnime.slice(0, 5);
-        
+
         try {
           // Fetch detailed info for each featured anime with AniList enrichment
           const detailedAnime = await Promise.all(
@@ -38,7 +54,7 @@ const Index = () => {
                 // First get detailed info from our API
                 const detailed = await apiClient.getAnime(anime.id);
                 const baseAnime = detailed || anime;
-                
+
                 // Then enrich with AniList images
                 const enrichedAnime = await AniListClient.enrichAnimeWithImages(baseAnime);
                 return enrichedAnime;
@@ -71,7 +87,7 @@ const Index = () => {
   const bestAnime = topAnimeList?.map(item => item.anime) || [];
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background text-foreground font-sans">
       <Navbar />
 
       {/* Hero Section with Enhanced Design */}
@@ -92,7 +108,7 @@ const Index = () => {
         </div>
       ) : null}
 
-      {/* Error State - Premium Design */}
+      {/* Error State */}
       {hasError && (
         <div className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-4 p-6 rounded-2xl bg-gradient-to-r from-red-950/30 to-red-900/10 border border-red-900/30 backdrop-blur-xl shadow-lg">
@@ -114,118 +130,172 @@ const Index = () => {
         </div>
       )}
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-16">
-        {/* Trending Now Section */}
-        <section className="animate-fade-in">
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-fox-orange to-orange-600 flex items-center justify-center shadow-lg shadow-fox-orange/20">
-                <TrendingUp className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Trending Now</h2>
-                <p className="text-muted-foreground text-sm mt-0.5">Most popular anime this week</p>
-              </div>
-            </div>
+      {/* Main Content Layout */}
+      <main className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12">
+
+        <div className="flex flex-col lg:flex-row gap-8 lg:gap-12">
+          {/* Main Column */}
+          <div className="flex-1 min-w-0 space-y-12">
+
+            {/* Continue Watching Section */}
+            {history.length > 0 && (
+              <section className="animate-fade-in mb-8">
+                <SectionHeader
+                  title="Continue Watching"
+                  subtitle="Pick up where you left off"
+                  icon={Clock}
+                  iconBg="from-fox-orange to-orange-600"
+                  iconColor="text-white"
+                />
+                <ContinueWatching items={history} onRemove={removeFromHistory} />
+              </section>
+            )}
+
+            {/* Trending Section */}
+            <section className="animate-fade-in relative z-10">
+              <SectionHeader
+                title="Trending Now"
+                subtitle="Most popular anime right now"
+                icon={TrendingUp}
+                iconBg="from-fox-orange to-orange-600"
+                link="/api/anime/trending"
+                linkText="See All"
+              />
+
+              {trendingLoading ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {[...Array(10)].map((_, i) => (
+                    <div key={i} className="aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
+                  ))}
+                </div>
+              ) : trendingAnime && trendingAnime.length > 0 ? (
+                // Filter out 'Upcoming' or 'Not Yet Released' from trending standard view
+                // Also filter out any anime with incomplete data if possible (like missing images)
+                <AnimeGrid
+                  anime={trendingAnime
+                    .filter(a => a.status !== 'Upcoming' && a.rating !== undefined)
+                    .slice(0, 10)}
+                  columns={5}
+                />
+              ) : (
+                <EmptyState message="No trending content available" />
+              )}
+            </section>
+
+            {/* Seasonal Section */}
+            <section className="animate-fade-in relative z-10" style={{ animationDelay: '150ms' }}>
+              <SectionHeader
+                title="New This Season"
+                subtitle="Fresh anime airing now"
+                icon={Calendar}
+                iconBg="from-green-500 to-emerald-600"
+                link="/api/anime/seasonal"
+                linkText="View Season"
+              />
+
+              {seasonalLoading ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {[...Array(10)].map((_, i) => (
+                    <div key={i} className="aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
+                  ))}
+                </div>
+              ) : seasonalData?.results ? (
+                <AnimeGrid anime={seasonalData.results.slice(0, 10)} columns={5} />
+              ) : (
+                <EmptyState message="No seasonal content available" />
+              )}
+            </section>
+
+            {/* Latest Episodes */}
+            <section className="animate-fade-in relative z-10" style={{ animationDelay: '100ms' }}>
+              <SectionHeader
+                title="Latest Episodes"
+                subtitle="Fresh releases just for you"
+                icon={Clock}
+                iconBg="from-blue-500 to-cyan-500"
+                link="/schedule"
+                linkText="Full Schedule"
+              />
+
+              {latestLoading ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                  {[...Array(10)].map((_, i) => (
+                    <div key={i} className="aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
+                  ))}
+                </div>
+              ) : latestAnime && latestAnime.length > 0 ? (
+                <AnimeGrid anime={latestAnime.slice(0, 10)} columns={5} />
+              ) : (
+                <EmptyState message="No new episodes available" />
+              )}
+            </section>
+
           </div>
 
-          {trendingLoading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
-              {[...Array(18)].map((_, i) => (
-                <div
-                  key={i}
-                  className="aspect-[2/3] rounded-xl bg-gradient-to-br from-fox-surface to-fox-surface/50 animate-pulse"
-                  style={{ animationDelay: `${i * 50}ms` }}
-                />
-              ))}
-            </div>
-          ) : trendingAnime && trendingAnime.length > 0 ? (
-            <AnimeGrid anime={trendingAnime.slice(0, 18)} columns={6} />
-          ) : (
-            <EmptyState message="No trending content available" />
-          )}
-        </section>
+          {/* Sidebar */}
+          <aside className="w-full lg:w-80 shrink-0 space-y-6">
 
-        {/* Latest Episodes Section */}
-        <section className="animate-fade-in" style={{ animationDelay: '100ms' }}>
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
-                <Clock className="w-6 h-6 text-white" />
+            {/* Airing Today Widget */}
+            <div className="bg-fox-surface/30 rounded-2xl p-6 border border-white/5 backdrop-blur-sm shadow-lg">
+              <div className="flex items-center gap-2 mb-6">
+                <Clock className="w-4 h-4 text-fox-orange" />
+                <h3 className="font-bold text-lg">Airing Today</h3>
               </div>
-              <div>
-                <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Latest Episodes</h2>
-                <p className="text-muted-foreground text-sm mt-0.5">Fresh releases just for you</p>
-              </div>
+              <AiringSchedule schedule={todaySchedule} isLoading={scheduleLoading} />
             </div>
-            <Link to="/schedule">
-              <Button
-                variant="ghost"
-                className="text-muted-foreground hover:text-foreground hover:bg-fox-surface/80 transition-all h-10 px-4 rounded-xl"
-              >
-                Schedule
-                <span className="ml-2">→</span>
-              </Button>
-            </Link>
-          </div>
 
-          {latestLoading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
-              {[...Array(18)].map((_, i) => (
-                <div
-                  key={i}
-                  className="aspect-[2/3] rounded-xl bg-gradient-to-br from-fox-surface to-fox-surface/50 animate-pulse"
-                  style={{ animationDelay: `${i * 50}ms` }}
-                />
-              ))}
-            </div>
-          ) : latestAnime && latestAnime.length > 0 ? (
-            <AnimeGrid anime={latestAnime.slice(0, 18)} columns={6} />
-          ) : (
-            <EmptyState message="No new episodes available" />
-          )}
-        </section>
-
-        {/* Top Rated Section */}
-        <section className="animate-fade-in" style={{ animationDelay: '200ms' }}>
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-yellow-500 flex items-center justify-center shadow-lg shadow-amber-500/20">
-                <Award className="w-6 h-6 text-white" />
+            {/* Weekly Leaderboard Widget */}
+            <div className="bg-fox-surface/30 rounded-2xl p-6 border border-white/5 backdrop-blur-sm shadow-lg">
+              <div className="flex items-center gap-2 mb-6">
+                <Award className="w-4 h-4 text-yellow-500" />
+                <h3 className="font-bold text-lg">Weekly Top 10</h3>
               </div>
-              <div>
-                <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Top Rated</h2>
-                <p className="text-muted-foreground text-sm mt-0.5">Highest rated anime of all time</p>
-              </div>
+              <WeeklyLeaderboard anime={leaderboardData?.results || []} isLoading={leaderboardLoading} />
             </div>
-            <Link to="/search?sort=rating">
-              <Button
-                variant="ghost"
-                className="text-muted-foreground hover:text-foreground hover:bg-fox-surface/80 transition-all h-10 px-4 rounded-xl"
-              >
-                View All
-                <span className="ml-2">→</span>
-              </Button>
-            </Link>
-          </div>
 
-          {topLoading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5">
-              {[...Array(18)].map((_, i) => (
-                <div
-                  key={i}
-                  className="aspect-[2/3] rounded-xl bg-gradient-to-br from-fox-surface to-fox-surface/50 animate-pulse"
-                  style={{ animationDelay: `${i * 50}ms` }}
-                />
-              ))}
+            {/* Top Rated Mini List */}
+            <div className="bg-fox-surface/30 rounded-2xl p-6 border border-white/5 backdrop-blur-sm shadow-lg">
+              <div className="flex items-center gap-2 mb-6">
+                <Flame className="w-4 h-4 text-red-500" />
+                <h3 className="font-bold text-lg">All-Time Best</h3>
+              </div>
+
+              <div className="space-y-4">
+                {topLoading ? (
+                  [...Array(3)].map((_, i) => (
+                    <div key={i} className="h-16 bg-fox-surface/50 rounded-lg animate-pulse" />
+                  ))
+                ) : bestAnime.slice(0, 5).map((anime, i) => (
+                  <Link key={anime.id} to={`/watch?id=${encodeURIComponent(anime.id)}`} className="flex gap-3 items-center group p-2 rounded-lg hover:bg-fox-surface/50 transition-colors">
+                    <span className={cn(
+                      "w-6 text-center font-bold text-lg",
+                      i === 0 ? "text-yellow-500" : "text-muted-foreground"
+                    )}>{i + 1}</span>
+                    <div className="w-12 h-16 rounded bg-fox-surface overflow-hidden shrink-0 shadow-sm relative">
+                      <img src={anime.image} alt="" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold truncate group-hover:text-fox-orange transition-colors">{anime.title}</p>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                        <span className="flex items-center gap-1">
+                          <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                          {anime.rating ? (anime.rating > 10 ? anime.rating / 10 : anime.rating).toFixed(1) : 'N/A'}
+                        </span>
+                        <span>•</span>
+                        <span>{anime.type || 'TV'}</span>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+
+              <Link to="/search?sort=rating" className="block mt-6">
+                <Button variant="outline" size="sm" className="w-full text-xs border-white/10 hover:bg-white/5">View All Top Rated</Button>
+              </Link>
             </div>
-          ) : bestAnime.length > 0 ? (
-            <AnimeGrid anime={bestAnime.slice(0, 18)} columns={6} />
-          ) : (
-            <EmptyState message="No top rated content available" />
-          )}
-        </section>
+
+          </aside>
+        </div>
       </main>
 
       <Footer />

@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
-import { BaseAnimeSource } from './base-source.js';
+import { BaseAnimeSource, GenreAwareSource } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
+
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { Agent } from 'node:http';
 import { logger } from '../utils/logger.js';
@@ -68,6 +69,9 @@ interface HomeResponse {
 
 interface CategoryResponse {
     animes?: AnimeInfoRaw[];
+    totalPages?: number;
+    currentPage?: number;
+    hasNextPage?: boolean;
 }
 
 interface EpisodeRaw {
@@ -143,7 +147,7 @@ interface ChiStreamResponse {
  * - Multiple server fallbacks
  * - Proper data scraping from hianime.to
  */
-export class HiAnimeSource extends BaseAnimeSource {
+export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'HiAnime';
     baseUrl: string;
     private client: AxiosInstance;
@@ -701,6 +705,32 @@ export class HiAnimeSource extends BaseAnimeSource {
         } catch (error) {
             this.handleError(error, 'getTopAiring');
             return [];
+        }
+    }
+
+    async getByGenre(genre: string, page: number = 1): Promise<AnimeSearchResult> {
+        const cacheKey = `genre:${genre}:${page}`;
+        const cached = this.getCached<AnimeSearchResult>(cacheKey);
+        if (cached) return cached;
+
+        const slug = genre.toLowerCase().trim().replace(/\s+/g, '-');
+
+        try {
+            const data = await this.apiRequest<CategoryResponse>(`/genre/${slug}`, { page });
+
+            const result: AnimeSearchResult = {
+                results: (data.animes || []).map((a) => this.mapAnimeFromSearch(a)),
+                totalPages: data.totalPages || 1,
+                currentPage: data.currentPage || page,
+                hasNextPage: data.hasNextPage || (data.animes || []).length > 0,
+                source: this.name
+            };
+
+            this.setCache(cacheKey, result, this.cacheTTL.search);
+            return result;
+        } catch (error) {
+            this.handleError(error, 'getByGenre');
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
         }
     }
 }

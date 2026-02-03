@@ -48,6 +48,8 @@ interface VideoPlayerProps {
   hasNextEpisode?: boolean;
   animeId?: string;
   selectedEpisodeNum?: number;
+  animeTitle?: string;
+  animeImage?: string;
 }
 
 // Logger for video player events
@@ -371,6 +373,19 @@ export const VideoPlayer = ({
       // Save position every 5 seconds
       if (Math.floor(time) % 5 === 0) {
         savePosition(time);
+
+        // Save to global watch history if anime details are available
+        if (animeId && props.animeTitle && props.animeImage && selectedEpisodeNum) {
+          import('@/lib/watch-history').then(({ WatchHistory }) => {
+            WatchHistory.save(
+              { id: animeId, title: props.animeTitle!, image: props.animeImage! } as any,
+              (props.selectedEpisodeNum || 1).toString(), // Using episodeNum as ID for simplicity in history
+              props.selectedEpisodeNum || 1,
+              time,
+              video.duration
+            );
+          });
+        }
       }
 
       // Check for intro skip
@@ -432,7 +447,7 @@ export const VideoPlayer = ({
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('canplay', handleCanPlay);
     };
-  }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown, savePosition, clearSavedPosition]);
+  }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, props.animeTitle, props.animeImage]);
 
   // Fullscreen change handler
   useEffect(() => {

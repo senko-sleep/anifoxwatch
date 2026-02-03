@@ -24,6 +24,8 @@ export interface Anime {
   // AniList specific fields
   bannerImage?: string;
   coverImage?: string;
+  nextAiringEpisode?: number;
+  timeUntilAiring?: number; // in seconds
 }
 
 export interface Episode {

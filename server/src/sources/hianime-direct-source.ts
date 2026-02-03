@@ -510,12 +510,21 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         if (cached) return cached;
 
         // List of generic genre names that would return wrong results from search
-        const genericGenres = ['action', 'adventure', 'comedy', 'drama', 'romance', 'sci-fi', 'fantasy', 'horror', 'slice-of-life', 'sports', 'supernatural', 'mystery', 'thriller', 'music', 'mecha'];
-        const isGenericGenre = genericGenres.includes(genre.toLowerCase());
+        const genericGenres = [
+            'action', 'adventure', 'cars', 'comedy', 'dementia', 'demons', 'drama', 'ecchi',
+            'fantasy', 'game', 'harem', 'historical', 'horror', 'isekai', 'josei', 'kids',
+            'magic', 'martial-arts', 'mecha', 'military', 'music', 'mystery', 'parody',
+            'police', 'psychological', 'romance', 'samurai', 'school', 'sci-fi', 'seinen',
+            'shoujo', 'shoujo-ai', 'shounen', 'shounen-ai', 'slice-of-life', 'space',
+            'sports', 'super-power', 'supernatural', 'thriller', 'vampire'
+        ];
+
+        const slug = genre.toLowerCase().trim().replace(/\s+/g, '-');
+        const isGenericGenre = genericGenres.includes(slug);
 
         try {
-            // Try the genre endpoint first
-            const data = await this.scraper.getGenreAnime(genre.toLowerCase(), page);
+            // Try the genre endpoint first using the slug
+            const data = await this.getScraper().getGenreAnime(slug, page);
 
             const result: AnimeSearchResult = {
                 results: (data.animes || []).map((a: any) => this.mapAnime(a)),
@@ -565,7 +574,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
             // Fallback: Use search for niche genres
             try {
                 logger.info(`[${this.name}] Falling back to search for niche genre: ${genre}`);
-                const searchData = await this.scraper.search(genre, page);
+                const searchData = await this.getScraper().search(genre, page);
 
                 const result: AnimeSearchResult = {
                     results: (searchData.animes || []).map((a: any) => this.mapAnime(a)),

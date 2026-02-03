@@ -57,22 +57,21 @@ type BrowseSortOption = 'popularity' | 'trending' | 'recently_released' | 'shuff
 type TypeFilter = 'all' | 'TV' | 'Movie' | 'OVA' | 'ONA' | 'Special';
 type StatusFilter = 'all' | 'Ongoing' | 'Completed' | 'Upcoming';
 
-// Comprehensive anime genres from HiAnime
-const COMMON_GENRES = [
-  'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance',
-  'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller', 'Yuri', 'Yaoi',
-  'Ecchi', 'Harem', 'Mecha', 'Music', 'Psychological', 'Historical', 'Parody',
-  'Samurai', 'Shounen', 'Shoujo', 'Seinen', 'Josei', 'Kids', 'Police', 'Military',
-  'School', 'Demons', 'Game', 'Magic', 'Vampire', 'Space', 'Martial Arts',
-  'Isekai', 'Gore', 'Survival', 'Cyberpunk', 'Super Power', 'Mythology',
-  'Work Life', 'Adult Cast', 'Anthropomorphic', 'CGDCT', 'Childcare', 'Combat Sports',
-  'Crossdressing', 'Delinquents', 'Detective', 'Educational', 'Gag Humor', 'Gender Bender',
-  'High Stakes Game', 'Idols (Female)', 'Idols (Male)', 'Iyashikei',
-  'Love Polygon', 'Magical Sex Shift', 'Mahou Shoujo', 'Medical', 'Memoir',
-  'Organized Crime', 'Otaku Culture', 'Performing Arts', 'Pets', 'Reincarnation', 'Reverse Harem',
-  'Romantic Subtext', 'Showbiz', 'Strategy Game', 'Team Sports', 'Time Travel',
-  'Video Game', 'Visual Arts', 'Workplace'
+// Genre lists for different content modes
+const SAFE_GENRES = [
+  'Action', 'Adventure', 'Cars', 'Comedy', 'Dementia', 'Demons', 'Drama',
+  'Fantasy', 'Game', 'Harem', 'Historical', 'Horror', 'Isekai', 'Josei', 'Kids',
+  'Magic', 'Martial Arts', 'Mecha', 'Military', 'Music', 'Mystery', 'Parody',
+  'Police', 'Psychological', 'Romance', 'Samurai', 'School', 'Sci-Fi', 'Seinen',
+  'Shoujo', 'Shounen', 'Slice of Life', 'Space',
+  'Sports', 'Super Power', 'Supernatural', 'Thriller', 'Vampire'
 ];
+
+const ADULT_GENRES = [
+  'Hentai', 'Ecchi', 'Yaoi', 'Yuri', 'Shoujo Ai', 'Shounen Ai'
+];
+
+const MIXED_GENRES = [...SAFE_GENRES, ...ADULT_GENRES].sort();
 
 // Year ranges for date filter
 const currentYear = new Date().getFullYear();
@@ -117,7 +116,7 @@ const Search = () => {
   const initialYear = parseInt(searchParams.get('year') || '0', 10);
   const initialSort = (searchParams.get('sort') as BrowseSortOption) || 'popularity';
   const initialPage = parseInt(searchParams.get('page') || '1', 10);
-  const initialMode = (searchParams.get('mode') as 'safe' | 'mixed' | 'adult') || 'safe';
+  const initialMode = (searchParams.get('mode') as 'safe' | 'mixed' | 'adult') || 'mixed';
 
   const [query, setQuery] = useState(initialQuery);
   const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
@@ -155,8 +154,17 @@ const Search = () => {
     const needsYearSync = urlYear !== selectedYearRange;
     const needsSortSync = urlSort !== browseSortBy;
     const needsModeSync = urlMode !== mode;
+
+    // Filter genres based on mode
+    let validUrlGenres = urlGenres;
+    if (urlMode === 'safe') {
+      validUrlGenres = urlGenres.filter(genre => SAFE_GENRES.includes(genre));
+    } else if (urlMode === 'adult') {
+      validUrlGenres = urlGenres.filter(genre => ADULT_GENRES.includes(genre));
+    }
+
     const currentGenresStr = selectedGenres.sort().join(',');
-    const urlGenresStr = urlGenres.sort().join(',');
+    const urlGenresStr = validUrlGenres.sort().join(',');
     const needsGenresSync = currentGenresStr !== urlGenresStr;
 
     if (needsPageSync || needsTypeSync || needsStatusSync || needsYearSync || needsSortSync || needsModeSync || needsGenresSync) {
@@ -169,7 +177,7 @@ const Search = () => {
       if (needsYearSync) setSelectedYearRange(urlYear);
       if (needsSortSync) setBrowseSortBy(urlSort);
       if (needsModeSync) setMode(urlMode);
-      if (needsGenresSync) setSelectedGenres(urlGenres);
+      if (needsGenresSync) setSelectedGenres(validUrlGenres);
 
       // Reset ref after state updates complete
       setTimeout(() => {
@@ -359,38 +367,35 @@ const Search = () => {
         </Select>
       </FilterSection>
 
-      <FilterSection title="Content Settings">
-        <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
-          <SelectTrigger className="w-full bg-secondary/50 border-white/10">
-            <SelectValue placeholder="Content Visibility" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="safe">Safe Only (Default)</SelectItem>
-            <SelectItem value="mixed">Mixed Content</SelectItem>
-            <SelectItem value="adult">+18 Only</SelectItem>
-          </SelectContent>
-        </Select>
-      </FilterSection>
+
 
       <FilterSection title="Genres">
         <ScrollArea className="h-[300px] pr-4">
           <div className="flex flex-wrap gap-2">
-            {COMMON_GENRES.map((g) => (
-              <Badge
-                key={g}
-                variant={selectedGenres.includes(g) ? "default" : "outline"}
-                className={cn(
-                  "cursor-pointer hover:bg-secondary/80 transition-colors",
-                  selectedGenres.includes(g) ? "bg-fox-orange text-white hover:bg-fox-orange/90 border-transparent" : "text-muted-foreground"
-                )}
-                onClick={() => {
-                  setSelectedGenres(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
-                  setPage(1);
-                }}
-              >
-                {g}
-              </Badge>
-            ))}
+            {(() => {
+              let genresToDisplay = SAFE_GENRES;
+              if (mode === 'adult') {
+                genresToDisplay = ADULT_GENRES;
+              } else if (mode === 'mixed') {
+                genresToDisplay = MIXED_GENRES;
+              }
+              return genresToDisplay.map((g) => (
+                <Badge
+                  key={g}
+                  variant={selectedGenres.includes(g) ? "default" : "outline"}
+                  className={cn(
+                    "cursor-pointer hover:bg-secondary/80 transition-colors",
+                    selectedGenres.includes(g) ? "bg-fox-orange text-white hover:bg-fox-orange/90 border-transparent" : "text-muted-foreground"
+                  )}
+                  onClick={() => {
+                    setSelectedGenres(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
+                    setPage(1);
+                  }}
+                >
+                  {g}
+                </Badge>
+              ));
+            })()}
           </div>
         </ScrollArea>
       </FilterSection>
@@ -408,43 +413,62 @@ const Search = () => {
 
       {/* Search Header */}
       <div className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-white/5 py-4 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto flex gap-4 items-center">
-          <div className="relative flex-1 max-w-2xl">
-            <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search anime..."
-              className="pl-12 h-12 bg-secondary/50 border-white/10 rounded-xl text-lg focus:ring-fox-orange/50 transition-all font-medium"
-            />
-            {query && (
-              <Button variant="ghost" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8" onClick={() => setQuery('')}>
-                <X className="w-4 h-4" />
-              </Button>
-            )}
-          </div>
+        <div className="max-w-7xl mx-auto flex gap-4 items-center justify-center">
 
-          <div className="flex items-center gap-2">
-            <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
-              <SheetTrigger asChild>
-                <Button variant="outline" size="lg" className="lg:hidden gap-2 h-12 rounded-xl">
-                  <Filter className="w-5 h-5" />
-                  Filters
-                  {(selectedGenres.length > 0 || typeFilter !== 'all' || statusFilter !== 'all' || mode !== 'safe') && (
-                    <Badge variant="secondary" className="ml-1 px-1.5 h-5 min-w-[1.25rem] flex items-center justify-center">
-                      {selectedGenres.length + (typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (mode !== 'safe' ? 1 : 0)}
-                    </Badge>
-                  )}
+          <div className="flex-1 max-w-4xl flex items-center gap-4">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search anime..."
+                className="pl-12 h-12 bg-secondary/50 border-white/10 rounded-xl text-lg focus:ring-fox-orange/50 transition-all font-medium"
+              />
+              {query && (
+                <Button variant="ghost" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8" onClick={() => setQuery('')}>
+                  <X className="w-4 h-4" />
                 </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-[300px] sm:w-[400px] overflow-y-auto">
-                <SheetHeader className="mb-6">
-                  <SheetTitle>Filter Anime</SheetTitle>
-                  <SheetDescription>Narrow down results by genre, status, and more.</SheetDescription>
-                </SheetHeader>
-                <FiltersContent />
-              </SheetContent>
-            </Sheet>
+              )}
+            </div>
+
+            {/* Content Settings Dropdown */}
+            <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
+              <SelectTrigger className={cn(
+                "w-[180px] h-12 rounded-xl bg-secondary/50 border-white/10 font-medium transition-colors",
+                mode !== 'safe' && "border-fox-orange/50 text-fox-orange bg-fox-orange/10"
+              )}>
+                <SelectValue placeholder="Content Visibility" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="safe">Safe Only (Default)</SelectItem>
+                <SelectItem value="mixed">Mixed Content</SelectItem>
+                <SelectItem value="adult">+18 Only</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Mobile Filter Button */}
+            <div className="flex items-center gap-2 lg:hidden">
+              <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
+                <SheetTrigger asChild>
+                  <Button variant="outline" size="lg" className="gap-2 h-12 rounded-xl px-3">
+                    <Filter className="w-5 h-5" />
+                    {(selectedGenres.length > 0 || typeFilter !== 'all' || statusFilter !== 'all') && (
+                      <Badge variant="secondary" className="px-1.5 h-5 min-w-[1.25rem] flex items-center justify-center bg-fox-orange text-white">
+                        {selectedGenres.length + (typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0)}
+                      </Badge>
+                    )}
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-[300px] sm:w-[400px] overflow-y-auto">
+                  <SheetHeader className="mb-6">
+                    <SheetTitle>Filter Anime</SheetTitle>
+                    <SheetDescription>Narrow down results by genre, status, and more.</SheetDescription>
+                  </SheetHeader>
+                  <FiltersContent />
+                </SheetContent>
+              </Sheet>
+            </div>
           </div>
         </div>
       </div>

@@ -21,6 +21,8 @@ export interface AnimeBase {
     dubCount?: number;
     isMature?: boolean;
     source?: string; // Which source this came from
+    nextAiringEpisode?: number;
+    timeUntilAiring?: number; // in seconds
 }
 
 export interface Episode {

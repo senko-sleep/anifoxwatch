@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { apiClient, SourceHealth, StreamingData, EpisodeServer } from '@/lib/api-client';
+import { apiClient, SourceHealth, StreamingData, EpisodeServer, ScheduleResponse, LeaderboardResponse, SeasonalResponse } from '@/lib/api-client';
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 
 // Query keys for caching and invalidation
@@ -7,7 +7,7 @@ export const queryKeys = {
     trending: (page: number, source?: string) => ['trending', page, source] as const,
     latest: (page: number, source?: string) => ['latest', page, source] as const,
     topRated: (page: number, limit: number, source?: string) => ['topRated', page, limit, source] as const,
-    search: (query: string, page: number, source?: string) => ['search', query, page, source] as const,
+    search: (query: string, page: number, source?: string, mode?: 'safe' | 'mixed' | 'adult') => ['search', query, page, source, mode] as const,
     genre: (genre: string, page: number, source?: string) => ['genre', genre, page, source] as const,
     anime: (id: string) => ['anime', id] as const,
     episodes: (animeId: string) => ['episodes', animeId] as const,
@@ -15,6 +15,9 @@ export const queryKeys = {
     stream: (episodeId: string, server?: string, category?: string) => ['stream', episodeId, server, category] as const,
     sources: ['sources'] as const,
     sourceHealth: ['sourceHealth'] as const,
+    schedule: (startDate?: string, endDate?: string, page?: number) => ['schedule', startDate, endDate, page] as const,
+    leaderboard: (type: string, page: number) => ['leaderboard', type, page] as const,
+    seasonal: (year?: number, season?: string, page?: number) => ['seasonal', year, season, page] as const,
 };
 
 // ============ ANIME DATA HOOKS ============
@@ -46,12 +49,9 @@ export function useTopRated(page: number = 1, limit: number = 10, source?: strin
     });
 }
 
-export function useSearch(query: string, page: number = 1, source?: string, enabled: boolean = true, mode: 'safe' | 'mixed' | 'adult' = 'safe') {
+export function useSearch(query: string, page: number = 1, source?: string, enabled: boolean = true, mode: 'safe' | 'mixed' | 'adult' = 'mixed') {
     return useQuery<AnimeSearchResult, Error>({
-        queryKey: queryKeys.search(query, page, source), // We should probably include mode in queryKey but it's fine for now if we don't cache by it strictly or assume source handles it
-        // Actually valid queryKey is needed. Let's append it to key 'search'
-        // But queryKeys.search definition is fixed up top. I should update it too or just hack it.
-        // Let's rely on source changing if mode changes.
+        queryKey: queryKeys.search(query, page, source, mode),
         queryFn: async () => {
             try {
                 const result = await apiClient.search(query, page, source, mode);
@@ -145,6 +145,50 @@ export function useEpisodes(animeId: string, enabled: boolean = true) {
         queryFn: () => apiClient.getEpisodes(animeId),
         enabled: enabled && animeId.length > 0,
         staleTime: 10 * 60 * 1000,
+    });
+}
+
+// ============ SCHEDULE & LEADERBOARD HOOKS ============
+
+interface DailySchedule {
+    [key: string]: import('@/lib/api-client').ScheduleItem[];
+}
+
+export function useSchedule(startDate?: string, endDate?: string, page: number = 1, enabled: boolean = true) {
+    return useQuery<{
+        schedule: import('@/lib/api-client').ScheduleItem[];
+        groupedByDay: DailySchedule;
+        metadata: {
+            totalShows: number;
+            dateRange: { start: string; end: string };
+            pageInfo: { currentPage: number; totalCount: number };
+        };
+    }, Error>({
+        queryKey: queryKeys.schedule(startDate, endDate, page),
+        queryFn: () => apiClient.getSchedule(startDate, endDate, page),
+        enabled,
+        staleTime: 5 * 60 * 1000, // 5 minutes - schedule updates frequently
+        gcTime: 15 * 60 * 1000,
+    });
+}
+
+export function useLeaderboard(type: 'trending' | 'top-rated' = 'trending', page: number = 1, enabled: boolean = true) {
+    return useQuery<import('@/lib/api-client').LeaderboardResponse, Error>({
+        queryKey: queryKeys.leaderboard(type, page),
+        queryFn: () => apiClient.getLeaderboard(type, page),
+        enabled,
+        staleTime: 10 * 60 * 1000, // 10 minutes
+        gcTime: 30 * 60 * 1000,
+    });
+}
+
+export function useSeasonal(year?: number, season?: string, page: number = 1, enabled: boolean = true) {
+    return useQuery<import('@/lib/api-client').SeasonalResponse, Error>({
+        queryKey: queryKeys.seasonal(year, season, page),
+        queryFn: () => apiClient.getSeasonal(year, season, page),
+        enabled,
+        staleTime: 30 * 60 * 1000, // 30 minutes - seasonal data is fairly static
+        gcTime: 60 * 60 * 1000,
     });
 }
 

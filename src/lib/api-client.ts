@@ -64,58 +64,169 @@ interface CacheEntry<T = unknown> {
     expires: number;
 }
 
+// Enhanced Schedule types with date range support
+export interface ScheduleItem {
+    id: number;
+    title: string;
+    episode: number;
+    airingAt: number;
+    media: {
+        thumbnail: string;
+        format: string;
+        genres: string[];
+    };
+}
+
+export interface ScheduleResponse {
+    schedule: (ScheduleItem & { countdown: number; timeUntilAiring: number })[];
+    groupedByDay: Record<string, ScheduleItem[]>;
+    metadata: {
+        totalShows: number;
+        dateRange: {
+            start: string;
+            end: string;
+        };
+        pageInfo: {
+            currentPage: number;
+            totalCount: number;
+        };
+    };
+    hasNextPage: boolean;
+    currentPage: number;
+}
+
+// Enhanced Leaderboard types with movement indicators
+export interface LeaderboardResponse {
+    results: Anime[];
+    pageInfo: {
+        hasNextPage: boolean;
+        currentPage: number;
+        totalPages: number;
+    };
+    type: 'trending' | 'top-rated';
+    source: string;
+}
+
+// Enhanced Seasonal types with pagination metadata
+export interface SeasonalResponse {
+    results: Anime[];
+    pageInfo: {
+        hasNextPage: boolean;
+        currentPage: number;
+        totalPages: number;
+        totalItems: number;
+    };
+    seasonInfo: {
+        year: number;
+        season: string;
+    };
+    source: string;
+}
+
+
 class AnimeApiClient {
     private baseUrl: string;
     private cache: Map<string, CacheEntry<unknown>> = new Map();
+    private readonly MAX_RETRIES = 3;
+    private readonly TIMEOUT_MS = 30000;
 
     constructor(baseUrl: string = API_BASE_URL) {
         this.baseUrl = baseUrl;
     }
 
-    private async fetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
-        // Check cache first
-        const cacheKey = `${endpoint}`;
-        const cached = this.cache.get(cacheKey);
-        if (cached && cached.expires > Date.now()) {
-            return cached.data as T;
-        }
-
-        try {
-            const response = await fetch(`${this.baseUrl}${endpoint}`, {
-                ...options,
-                headers: {
-                    'Accept': 'application/json',
-                    ...options?.headers
-                }
-            });
-
-            if (!response.ok) {
-                // Try to parse error response
-                const errorText = await response.text();
-                let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-
-                try {
-                    const errorData = JSON.parse(errorText);
-                    if (errorData.error) {
-                        errorMessage = errorData.error;
-                    }
-                } catch {
-                    // Ignore JSON parse errors
-                }
-
-                throw new Error(errorMessage);
+    /**
+     * Execute fetch with retry logic and timeout
+     */
+    private async fetchWithRetry<T>(
+        endpoint: string,
+        options?: RequestInit,
+        retries: number = this.MAX_RETRIES
+    ): Promise<T> {
+        // Check cache first for GET requests
+        if (!options?.method || options.method === 'GET') {
+            const cacheKey = `${endpoint}`;
+            const cached = this.cache.get(cacheKey);
+            if (cached && cached.expires > Date.now()) {
+                return cached.data as T;
             }
-
-            const data = await response.json();
-
-            // Cache for 2 minutes - store with proper type
-            this.cache.set(cacheKey, { data, expires: Date.now() + 2 * 60 * 1000 } as CacheEntry<T>);
-
-            return data;
-        } catch (error) {
-            console.error(`[API] Fetch error for ${endpoint}:`, error);
-            throw error;
         }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
+
+        let lastError: Error | null = null;
+
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const response = await fetch(`${this.baseUrl}${endpoint}`, {
+                    ...options,
+                    signal: controller.signal,
+                    headers: {
+                        'Accept': 'application/json',
+                        ...options?.headers
+                    }
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+
+                    try {
+                        const errorData = JSON.parse(errorText);
+                        if (errorData.error) {
+                            errorMessage = errorData.error;
+                        }
+                    } catch {
+                        // Ignore JSON parse errors
+                    }
+
+                    throw new Error(errorMessage);
+                }
+
+                const data = await response.json();
+
+                // Cache for 2 minutes - store with proper type
+                if (!options?.method || options.method === 'GET') {
+                    const cacheKey = `${endpoint}`;
+                    this.cache.set(cacheKey, { data, expires: Date.now() + 2 * 60 * 1000 } as CacheEntry<T>);
+                }
+
+                return data;
+            } catch (error) {
+                lastError = error as Error;
+
+                // Check if it's a timeout
+                if (lastError.name === 'AbortError') {
+                    throw new Error('Request timeout - please try again');
+                }
+
+                // Check if we should retry (network errors)
+                const isRetryable = attempt < retries && (
+                    lastError.message.includes('network') ||
+                    lastError.message.includes('Failed to fetch') ||
+                    lastError.message.includes('timeout')
+                );
+
+                if (isRetryable) {
+                    // Exponential backoff
+                    const delay = Math.pow(2, attempt) * 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+
+                throw lastError;
+            } finally {
+                clearTimeout(timeoutId);
+            }
+        }
+
+        throw lastError || new Error('Unknown error');
+    }
+
+    private async fetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
+        return this.fetchWithRetry<T>(endpoint, options);
     }
 
     // Clear cache for fresh data
@@ -125,7 +236,7 @@ class AnimeApiClient {
 
     // ============ ANIME ENDPOINTS ============
 
-    async search(query: string, page: number = 1, source?: string, mode: 'safe' | 'mixed' | 'adult' = 'safe'): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, source?: string, mode: 'safe' | 'mixed' | 'adult' = 'mixed'): Promise<AnimeSearchResult> {
         const params = new URLSearchParams({ q: query, page: String(page) });
         if (source) params.append('source', source);
         if (mode) params.append('mode', mode);
@@ -211,6 +322,27 @@ class AnimeApiClient {
             `/api/anime/episodes?id=${encodeURIComponent(animeId)}`
         );
         return response.episodes || [];
+    }
+
+    // ============ SCHEDULE & LEADERBOARD ENDPOINTS ============
+
+    async getSchedule(startDate?: string, endDate?: string, page: number = 1): Promise<ScheduleResponse> {
+        const params = new URLSearchParams({ page: String(page) });
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+        return this.fetch<ScheduleResponse>(`/api/anime/schedule?${params}`);
+    }
+
+    async getLeaderboard(type: 'trending' | 'top-rated' = 'trending', page: number = 1): Promise<LeaderboardResponse> {
+        const params = new URLSearchParams({ type, page: String(page) });
+        return this.fetch<LeaderboardResponse>(`/api/anime/leaderboard?${params}`);
+    }
+
+    async getSeasonal(year?: number, season?: string, page: number = 1): Promise<SeasonalResponse> {
+        const params = new URLSearchParams({ page: String(page) });
+        if (year) params.append('year', String(year));
+        if (season) params.append('season', season);
+        return this.fetch<SeasonalResponse>(`/api/anime/seasonal?${params}`);
     }
 
     // ============ STREAMING ENDPOINTS ============

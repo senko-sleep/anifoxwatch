@@ -462,6 +462,8 @@ const Watch = () => {
                       hasNextEpisode={hasNext}
                       animeId={cleanAnimeId}
                       selectedEpisodeNum={selectedEpisodeNum}
+                      animeTitle={anime.title}
+                      animeImage={anime.image}
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
