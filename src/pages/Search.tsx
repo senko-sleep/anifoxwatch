@@ -68,7 +68,25 @@ const SAFE_GENRES = [
 ];
 
 const ADULT_GENRES = [
-  'Hentai', 'Ecchi', 'Yaoi', 'Yuri', 'Shoujo Ai', 'Shounen Ai'
+  // Core adult genres
+  'Hentai', 'Ecchi', 'Yaoi', 'Yuri',
+
+  // WatchHentai specific genres (formatted for display)
+  '3D', 'Ahegao', 'Anal', 'Animal Ears', 'BDSM', 'Beastiality', 'Big Boobs',
+  'Blackmail', 'Blowjob', 'Bondage', 'Brainwashed', 'Bukakke', 'Cat Girl',
+  'Censored', 'Cosplay', 'Creampie', 'Dark Skin', 'Deepthroat', 'Double Penetration',
+  'Facesitting', 'Facial', 'Femdom', 'Footjob', 'Futanari', 'Gangbang',
+  'Gyaru', 'Horny Slut', 'Housewife', 'Humiliation', 'Incest', 'Inflation',
+  'Internal Cumshot', 'Lactation', 'Large Breasts', 'Lolicon', 'Magical Girls',
+  'Maid', 'Megane', 'MILF', 'Mind Break', 'Molestation', 'NTR', 'Nuns', 'Nurses',
+  'Office Ladies', 'POV', 'Pregnant', 'Princess', 'Public Sex', 'Rape',
+  'Rim Job', 'Scat', 'School Girls', 'Shimapan', 'Shoutacon', 'Slaves',
+  'Squirting', 'Stocking', 'Strap On', 'Strapped On', 'Succubus', 'Swimsuit',
+  'Tentacles', 'Three Some', 'Tits Fuck', 'Torture', 'Toys', 'Train Molestation',
+  'Tsundere', 'Uncensored', 'Urination', 'Vanilla', 'Virgins', 'Widow', 'X-Ray',
+
+  // Shared genres that appear in both
+  'Female Doctor', 'Female Teacher'
 ];
 
 const MIXED_GENRES = [...SAFE_GENRES, ...ADULT_GENRES].sort();
@@ -144,7 +162,7 @@ const Search = () => {
     const urlStatus = (searchParams.get('status') as StatusFilter) || 'all';
     const urlYear = parseInt(searchParams.get('year') || '0', 10);
     const urlSort = (searchParams.get('sort') as BrowseSortOption) || 'popularity';
-    const urlMode = (searchParams.get('mode') as 'safe' | 'mixed' | 'adult') || 'safe';
+    const urlMode = (searchParams.get('mode') as 'safe' | 'mixed' | 'adult') || 'mixed';
     const urlGenres = searchParams.get('genres')?.split(',').filter(Boolean) || searchParams.get('genre')?.split(',').filter(Boolean) || [];
 
     // Check if any values differ
@@ -228,7 +246,7 @@ const Search = () => {
     if (selectedYearRange > 0) params.year = selectedYearRange.toString();
     if (browseSortBy !== 'popularity') params.sort = browseSortBy;
     if (page > 1) params.page = page.toString();
-    if (mode !== 'safe') params.mode = mode;
+    if (mode !== 'mixed') params.mode = mode;
     setSearchParams(params, { replace: true });
   }, [debouncedQuery, selectedGenres, typeFilter, statusFilter, selectedYearRange, browseSortBy, page, mode, setSearchParams]);
 
@@ -313,7 +331,7 @@ const Search = () => {
     setSelectedYearRange(0);
     setPage(1);
     setQuery(''); // Also clear query
-    setMode('safe');
+    setMode('mixed');
   };
 
   const handleShuffle = () => {

@@ -82,7 +82,9 @@ export const VideoPlayer = ({
   onNextEpisode,
   hasNextEpisode,
   animeId,
-  selectedEpisodeNum
+  selectedEpisodeNum,
+  animeTitle,
+  animeImage
 }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -375,12 +377,12 @@ export const VideoPlayer = ({
         savePosition(time);
 
         // Save to global watch history if anime details are available
-        if (animeId && props.animeTitle && props.animeImage && selectedEpisodeNum) {
+        if (animeId && animeTitle && animeImage && selectedEpisodeNum) {
           import('@/lib/watch-history').then(({ WatchHistory }) => {
             WatchHistory.save(
-              { id: animeId, title: props.animeTitle!, image: props.animeImage! } as any,
-              (props.selectedEpisodeNum || 1).toString(), // Using episodeNum as ID for simplicity in history
-              props.selectedEpisodeNum || 1,
+              { id: animeId, title: animeTitle, image: animeImage } as any,
+              selectedEpisodeNum.toString(), // Using episodeNum as ID for simplicity in history
+              selectedEpisodeNum,
               time,
               video.duration
             );
@@ -447,7 +449,7 @@ export const VideoPlayer = ({
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('canplay', handleCanPlay);
     };
-  }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, props.animeTitle, props.animeImage]);
+  }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage]);
 
   // Fullscreen change handler
   useEffect(() => {

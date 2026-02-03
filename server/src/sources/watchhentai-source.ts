@@ -395,7 +395,13 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
 
     async getLatest(page?: number): Promise<AnimeBase[]> {
         try {
-            const url = page && page > 1 ? `${this.baseUrl}/page/${page}` : this.baseUrl;
+            // Use /series/ endpoint for better content organization
+            const url = page && page > 1
+                ? `${this.baseUrl}/series/page/${page}/`
+                : `${this.baseUrl}/series/`;
+
+            logger.info(`[WatchHentai] Fetching latest from: ${url}`);
+
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
             });
@@ -415,14 +421,134 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
         }));
     }
 
+    async getGenres(): Promise<string[]> {
+        return [
+            '3d',
+            'action',
+            'adventure',
+            'ahegao',
+            'anal',
+            'animal-ears',
+            'animation',
+            'bdsm',
+            'beastiality',
+            'big-boobs',
+            'blackmail',
+            'blowjob',
+            'bondage',
+            'brainwashed',
+            'bukakke',
+            'cat-girl',
+            'censored',
+            'comedy',
+            'cosplay',
+            'creampie',
+            'dark-skin',
+            'deepthroat',
+            'demons',
+            'doctor',
+            'double-penatration',
+            'drama',
+            'dubbed',
+            'ecchi',
+            'elf',
+            'eroge',
+            'facesitting',
+            'facial',
+            'family',
+            'fantasy',
+            'female-doctor',
+            'female-teacher',
+            'femdom',
+            'footjob',
+            'futanari',
+            'gangbang',
+            'gore',
+            'gyaru',
+            'harem',
+            'historical',
+            'horny-slut',
+            'housewife',
+            'humiliation',
+            'incest',
+            'inflation',
+            'internal-cumshot',
+            'lactation',
+            'large-breasts',
+            'lolicon',
+            'magical-girls',
+            'maid',
+            'martial-arts',
+            'megane',
+            'milf',
+            'mind-break',
+            'molestation',
+            'ntr',
+            'nuns',
+            'nurses',
+            'office-ladies',
+            'police',
+            'pov',
+            'pregnant',
+            'princess',
+            'public-sex',
+            'rape',
+            'rim-job',
+            'romance',
+            'scat',
+            'school-girls',
+            'sci-fi',
+            'shimapan',
+            'shoutacon',
+            'slaves',
+            'sports',
+            'squirting',
+            'stocking',
+            'strap-on',
+            'strapped-on',
+            'succubus',
+            'super-power',
+            'supernatural',
+            'swimsuit',
+            'tentacles',
+            'three-some',
+            'tits-fuck',
+            'torture',
+            'toys',
+            'train-molestation',
+            'tsundere',
+            'uncensored',
+            'upcoming',
+            'urination',
+            'vampire',
+            'vanilla',
+            'virgins',
+            'widow',
+            'x-ray',
+            'yaoi',
+            'yuri'
+        ];
+    }
+
+    /**
+     * Convert genre display name to URL slug format
+     * E.g., "Three Some" -> "three-some", "MILF" -> "milf"
+     */
+    private genreToSlug(genre: string): string {
+        return genre
+            .toLowerCase()
+            .replace(/\s+/g, '-')
+            .replace(/[^a-z0-9-]/g, '');
+    }
+
     async getByGenre(genre: string, page: number = 1): Promise<AnimeSearchResult> {
         const cacheKey = `genre:${genre}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
 
         try {
-            // WatchHentai URL structure: /genre/{genre}/ or /genre/{genre}/page/{page}/
-            const genreSlug = genre.toLowerCase().replace(/\s+/g, '-');
+            // Convert display name to URL slug (e.g., "Three Some" -> "three-some")
+            const genreSlug = this.genreToSlug(genre);
             const url = page > 1
                 ? `${this.baseUrl}/genre/${genreSlug}/page/${page}/`
                 : `${this.baseUrl}/genre/${genreSlug}/`;

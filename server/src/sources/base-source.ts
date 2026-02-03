@@ -6,6 +6,7 @@ import { logger } from '../utils/logger.js';
  */
 export interface GenreAwareSource extends AnimeSource {
     getByGenre(genre: string, page?: number): Promise<AnimeSearchResult>;
+    getGenres(): Promise<string[]>;
 }
 
 /**

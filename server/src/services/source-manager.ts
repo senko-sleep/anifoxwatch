@@ -836,7 +836,8 @@ export class SourceManager {
         // 1. Source is not explicitly forced to a scraper (or is default/mixed)
         // 2. Filters are compatible with AniList (standard filters)
 
-        const canUseAniList = !filters.source || filters.source === 'HiAnimeDirect' || filters.source === 'AniList';
+        const canUseAniList = (!filters.source || filters.source === 'HiAnimeDirect' || filters.source === 'AniList')
+            && filters.mode !== 'adult'; // Skip AniList for adult content mode
 
         if (canUseAniList) {
             logger.info(`[SourceManager] Using AniList-first strategy for browse`, filters);
@@ -913,7 +914,27 @@ export class SourceManager {
                         }
                     }
 
-                    finalResults = enrichedResults;
+                    // Apply content mode filtering to AniList results
+                    const mode = filters.mode || 'mixed';
+                    const adultGenres = ['hentai', 'ecchi', 'yaoi', 'yuri'];
+                    let filteredResults = enrichedResults;
+
+                    if (mode === 'safe') {
+                        // Exclude adult content
+                        filteredResults = enrichedResults.filter(a => {
+                            if (!a.genres || a.genres.length === 0) return true;
+                            return !a.genres.some(g => adultGenres.includes(g.toLowerCase()));
+                        });
+                    } else if (mode === 'adult') {
+                        // Only show adult content
+                        filteredResults = enrichedResults.filter(a => {
+                            if (!a.genres || a.genres.length === 0) return false;
+                            return a.genres.some(g => adultGenres.includes(g.toLowerCase()));
+                        });
+                    }
+                    // mixed mode: show everything (no filtering)
+
+                    finalResults = filteredResults;
                     totalResults = anilistResult.totalResults || 5000;
                     totalPages = anilistResult.totalPages || 100;
                     hasNextPage = anilistResult.hasNextPage;
@@ -982,6 +1003,25 @@ export class SourceManager {
                     );
                 });
             }
+
+            // Content mode filtering
+            const mode = filters.mode || 'mixed';
+            const adultGenres = ['hentai', 'ecchi', 'yaoi', 'yuri'];
+
+            if (mode === 'safe') {
+                // Exclude adult content
+                filtered = filtered.filter(a => {
+                    if (!a.genres || a.genres.length === 0) return true;
+                    return !a.genres.some(g => adultGenres.includes(g.toLowerCase()));
+                });
+            } else if (mode === 'adult') {
+                // Only show adult content
+                filtered = filtered.filter(a => {
+                    if (!a.genres || a.genres.length === 0) return false;
+                    return a.genres.some(g => adultGenres.includes(g.toLowerCase()));
+                });
+            }
+            // mixed mode: show everything (no filtering)
 
             // Shuffle or Sort
             if (sortType === 'shuffle') {
