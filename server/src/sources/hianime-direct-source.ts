@@ -44,7 +44,8 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
      */
     private getScraper(): HiAnime.Scraper {
         if (!this.scraper) {
-            this.scraper = new HiAnime.Scraper();
+            // @ts-ignore - Pass baseUrl to constructor
+            this.scraper = new HiAnime.Scraper(this.baseUrl);
             this.scraperInitialized = true;
         }
         return this.scraper;
