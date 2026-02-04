@@ -8,7 +8,7 @@
  * - Production: Configured in .env.production
  */
 
-export type ApiDeployment = 'local' | 'cloudflare' | 'render' | 'custom';
+export type ApiDeployment = 'local' | 'cloudflare' | 'render' | 'firebase' | 'custom';
 
 export interface ApiConfig {
     deployment: ApiDeployment;
@@ -22,8 +22,9 @@ export interface ApiConfig {
  */
 export const API_DEPLOYMENTS = {
     local: 'http://localhost:3001',
-    cloudflare: 'https://your-worker.workers.dev', // Update with your Cloudflare Workers URL
-    render: 'https://anifoxwatch.onrender.com',
+    cloudflare: 'https://anifoxwatch-api.anifoxwatch.workers.dev',
+    render: 'https://anifoxwatch-api.anifoxwatch.workers.dev', // 'https://anifoxwatch.onrender.com',
+    firebase: '/api', // Firebase Functions proxy endpoint
     custom: '' // Will be set from environment variable
 } as const;
 
@@ -33,19 +34,21 @@ export const API_DEPLOYMENTS = {
 export function getApiConfig(): ApiConfig {
     // Check environment variable first
     const envApiUrl = import.meta.env.VITE_API_URL;
-    
+
     if (envApiUrl) {
         // Determine deployment type from URL
         let deployment: ApiDeployment = 'custom';
-        
+
         if (envApiUrl.includes('localhost') || envApiUrl.includes('127.0.0.1')) {
             deployment = 'local';
         } else if (envApiUrl.includes('workers.dev')) {
             deployment = 'cloudflare';
         } else if (envApiUrl.includes('render.com')) {
             deployment = 'render';
+        } else if (envApiUrl === '/api') {
+            deployment = 'firebase';
         }
-        
+
         return {
             deployment,
             baseUrl: envApiUrl,
@@ -53,7 +56,7 @@ export function getApiConfig(): ApiConfig {
             retries: 3
         };
     }
-    
+
     // Auto-detect based on environment
     if (import.meta.env.DEV) {
         return {
@@ -63,11 +66,26 @@ export function getApiConfig(): ApiConfig {
             retries: 3
         };
     }
-    
-    // Production defaults to Render (update if using Cloudflare Workers primarily)
+
+    // Check if we're on Firebase Hosting (detect firebaseapp.com or web.app)
+    const isFirebaseHosting = typeof window !== 'undefined' && (
+        window.location.hostname.includes('firebaseapp.com') ||
+        window.location.hostname.includes('web.app')
+    );
+
+    if (isFirebaseHosting) {
+        return {
+            deployment: 'firebase',
+            baseUrl: API_DEPLOYMENTS.firebase,
+            timeout: 30000,
+            retries: 3
+        };
+    }
+
+    // Production defaults to Cloudflare
     return {
-        deployment: 'render',
-        baseUrl: API_DEPLOYMENTS.render,
+        deployment: 'cloudflare',
+        baseUrl: API_DEPLOYMENTS.cloudflare,
         timeout: 30000,
         retries: 3
     };
@@ -93,16 +111,16 @@ export async function getApiStatus(baseUrl: string): Promise<{
     version: string;
 }> {
     const startTime = Date.now();
-    
+
     try {
         const response = await fetch(`${baseUrl}/health`, {
             method: 'GET',
             signal: AbortSignal.timeout(5000)
         });
-        
+
         const data = await response.json();
         const latency = Date.now() - startTime;
-        
+
         return {
             online: response.ok,
             deployment: data.environment || 'unknown',
@@ -126,13 +144,15 @@ export async function testAllDeployments(): Promise<Record<ApiDeployment, any>> 
     const results = await Promise.allSettled([
         getApiStatus(API_DEPLOYMENTS.local),
         getApiStatus(API_DEPLOYMENTS.cloudflare),
-        getApiStatus(API_DEPLOYMENTS.render)
+        getApiStatus(API_DEPLOYMENTS.render),
+        getApiStatus(API_DEPLOYMENTS.firebase)
     ]);
-    
+
     return {
         local: results[0].status === 'fulfilled' ? results[0].value : { online: false, error: true },
         cloudflare: results[1].status === 'fulfilled' ? results[1].value : { online: false, error: true },
         render: results[2].status === 'fulfilled' ? results[2].value : { online: false, error: true },
+        firebase: results[3].status === 'fulfilled' ? results[3].value : { online: false, error: true },
         custom: { online: false, error: true }
     };
 }

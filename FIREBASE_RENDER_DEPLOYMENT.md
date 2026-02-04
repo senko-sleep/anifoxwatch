@@ -58,7 +58,7 @@ Create environment files for different environments:
 #### **For Production (Firebase Hosting):**
 Create `.env.production`:
 ```bash
-VITE_API_URL=https://anifoxwatch.onrender.com
+VITE_API_URL=https://anifoxwatch-api.anifoxwatch.workers.dev
 ```
 
 #### **For Local Development:**
@@ -70,7 +70,7 @@ Create `.env.development` (optional):
 #### **Automatic Environment Detection:**
 The API client automatically uses:
 - **Local**: `http://localhost:3001` (development)
-- **Production**: `https://anifoxwatch.onrender.com` (production)
+- **Production**: `https://anifoxwatch-api.anifoxwatch.workers.dev` (production)
 
 ---
 
@@ -105,7 +105,7 @@ PORT=10000
 
 Render.com will automatically deploy when you push to your main branch.
 
-Your API will be available at: `https://anifoxwatch.onrender.com`
+Your API will be available at: `https://anifoxwatch-api.anifoxwatch.workers.dev`
 
 ---
 
@@ -115,13 +115,13 @@ Your API will be available at: `https://anifoxwatch.onrender.com`
 
 1. Push code to GitHub
 2. Render.com auto-deploys the API
-3. Your API will be available at: `https://anifoxwatch.onrender.com`
+3. Your API will be available at: `https://anifoxwatch-api.anifoxwatch.workers.dev`
 
 ### Step 2: Update Frontend Environment
 
 The frontend automatically uses the correct API URL:
 - **Local development**: `http://localhost:3001`
-- **Production**: `https://anifoxwatch.onrender.com`
+- **Production**: `https://anifoxwatch-api.anifoxwatch.workers.dev`
 
 ### Step 3: Deploy Frontend to Firebase
 
@@ -137,7 +137,7 @@ npx firebase deploy --only hosting
 
 After deployment:
 - **Frontend**: `https://anifoxwatch.web.app`
-- **Backend API**: `https://anifoxwatch.onrender.com`
+- **Backend API**: `https://anifoxwatch-api.anifoxwatch.workers.dev`
 
 ---
 

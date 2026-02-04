@@ -7,8 +7,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming';
-import { BaseAnimeSource } from './base-source';
-import { GenreAwareSource } from './base-source';
+import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source';
 import { logger } from '../utils/logger';
 
 export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSource {
@@ -35,10 +34,11 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
-    async healthCheck(): Promise<boolean> {
+    async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
             const response = await axios.get(this.baseUrl, {
-                timeout: 10000,
+                timeout: options?.timeout || 10000,
+                signal: options?.signal,
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
             });
             this.isAvailable = response.status === 200;
@@ -87,7 +87,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
         return items;
     }
 
-    async search(query: string, page: number = 1): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `search:${query}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
@@ -95,7 +95,9 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
         try {
             const url = `${this.baseUrl}/?s=${encodeURIComponent(query)}`;
             const response = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
             });
             const $ = cheerio.load(response.data);
             const results = this.parseAnimeItems($);
@@ -111,17 +113,23 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             this.setCache(cacheKey, result, this.cacheTTL.search);
             return result;
         } catch (error: any) {
-            logger.error(`[WatchHentai] Search failed: ${error.message}`);
+            this.handleError(error, 'search');
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
         }
     }
 
-    async getAnime(id: string): Promise<AnimeBase | null> {
+    async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
+        const cacheKey = `anime:${id}`;
+        const cached = this.getCached<AnimeBase>(cacheKey);
+        if (cached) return cached;
+
         try {
             const cleanId = id.replace(/^watchhentai-/, '');
             const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}`;
             const response = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
             });
             const $ = cheerio.load(response.data);
 
@@ -136,7 +144,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                 image = `${this.baseUrl}${image.startsWith('/') ? '' : '/'}${image}`;
             }
 
-            return {
+            const anime: AnimeBase = {
                 id,
                 title,
                 image,
@@ -147,20 +155,25 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                 episodes: 1,
                 genres: ['Hentai']
             };
+
+            this.setCache(cacheKey, anime, this.cacheTTL.anime);
+            return anime;
         } catch (error: any) {
-            logger.error(`[WatchHentai] getAnime failed: ${error.message}`);
+            this.handleError(error, 'getAnime');
             return null;
         }
     }
 
-    async getEpisodes(animeId: string): Promise<Episode[]> {
+    async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         const cleanId = animeId.replace(/^watchhentai-/, '');
 
         // Fetch the anime page to find video links
         try {
             const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}`;
             const response = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
             });
             const $ = cheerio.load(response.data);
 
@@ -170,19 +183,12 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                 const href = $(link).attr('href') || '';
                 const text = $(link).text().trim();
 
-                // Extract video ID from URL (handle both relative and absolute URLs)
-                // href can be: /videos/slug, https://watchhentai.net/videos/slug/, //watchhentai.net/videos/slug
                 let videoId = href;
-
-                // Remove protocol and domain if present
                 if (videoId.includes('/videos/')) {
                     videoId = videoId.split('/videos/')[1];
                 }
-
-                // Remove trailing slash
                 videoId = videoId.replace(/\/$/, '');
 
-                // Match episode number from text
                 const episodeMatch = text.match(/episode\s*(\d+)/i);
                 const episodeNum = episodeMatch ? parseInt(episodeMatch[1]) : videoLinks.length + 1;
 
@@ -202,10 +208,9 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                 return videoLinks;
             }
         } catch (error: any) {
-            logger.error(`[WatchHentai] Failed to fetch episodes: ${error.message}`);
+            this.handleError(error, 'getEpisodes');
         }
 
-        // Fallback: single episode with converted ID format
         const fallbackId = cleanId.replace('series/', '').replace('-id-', '-episode-1-uncensored-id-');
         return [{
             id: `watchhentai-videos/${fallbackId}`,
@@ -217,7 +222,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
         }];
     }
 
-    async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
+    async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         const cleanId = episodeId.replace(/^watchhentai-/, '');
         return [{ name: 'WatchHentai', url: cleanId, type: 'sub' }];
     }
@@ -226,8 +231,8 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
      * Get streaming URL from video page - extracts MP4 URL by fetching the JWPlayer page
      * The main video page contains an iframe pointing to a player page with actual stream URLs
      */
-    async getStreamingLinks(episodeId: string, server?: string, category?: 'sub' | 'dub'): Promise<StreamingData> {
-        const cacheKey = `stream:${episodeId}:${server || 'default'}:${category || 'sub'}`;
+    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
+        const cacheKey = `stream:${episodeId}:${server || 'default'}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
 
@@ -253,7 +258,8 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.5',
                 },
-                timeout: 15000
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
             });
 
             const html = response.data;
@@ -288,7 +294,8 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Referer': 'https://watchhentai.net/',
                 },
-                timeout: 15000
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
             });
 
             const playerHtml = playerResponse.data;
@@ -384,16 +391,16 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             return { sources: [], subtitles: [], source: this.name };
 
         } catch (error: any) {
-            logger.error(`[WatchHentai] Stream extraction failed: ${error.message}`);
+            this.handleError(error, 'getStreamingLinks');
             return { sources: [], subtitles: [], source: this.name };
         }
     }
 
-    async getTrending(page?: number): Promise<AnimeBase[]> {
-        return this.getLatest(page);
+    async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
+        return this.getLatest(page, options);
     }
 
-    async getLatest(page?: number): Promise<AnimeBase[]> {
+    async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         try {
             // Use /series/ endpoint for better content organization
             const url = page && page > 1
@@ -403,18 +410,20 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             logger.info(`[WatchHentai] Fetching latest from: ${url}`);
 
             const response = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
             });
             const $ = cheerio.load(response.data);
             return this.parseAnimeItems($);
         } catch (error: any) {
-            logger.error(`[WatchHentai] getLatest failed: ${error.message}`);
+            this.handleError(error, 'getLatest');
             return [];
         }
     }
 
-    async getTopRated(page?: number, limit?: number): Promise<TopAnime[]> {
-        const latest = await this.getLatest(page);
+    async getTopRated(page: number = 1, limit: number = 10, options?: SourceRequestOptions): Promise<TopAnime[]> {
+        const latest = await this.getLatest(page, options);
         return latest.map((anime, index) => ({
             rank: index + 1,
             anime
@@ -532,7 +541,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             .replace(/[^a-z0-9-]/g, '');
     }
 
-    async getByGenre(genre: string, page: number = 1): Promise<AnimeSearchResult> {
+    async getByGenre(genre: string, page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `genre:${genre}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
@@ -546,7 +555,9 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             logger.info(`[WatchHentai] Fetching genre page ${page}: ${url}`);
 
             const response = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
             });
             const $ = cheerio.load(response.data);
             const results = this.parseAnimeItems($);
@@ -575,7 +586,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             this.setCache(cacheKey, result, this.cacheTTL.search);
             return result;
         } catch (error: any) {
-            logger.error(`[WatchHentai] Genre fetch failed for ${genre} page ${page}: ${error.message}`);
+            this.handleError(error, 'getByGenre');
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
         }
     }

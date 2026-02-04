@@ -25,6 +25,7 @@
     "deploy:api:cloudflare": "cd server && npm run deploy:cloudflare",
     "dev:cloudflare": "cd server && npm run dev:cloudflare",
     "build:api": "cd server && npm run build",
+    "build:firebase": "vite build --mode firebase",
     "build:functions": "cd functions && npm install",
     "firebase:init": "npx firebase init",
     "firebase:serve": "npx firebase serve",

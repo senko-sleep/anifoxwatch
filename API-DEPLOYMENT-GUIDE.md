@@ -10,14 +10,13 @@ This guide explains how to deploy and switch between different API backends for 
 - **Features**: Full logging, hot reload, easy debugging
 
 ### 2️⃣ Cloudflare Workers
-- **URL**: `https://your-worker.workers.dev`
+- **URL**: `https://anifoxwatch-api.anifoxwatch.workers.dev`
 - **Best for**: Global edge deployment, low latency
 - **Features**: Edge computing, automatic scaling, 0ms cold starts
 
-### 3️⃣ Render.com
-- **URL**: `https://anifoxwatch.onrender.com`
-- **Best for**: Traditional server deployment
-- **Features**: Easy setup, free tier, auto-deploy from Git
+### 3️⃣ Render.com (Legacy)
+- **URL**: `https://anifoxwatch-api.anifoxwatch.workers.dev` (Replaced Render with Cloudflare Workers)
+- **Status**: Replaced by Cloudflare Workers for better performance
 
 ---
 
@@ -109,11 +108,7 @@ The frontend will automatically connect to `http://localhost:3001`.
 Update `.env.production` or `.env.development`:
 
 ```env
-# Use Cloudflare Workers
-VITE_API_URL=https://your-worker.workers.dev
-
-# Or use Render
-VITE_API_URL=https://anifoxwatch.onrender.com
+VITE_API_URL=https://anifoxwatch-api.anifoxwatch.workers.dev
 
 # Or use local
 VITE_API_URL=http://localhost:3001

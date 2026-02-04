@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
-import { BaseAnimeSource } from './base-source.js';
+import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 
@@ -22,7 +22,7 @@ export class AniwaveSource extends BaseAnimeSource {
     private maxConcurrent = 3;
     private minDelay = 250;
     private lastRequest = 0;
-    private requestQueue: Array<{ fn: () => Promise<any>; resolve: (v: any) => void; reject: (e: any) => void }> = [];
+    private requestQueue: Array<{ fn: (signal?: AbortSignal) => Promise<any>; resolve: (v: any) => void; reject: (e: any) => void; signal?: AbortSignal }> = [];
 
     // Smart caching with TTL
     private cache: Map<string, { data: any; expires: number }> = new Map();
@@ -54,9 +54,10 @@ export class AniwaveSource extends BaseAnimeSource {
 
     // ============ CONCURRENCY CONTROL ============
 
-    private async throttledRequest<T>(fn: () => Promise<T>): Promise<T> {
+    private async throttledRequest<T>(fn: (signal?: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+        if (signal?.aborted) throw new Error('Aborted');
         return new Promise((resolve, reject) => {
-            this.requestQueue.push({ fn, resolve, reject });
+            this.requestQueue.push({ fn, resolve, reject, signal });
             this.processQueue();
         });
     }
@@ -76,11 +77,17 @@ export class AniwaveSource extends BaseAnimeSource {
         const request = this.requestQueue.shift();
         if (!request) return;
 
+        if (request.signal?.aborted) {
+            request.reject(new Error('Aborted'));
+            this.processQueue();
+            return;
+        }
+
         this.activeRequests++;
         this.lastRequest = Date.now();
 
         try {
-            const result = await request.fn();
+            const result = await request.fn(request.signal);
             request.resolve(result);
         } catch (error) {
             request.reject(error);
@@ -164,10 +171,15 @@ export class AniwaveSource extends BaseAnimeSource {
 
     // ============ API METHODS ============
 
-    async healthCheck(): Promise<boolean> {
+    async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const response = await this.throttledRequest(() =>
-                this.client.get('/recent-episodes', { params: { page: 1 }, timeout: 5000 })
+            const response = await this.throttledRequest((signal) =>
+                this.client.get('/recent-episodes', {
+                    params: { page: 1 },
+                    timeout: options?.timeout || 5000,
+                    signal
+                }),
+                options?.signal
             );
             this.isAvailable = response.status === 200;
             return this.isAvailable;
@@ -177,14 +189,19 @@ export class AniwaveSource extends BaseAnimeSource {
         }
     }
 
-    async search(query: string, page: number = 1, filters?: any): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `search:${query}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.throttledRequest(() =>
-                this.client.get(`/${encodeURIComponent(query)}`, { params: { page } })
+            const response = await this.throttledRequest((signal) =>
+                this.client.get(`/${encodeURIComponent(query)}`, {
+                    params: { page },
+                    signal,
+                    timeout: options?.timeout || 10000
+                }),
+                options?.signal
             );
 
             const result: AnimeSearchResult = {
@@ -203,15 +220,19 @@ export class AniwaveSource extends BaseAnimeSource {
         }
     }
 
-    async getAnime(id: string): Promise<AnimeBase | null> {
+    async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         const cacheKey = `anime:${id}`;
         const cached = this.getCached<AnimeBase>(cacheKey);
         if (cached) return cached;
 
         try {
             const animeId = id.replace('aniwave-', '');
-            const response = await this.throttledRequest(() =>
-                this.client.get(`/info/${animeId}`)
+            const response = await this.throttledRequest((signal) =>
+                this.client.get(`/info/${animeId}`, {
+                    signal,
+                    timeout: options?.timeout || 10000
+                }),
+                options?.signal
             );
             const anime = this.mapAnime(response.data);
             this.setCache(cacheKey, anime, this.cacheTTL.anime);
@@ -222,15 +243,19 @@ export class AniwaveSource extends BaseAnimeSource {
         }
     }
 
-    async getEpisodes(animeId: string): Promise<Episode[]> {
+    async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         const cacheKey = `episodes:${animeId}`;
         const cached = this.getCached<Episode[]>(cacheKey);
         if (cached) return cached;
 
         try {
             const id = animeId.replace('aniwave-', '');
-            const response = await this.throttledRequest(() =>
-                this.client.get(`/info/${id}`)
+            const response = await this.throttledRequest((signal) =>
+                this.client.get(`/info/${id}`, {
+                    signal,
+                    timeout: options?.timeout || 10000
+                }),
+                options?.signal
             );
 
             const episodes: Episode[] = (response.data.episodes || []).map((ep: any) => ({
@@ -254,14 +279,18 @@ export class AniwaveSource extends BaseAnimeSource {
     /**
      * Get streaming servers with quality info
      */
-    async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
+    async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         const cacheKey = `servers:${episodeId}`;
         const cached = this.getCached<EpisodeServer[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.throttledRequest(() =>
-                this.client.get(`/servers/${episodeId}`)
+            const response = await this.throttledRequest((signal) =>
+                this.client.get(`/servers/${episodeId}`, {
+                    signal,
+                    timeout: options?.timeout || 5000
+                }),
+                options?.signal
             );
 
             const servers: EpisodeServer[] = (response.data || []).map((s: any) => ({
@@ -285,15 +314,24 @@ export class AniwaveSource extends BaseAnimeSource {
     /**
      * Get HD streaming links with multiple quality options
      */
-    async getStreamingLinks(episodeId: string, server: string = 'vidplay'): Promise<StreamingData> {
-        const cacheKey = `stream:${episodeId}:${server}`;
+    async getStreamingLinks(episodeId: string, server: string = 'vidplay', category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
+        const cacheKey = `stream:${episodeId}:${server}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.throttledRequest(() =>
-                this.client.get(`/watch/${episodeId}`, { params: { server }, timeout: 8000 })
+            const response = await this.throttledRequest((signal) =>
+                this.client.get(`/watch/${episodeId}`, {
+                    params: { server, category },
+                    timeout: options?.timeout || 8000,
+                    signal
+                }),
+                options?.signal
             );
+
+            if (!response.data) {
+                return { sources: [], subtitles: [] };
+            }
 
             // Map to HD quality options
             const sources = (response.data.sources || []).map((s: any): VideoSource => ({
@@ -339,14 +377,19 @@ export class AniwaveSource extends BaseAnimeSource {
         return 'auto';
     }
 
-    async getTrending(page: number = 1): Promise<AnimeBase[]> {
+    async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `trending:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.throttledRequest(() =>
-                this.client.get('/airing', { params: { page } })
+            const response = await this.throttledRequest((signal) =>
+                this.client.get('/airing', {
+                    params: { page },
+                    signal,
+                    timeout: options?.timeout || 10000
+                }),
+                options?.signal
             );
             const results = (response.data.results || []).map((a: any) => this.mapAnime(a));
             this.setCache(cacheKey, results, 10 * 60 * 1000);
@@ -357,14 +400,19 @@ export class AniwaveSource extends BaseAnimeSource {
         }
     }
 
-    async getLatest(page: number = 1): Promise<AnimeBase[]> {
+    async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `latest:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.throttledRequest(() =>
-                this.client.get('/recent-episodes', { params: { page } })
+            const response = await this.throttledRequest((signal) =>
+                this.client.get('/recent-episodes', {
+                    params: { page },
+                    signal,
+                    timeout: options?.timeout || 10000
+                }),
+                options?.signal
             );
             const results = (response.data.results || []).map((a: any) => this.mapAnime(a));
             this.setCache(cacheKey, results, 3 * 60 * 1000);
@@ -375,14 +423,19 @@ export class AniwaveSource extends BaseAnimeSource {
         }
     }
 
-    async getTopRated(page: number = 1, limit: number = 10): Promise<TopAnime[]> {
+    async getTopRated(page: number = 1, limit: number = 10, options?: SourceRequestOptions): Promise<TopAnime[]> {
         const cacheKey = `topRated:${page}:${limit}`;
         const cached = this.getCached<TopAnime[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.throttledRequest(() =>
-                this.client.get('/airing', { params: { page } })
+            const response = await this.throttledRequest((signal) =>
+                this.client.get('/airing', {
+                    params: { page },
+                    signal,
+                    timeout: options?.timeout || 15000
+                }),
+                options?.signal
             );
             const results = (response.data.results || [])
                 .slice(0, limit)

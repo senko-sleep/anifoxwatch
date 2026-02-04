@@ -208,7 +208,7 @@ export class GogoanimeSource extends BaseAnimeSource {
         }
     }
 
-    async getStreamingLinks(episodeId: string, server?: string, category?: 'sub' | 'dub', options?: SourceRequestOptions): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         try {
             const response = await axios.get(`${this.baseUrl}/${episodeId}`, {
                 signal: options?.signal,

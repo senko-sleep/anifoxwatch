@@ -1181,8 +1181,8 @@ export class SourceManager {
 
         for (const name of this.sourceOrder) {
             // Skip incompatible fallback sources for specialized IDs
-            if (isHentaiHavenId && name !== 'HentaiHaven') continue;
-            if (isHanimeId && name !== 'Hanime') continue;
+            if (isHentaiHavenId && name !== 'WatchHentai') continue;
+            if (isHanimeId && name !== 'WatchHentai') continue;
 
             const fallbackSource = this.sources.get(name) as StreamingSource;
             if (fallbackSource?.isAvailable && fallbackSource !== source && fallbackSource.getEpisodeServers) {
@@ -1243,8 +1243,8 @@ export class SourceManager {
 
         for (const name of this.sourceOrder) {
             // Skip incompatible fallback sources for specialized IDs
-            if (isHentaiHavenId && name !== 'HentaiHaven') continue;
-            if (isHanimeId && name !== 'Hanime') continue;
+            if (isHentaiHavenId && name !== 'WatchHentai') continue;
+            if (isHanimeId && name !== 'WatchHentai') continue;
 
             const fallbackSource = this.sources.get(name) as StreamingSource;
             if (fallbackSource?.isAvailable && fallbackSource !== source && fallbackSource.getStreamingLinks) {

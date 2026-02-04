@@ -12,7 +12,7 @@ services:
       - key: PORT
         value: 3001
       - key: CORS_ORIGIN
-        value: https://anifoxwatch.onrender.com
+        value: https://anifoxwatch-api.anifoxwatch.workers.dev
 
   - type: static_site
     name: anifoxwatch-frontend
@@ -24,7 +24,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: VITE_API_URL
-        value: https://anifoxwatch.onrender.com/api
+        value: https://anifoxwatch-api.anifoxwatch.workers.dev/api
 
 databases:
   - name: anifoxwatch-cache

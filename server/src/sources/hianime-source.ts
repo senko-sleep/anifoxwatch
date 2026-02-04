@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
-import { BaseAnimeSource, GenreAwareSource } from './base-source.js';
+import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
@@ -219,10 +219,10 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
 
     // ============ API REQUEST WITH FALLBACK ============
 
-    private async apiRequest<T>(path: string, params?: Record<string, unknown>): Promise<T> {
+    private async apiRequest<T>(path: string, params?: Record<string, unknown>, options?: SourceRequestOptions): Promise<T> {
         let lastError: Error | null = null;
+        if (options?.signal?.aborted) throw new Error('Aborted');
 
-        // Try current API instance first, then fallback to others
         for (let i = 0; i < this.apiInstances.length; i++) {
             const apiIndex = (this.currentApiIndex + i) % this.apiInstances.length;
             const apiUrl = this.apiInstances[apiIndex];
@@ -230,7 +230,8 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
             try {
                 const response = await axios.get<HiAnimeAPIResponse>(`${apiUrl}/api/v2/hianime${path}`, {
                     params,
-                    timeout: 15000,
+                    timeout: options?.timeout || 15000,
+                    signal: options?.signal,
                     headers: {
                         'Accept': 'application/json',
                         'User-Agent': 'AniStreamHub/1.0'
@@ -246,6 +247,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
                 }
                 throw new Error(`API returned success: false or status: ${response.data?.status}`);
             } catch (error) {
+                if (error instanceof Error && (error.name === 'AbortError' || error.message === 'Aborted')) throw error;
                 const err = error as Error;
                 lastError = err;
                 logger.warn(`API ${apiUrl} failed: ${err.message}`, { path, params }, this.name);
@@ -324,9 +326,12 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
 
     // ============ API METHODS ============
 
-    async healthCheck(): Promise<boolean> {
+    async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            await this.apiRequest<HomeResponse>('/home');
+            await this.apiRequest<HomeResponse>('/home', {}, {
+                ...options,
+                timeout: options?.timeout || 5000
+            });
             this.isAvailable = true;
             return true;
         } catch {
@@ -335,13 +340,13 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    async search(query: string, page: number = 1): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `search:${query}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<SearchResponse>('/search', { q: query, page });
+            const data = await this.apiRequest<SearchResponse>('/search', { q: query, page }, options);
 
             const result: AnimeSearchResult = {
                 results: (data.animes || []).map((a) => this.mapAnimeFromSearch(a)),
@@ -359,15 +364,14 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    async getAnime(id: string): Promise<AnimeBase | null> {
+    async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         const cacheKey = `anime:${id}`;
         const cached = this.getCached<AnimeBase>(cacheKey);
         if (cached) return cached;
 
         try {
             const animeId = id.replace('hianime-', '');
-            const data = await this.apiRequest<AnimeDetailResponse>(`/anime/${animeId}`);
-
+            const data = await this.apiRequest<AnimeDetailResponse>(`/anime/${animeId}`, {}, options);
             // Handle nested structure
             const animeInfo = (typeof data.anime === 'object' && 'info' in data.anime)
                 ? data.anime.info
@@ -390,14 +394,14 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    async getEpisodes(animeId: string): Promise<Episode[]> {
+    async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         const cacheKey = `episodes:${animeId}`;
         const cached = this.getCached<Episode[]>(cacheKey);
         if (cached) return cached;
 
         try {
             const id = animeId.replace('hianime-', '');
-            const data = await this.apiRequest<EpisodesResponse>(`/anime/${id}/episodes`);
+            const data = await this.apiRequest<EpisodesResponse>(`/anime/${id}/episodes`, {}, options);
 
             const episodes: Episode[] = (data.episodes || []).map((ep) => ({
                 id: ep.episodeId,
@@ -420,7 +424,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     /**
      * Get streaming servers for an episode
      */
-    async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
+    async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         const cacheKey = `servers:${episodeId}`;
         const cached = this.getCached<EpisodeServer[]>(cacheKey);
         if (cached) return cached;
@@ -436,7 +440,8 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
                 try {
                     const response = await axios.get<ChiServersResponse>(`${apiUrl}/api/stream`, {
                         params: { id: episodeId, server: 'hd-1', type: 'sub' },
-                        timeout: 15000
+                        timeout: options?.timeout || 15000,
+                        signal: options?.signal
                     });
 
                     if (response.data?.success && response.data.results?.servers) {
@@ -447,6 +452,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
                         }));
                     }
                 } catch (e) {
+                    if (e instanceof Error && (e.name === 'AbortError' || e.message === 'Aborted')) throw e;
                     logger.warn('CHI API /api/stream failed for servers', undefined, this.name);
                 }
             }
@@ -454,7 +460,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
             // Try legacy endpoint if chi failed or not chi instance
             if (servers.length === 0) {
                 try {
-                    const data = await this.apiRequest<ServersResponse>('/episode/servers', { animeEpisodeId: episodeId });
+                    const data = await this.apiRequest<ServersResponse>('/episode/servers', { animeEpisodeId: episodeId }, options);
                     if (data.sub) {
                         data.sub.forEach((s) => {
                             servers.push({ name: s.serverName || 'unknown', url: '', type: 'sub' });
@@ -466,6 +472,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
                         });
                     }
                 } catch (e) {
+                    if (e instanceof Error && (e.name === 'AbortError' || e.message === 'Aborted')) throw e;
                     logger.warn('Legacy /episode/servers endpoint failed', undefined, this.name);
                 }
             }
@@ -499,7 +506,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     /**
      * Get HD streaming links for an episode
      */
-    async getStreamingLinks(episodeId: string, server: string = 'hd-2', category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server: string = 'hd-2', category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         const cacheKey = `stream:${episodeId}:${server}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
@@ -513,7 +520,8 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
                 try {
                     const response = await axios.get<ChiStreamResponse>(`${apiUrl}/api/stream`, {
                         params: { id: episodeId, server, type: category },
-                        timeout: 15000
+                        timeout: options?.timeout || 15000,
+                        signal: options?.signal
                     });
 
                     if (response.data?.success && response.data?.results) {
@@ -523,7 +531,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
                                 url: s.url,
                                 quality: this.normalizeQuality(s.quality || s.label || 'auto'),
                                 isM3U8: s.isM3U8 || (typeof s.url === 'string' && s.url.includes('.m3u8')),
-                                isDASH: typeof s.url === 'string' && s.url.includes('.mpd')
+                                isDASH: typeof s.url === 'string' && s.url.includes('.mpd'),
                             })),
                             subtitles: (results.subtitles || []).map((sub) => ({
                                 url: sub.url,
@@ -548,7 +556,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
                         return streamData;
                     }
                 } catch (e) {
-                    // Fall through to legacy endpoint
+                    if (e instanceof Error && (e.name === 'AbortError' || e.message === 'Aborted')) throw e;
                     logger.warn(`CHI /api/stream failed, falling back to legacy endpoints`, undefined, this.name);
                 }
             }
@@ -558,14 +566,14 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
                 animeEpisodeId: episodeId,
                 server,
                 category
-            });
+            }, options);
 
             streamData = {
                 sources: (data.sources || []).map((s): VideoSource => ({
                     url: s.url,
                     quality: this.normalizeQuality(s.quality || 'auto'),
                     isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-                    isDASH: s.url?.includes('.mpd')
+                    isDASH: s.url?.includes('.mpd'),
                 })),
                 subtitles: (data.subtitles || []).map((sub) => ({
                     url: sub.url,
@@ -604,13 +612,13 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         return 'auto';
     }
 
-    async getTrending(page: number = 1): Promise<AnimeBase[]> {
+    async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `trending:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<HomeResponse>('/home');
+            const data = await this.apiRequest<HomeResponse>('/home', {}, options);
 
             // Get trending animes from home page
             const trending = data.trendingAnimes || data.spotlightAnimes || [];
@@ -624,13 +632,13 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    async getLatest(page: number = 1): Promise<AnimeBase[]> {
+    async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `latest:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<HomeResponse>('/home');
+            const data = await this.apiRequest<HomeResponse>('/home', {}, options);
 
             // Get latest episode animes from home page
             const latest = data.latestEpisodeAnimes || [];
@@ -644,17 +652,16 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    async getTopRated(page: number = 1, limit: number = 10): Promise<TopAnime[]> {
+    async getTopRated(page: number = 1, limit: number = 10, options?: SourceRequestOptions): Promise<TopAnime[]> {
         const cacheKey = `topRated:${page}:${limit}`;
         const cached = this.getCached<TopAnime[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<HomeResponse>('/home');
+            const data = await this.apiRequest<HomeResponse>('/home', {}, options);
 
             // Get top 10 animes from home page
             const topAnimes = data.top10Animes?.today || data.top10Animes?.week || [];
-            // FIX: Replaced (a: any, i: number) with properly typed parameters
             const results = topAnimes.slice(0, limit).map((a, i) => ({
                 rank: a.rank || ((page - 1) * limit + i + 1),
                 anime: this.mapAnimeFromSearch(a)
@@ -671,13 +678,13 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     /**
      * Get popular animes
      */
-    async getPopular(page: number = 1): Promise<AnimeBase[]> {
+    async getPopular(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `popular:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<CategoryResponse>('/category/most-popular', { page });
+            const data = await this.apiRequest<CategoryResponse>('/category/most-popular', { page }, options);
             const results = (data.animes || []).map((a) => this.mapAnimeFromSearch(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
@@ -691,13 +698,13 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     /**
      * Get top airing animes
      */
-    async getTopAiring(page: number = 1): Promise<AnimeBase[]> {
+    async getTopAiring(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `topAiring:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.apiRequest<CategoryResponse>('/category/top-airing', { page });
+            const data = await this.apiRequest<CategoryResponse>('/category/top-airing', { page }, options);
             const results = (data.animes || []).map((a) => this.mapAnimeFromSearch(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
@@ -708,7 +715,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    async getByGenre(genre: string, page: number = 1): Promise<AnimeSearchResult> {
+    async getByGenre(genre: string, page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `genre:${genre}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
@@ -716,7 +723,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         const slug = genre.toLowerCase().trim().replace(/\s+/g, '-');
 
         try {
-            const data = await this.apiRequest<CategoryResponse>(`/genre/${slug}`, { page });
+            const data = await this.apiRequest<CategoryResponse>(`/genre/${slug}`, { page }, options);
 
             const result: AnimeSearchResult = {
                 results: (data.animes || []).map((a) => this.mapAnimeFromSearch(a)),
