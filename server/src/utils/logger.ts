@@ -15,6 +15,16 @@ export interface LogContext {
   ip?: string;
   userAgent?: string;
   duration?: number;
+  attempt?: number;
+  maxAttempts?: number;
+  retryDelay?: number;
+  cacheKey?: string;
+  cacheHit?: boolean;
+  sourceName?: string;
+  operation?: string;
+  statusCode?: number;
+  errorType?: string;
+  errorCode?: string;
   [key: string]: unknown;
 }
 
@@ -74,7 +84,9 @@ class Logger {
       error: error ? {
         message: error.message,
         name: error.name,
-        stack: error.stack
+        stack: error.stack,
+        code: error['code'],
+        cause: error['cause']
       } : undefined
     };
 
@@ -171,6 +183,47 @@ class Logger {
   public performance(operation: string, duration: number, context?: LogContext) {
     this.info(`Performance: ${operation} ${duration}ms`, context, 'PERF');
   }
+
+  // Enhanced logging methods
+  public circuitBreakerTripped(sourceName: string, failureCount: number, resetTime: number, context?: LogContext) {
+    this.error(`Circuit breaker tripped for ${sourceName} (${failureCount} failures, reset in ${resetTime}ms)`, undefined, context, 'CIRCUIT');
+  }
+
+  public circuitBreakerReset(sourceName: string, context?: LogContext) {
+    this.info(`Circuit breaker reset for ${sourceName}`, context, 'CIRCUIT');
+  }
+
+  public retryAttempt(operation: string, attempt: number, maxAttempts: number, delay: number, context?: LogContext) {
+    this.warn(`Retry ${attempt}/${maxAttempts} for ${operation} (delay: ${delay}ms)`, context, 'RETRY');
+  }
+
+  public requestTimeout(operation: string, timeout: number, context?: LogContext) {
+    this.error(`Request timeout: ${operation} (${timeout}ms)`, undefined, context, 'TIMEOUT');
+  }
+
+  public connectionError(operation: string, error: Error, context?: LogContext) {
+    this.error(`Connection error: ${operation} - ${error.message}`, error, context, 'CONNECTION');
+  }
+
+  public parsingError(operation: string, error: Error, context?: LogContext) {
+    this.error(`Parsing error: ${operation} - ${error.message}`, error, context, 'PARSING');
+  }
+
+  public rateLimitExceeded(sourceName: string, retryAfter: number, context?: LogContext) {
+    this.warn(`Rate limit exceeded for ${sourceName}, retry after ${retryAfter}ms`, context, 'RATE_LIMIT');
+  }
+
+  public resourceExhausted(operation: string, limit: number, current: number, context?: LogContext) {
+    this.error(`Resource exhausted: ${operation} (limit: ${limit}, current: ${current})`, undefined, context, 'RESOURCE');
+  }
+
+  public slowOperation(operation: string, duration: number, threshold: number, context?: LogContext) {
+    this.warn(`Slow operation: ${operation} took ${duration}ms (threshold: ${threshold}ms)`, context, 'PERF');
+  }
+
+  public dependencyFailure(dependency: string, operation: string, error: Error, context?: LogContext) {
+    this.error(`Dependency failure: ${dependency} - ${operation} failed`, error, context, 'DEPENDENCY');
+  }
 }
 
 export const logger = Logger.getInstance();
@@ -204,24 +257,34 @@ export function createRequestContext(req: {
   };
 }
 
-// Performance timer
+// Performance timer with enhanced metrics
 export class PerformanceTimer {
   private start: number;
   private operation: string;
   private context?: LogContext;
   private source?: string;
+  private threshold: number;
 
-  constructor(operation: string, context?: LogContext, source?: string) {
+  constructor(operation: string, context?: LogContext, source?: string, threshold?: number) {
     this.operation = operation;
     this.context = context;
     this.source = source;
     this.start = Date.now();
+    this.threshold = threshold || 2000; // Default slow operation threshold: 2 seconds
   }
 
   public end(additionalContext?: LogContext) {
     const duration = Date.now() - this.start;
     const finalContext = { ...this.context, ...additionalContext, duration };
+
+    // Log performance metric
     logger.performance(this.operation, duration, finalContext);
+
+    // Warn about slow operations
+    if (duration > this.threshold) {
+      logger.slowOperation(this.operation, duration, this.threshold, finalContext);
+    }
+
     return duration;
   }
 }

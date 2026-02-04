@@ -5,9 +5,14 @@ import animeRoutes from './routes/anime.js';
 import sourcesRoutes from './routes/sources.js';
 import streamingRoutes from './routes/streaming.js';
 import { logger, createRequestContext, PerformanceTimer } from './utils/logger.js';
-// Extend Request interface to include id
+import { reliabilityMiddleware, healthCheckMiddleware } from './middleware/reliability.js';
+// Extend Request interface to include id and reliability utilities
 interface ExtendedRequest extends Request {
     id: string;
+    reliableRequest?: any;
+    retry?: any;
+    withTimeout?: any;
+    withCircuitBreaker?: any;
 }
 
 const app = express();
@@ -35,6 +40,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     res.set('X-Frame-Options', 'DENY');
     next();
 });
+
+// Reliability middleware with circuit breaker, timeouts, and retries
+app.use(reliabilityMiddleware);
 
 // Advanced request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -73,15 +81,7 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // API health check endpoint
-app.get('/api/health', (_req: Request, res: Response) => {
-    res.set('Cache-Control', 'no-cache');
-    res.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        version: '1.0.0',
-        uptime: process.uptime()
-    });
-});
+app.get('/api/health', healthCheckMiddleware);
 
 // API routes
 app.use('/api/anime', animeRoutes);

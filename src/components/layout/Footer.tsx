@@ -49,7 +49,7 @@ export const Footer = () => {
           <div>
             <h4 className="font-semibold mb-4">Resources</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><a href="#" className="hover:text-fox-orange transition-colors">API Docs</a></li>
+              <li><Link to="/docs" className="hover:text-fox-orange transition-colors">API Docs</Link></li>
               <li><a href="#" className="hover:text-fox-orange transition-colors">Status</a></li>
               <li><a href="#" className="hover:text-fox-orange transition-colors">Changelog</a></li>
               <li><a href="#" className="hover:text-fox-orange transition-colors">Support</a></li>
@@ -68,7 +68,7 @@ export const Footer = () => {
 
         <div className="mt-12 pt-6 border-t border-border">
           <p className="text-center text-sm text-muted-foreground">
-            © {new Date().getFullYear()} AniFox. All rights reserved. 
+            © {new Date().getFullYear()} AniFox. All rights reserved.
             <span className="mx-2">•</span>
             Made with <span className="text-fox-orange">♥</span> for anime fans
           </p>

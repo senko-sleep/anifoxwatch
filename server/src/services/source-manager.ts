@@ -36,14 +36,19 @@ export class SourceManager {
     private healthStatus: Map<string, SourceHealth> = new Map();
     private sourceOrder: string[] = ['HiAnimeDirect', 'HiAnime', 'Gogoanime', '9Anime', 'Aniwave', 'Aniwatch', 'Consumet', 'WatchHentai'];
 
-    // Concurrency control for API requests
+    // Concurrency control for API requests with better reliability
     private globalActiveRequests = 0;
-    private maxGlobalConcurrent = 6;
+    private maxGlobalConcurrent = 8; // Increased from 6 to 8 for better throughput
     private requestQueue: Array<{
         fn: () => Promise<unknown>;
         resolve: (v: unknown) => void;
-        reject: (e: unknown) => void
+        reject: (e: unknown) => void;
+        timeout: NodeJS.Timeout;
     }> = [];
+
+    // Rate limiting by source
+    private sourceRequestCounts = new Map<string, number>();
+    private sourceRateLimits = new Map<string, { limit: number; resetTime: number }>();
 
     constructor() {
         // Register streaming sources in priority order
@@ -60,6 +65,16 @@ export class SourceManager {
         this.registerSource(new ConsumetSource());
         // Adult Sources - WatchHentai (Deep Scraping)
         this.registerSource(new WatchHentaiSource());
+
+        // Configure rate limits for each source (requests per minute)
+        this.sourceRateLimits.set('HiAnimeDirect', { limit: 100, resetTime: 60000 });
+        this.sourceRateLimits.set('HiAnime', { limit: 100, resetTime: 60000 });
+        this.sourceRateLimits.set('Gogoanime', { limit: 100, resetTime: 60000 });
+        this.sourceRateLimits.set('9Anime', { limit: 50, resetTime: 60000 });
+        this.sourceRateLimits.set('Aniwave', { limit: 50, resetTime: 60000 });
+        this.sourceRateLimits.set('Aniwatch', { limit: 50, resetTime: 60000 });
+        this.sourceRateLimits.set('Consumet', { limit: 30, resetTime: 60000 });
+        this.sourceRateLimits.set('WatchHentai', { limit: 20, resetTime: 60000 });
 
         // Start health monitoring
         this.startHealthMonitor();
@@ -81,6 +96,17 @@ export class SourceManager {
         // Note: setInterval is not allowed in Cloudflare Workers global scope
         // Health checks will only run when explicitly called
         logger.info('Health monitoring initialized (manual checks only)', undefined, 'SourceManager');
+    }
+
+    private async executeWithTimeout<T>(promise: Promise<T>, timeoutMs: number, context: string): Promise<T> {
+        return Promise.race([
+            promise,
+            new Promise<T>((_, reject) => {
+                const error = new Error(`${context} timed out after ${timeoutMs}ms`);
+                logger.requestTimeout(context, timeoutMs);
+                setTimeout(() => reject(error), timeoutMs);
+            })
+        ]);
     }
 
     async checkAllHealth(): Promise<Map<string, SourceHealth>> {
@@ -132,6 +158,10 @@ export class SourceManager {
 
     getHealthStatus(): SourceHealth[] {
         return Array.from(this.healthStatus.values());
+    }
+
+    getAvailableSources(): string[] {
+        return Array.from(this.sources.keys());
     }
 
     private getAvailableSource(preferred?: string): StreamingSource | null {
@@ -327,7 +357,7 @@ export class SourceManager {
                 return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
             }
             try {
-                const result = await source.search(query, page);
+                const result = await this.executeWithTimeout(source.search(query, page), 15000, `Search ${sourceName}`);
                 timer.end();
                 return result;
             } catch (error) {
@@ -352,7 +382,7 @@ export class SourceManager {
             logger.info(`Starting multi-source search with: ${sourcesToTry.map(s => s.name).join(', ')}`, { query });
 
             const searchPromises = sourcesToTry.map(source =>
-                source.search(query, page)
+                this.executeWithTimeout(source.search(query, page), 15000, `Search ${source.name}`)
                     .then(res => ({ ...res, sourceName: source.name }))
                     .catch(error => {
                         logger.warn(`Search failed on ${source.name}: ${error.message}`);
@@ -591,7 +621,7 @@ export class SourceManager {
             const pagesToFetch = 3;
             for (let i = 0; i < pagesToFetch; i++) {
                 try {
-                    const trending = await source.getTrending(page + i);
+                    const trending = await this.executeWithTimeout(source.getTrending(page + i), 10000, `Trending ${source.name} page ${page + i}`);
                     allAnime.push(...trending);
                 } catch {
                     break;

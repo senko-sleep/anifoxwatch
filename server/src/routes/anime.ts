@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
 import { anilistService } from '../services/anilist-service.js';
+import { logger, createRequestContext, PerformanceTimer } from '../utils/logger.js';
 
 const router = Router();
 
@@ -11,7 +12,7 @@ const router = Router();
  * @query source - Preferred source (optional)
  */
 router.get('/search', async (req: Request, res: Response): Promise<void> => {
-    const startTime = Date.now();
+    const timer = new PerformanceTimer('Anime Search', createRequestContext(req));
     try {
         const { q, page = '1', source, mode = 'safe' } = req.query;
 
@@ -30,12 +31,14 @@ router.get('/search', async (req: Request, res: Response): Promise<void> => {
         const query = q.trim();
         const searchMode = (mode as 'safe' | 'mixed' | 'adult');
 
-        console.log(`[AnimeRoutes] 🔍 Search: "${query}" page ${pageNum} source: ${source || 'auto'} mode: ${searchMode}`);
+        logger.info(`🔍 Search: "${query}" page ${pageNum} source: ${source || 'auto'} mode: ${searchMode}`,
+            { query, page: pageNum, source: source as string | undefined, mode: searchMode }, 'AnimeRoutes');
 
         const result = await sourceManager.search(query, pageNum, source as string | undefined, { mode: searchMode });
 
-        const duration = Date.now() - startTime;
-        console.log(`[AnimeRoutes] ✅ Search completed: "${query}" returned ${result.results?.length || 0} results in ${duration}ms`);
+        const duration = timer.end();
+        logger.info(`✅ Search completed: "${query}" returned ${result.results?.length || 0} results in ${duration}ms`,
+            { query, page: pageNum, source: source as string | undefined, mode: searchMode, duration, results: result.results?.length }, 'AnimeRoutes');
 
         const totalResults = result.results?.length ? result.results.length * (result.totalPages || 1) : 0;
         res.json({
@@ -47,9 +50,10 @@ router.get('/search', async (req: Request, res: Response): Promise<void> => {
             source: result.source || 'unknown'
         });
     } catch (error) {
-        const duration = Date.now() - startTime;
+        const duration = timer.end();
         const { q } = req.query;
-        console.error(`[AnimeRoutes] ❌ Search error for "${q}":`, error);
+        logger.error(`❌ Search error for "${q}"`, error as Error,
+            { query: q, duration }, 'AnimeRoutes');
 
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         const isTimeout = errorMessage.includes('timeout');

@@ -48,8 +48,8 @@ export class AniwaveSource extends BaseAnimeSource {
             }
         });
 
-        // Cleanup cache periodically
-        setInterval(() => this.cleanupCache(), 5 * 60 * 1000);
+        // Note: Cache cleanup is done on-demand in getCached/setCache
+        // setInterval is not allowed in Cloudflare Workers global scope
     }
 
     // ============ CONCURRENCY CONTROL ============

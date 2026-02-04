@@ -1,5 +1,8 @@
 name = "anifoxwatch-api"
-main = "src/worker.ts"
+# Choose your worker implementation:
+# - src/worker.ts = Standard (all routes inline, 700+ lines)
+# - src/worker-modular.ts = Modular (separate route files, maintainable) ✅ Recommended
+main = "src/worker-modular.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
