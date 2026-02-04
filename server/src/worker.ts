@@ -655,7 +655,7 @@ app.get('/api/stream/proxy', async (c) => {
 });
 
 app.options('/api/stream/proxy', (c) => {
-    return c.text('', 204, {
+    return c.body(null, 204, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
         'Access-Control-Allow-Headers': 'Range, Origin, Accept',

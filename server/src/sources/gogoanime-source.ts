@@ -1,38 +1,42 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { BaseAnimeSource } from './base-source.js';
+import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js';
 
 export class GogoanimeSource extends BaseAnimeSource {
     name = 'Gogoanime';
-    baseUrl = 'https://anitaku.pe'; // Current working domain
+    baseUrl = 'https://anitaku.pe';
     ajaxUrl = 'https://ajax.gogocdn.net/ajax';
 
     constructor() {
         super();
     }
 
-    async healthCheck(): Promise<boolean> {
+    async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const response = await axios.get(`${this.baseUrl}/home.html`);
+            const response = await axios.get(`${this.baseUrl}/home.html`, {
+                signal: options?.signal,
+                timeout: options?.timeout || 5000
+            });
             return response.status === 200;
         } catch (e) {
             return false;
         }
     }
 
-    async search(query: string, page: number = 1, filters?: any): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         try {
             const response = await axios.get(`${this.baseUrl}/search.html`, {
-                params: { keyword: query, page }
+                params: { keyword: query, page },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
             });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
 
             $('.last_episodes .items li').each((i, el) => {
                 const title = $(el).find('.name a').text();
-                // id is the slug from href minus /category/
                 const href = $(el).find('.name a').attr('href') || '';
                 const id = href.split('/category/')[1] || '';
                 const image = $(el).find('.img a img').attr('src') || '';
@@ -44,7 +48,7 @@ export class GogoanimeSource extends BaseAnimeSource {
                         title: title,
                         image: image,
                         cover: image,
-                        description: '', // Search doesn't provide description
+                        description: '',
                         type: 'TV',
                         status: 'Ongoing',
                         episodes: 0,
@@ -61,7 +65,6 @@ export class GogoanimeSource extends BaseAnimeSource {
                 }
             });
 
-            // Pagination simplified
             const hasNextPage = $('.pagination .next').length > 0;
 
             return {
@@ -72,15 +75,18 @@ export class GogoanimeSource extends BaseAnimeSource {
                 source: this.name
             };
         } catch (error) {
-            console.error('Gogoanime search error:', error);
+            this.handleError(error, 'search');
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
         }
     }
 
-    async getAnime(id: string): Promise<AnimeBase | null> {
+    async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         try {
             const animeId = id.replace('gogoanime-', '');
-            const response = await axios.get(`${this.baseUrl}/category/${animeId}`);
+            const response = await axios.get(`${this.baseUrl}/category/${animeId}`, {
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
             const $ = cheerio.load(response.data);
 
             const title = $('.anime_info_body_bg h1').text();
@@ -89,18 +95,16 @@ export class GogoanimeSource extends BaseAnimeSource {
             let desc = $('.anime_info_body_bg p.type:contains("Plot Summary:")').text().replace('Plot Summary:', '').trim();
             const released = $('.anime_info_body_bg p.type:contains("Released:")').text().replace('Released:', '').trim();
             const status = $('.anime_info_body_bg p.type:contains("Status:") a').text();
-            // Genres scraping
             const genres: string[] = [];
             $('.anime_info_body_bg p.type:contains("Genre:") a').each((i, el) => {
                 genres.push($(el).text().replace(',', '').trim());
             });
 
-            // Get total episodes
             const epEnd = $('#episode_page li').last().find('a').attr('ep_end');
             const totalEpisodes = epEnd ? parseInt(epEnd) : 0;
 
             return {
-                id: id,
+                id,
                 title,
                 titleJapanese: '',
                 image,
@@ -121,15 +125,18 @@ export class GogoanimeSource extends BaseAnimeSource {
                 isMature: false
             };
         } catch (error) {
-            console.error('Gogoanime getAnime error:', error);
+            this.handleError(error, 'getAnime');
             return null;
         }
     }
 
-    async getEpisodes(animeId: string): Promise<Episode[]> {
+    async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         try {
             const id = animeId.replace('gogoanime-', '');
-            const response = await axios.get(`${this.baseUrl}/category/${id}`);
+            const response = await axios.get(`${this.baseUrl}/category/${id}`, {
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
             const $ = cheerio.load(response.data);
 
             const movieId = $('#movie_id').val();
@@ -140,16 +147,17 @@ export class GogoanimeSource extends BaseAnimeSource {
             if (!movieId) return [];
 
             const listUrl = `${this.ajaxUrl}/load-list-episode?ep_start=0&ep_end=${epEnd}&id=${movieId}&default_ep=${defaultEp}&alias=${alias}`;
-            const listResponse = await axios.get(listUrl);
+            const listResponse = await axios.get(listUrl, {
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
             const $list = cheerio.load(listResponse.data);
 
             const episodes: Episode[] = [];
             $list('li a').each((i, el) => {
                 const epNumStr = $(el).find('.name').text().replace('EP ', '').trim();
                 const epNum = parseFloat(epNumStr);
-                // /naruto-episode-1
                 const href = $(el).attr('href')?.trim() || '';
-                // We need episodeId for streaming. Usually it is the slug without leading /
                 const epId = href.startsWith('/') ? href.substring(1) : href;
 
                 episodes.push({
@@ -159,51 +167,40 @@ export class GogoanimeSource extends BaseAnimeSource {
                     isFiller: false,
                     hasSub: true,
                     hasDub: false,
-                    thumbnail: '' // Not easily available in list
+                    thumbnail: ''
                 });
             });
 
             return episodes.reverse();
         } catch (error) {
-            console.error('Gogoanime getEpisodes error:', error);
+            this.handleError(error, 'getEpisodes');
             return [];
         }
     }
 
-    async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
+    async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         try {
-            const response = await axios.get(`${this.baseUrl}/${episodeId}`);
+            const response = await axios.get(`${this.baseUrl}/${episodeId}`, {
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
             const $ = cheerio.load(response.data);
 
             const servers: EpisodeServer[] = [];
-
-            // Get available servers from the page
             $('.anime_muti_link ul li').each((i, el) => {
                 const serverName = $(el).find('a').text().trim();
-                const dataName = $(el).attr('class') || '';
-
                 if (serverName) {
                     servers.push({
                         name: serverName,
-                        url: '', // URL will be fetched when streaming
+                        url: '',
                         type: 'sub'
                     });
                 }
             });
 
-            // Default servers if none found
-            if (servers.length === 0) {
-                servers.push(
-                    { name: 'Vidstreaming', url: '', type: 'sub' },
-                    { name: 'Gogo server', url: '', type: 'sub' },
-                    { name: 'Streamtape', url: '', type: 'sub' }
-                );
-            }
-
             return servers;
         } catch (error) {
-            console.error('Gogoanime getEpisodeServers error:', error);
-            // Return default servers
+            this.handleError(error, 'getEpisodeServers');
             return [
                 { name: 'Vidstreaming', url: '', type: 'sub' },
                 { name: 'Gogo server', url: '', type: 'sub' }
@@ -211,16 +208,17 @@ export class GogoanimeSource extends BaseAnimeSource {
         }
     }
 
-    async getStreamingLinks(episodeId: string, server?: string): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category?: 'sub' | 'dub', options?: SourceRequestOptions): Promise<StreamingData> {
         try {
-            // Get the episode page
-            const response = await axios.get(`${this.baseUrl}/${episodeId}`);
+            const response = await axios.get(`${this.baseUrl}/${episodeId}`, {
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
             const $ = cheerio.load(response.data);
 
             const sources: VideoSource[] = [];
             const subtitles: Array<{ url: string; lang: string }> = [];
 
-            // Method 1: Try to get streaming link from iframe
             const iframeSrc = $('#load_anime iframe').attr('src') ||
                 $('.play-video iframe').attr('src');
 
@@ -230,9 +228,10 @@ export class GogoanimeSource extends BaseAnimeSource {
                     streamingUrl = `https:${streamingUrl}`;
                 }
 
-                // Try to extract actual video source from the iframe
                 try {
                     const iframeResponse = await axios.get(streamingUrl, {
+                        signal: options?.signal,
+                        timeout: options?.timeout || 10000,
                         headers: {
                             'Referer': this.baseUrl,
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -240,8 +239,6 @@ export class GogoanimeSource extends BaseAnimeSource {
                     });
 
                     const iframeHtml = iframeResponse.data;
-
-                    // Try to extract m3u8 or mp4 sources
                     const m3u8Match = iframeHtml.match(/file:\s*["']([^"']*\.m3u8[^"']*)["']/);
                     const mp4Match = iframeHtml.match(/file:\s*["']([^"']*\.mp4[^"']*)["']/);
 
@@ -258,7 +255,6 @@ export class GogoanimeSource extends BaseAnimeSource {
                             isM3U8: false
                         });
                     } else {
-                        // Fallback: use iframe URL directly
                         sources.push({
                             url: streamingUrl,
                             quality: 'auto',
@@ -266,8 +262,6 @@ export class GogoanimeSource extends BaseAnimeSource {
                         });
                     }
                 } catch (iframeError) {
-                    console.error('Error fetching iframe content:', iframeError);
-                    // Use iframe URL as fallback
                     sources.push({
                         url: streamingUrl,
                         quality: 'auto',
@@ -276,11 +270,9 @@ export class GogoanimeSource extends BaseAnimeSource {
                 }
             }
 
-            // Method 2: Try to get download links as alternative sources
             $('.dowloads a').each((i, el) => {
                 const downloadUrl = $(el).attr('href');
                 const quality = $(el).text().trim();
-
                 if (downloadUrl && quality) {
                     sources.push({
                         url: downloadUrl,
@@ -289,11 +281,6 @@ export class GogoanimeSource extends BaseAnimeSource {
                     });
                 }
             });
-
-            // If no sources found, return error info
-            if (sources.length === 0) {
-                console.warn(`No streaming sources found for ${episodeId}`);
-            }
 
             return {
                 sources,
@@ -304,15 +291,17 @@ export class GogoanimeSource extends BaseAnimeSource {
                 }
             };
         } catch (error) {
-            console.error('Gogoanime getStreamingLinks error:', error);
+            this.handleError(error, 'getStreamingLinks');
             return { sources: [], subtitles: [] };
         }
     }
 
-    async getTrending(page: number = 1): Promise<AnimeBase[]> {
+    async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         try {
             const response = await axios.get(`${this.baseUrl}/popular.html`, {
-                params: { page }
+                params: { page },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
             });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
@@ -349,15 +338,17 @@ export class GogoanimeSource extends BaseAnimeSource {
 
             return results;
         } catch (error) {
-            console.error('Gogoanime getTrending error:', error);
+            this.handleError(error, 'getTrending');
             return [];
         }
     }
 
-    async getLatest(page: number = 1): Promise<AnimeBase[]> {
+    async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         try {
             const response = await axios.get(`${this.baseUrl}/home.html`, {
-                params: { page }
+                params: { page },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
             });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
@@ -366,12 +357,7 @@ export class GogoanimeSource extends BaseAnimeSource {
                 const title = $(el).find('.name a').text();
                 const image = $(el).find('.img a img').attr('src') || '';
                 const href = $(el).find('.name a').attr('href') || '';
-                // Latest on home.html links to episode, not category
-                // href example: /boruto-episode-287
                 const episodeId = href.substring(1);
-                // We need the anime ID. Usually we can't easily get it from episode slug without info call.
-                // But for list display, we can use episodeId as ID temporarily or try to guess.
-                // Gogoanime: /category/boruto from /boruto-episode-287
                 const animeId = episodeId.replace(/-episode-\d+$/, '');
 
                 results.push({
@@ -397,12 +383,12 @@ export class GogoanimeSource extends BaseAnimeSource {
 
             return results;
         } catch (error) {
-            console.error('Gogoanime getLatest error:', error);
+            this.handleError(error, 'getLatest');
             return [];
         }
     }
 
-    async getTopRated(page: number = 1, limit: number = 10): Promise<TopAnime[]> {
+    async getTopRated(page: number = 1, limit: number = 10, options?: SourceRequestOptions): Promise<TopAnime[]> {
         return [];
     }
 

@@ -276,6 +276,25 @@ class AnimeApiClient {
         return this.fetch<AnimeSearchResult>(`/api/anime/genre/${encodeURIComponent(genre)}?${params}`);
     }
 
+    async getAnimeByGenreAniList(genre: string, page: number = 1): Promise<AnimeSearchResult> {
+        const params = new URLSearchParams({ page: String(page) });
+        return this.fetch<AnimeSearchResult>(`/api/anime/genre-anilist/${encodeURIComponent(genre)}?${params}`);
+    }
+
+    async filterAnime(filters: Partial<BrowseFilters>, page: number = 1): Promise<AnimeSearchResult> {
+        const params = new URLSearchParams({ page: String(page) });
+        
+        if (filters.type) params.append('type', filters.type);
+        if (filters.genre) params.append('genre', filters.genre);
+        if (filters.status) params.append('status', filters.status);
+        if (filters.year) params.append('year', String(filters.year));
+        if (filters.sort) params.append('sort', filters.sort);
+        if (filters.order) params.append('order', filters.order);
+        if (filters.source) params.append('source', filters.source);
+
+        return this.fetch<AnimeSearchResult>(`/api/anime/filter?${params}`);
+    }
+
     async browseAnime(filters: BrowseFilters, page: number = 1, bypassCache: boolean = false): Promise<AnimeSearchResult> {
         const params = new URLSearchParams({ page: String(page), limit: '25' });
 
@@ -412,6 +431,33 @@ class AnimeApiClient {
             body: JSON.stringify({ source })
         });
         return response.ok;
+    }
+
+    // ============ UTILITY ENDPOINTS ============
+
+    async getAnimeTypes(): Promise<{ value: string; label: string; description: string }[]> {
+        const response = await this.fetch<{ types: { value: string; label: string; description: string }[] }>('/api/anime/types');
+        return response.types || [];
+    }
+
+    async getAnimeGenres(): Promise<string[]> {
+        const response = await this.fetch<{ genres: string[] }>('/api/anime/genres');
+        return response.genres || [];
+    }
+
+    async getAnimeStatuses(): Promise<{ value: string; label: string; description: string }[]> {
+        const response = await this.fetch<{ statuses: { value: string; label: string; description: string }[] }>('/api/anime/statuses');
+        return response.statuses || [];
+    }
+
+    async getAnimeSeasons(): Promise<{ value: string; label: string; months: string }[]> {
+        const response = await this.fetch<{ seasons: { value: string; label: string; months: string }[] }>('/api/anime/seasons');
+        return response.seasons || [];
+    }
+
+    async getAnimeYears(): Promise<{ value: number; label: string; decade: string }[]> {
+        const response = await this.fetch<{ years: { value: number; label: string; decade: string }[] }>('/api/anime/years');
+        return response.years || [];
     }
 }
 

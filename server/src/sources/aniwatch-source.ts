@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import { Agent } from 'http';
-import { BaseAnimeSource } from './base-source.js';
+import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 
@@ -92,11 +92,12 @@ export class AniwatchSource extends BaseAnimeSource {
         }
     }
 
-    async healthCheck(): Promise<boolean> {
+    async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
             const response = await this.client.get('/recent-episodes', {
                 params: { page: 1 },
-                timeout: 3000
+                signal: options?.signal,
+                timeout: options?.timeout || 3000
             });
             this.isAvailable = response.status === 200;
             return this.isAvailable;
@@ -150,13 +151,17 @@ export class AniwatchSource extends BaseAnimeSource {
         return 'Completed';
     }
 
-    async search(query: string, page: number = 1, filters?: any): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `search:${query}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.client.get(`/${encodeURIComponent(query)}`, { params: { page } });
+            const response = await this.client.get(`/${encodeURIComponent(query)}`, {
+                params: { page },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
 
             const result: AnimeSearchResult = {
                 results: (response.data.results || []).map((a: unknown) => this.mapAnime(a)),
@@ -174,14 +179,18 @@ export class AniwatchSource extends BaseAnimeSource {
         }
     }
 
-    async getAnime(id: string): Promise<AnimeBase | null> {
+    async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         const cacheKey = `anime:${id}`;
         const cached = this.getCached<AnimeBase>(cacheKey);
         if (cached) return cached;
 
         try {
             const animeId = id.replace('aniwatch-', '');
-            const response = await this.client.get(`/info`, { params: { id: animeId } });
+            const response = await this.client.get(`/info`, {
+                params: { id: animeId },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
             const anime = this.mapAnime(response.data);
             this.setCache(cacheKey, anime, 15 * 60 * 1000);
             return anime;
@@ -191,14 +200,18 @@ export class AniwatchSource extends BaseAnimeSource {
         }
     }
 
-    async getEpisodes(animeId: string): Promise<Episode[]> {
+    async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         const cacheKey = `episodes:${animeId}`;
         const cached = this.getCached<Episode[]>(cacheKey);
         if (cached) return cached;
 
         try {
             const id = animeId.replace('aniwatch-', '');
-            const response = await this.client.get(`/info`, { params: { id } });
+            const response = await this.client.get(`/info`, {
+                params: { id },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
 
             const episodes: Episode[] = (response.data.episodes || []).map((ep: unknown) => {
                 const e = ep as Record<string, unknown>;
@@ -225,13 +238,16 @@ export class AniwatchSource extends BaseAnimeSource {
     /**
      * Get streaming servers for an episode
      */
-    async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
+    async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         const cacheKey = `servers:${episodeId}`;
         const cached = this.getCached<EpisodeServer[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.client.get(`/servers/${episodeId}`);
+            const response = await this.client.get(`/servers/${episodeId}`, {
+                signal: options?.signal,
+                timeout: options?.timeout || 5000
+            });
             const servers: EpisodeServer[] = (response.data || []).map((s: unknown) => {
                 const srv = s as Record<string, unknown>;
                 return {
@@ -251,15 +267,16 @@ export class AniwatchSource extends BaseAnimeSource {
      * Get HLS streaming URLs for an episode
      * Optimized for low latency and multiple quality options
      */
-    async getStreamingLinks(episodeId: string, server: string = 'vidcloud'): Promise<StreamingData> {
-        const cacheKey = `stream:${episodeId}:${server}`;
+    async getStreamingLinks(episodeId: string, server: string = 'vidcloud', category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
+        const cacheKey = `stream:${episodeId}:${server}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
 
         try {
             const response = await this.client.get(`/watch/${episodeId}`, {
-                params: { server },
-                timeout: 5000
+                params: { server, category },
+                signal: options?.signal,
+                timeout: options?.timeout || 8000
             });
 
             const streamData: StreamingData = {
@@ -306,13 +323,17 @@ export class AniwatchSource extends BaseAnimeSource {
         return 'auto';
     }
 
-    async getTrending(page: number = 1): Promise<AnimeBase[]> {
+    async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `trending:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.client.get('/top-airing', { params: { page } });
+            const response = await this.client.get('/top-airing', {
+                params: { page },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
             const results = (response.data.results || []).map((a: unknown) => this.mapAnime(a));
             this.setCache(cacheKey, results, 10 * 60 * 1000);
             return results;
@@ -322,13 +343,17 @@ export class AniwatchSource extends BaseAnimeSource {
         }
     }
 
-    async getLatest(page: number = 1): Promise<AnimeBase[]> {
+    async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `latest:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.client.get('/recent-episodes', { params: { page } });
+            const response = await this.client.get('/recent-episodes', {
+                params: { page },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
             const results = (response.data.results || []).map((a: unknown) => this.mapAnime(a));
             this.setCache(cacheKey, results, 3 * 60 * 1000); // Short cache for latest
             return results;
@@ -338,13 +363,17 @@ export class AniwatchSource extends BaseAnimeSource {
         }
     }
 
-    async getTopRated(page: number = 1, limit: number = 10): Promise<TopAnime[]> {
+    async getTopRated(page: number = 1, limit: number = 10, options?: SourceRequestOptions): Promise<TopAnime[]> {
         const cacheKey = `topRated:${page}:${limit}`;
         const cached = this.getCached<TopAnime[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.client.get('/top-airing', { params: { page } });
+            const response = await this.client.get('/top-airing', {
+                params: { page },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
+            });
             const results = (response.data.results || [])
                 .slice(0, limit)
                 .map((a: unknown, i: number) => ({

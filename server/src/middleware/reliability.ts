@@ -83,19 +83,27 @@ function isCircuitBreakerOpen(sourceName: string): boolean {
     return circuit.state === 'open';
 }
 
-// Retry mechanism with exponential backoff
+/**
+ * Retry an operation with exponential backoff and support for cancellation
+ */
 export async function retry<T>(
-    fn: () => Promise<T>,
+    fn: (signal?: AbortSignal) => Promise<T>,
     maxAttempts: number = 3,
     delay: number = 1000,
-    context?: any
+    context?: any,
+    parentSignal?: AbortSignal
 ): Promise<T> {
+    let lastError: any;
+
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        if (parentSignal?.aborted) throw new Error('Aborted');
+
         try {
-            const result = await fn();
-            return result;
+            return await fn(parentSignal);
         } catch (error) {
-            if (attempt === maxAttempts) {
+            lastError = error;
+
+            if (attempt === maxAttempts || (error instanceof Error && (error.name === 'AbortError' || error.message === 'Aborted'))) {
                 throw error;
             }
 
@@ -106,87 +114,130 @@ export async function retry<T>(
                 delay
             );
 
-            // Exponential backoff
-            await new Promise(resolve => setTimeout(resolve, delay));
+            // Wait with support for cancellation
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(resolve, delay);
+                parentSignal?.addEventListener('abort', () => {
+                    clearTimeout(timeout);
+                    reject(new Error('Aborted'));
+                }, { once: true });
+            });
+
             delay *= 2;
         }
     }
 
-    throw new Error('Max retries exceeded');
+    throw lastError || new Error('Max retries exceeded');
 }
 
-// Timeout decorator
-export function withTimeout<T>(
-    promise: Promise<T>,
+/**
+ * Wrap a promise with a timeout that includes proper cancellation via AbortSignal
+ */
+export async function withTimeout<T>(
+    fn: (signal: AbortSignal) => Promise<T>,
     timeoutMs: number = DEFAULT_CIRCUIT_SETTINGS.timeout,
-    context?: any
+    context?: any,
+    parentSignal?: AbortSignal
 ): Promise<T> {
-    return Promise.race([
-        promise,
-        new Promise<T>((_, reject) => {
-            setTimeout(() => {
-                const error = new Error(`${context?.operation || 'Operation'} timed out after ${timeoutMs}ms`);
-                logger.requestTimeout(context?.operation || 'unknown', timeoutMs, context);
-                reject(error);
-            }, timeoutMs);
-        })
-    ]);
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    const onAbort = () => controller.abort();
+    if (parentSignal) {
+        if (parentSignal.aborted) {
+            controller.abort();
+            throw new Error('Aborted');
+        }
+        parentSignal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    const timeoutId = setTimeout(() => {
+        const error = new Error(`${context?.operation || 'Operation'} timed out after ${timeoutMs}ms`);
+        logger.requestTimeout(context?.operation || 'unknown', timeoutMs, context);
+        controller.abort();
+    }, timeoutMs);
+
+    try {
+        return await fn(signal);
+    } finally {
+        clearTimeout(timeoutId);
+        if (parentSignal) {
+            parentSignal.removeEventListener('abort', onAbort);
+        }
+    }
 }
 
-// Circuit breaker decorator
-export function withCircuitBreaker<T>(
+/**
+ * Wrap an operation with circuit breaker logic
+ */
+export async function withCircuitBreaker<T>(
     sourceName: string,
     fn: () => Promise<T>,
     context?: any
 ): Promise<T> {
     if (isCircuitBreakerOpen(sourceName)) {
-        throw new Error(`Circuit breaker is open for ${sourceName}`);
+        throw new Error(`Circuit breaker for ${sourceName} is OPEN. Request rejected.`);
     }
 
-    return fn().then(result => {
+    try {
+        const result = await fn();
         recordSuccess(sourceName);
         return result;
-    }).catch(error => {
-        recordFailure(sourceName);
+    } catch (error) {
+        const isAbort = error instanceof Error && (error.name === 'AbortError' || error.message === 'Aborted' || error.message.includes('timeout'));
+        if (!isAbort) {
+            recordFailure(sourceName);
+        }
         throw error;
-    });
+    }
 }
 
-// Comprehensive reliability wrapper with circuit breaker, timeout, and retries
+/**
+ * Perform a reliable request with retries, circuit breaker, and timeout
+ */
 export async function reliableRequest<T>(
     sourceName: string,
     operation: string,
-    fn: () => Promise<T>,
+    fn: (signal: AbortSignal) => Promise<T>,
     options: {
         maxAttempts?: number;
         timeout?: number;
         retryDelay?: number;
         context?: any;
+        signal?: AbortSignal;
     } = {}
 ): Promise<T> {
     const {
-        maxAttempts = 3,
+        maxAttempts = DEFAULT_CIRCUIT_SETTINGS.maxFailures,
         timeout = DEFAULT_CIRCUIT_SETTINGS.timeout,
         retryDelay = 1000,
-        context = {}
+        context: extraContext = {},
+        signal: parentSignal
     } = options;
 
     const requestContext = {
-        ...context,
         sourceName,
-        operation
+        operation,
+        ...extraContext,
+        startTime: Date.now()
     };
 
     try {
         return await retry(
-            () => withCircuitBreaker(
+            (attemptSignal) => withCircuitBreaker(
                 sourceName,
-                () => withTimeout(fn(), timeout, requestContext),
+                () => withTimeout(
+                    (timeoutSignal) => fn(timeoutSignal),
+                    timeout,
+                    requestContext,
+                    attemptSignal
+                ),
                 requestContext
             ),
             maxAttempts,
             retryDelay,
-            requestContext
+            requestContext,
+            parentSignal
         );
     } catch (error) {
         logger.error(
@@ -198,23 +249,22 @@ export async function reliableRequest<T>(
     }
 }
 
-// Express middleware for reliability
+/**
+ * Express middleware for reliability and performance monitoring
+ */
 export function reliabilityMiddleware(req: Request, res: Response, next: NextFunction) {
     const context = createRequestContext(req);
     const timer = new PerformanceTimer('API Request', context);
 
-    // Handle response timing and errors
     res.on('finish', () => {
         const duration = timer.end();
 
-        // Log request duration with details
         logger.performance('API Request', duration, {
             ...context,
             statusCode: res.statusCode,
             duration
         });
 
-        // Log slow requests
         if (duration > 2000) {
             logger.slowOperation('API Request', duration, 2000, {
                 ...context,
@@ -222,7 +272,6 @@ export function reliabilityMiddleware(req: Request, res: Response, next: NextFun
             });
         }
 
-        // Log errors
         if (res.statusCode >= 400) {
             logger.error(
                 `API Error ${res.statusCode}`,
@@ -236,35 +285,33 @@ export function reliabilityMiddleware(req: Request, res: Response, next: NextFun
         }
     });
 
-    // Add reliability utilities to request object
     (req as any).reliableRequest = reliableRequest;
     (req as any).retry = retry;
-    (req as any).withTimeout = withTimeout;
-    (req as any).withCircuitBreaker = withCircuitBreaker;
 
     next();
 }
 
-// Health check endpoint middleware
+/**
+ * Health check endpoint middleware to expose circuit breaker states
+ */
 export function healthCheckMiddleware(req: Request, res: Response) {
-    const sources = Array.from(circuitBreakers.keys());
-    const circuitStates = Array.from(circuitBreakers.entries()).map(([name, state]) => ({
+    const circuits = Array.from(circuitBreakers.entries()).map(([name, state]) => ({
         name,
         state: state.state,
         failureCount: state.failureCount,
         lastAttemptTime: new Date(state.lastAttemptTime).toISOString(),
         lastFailureTime: state.lastFailureTime ? new Date(state.lastFailureTime).toISOString() : null,
-        resetTime: state.resetTime
+        resetTimeRemaining: state.state === 'open'
+            ? Math.max(0, DEFAULT_CIRCUIT_SETTINGS.resetTime - (Date.now() - (state.lastFailureTime || 0)))
+            : 0
     }));
 
     res.json({
-        status: 'healthy',
+        status: 'ok',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
-        sources: sources.length,
-        circuitBreakers: circuitStates,
-        activeRequests: (global as any).activeRequests || 0,
-        memory: process.memoryUsage()
+        memory: process.memoryUsage(),
+        circuits
     });
 }
 

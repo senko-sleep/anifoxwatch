@@ -1,7 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import * as cheerio from 'cheerio';
 import type { Browser, Page } from 'puppeteer';
-import { BaseAnimeSource } from './base-source.js';
+import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
@@ -164,7 +164,8 @@ export class NineAnimeSource extends BaseAnimeSource {
     /**
      * Extract stream URLs from embed page using Puppeteer
      */
-    private async extractStreamFromEmbed(browser: Browser, embedUrl: string, referer: string): Promise<VideoSource[]> {
+    private async extractStreamFromEmbed(browser: Browser, embedUrl: string, referer: string, signal?: AbortSignal): Promise<VideoSource[]> {
+        if (signal?.aborted) throw new Error('Aborted');
         const sources: VideoSource[] = [];
         const page = await browser.newPage();
 
@@ -204,6 +205,8 @@ export class NineAnimeSource extends BaseAnimeSource {
                 }
             });
 
+            if (signal?.aborted) throw new Error('Aborted');
+
             // Navigate to embed with referer
             await page.setExtraHTTPHeaders({ 'Referer': referer });
 
@@ -213,12 +216,12 @@ export class NineAnimeSource extends BaseAnimeSource {
             });
 
             // Wait for player to initialize
-            await this.delay(3000);
+            await this.delayWithSignal(3000, signal);
 
             // Try to click play
             try {
                 await page.click('.play-btn, .vjs-big-play-button, [class*="play"]').catch(() => { });
-                await this.delay(2000);
+                await this.delayWithSignal(2000, signal);
             } catch { }
 
             // Check video element
@@ -263,30 +266,26 @@ export class NineAnimeSource extends BaseAnimeSource {
         return sources;
     }
 
-    private async getStreamsFromPuppeteer(episodeId: string, serverId: string): Promise<StreamingData | null> {
+    private async getStreamsFromPuppeteer(episodeId: string, serverId: string, signal?: AbortSignal): Promise<StreamingData | null> {
+        if (signal?.aborted) throw new Error('Aborted');
         let browser: Browser | null = null;
 
         try {
-            // Reconstruct episode URL
-            // id: "anime-slug?ep=123"
             const [animeSlug, epParam] = episodeId.split('?');
-            const epId = epParam?.replace('ep=', '') || serverId; // Fallback
+            const epId = epParam?.replace('ep=', '') || serverId;
 
             const episodeUrl = `${this.baseUrl}/watch/${animeSlug}?ep=${epId}`;
             logger.info(`Puppeteer scraping: ${episodeUrl}`, undefined, this.name);
 
             browser = await this.launchBrowser();
-            const page = await browser.newPage();
 
-            // Step 1: Get Embed URL via API (faster than scraping page for it)
-            // We need cookies/headers mimicking browser, but axios might suffice for this part
-            // Actually, scrape-9anime-v2 uses axios for this part too, let's use that to save time
             const serverUrl = `${this.baseUrl}/ajax/episode/sources?id=${serverId}`;
             const sourcesResponse = await this.client.get(serverUrl, {
                 headers: {
                     'X-Requested-With': 'XMLHttpRequest',
                     'Referer': episodeUrl
-                }
+                },
+                signal
             });
 
             if (!sourcesResponse.data?.link) {
@@ -296,8 +295,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             const embedUrl = sourcesResponse.data.link;
             logger.info(`Found embed URL: ${embedUrl}`, undefined, this.name);
 
-            // Step 2: Extract streams from embed
-            const sources = await this.extractStreamFromEmbed(browser, embedUrl, episodeUrl);
+            const sources = await this.extractStreamFromEmbed(browser, embedUrl, episodeUrl, signal);
 
             await browser.close();
             browser = null;
@@ -305,26 +303,41 @@ export class NineAnimeSource extends BaseAnimeSource {
             if (sources.length > 0) {
                 return {
                     sources,
-                    subtitles: [], // Text scraping for subs is complex, skipping for now or use API fallback
+                    subtitles: [],
                     source: this.name,
-                    headers: { Referer: 'https://iframe.cool/' } // Generic referer, might need adjustment
+                    headers: { Referer: 'https://iframe.cool/' }
                 };
             }
 
             return null;
 
         } catch (error) {
+            if (error instanceof Error && (error.name === 'AbortError' || error.message === 'Aborted')) throw error;
             logger.error('Puppeteer scraping failed', error as any, {}, this.name);
             if (browser) await browser.close();
             return null;
         }
     }
 
+    private async delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+        if (signal?.aborted) throw new Error('Aborted');
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(resolve, ms);
+            signal?.addEventListener('abort', () => {
+                clearTimeout(timeout);
+                reject(new Error('Aborted'));
+            }, { once: true });
+        });
+    }
+
     // ============ 9ANIME SCRAPING METHODS ============
 
-    async healthCheck(): Promise<boolean> {
+    async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const response = await this.client.get(`${this.baseUrl}/home`, { timeout: 10000 });
+            const response = await this.client.get(`${this.baseUrl}/home`, {
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
             this.isAvailable = response.status === 200;
             return this.isAvailable;
         } catch {
@@ -333,7 +346,7 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 
-    async search(query: string, page: number = 1): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `9anime-search:${query}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
@@ -341,9 +354,10 @@ export class NineAnimeSource extends BaseAnimeSource {
         try {
             const response = await this.client.get(`${this.baseUrl}/search`, {
                 params: { keyword: query, page },
-                headers: { 'Accept': 'text/html' }
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
             });
-
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
 
@@ -373,7 +387,7 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 
-    async getAnime(id: string): Promise<AnimeBase | null> {
+    async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         const cacheKey = `9anime-anime:${id}`;
         const cached = this.getCached<AnimeBase>(cacheKey);
         if (cached) return cached;
@@ -381,7 +395,9 @@ export class NineAnimeSource extends BaseAnimeSource {
         try {
             const animeSlug = id.replace('9anime-', '');
             const response = await this.client.get(`${this.baseUrl}/watch/${animeSlug}`, {
-                headers: { 'Accept': 'text/html' }
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
             });
 
             const $ = cheerio.load(response.data);
@@ -423,7 +439,7 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 
-    async getEpisodes(animeId: string): Promise<Episode[]> {
+    async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         const cacheKey = `9anime-episodes:${animeId}`;
         const cached = this.getCached<Episode[]>(cacheKey);
         if (cached) return cached;
@@ -441,7 +457,9 @@ export class NineAnimeSource extends BaseAnimeSource {
                 headers: {
                     'X-Requested-With': 'XMLHttpRequest',
                     'Referer': `${this.baseUrl}/watch/${animeSlug}`
-                }
+                },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
             });
 
             if (!response.data?.html) {
@@ -477,7 +495,7 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 
-    async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
+    async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         const cacheKey = `9anime-servers:${episodeId}`;
         const cached = this.getCached<EpisodeServer[]>(cacheKey);
         if (cached) return cached;
@@ -490,7 +508,9 @@ export class NineAnimeSource extends BaseAnimeSource {
                 headers: {
                     'X-Requested-With': 'XMLHttpRequest',
                     'Referer': this.baseUrl
-                }
+                },
+                signal: options?.signal,
+                timeout: options?.timeout || 5000
             });
 
             if (!response.data?.html) {
@@ -537,7 +557,7 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 
-    async getStreamingLinks(episodeId: string, server: string = 'hd-1', category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server: string = 'hd-1', category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         const cacheKey = `9anime-stream:${episodeId}:${server}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
@@ -554,7 +574,7 @@ export class NineAnimeSource extends BaseAnimeSource {
                 targetServerId = server; // It's likely the data-id from getEpisodeServers
             } else {
                 // Fetch servers to get a real ID
-                const servers = await this.getEpisodeServers(episodeId);
+                const servers = await this.getEpisodeServers(episodeId, options);
                 const matchingServer = servers.find(s => s.type === category) || servers[0];
                 if (matchingServer && matchingServer.url) {
                     targetServerId = matchingServer.url;
@@ -562,7 +582,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             }
 
             if (targetServerId) {
-                const scrapedData = await this.getStreamsFromPuppeteer(episodeId, targetServerId);
+                const scrapedData = await this.getStreamsFromPuppeteer(episodeId, targetServerId, options?.signal);
                 if (scrapedData) {
                     this.setCache(cacheKey, scrapedData, this.cacheTTL.stream);
                     return scrapedData;
@@ -578,7 +598,8 @@ export class NineAnimeSource extends BaseAnimeSource {
                             server,
                             category
                         },
-                        timeout: 30000
+                        signal: options?.signal,
+                        timeout: options?.timeout || 30000
                     });
 
                     const data = response.data?.data || response.data;
@@ -617,14 +638,16 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 
-    async getTrending(page: number = 1): Promise<AnimeBase[]> {
+    async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `9anime-trending:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
             const response = await this.client.get(`${this.baseUrl}/home`, {
-                headers: { 'Accept': 'text/html' }
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
             });
 
             const $ = cheerio.load(response.data);
@@ -658,16 +681,17 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 
-    async getLatest(page: number = 1): Promise<AnimeBase[]> {
+    async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `9anime-latest:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
             const response = await this.client.get(`${this.baseUrl}/recently-updated?page=${page}`, {
-                headers: { 'Accept': 'text/html' }
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
             });
-
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
 
@@ -686,16 +710,17 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 
-    async getTopRated(page: number = 1, limit: number = 10): Promise<TopAnime[]> {
+    async getTopRated(page: number = 1, limit: number = 10, options?: SourceRequestOptions): Promise<TopAnime[]> {
         const cacheKey = `9anime-topRated:${page}:${limit}`;
         const cached = this.getCached<TopAnime[]>(cacheKey);
         if (cached) return cached;
 
         try {
             const response = await this.client.get(`${this.baseUrl}/most-popular?page=${page}`, {
-                headers: { 'Accept': 'text/html' }
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
             });
-
             const $ = cheerio.load(response.data);
             const results: TopAnime[] = [];
 

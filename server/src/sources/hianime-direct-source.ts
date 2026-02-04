@@ -8,7 +8,7 @@
 import { HiAnime } from 'aniwatch';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { BaseAnimeSource, GenreAwareSource } from './base-source.js';
+import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
@@ -137,9 +137,12 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
     // ============ API METHODS ============
 
-    async healthCheck(): Promise<boolean> {
+    async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const home = await this.getScraper().getHomePage();
+            const home = await this.executeWithSignal(
+                () => this.getScraper().getHomePage(),
+                options?.signal
+            );
             this.isAvailable = !!(home.trendingAnimes && home.trendingAnimes.length > 0);
             return this.isAvailable;
         } catch (error) {
@@ -148,13 +151,16 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         }
     }
 
-    async search(query: string, page: number = 1, filters?: any): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `search:${query}:${page}:${JSON.stringify(filters || {})}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.getScraper().search(query, page, filters);
+            const data = await this.executeWithSignal(
+                () => this.getScraper().search(query, page, filters),
+                options?.signal
+            );
 
             const result: AnimeSearchResult = {
                 results: (data.animes || []).map((a: any) => this.mapAnime(a)),
@@ -172,14 +178,17 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         }
     }
 
-    async getAnime(id: string): Promise<AnimeBase | null> {
+    async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         const cacheKey = `anime:${id}`;
         const cached = this.getCached<AnimeBase>(cacheKey);
         if (cached) return cached;
 
         try {
             const animeId = id.replace('hianime-', '');
-            const data = await this.getScraper().getInfo(animeId);
+            const data = await this.executeWithSignal(
+                () => this.getScraper().getInfo(animeId),
+                options?.signal
+            );
 
             if (!data.anime?.info) {
                 return null;
@@ -199,14 +208,17 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         }
     }
 
-    async getEpisodes(animeId: string): Promise<Episode[]> {
+    async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         const cacheKey = `episodes:${animeId}`;
         const cached = this.getCached<Episode[]>(cacheKey);
         if (cached) return cached;
 
         try {
             const id = animeId.replace('hianime-', '');
-            const data = await this.getScraper().getEpisodes(id);
+            const data = await this.executeWithSignal(
+                () => this.getScraper().getEpisodes(id),
+                options?.signal
+            );
 
             const episodes: Episode[] = (data.episodes || []).map((ep: any) => ({
                 id: ep.episodeId || `${id}?ep=${ep.number}`,
@@ -229,13 +241,16 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
     /**
      * Get streaming servers for an episode
      */
-    async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
+    async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         const cacheKey = `servers:${episodeId}`;
         const cached = this.getCached<EpisodeServer[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.getScraper().getEpisodeServers(episodeId);
+            const data = await this.executeWithSignal(
+                () => this.getScraper().getEpisodeServers(episodeId),
+                options?.signal
+            );
 
             const servers: EpisodeServer[] = [];
 
@@ -282,10 +297,8 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
     /**
      * Get HD streaming links for an episode - DEEP SCRAPING
-     * This is the critical method that extracts actual streaming URLs
-     * Includes retry logic with exponential backoff for rate limiting
      */
-    async getStreamingLinks(episodeId: string, server: string = 'hd-2', category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server: string = 'hd-2', category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         const cacheKey = `stream:${episodeId}:${server}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
@@ -298,25 +311,25 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
         for (const currentServer of serversToTry) {
             for (let retry = 0; retry <= maxRetries; retry++) {
+                if (options?.signal?.aborted) throw new Error('Aborted');
+
                 try {
                     if (retry > 0) {
-                        const delayMs = retry * 1000; // 1s, 2s delay
-                        logger.info(`[${this.name}] Retry ${retry}/${maxRetries} for ${currentServer} after ${delayMs}ms`);
-                        await this.delay(delayMs);
+                        const delayMs = retry * 1000;
+                        await this.delayWithSignal(delayMs, options?.signal);
                     }
 
-                    logger.info(`[${this.name}] Trying server: ${currentServer}`);
-
-                    const data = await this.getScraper().getEpisodeSources(
-                        episodeId,
-                        currentServer as HiAnime.AnimeServers,
-                        category
+                    const data = await this.executeWithSignal(
+                        () => this.getScraper().getEpisodeSources(
+                            episodeId,
+                            currentServer as HiAnime.AnimeServers,
+                            category
+                        ),
+                        options?.signal
                     );
 
                     if (data.sources && data.sources.length > 0) {
-                        // Cast to any to access all properties from the response
                         const rawData = data as any;
-
                         const streamData: StreamingData = {
                             sources: data.sources.map((s: any): VideoSource => ({
                                 url: s.url,
@@ -337,7 +350,6 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                             source: this.name
                         };
 
-                        // Sort sources by quality (highest first)
                         if (streamData.sources.length > 1) {
                             streamData.sources.sort((a, b) => {
                                 const order: Record<string, number> = { '1080p': 0, '720p': 1, '480p': 2, '360p': 3, 'auto': 4, 'default': 5 };
@@ -345,54 +357,49 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                             });
                         }
 
-                        logger.info(`[${this.name}] ✅ Found ${streamData.sources.length} sources from ${currentServer}`);
                         this.setCache(cacheKey, streamData, this.cacheTTL.stream);
                         return streamData;
                     }
                 } catch (error: any) {
+                    if (error.name === 'AbortError') throw error;
                     logger.warn(`[${this.name}] Server ${currentServer} failed (attempt ${retry + 1}): ${error.message}`);
-                    // Continue to next retry or server
                 }
             }
         }
 
-        logger.error(`[${this.name}] All servers failed for ${episodeId}`);
         return { sources: [], subtitles: [] };
     }
 
-    async getTrending(page: number = 1): Promise<AnimeBase[]> {
+    async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `trending:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            // Try to get more anime by fetching multiple pages from category
             const allAnime: AnimeBase[] = [];
 
-            // Fetch from top-airing category for more results
             try {
-                const airingData = await this.getScraper().getCategoryAnime('top-airing' as any, page);
+                const airingData = await this.executeWithSignal(
+                    () => this.getScraper().getCategoryAnime('top-airing' as any, page),
+                    options?.signal
+                );
                 if (airingData.animes && airingData.animes.length > 0) {
                     allAnime.push(...airingData.animes.map((a: any) => this.mapAnime(a)));
                 }
-            } catch {
-                // Fallback to home page
-            }
+            } catch { }
 
-            // If we don't have enough, also fetch from home page trending
             if (allAnime.length < 24) {
                 try {
-                    const data = await this.getScraper().getHomePage();
+                    const data = await this.executeWithSignal(
+                        () => this.getScraper().getHomePage(),
+                        options?.signal
+                    );
                     const trending = data.trendingAnimes || data.spotlightAnimes || [];
                     allAnime.push(...trending.map((a: any) => this.mapAnime(a)));
-                } catch {
-                    // Ignore error
-                }
+                } catch { }
             }
 
-            // Remove duplicates
             const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
-
             this.setCache(cacheKey, uniqueAnime.slice(0, 48), this.cacheTTL.home);
             return uniqueAnime.slice(0, 48);
         } catch (error) {
@@ -401,7 +408,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         }
     }
 
-    async getLatest(page: number = 1): Promise<AnimeBase[]> {
+    async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `latest:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
@@ -409,30 +416,28 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         try {
             const allAnime: AnimeBase[] = [];
 
-            // Fetch from latest category for more results
             try {
-                const latestData = await this.getScraper().getCategoryAnime('latest' as any, page);
+                const latestData = await this.executeWithSignal(
+                    () => this.getScraper().getCategoryAnime('latest' as any, page),
+                    options?.signal
+                );
                 if (latestData.animes && latestData.animes.length > 0) {
                     allAnime.push(...latestData.animes.map((a: any) => this.mapAnime(a)));
                 }
-            } catch {
-                // Fallback to home page
-            }
+            } catch { }
 
-            // Also fetch from home page latest episodes
             if (allAnime.length < 24) {
                 try {
-                    const data = await this.getScraper().getHomePage();
+                    const data = await this.executeWithSignal(
+                        () => this.getScraper().getHomePage(),
+                        options?.signal
+                    );
                     const latest = data.latestEpisodeAnimes || [];
                     allAnime.push(...latest.map((a: any) => this.mapAnime(a)));
-                } catch {
-                    // Ignore error
-                }
+                } catch { }
             }
 
-            // Remove duplicates
             const uniqueAnime = Array.from(new Map(allAnime.map(a => [a.id, a])).values());
-
             this.setCache(cacheKey, uniqueAnime.slice(0, 48), this.cacheTTL.home);
             return uniqueAnime.slice(0, 48);
         } catch (error) {
@@ -441,13 +446,16 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
         }
     }
 
-    async getTopRated(page: number = 1, limit: number = 10): Promise<TopAnime[]> {
+    async getTopRated(page: number = 1, limit: number = 10, options?: SourceRequestOptions): Promise<TopAnime[]> {
         const cacheKey = `topRated:${page}:${limit}`;
         const cached = this.getCached<TopAnime[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.getScraper().getHomePage();
+            const data = await this.executeWithSignal(
+                () => this.getScraper().getHomePage(),
+                options?.signal
+            );
             const topAnimes = data.top10Animes?.today || data.top10Animes?.week || [];
             const results = topAnimes.slice(0, limit).map((a: any, i: number) => ({
                 rank: a.rank || ((page - 1) * limit + i + 1),
@@ -465,13 +473,16 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
     /**
      * Get popular animes
      */
-    async getPopular(page: number = 1): Promise<AnimeBase[]> {
+    async getPopular(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `popular:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.getScraper().getCategoryAnime('most-popular' as any, page);
+            const data = await this.executeWithSignal(
+                () => this.getScraper().getCategoryAnime('most-popular' as any, page),
+                options?.signal
+            );
             const results = (data.animes || []).map((a: any) => this.mapAnime(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
@@ -485,13 +496,16 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
     /**
      * Get top airing animes
      */
-    async getTopAiring(page: number = 1): Promise<AnimeBase[]> {
+    async getTopAiring(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `topAiring:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const data = await this.getScraper().getCategoryAnime('top-airing' as any, page);
+            const data = await this.executeWithSignal(
+                () => this.getScraper().getCategoryAnime('top-airing' as any, page),
+                options?.signal
+            );
             const results = (data.animes || []).map((a: any) => this.mapAnime(a));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
@@ -505,54 +519,62 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
     /**
      * Get anime by type (TV, Movie, OVA, etc.) - NATIVE SCRAPING
      */
-    async getByType(type: string, page: number = 1): Promise<AnimeSearchResult> {
+    async getByType(type: string, page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `type:${type}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
 
         const typeMap: Record<string, string> = {
-            'TV': 'tv',
-            'Movie': 'movie',
-            'OVA': 'ova',
-            'ONA': 'ona',
-            'Special': 'special'
+            'TV': 'tv', 'Movie': 'movie', 'OVA': 'ova', 'ONA': 'ona', 'Special': 'special'
         };
 
         const category = typeMap[type.toUpperCase()] || 'tv';
         const url = `${this.baseUrl}/${category}${page > 1 ? `?page=${page}` : ''}`;
 
-        return this.nativeScrape(url, page, cacheKey);
+        return this.nativeScrape(url, page, cacheKey, options);
     }
 
     /**
-     * Get anime by genre - NATIVE SCRAPING as requested
-     * Uses hianime.to/genre/[slug]?page=[page]
+     * Get anime by genre - NATIVE SCRAPING
      */
-    async getByGenre(genre: string, page: number = 1): Promise<AnimeSearchResult> {
+    async getByGenre(genre: string, page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `genre:${genre}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
 
-        // Custom slug mapping (fix martial arts typo)
         let slug = genre.toLowerCase().trim().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
         if (slug === 'martial-arts') slug = 'marial-arts';
 
         const url = `${this.baseUrl}/genre/${slug}${page > 1 ? `?page=${page}` : ''}`;
 
-        return this.nativeScrape(url, page, cacheKey);
+        return this.nativeScrape(url, page, cacheKey, options);
+    }
+
+    /**
+     * Get available genres for HiAnime
+     */
+    async getGenres(options?: SourceRequestOptions): Promise<string[]> {
+        // Return standard HiAnime genres
+        return [
+            "Action", "Adventure", "Cars", "Comedy", "Dementia", "Demons", "Drama", "Ecchi",
+            "Fantasy", "Game", "Harem", "Historical", "Horror", "Isekai", "Josei", "Kids",
+            "Magic", "Martial Arts", "Mecha", "Military", "Music", "Mystery", "Parody",
+            "Police", "Psychological", "Romance", "Samurai", "School", "Sci-Fi", "Seinen",
+            "Shoujo", "Shoujo Ai", "Shounen", "Shounen Ai", "Slice of Life", "Space",
+            "Sports", "Super Power", "Supernatural", "Thriller", "Vampire"
+        ];
     }
 
     /**
      * Internal helper for native scraping using axios and cheerio
      */
-    private async nativeScrape(url: string, page: number, cacheKey: string): Promise<AnimeSearchResult> {
-        logger.info(`[${this.name}] Native Scraping: ${url}`);
-
+    private async nativeScrape(url: string, page: number, cacheKey: string, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         try {
             const response = await axios.get(url, {
+                signal: options?.signal,
+                timeout: options?.timeout || 10000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
                     'Referer': 'https://hianime.to/'
                 }
             });
@@ -578,70 +600,63 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                     subCount: parseInt($el.find('.film-poster .tick-sub').text()) || 0,
                     dubCount: parseInt($el.find('.film-poster .tick-dub').text()) || 0,
                     source: this.name,
-                    rating: parseFloat($el.find('.film-poster .tick-rate').text()) || undefined
+                    rating: parseFloat($el.find('.film-poster .tick-rate').text()) || undefined,
+                    description: 'No description available.',
+                    status: 'Completed',
+                    genres: []
                 });
             });
 
-            // Improved pagination detection supporting up to 100+ pages
             let totalPages = page;
             const paginationItems = $('.pagination .page-item a');
-
             paginationItems.each((_, el) => {
                 const title = $(el).attr('title');
                 const text = $(el).text().trim();
                 const href = $(el).attr('href') || '';
-
                 if (title === 'Last' || title === 'Next') {
                     const match = href.match(/page=(\d+)/);
-                    if (match && parseInt(match[1]) > totalPages) {
-                        totalPages = parseInt(match[1]);
-                    }
+                    if (match && parseInt(match[1]) > totalPages) totalPages = parseInt(match[1]);
                 } else if (!isNaN(parseInt(text))) {
-                    if (parseInt(text) > totalPages) {
-                        totalPages = parseInt(text);
-                    }
+                    if (parseInt(text) > totalPages) totalPages = parseInt(text);
                 }
             });
 
-            // Ensure we support the requested 100 pages
             if (totalPages < 100 && $('.pagination .page-link[title="Next"]').length > 0) {
-                // If there is a next but we don't know total, assume at least page+1
                 if (totalPages === page) totalPages = page + 1;
             }
 
             const result: AnimeSearchResult = {
-                results: animeItems,
-                totalPages: totalPages,
-                currentPage: page,
-                hasNextPage: page < totalPages,
-                source: this.name
+                results: animeItems, totalPages, currentPage: page, hasNextPage: page < totalPages, source: this.name
             };
 
             this.setCache(cacheKey, result, this.cacheTTL.search);
             return result;
         } catch (error: any) {
-            logger.error(`[${this.name}] Native scrape failed for ${url}: ${error.message}`);
-
-            // Fallback to library fetch if page <= 1 and not a special category
-            if (page <= 1 && !url.includes('/tv') && !url.includes('/movie')) {
-                try {
-                    logger.info(`[${this.name}] Falling back to library getGenreAnime`);
-                    const slug = url.split('/').pop()?.split('?')[0] || '';
-                    const data = await this.getScraper().getGenreAnime(slug, page);
-                    const result: AnimeSearchResult = {
-                        results: (data.animes || []).map((a: any) => this.mapAnime(a)),
-                        totalPages: data.totalPages || 1,
-                        currentPage: data.currentPage || page,
-                        hasNextPage: data.hasNextPage || false,
-                        source: this.name
-                    };
-                    return result;
-                } catch (e) {
-                    return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
-                }
-            }
-
+            if (error.name === 'AbortError') throw error;
+            this.handleError(error, `nativeScrape: ${url}`);
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
         }
+    }
+
+    private async executeWithSignal<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+        if (signal?.aborted) throw new Error('Aborted');
+
+        return Promise.race([
+            fn(),
+            new Promise<T>((_, reject) => {
+                signal?.addEventListener('abort', () => reject(new Error('Aborted')), { once: true });
+            })
+        ]);
+    }
+
+    private async delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+        if (signal?.aborted) throw new Error('Aborted');
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(resolve, ms);
+            signal?.addEventListener('abort', () => {
+                clearTimeout(timeout);
+                reject(new Error('Aborted'));
+            }, { once: true });
+        });
     }
 }

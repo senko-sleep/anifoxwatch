@@ -85,8 +85,8 @@ class Logger {
         message: error.message,
         name: error.name,
         stack: error.stack,
-        code: error['code'],
-        cause: error['cause']
+        code: (error as any).code,
+        cause: (error as any).cause
       } : undefined
     };
 

@@ -10,15 +10,16 @@ import {
     WatchHentaiSource
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
-import { GenreAwareSource } from '../sources/base-source.js';
+import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
 import { logger, PerformanceTimer, createRequestContext } from '../utils/logger.js';
 import { anilistService } from './anilist-service.js';
+import { reliableRequest, retry, withTimeout } from '../middleware/reliability.js';
 
 interface StreamingSource extends AnimeSource {
-    getStreamingLinks?(episodeId: string, server?: string, category?: 'sub' | 'dub'): Promise<StreamingData>;
-    getEpisodeServers?(episodeId: string): Promise<EpisodeServer[]>;
-    getAnimeInfo?(id: string): Promise<AnimeBase>;
+    getStreamingLinks?(episodeId: string, server?: string, category?: 'sub' | 'dub', options?: SourceRequestOptions): Promise<StreamingData>;
+    getEpisodeServers?(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]>;
+    getAnimeInfo?(id: string, options?: SourceRequestOptions): Promise<AnimeBase>;
 }
 
 /**
@@ -29,6 +30,7 @@ interface StreamingSource extends AnimeSource {
  * - Health monitoring with auto-recovery
  * - Aggregation of results from multiple sources
  * - Smart caching for performance
+ * - Concurrency control with request queueing
  */
 export class SourceManager {
     private sources: Map<string, StreamingSource> = new Map();
@@ -38,12 +40,13 @@ export class SourceManager {
 
     // Concurrency control for API requests with better reliability
     private globalActiveRequests = 0;
-    private maxGlobalConcurrent = 8; // Increased from 6 to 8 for better throughput
+    private maxGlobalConcurrent = 8;
     private requestQueue: Array<{
-        fn: () => Promise<unknown>;
+        fn: (signal: AbortSignal) => Promise<unknown>;
         resolve: (v: unknown) => void;
         reject: (e: unknown) => void;
-        timeout: NodeJS.Timeout;
+        context: string;
+        options: SourceRequestOptions;
     }> = [];
 
     // Rate limiting by source
@@ -52,35 +55,29 @@ export class SourceManager {
 
     constructor() {
         // Register streaming sources in priority order
-        // HiAnimeDirect is primary (uses aniwatch package directly for deep scraping)
         this.registerSource(new HiAnimeDirectSource());
-        // HiAnime as secondary (uses external APIs)
         this.registerSource(new HiAnimeSource());
-        // Gogoanime as fallback (direct scraping)
         this.registerSource(new GogoanimeSource());
-        // Other fallbacks (may not work without self-hosted API)
         this.registerSource(new NineAnimeSource());
         this.registerSource(new AniwaveSource());
         this.registerSource(new AniwatchSource());
         this.registerSource(new ConsumetSource());
-        // Adult Sources - WatchHentai (Deep Scraping)
         this.registerSource(new WatchHentaiSource());
 
         // Configure rate limits for each source (requests per minute)
-        this.sourceRateLimits.set('HiAnimeDirect', { limit: 100, resetTime: 60000 });
+        this.sourceRateLimits.set('HiAnimeDirect', { limit: 120, resetTime: 60000 });
         this.sourceRateLimits.set('HiAnime', { limit: 100, resetTime: 60000 });
         this.sourceRateLimits.set('Gogoanime', { limit: 100, resetTime: 60000 });
         this.sourceRateLimits.set('9Anime', { limit: 50, resetTime: 60000 });
         this.sourceRateLimits.set('Aniwave', { limit: 50, resetTime: 60000 });
         this.sourceRateLimits.set('Aniwatch', { limit: 50, resetTime: 60000 });
         this.sourceRateLimits.set('Consumet', { limit: 30, resetTime: 60000 });
-        this.sourceRateLimits.set('WatchHentai', { limit: 20, resetTime: 60000 });
+        this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
 
-        // Start health monitoring
+        // Start health monitoring (manual only for now)
         this.startHealthMonitor();
 
         logger.info(`Initialized with ${this.sources.size} sources`, undefined, 'SourceManager');
-        logger.info(`Priority order: ${this.sourceOrder.join(' → ')}`, undefined, 'SourceManager');
     }
 
     private registerSource(source: StreamingSource): void {
@@ -93,34 +90,90 @@ export class SourceManager {
     }
 
     private startHealthMonitor(): void {
-        // Note: setInterval is not allowed in Cloudflare Workers global scope
-        // Health checks will only run when explicitly called
         logger.info('Health monitoring initialized (manual checks only)', undefined, 'SourceManager');
     }
 
-    private async executeWithTimeout<T>(promise: Promise<T>, timeoutMs: number, context: string): Promise<T> {
-        return Promise.race([
-            promise,
-            new Promise<T>((_, reject) => {
-                const error = new Error(`${context} timed out after ${timeoutMs}ms`);
-                logger.requestTimeout(context, timeoutMs);
-                setTimeout(() => reject(error), timeoutMs);
-            })
-        ]);
+    /**
+     * Internal helper to execute a source method reliably with timeout, retries, and circuit breaker
+     */
+    private async executeReliably<T>(
+        sourceName: string,
+        operation: string,
+        fn: (signal: AbortSignal) => Promise<T>,
+        options: SourceRequestOptions = {}
+    ): Promise<T> {
+        return this.enqueueRequest(
+            (signal) => reliableRequest(
+                sourceName,
+                operation,
+                (innerSignal) => fn(innerSignal),
+                { ...options, signal }
+            ),
+            operation,
+            options
+        ) as Promise<T>;
+    }
+
+    /**
+     * Enqueue a request for concurrency control
+     */
+    private async enqueueRequest<T>(
+        fn: (signal: AbortSignal) => Promise<T>,
+        context: string,
+        options: SourceRequestOptions = {}
+    ): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            this.requestQueue.push({
+                fn: fn as any,
+                resolve: resolve as any,
+                reject: reject as any,
+                context,
+                options
+            });
+            this.processQueue();
+        });
+    }
+
+    private async processQueue() {
+        if (this.globalActiveRequests >= this.maxGlobalConcurrent || this.requestQueue.length === 0) {
+            return;
+        }
+
+        const request = this.requestQueue.shift();
+        if (!request) return;
+
+        this.globalActiveRequests++;
+
+        // Handle priority if needed in future
+
+        try {
+            const result = await withTimeout(
+                (signal) => request.fn(signal),
+                request.options.timeout || 30000,
+                { operation: request.context },
+                request.options.signal
+            );
+            request.resolve(result);
+        } catch (error) {
+            request.reject(error);
+        } finally {
+            this.globalActiveRequests--;
+            this.processQueue();
+        }
     }
 
     async checkAllHealth(): Promise<Map<string, SourceHealth>> {
-        const timer = new PerformanceTimer('Health check', undefined, 'SourceManager');
+        const timer = new PerformanceTimer('All Health Check', undefined, 'SourceManager');
 
         const checks = Array.from(this.sources.entries()).map(async ([name, source]) => {
             const start = Date.now();
             try {
-                const isHealthy = await Promise.race([
-                    source.healthCheck(),
-                    new Promise<boolean>((_, reject) =>
-                        setTimeout(() => reject(new Error('timeout')), 5000)
-                    )
-                ]);
+                const isHealthy = await reliableRequest(
+                    name,
+                    'healthCheck',
+                    (signal) => source.healthCheck({ signal }),
+                    { timeout: 5000, maxAttempts: 1 }
+                );
 
                 const latency = Date.now() - start;
                 this.healthStatus.set(name, {
@@ -131,7 +184,6 @@ export class SourceManager {
                 });
 
                 source.isAvailable = isHealthy;
-                logger.healthCheck(name, isHealthy, latency, undefined);
             } catch (error) {
                 const latency = Date.now() - start;
                 this.healthStatus.set(name, {
@@ -141,16 +193,13 @@ export class SourceManager {
                     lastCheck: new Date()
                 });
                 source.isAvailable = false;
-                logger.healthCheck(name, false, latency, undefined);
             }
         });
 
         await Promise.all(checks);
 
-        // Log health status
         const online = Array.from(this.healthStatus.values()).filter(s => s.status === 'online');
-        const context = { online: online.length, total: this.sources.size };
-        logger.info(`Health check complete: ${online.length}/${this.sources.size} sources online`, context, 'SourceManager');
+        logger.info(`Health check complete: ${online.length}/${this.sources.size} sources online`, { online: online.length, total: this.sources.size }, 'SourceManager');
 
         timer.end();
         return this.healthStatus;
@@ -357,7 +406,7 @@ export class SourceManager {
                 return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
             }
             try {
-                const result = await this.executeWithTimeout(source.search(query, page), 15000, `Search ${sourceName}`);
+                const result = await this.executeReliably(source.name, 'search', (signal) => source.search(query, page, filters, { signal }));
                 timer.end();
                 return result;
             } catch (error) {
@@ -366,12 +415,11 @@ export class SourceManager {
             }
         }
 
-        // Multi-source search for robustness (Top 3 sources)
         const sourcesToTry = this.sourceOrder
-            .filter(name => name !== 'WatchHentai') // Exclude adult sources
+            .filter(name => name !== 'WatchHentai')
             .map(name => this.sources.get(name))
             .filter(source => source && source.isAvailable)
-            .slice(0, 3) as StreamingSource[]; // Use top 3 available sources
+            .slice(0, 3) as StreamingSource[];
 
         if (sourcesToTry.length === 0) {
             logger.warn(`No available sources for search`, { query }, 'SourceManager');
@@ -382,7 +430,7 @@ export class SourceManager {
             logger.info(`Starting multi-source search with: ${sourcesToTry.map(s => s.name).join(', ')}`, { query });
 
             const searchPromises = sourcesToTry.map(source =>
-                this.executeWithTimeout(source.search(query, page), 15000, `Search ${source.name}`)
+                this.executeReliably(source.name, 'search', (signal) => source.search(query, page, filters, { signal }))
                     .then(res => ({ ...res, sourceName: source.name }))
                     .catch(error => {
                         logger.warn(`Search failed on ${source.name}: ${error.message}`);
@@ -514,7 +562,7 @@ export class SourceManager {
         if (!source) return null;
 
         try {
-            return await source.getAnime(id);
+            return await this.executeReliably(source.name, 'getAnime', (signal) => source.getAnime(id, { signal }));
         } catch (error) {
             console.error(`[SourceManager] getAnime failed:`, error);
             return null;
@@ -526,7 +574,7 @@ export class SourceManager {
         if (!source) return [];
 
         try {
-            return await source.getEpisodes(animeId);
+            return await this.executeReliably(source.name, 'getEpisodes', (signal) => source.getEpisodes(animeId, { signal }));
         } catch (error) {
             console.error(`[SourceManager] getEpisodes failed:`, error);
             return [];
@@ -538,12 +586,11 @@ export class SourceManager {
         if (!source) return [];
 
         try {
-            return await source.getTrending(page);
+            return await this.executeReliably(source.name, 'getTrending', (signal) => source.getTrending(page, { signal }));
         } catch (error) {
-            source.isAvailable = false;
             const fallback = this.getAvailableSource();
             if (fallback && fallback !== source) {
-                return fallback.getTrending(page);
+                return this.executeReliably(fallback.name, 'getTrending', (signal) => fallback.getTrending(page, { signal }));
             }
             return [];
         }
@@ -554,12 +601,11 @@ export class SourceManager {
         if (!source) return [];
 
         try {
-            return await source.getLatest(page);
+            return await this.executeReliably(source.name, 'getLatest', (signal) => source.getLatest(page, { signal }));
         } catch (error) {
-            source.isAvailable = false;
             const fallback = this.getAvailableSource();
             if (fallback && fallback !== source) {
-                return fallback.getLatest(page);
+                return this.executeReliably(fallback.name, 'getLatest', (signal) => fallback.getLatest(page, { signal }));
             }
             return [];
         }
@@ -570,12 +616,11 @@ export class SourceManager {
         if (!source) return [];
 
         try {
-            return await source.getTopRated(page, limit);
+            return await this.executeReliably(source.name, 'getTopRated', (signal) => source.getTopRated(page, limit, { signal }));
         } catch (error) {
-            source.isAvailable = false;
             const fallback = this.getAvailableSource();
             if (fallback && fallback !== source) {
-                return fallback.getTopRated(page, limit);
+                return this.executeReliably(fallback.name, 'getTopRated', (signal) => fallback.getTopRated(page, limit, { signal }));
             }
             return [];
         }
@@ -621,7 +666,7 @@ export class SourceManager {
             const pagesToFetch = 3;
             for (let i = 0; i < pagesToFetch; i++) {
                 try {
-                    const trending = await this.executeWithTimeout(source.getTrending(page + i), 10000, `Trending ${source.name} page ${page + i}`);
+                    const trending = await this.executeReliably(source.name, 'getTrending', (signal) => source.getTrending(page + i, { signal }));
                     allAnime.push(...trending);
                 } catch {
                     break;
@@ -1121,7 +1166,7 @@ export class SourceManager {
         if (source && source.getEpisodeServers) {
             try {
                 logger.sourceRequest(source.name, 'getEpisodeServers', { episodeId });
-                const servers = await source.getEpisodeServers(episodeId);
+                const servers = await this.executeReliably(source.name, 'getEpisodeServers', (signal) => source.getEpisodeServers!(episodeId, { signal }));
                 logger.sourceResponse(source.name, 'getEpisodeServers', true, { serverCount: servers.length });
                 timer.end();
                 if (servers.length > 0) return servers;
@@ -1143,7 +1188,7 @@ export class SourceManager {
             if (fallbackSource?.isAvailable && fallbackSource !== source && fallbackSource.getEpisodeServers) {
                 try {
                     logger.failover(source?.name || 'unknown', fallbackSource.name, 'getEpisodeServers', { episodeId });
-                    const servers = await fallbackSource.getEpisodeServers(episodeId);
+                    const servers = await this.executeReliably(fallbackSource.name, 'getEpisodeServers', (signal) => fallbackSource.getEpisodeServers!(episodeId, { signal }));
                     if (servers.length > 0) {
                         timer.end();
                         return servers;
@@ -1175,7 +1220,7 @@ export class SourceManager {
         if (source && source.getStreamingLinks) {
             try {
                 logger.sourceRequest(source.name, 'getStreamingLinks', { episodeId, server });
-                const streamData = await source.getStreamingLinks(episodeId, server, category);
+                const streamData = await this.executeReliably(source.name, 'getStreamingLinks', (signal) => source.getStreamingLinks!(episodeId, server, category, { signal }));
                 logger.sourceResponse(source.name, 'getStreamingLinks', true, {
                     sourceCount: streamData.sources.length,
                     subtitleCount: streamData.subtitles?.length || 0
@@ -1205,7 +1250,7 @@ export class SourceManager {
             if (fallbackSource?.isAvailable && fallbackSource !== source && fallbackSource.getStreamingLinks) {
                 try {
                     logger.failover(source?.name || 'unknown', fallbackSource.name, 'getStreamingLinks', { episodeId, server, category });
-                    const streamData = await fallbackSource.getStreamingLinks(episodeId, server, category);
+                    const streamData = await this.executeReliably(fallbackSource.name, 'getStreamingLinks', (signal) => fallbackSource.getStreamingLinks!(episodeId, server, category, { signal }));
 
                     if (streamData.sources.length > 0) {
                         logger.info(`Successfully got streaming links from fallback source ${fallbackSource.name}`,
@@ -1238,7 +1283,7 @@ export class SourceManager {
 
     async searchAll(query: string, page: number = 1): Promise<AnimeSearchResult> {
         try {
-            logger.info(`Starting search for "${query}" (page ${page})`, undefined, 'SourceManager');
+            logger.info(`Starting search for "${query}"(page ${page})`, undefined, 'SourceManager');
 
             const results: AnimeBase[] = [];
             let totalPages = 0;
@@ -1260,43 +1305,43 @@ export class SourceManager {
                         totalPages = Math.max(totalPages, sourceResults.totalPages);
                         hasNextPage = hasNextPage || sourceResults.hasNextPage;
 
-                        logger.info(`Got ${sourceResults.results.length} results from ${sourceName}`, undefined, 'SourceManager');
+                        logger.info(`Got ${sourceResults.results.length} results from ${sourceName} `, undefined, 'SourceManager');
 
                         // If we have enough results, stop searching
                         if (results.length >= 20) break;
                     } else {
                         failedSources.push(sourceName);
-                        logger.warn(`No results from ${sourceName}`, undefined, 'SourceManager');
+                        logger.warn(`No results from ${sourceName} `, undefined, 'SourceManager');
                     }
                 } catch (error) {
                     failedSources.push(sourceName);
                     sourceErrors.push({ source: sourceName, error: (error as Error).message });
-                    logger.error(`Search failed on ${sourceName}: ${(error as Error).message}`, error as Error, undefined, 'SourceManager');
+                    logger.error(`Search failed on ${sourceName}: ${(error as Error).message} `, error as Error, undefined, 'SourceManager');
                 }
             }
 
             if (results.length === 0) {
                 // Enhanced logging for failed searches
                 logger.error(`❌ SEARCH FAILED: No results found for "${query}" from any source`, new Error('Search failed'), undefined, 'SourceManager');
-                logger.error(`📊 Search Statistics:`, new Error('No results'), undefined, 'SourceManager');
+                logger.error(`📊 Search Statistics: `, new Error('No results'), undefined, 'SourceManager');
                 logger.error(`   - Query: "${query}"`, new Error('Query info'), undefined, 'SourceManager');
-                logger.error(`   - Page: ${page}`, new Error('Page info'), undefined, 'SourceManager');
-                logger.error(`   - Available sources: ${this.sourceOrder.join(', ')}`, new Error('Sources info'), undefined, 'SourceManager');
-                logger.error(`   - Failed sources: ${failedSources.join(', ')}`, new Error('Failed sources'), undefined, 'SourceManager');
+                logger.error(`   - Page: ${page} `, new Error('Page info'), undefined, 'SourceManager');
+                logger.error(`   - Available sources: ${this.sourceOrder.join(', ')} `, new Error('Sources info'), undefined, 'SourceManager');
+                logger.error(`   - Failed sources: ${failedSources.join(', ')} `, new Error('Failed sources'), undefined, 'SourceManager');
 
                 // Log specific errors for each failed source
                 sourceErrors.forEach(({ source, error }) => {
-                    logger.error(`   - ${source}: ${error}`, new Error(error), undefined, 'SourceManager');
+                    logger.error(`   - ${source}: ${error} `, new Error(error), undefined, 'SourceManager');
                 });
 
                 // Log suggestions
-                logger.info(`💡 Suggestions for failed search:`, undefined, 'SourceManager');
+                logger.info(`💡 Suggestions for failed search: `, undefined, 'SourceManager');
                 logger.info(`   - Check if query is spelled correctly`, undefined, 'SourceManager');
                 logger.info(`   - Try alternative search terms`, undefined, 'SourceManager');
                 logger.info(`   - Some sources may be temporarily unavailable`, undefined, 'SourceManager');
 
             } else {
-                logger.info(`✅ Search successful: ${results.length} results from sources: ${workingSources.join(', ')}`, undefined, 'SourceManager');
+                logger.info(`✅ Search successful: ${results.length} results from sources: ${workingSources.join(', ')} `, undefined, 'SourceManager');
             }
 
             return {
@@ -1307,9 +1352,9 @@ export class SourceManager {
                 source: workingSources.join('+')
             };
         } catch (error) {
-            logger.error(`❌ SEARCH CRITICAL ERROR: ${(error as Error).message}`, error as Error, undefined, 'SourceManager');
+            logger.error(`❌ SEARCH CRITICAL ERROR: ${(error as Error).message} `, error as Error, undefined, 'SourceManager');
             logger.error(`   Query: "${query}"`, new Error('Query info'), undefined, 'SourceManager');
-            logger.error(`   Page: ${page}`, new Error('Page info'), undefined, 'SourceManager');
+            logger.error(`   Page: ${page} `, new Error('Page info'), undefined, 'SourceManager');
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
         }
     }
@@ -1378,15 +1423,15 @@ export class SourceManager {
                                     streamingId: searchMatch.id,
                                     source: 'HiAnimeDirect'
                                 };
-                                logger.debug(`[SourceManager] Fallback search found match for: ${title}`);
+                                logger.debug(`[SourceManager] Fallback search found match for: ${title} `);
                             }
                         }
                     } catch (e) {
-                        logger.warn(`[SourceManager] Fallback search failed for: ${title}`);
+                        logger.warn(`[SourceManager] Fallback search failed for: ${title} `);
                     }
                 }
             } else if (titlesNeedingSearch.length > 10) {
-                logger.warn(`[SourceManager] Skipping fallback search - too many titles (${titlesNeedingSearch.length})`);
+                logger.warn(`[SourceManager] Skipping fallback search - too many titles(${titlesNeedingSearch.length})`);
             }
 
             const withStreamingIds = enrichedResults.filter(a => a.streamingId).length;
@@ -1693,16 +1738,17 @@ export class SourceManager {
                 return null;
             }
 
-            // Search with the title (get more results for better matching)
-            const searchResult = await source.search(title, 5);
+            // Search with the title
+            const searchResult = await this.executeReliably(source.name, 'search', (signal) => source!.search(title, 1, {}, { signal }), { timeout: 10000 });
+            const results = searchResult.results || [];
 
             // Cache the results
             this.searchCache.set(cacheKey, {
-                results: searchResult.results || [],
+                results,
                 timestamp: Date.now()
             });
 
-            const bestMatch = this.findBestMatch(title, searchResult.results || []);
+            const bestMatch = this.findBestMatch(title, results);
 
             if (bestMatch) {
                 logger.info(`[SourceManager] Found streaming match for "${title}": ${bestMatch.id}`);
@@ -1753,28 +1799,26 @@ export class SourceManager {
             logger.sourceRequest(source.name, 'getAnimeByGenre', { genre, page });
 
             // Try to use genre-specific method if available
-            const sourceSupportsGenre = (source: AnimeSource): source is GenreAwareSource => {
-                return 'getByGenre' in source && typeof (source as GenreAwareSource).getByGenre === 'function';
+            const sourceSupportsGenre = (s: AnimeSource): s is GenreAwareSource => {
+                return 'getByGenre' in s;
             };
 
             if (sourceSupportsGenre(source)) {
-                const genreSource = source as GenreAwareSource;
-                const result = await genreSource.getByGenre(genre, page);
+                const result = await this.executeReliably(source.name, 'getByGenre', (signal) => (source as GenreAwareSource).getByGenre(genre, page, { signal }));
                 logger.sourceResponse(source.name, 'getByGenre', true, { resultCount: result.results?.length || 0 });
                 timer.end();
                 return result;
             }
 
-            // Fallback: search with genre as query
+            // Fallback: search by genre name
             logger.info(`Using search fallback for genre: ${genre}`, undefined, 'SourceManager');
-            const result = await source.search(genre, page);
+            const result = await this.executeReliably(source.name, 'search', (signal) => source.search(genre, page, {}, { signal }));
             logger.sourceResponse(source.name, 'search (genre fallback)', true, { resultCount: result.results.length });
             timer.end();
             return result;
         } catch (error) {
             logger.error(`Genre search failed for ${source.name}`, error as Error, { genre, page }, 'SourceManager');
             // Try fallback
-            source.isAvailable = false;
             const fallback = this.getAvailableSource();
             if (fallback && fallback !== source) {
                 logger.failover(source.name, fallback.name, 'genre search failed', { genre, page });
@@ -1802,13 +1846,13 @@ export class SourceManager {
 
             // Get trending anime (page 1-3 to have variety)
             const allAnime: AnimeBase[] = [];
-            const pagesToTry = Math.min(3, 5); // Try up to 3 pages
+            const pagesToTry = 3;
 
             for (let page = 1; page <= pagesToTry; page++) {
                 try {
-                    const trending = await source.getTrending(page);
+                    const trending = await this.executeReliably(source.name, 'getTrending', (signal) => source.getTrending(page, { signal }));
                     allAnime.push(...trending);
-                    if (allAnime.length >= 30) break; // Have enough to pick from
+                    if (allAnime.length >= 30) break;
                 } catch {
                     continue;
                 }
@@ -1820,7 +1864,6 @@ export class SourceManager {
                 return null;
             }
 
-            // Pick random anime
             const randomIndex = Math.floor(Math.random() * allAnime.length);
             const randomAnime = allAnime[randomIndex];
 
@@ -1833,8 +1876,6 @@ export class SourceManager {
             return randomAnime;
         } catch (error) {
             logger.error(`Random anime failed for ${source.name}`, error as Error, undefined, 'SourceManager');
-            // Try fallback
-            source.isAvailable = false;
             const fallback = this.getAvailableSource();
             if (fallback && fallback !== source) {
                 logger.failover(source.name, fallback.name, 'random anime failed', undefined);

@@ -733,4 +733,16 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
         }
     }
+
+    async getGenres(): Promise<string[]> {
+        // Return standard HiAnime genres
+        return [
+            "Action", "Adventure", "Cars", "Comedy", "Dementia", "Demons", "Drama", "Ecchi",
+            "Fantasy", "Game", "Harem", "Historical", "Horror", "Isekai", "Josei", "Kids",
+            "Magic", "Martial Arts", "Mecha", "Military", "Music", "Mystery", "Parody",
+            "Police", "Psychological", "Romance", "Samurai", "School", "Sci-Fi", "Seinen",
+            "Shoujo", "Shoujo Ai", "Shounen", "Shounen Ai", "Slice of Life", "Space",
+            "Sports", "Super Power", "Supernatural", "Thriller", "Vampire"
+        ];
+    }
 }
