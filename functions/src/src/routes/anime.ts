@@ -11,7 +11,7 @@ const router = Router();
  */
 router.get('/search', async (req: Request, res: Response): Promise<void> => {
     try {
-        const { q, page = '1', source } = req.query;
+        const { q, page = '1', source, mode = 'safe' } = req.query;
 
         if (!q || typeof q !== 'string') {
             res.status(400).json({ error: 'Query parameter "q" is required' });
@@ -19,7 +19,8 @@ router.get('/search', async (req: Request, res: Response): Promise<void> => {
         }
 
         const pageNum = parseInt(page as string, 10) || 1;
-        const result = await sourceManager.search(q, pageNum, source as string | undefined);
+        const searchMode = (mode as 'safe' | 'mixed' | 'adult') || 'safe';
+        const result = await sourceManager.search(q, pageNum, source as string | undefined, { mode: searchMode });
         res.json(result);
     } catch (error) {
         console.error('Search error:', error);
@@ -124,6 +125,73 @@ router.get('/genre/:genre', async (req: Request, res: Response): Promise<void> =
         res.json(result);
     } catch (error) {
         console.error('Genre search error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/browse
+ * @query page - Page number (default: 1)
+ * @query limit - Results per page (default: 25)
+ * @query type - Anime type filter (TV, Movie, OVA, etc.)
+ * @query genre - Genre filter (comma-separated)
+ * @query status - Status filter (Ongoing, Completed, etc.)
+ * @query year - Year filter
+ * @query startYear - Start year for range filter
+ * @query endYear - End year for range filter
+ * @query sort - Sort by (popularity, trending, recently_released, shuffle, rating, year, title)
+ * @query order - Sort order (asc, desc)
+ * @query source - Preferred source (optional)
+ * @query mode - Content mode (safe, mixed, adult) - default: safe
+ */
+router.get('/browse', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const {
+            page = '1',
+            limit = '25',
+            type,
+            genre,
+            status,
+            year,
+            startYear,
+            endYear,
+            sort = 'popularity',
+            order,
+            source,
+            mode = 'safe'
+        } = req.query;
+
+        const pageNum = parseInt(page as string, 10) || 1;
+        const limitNum = parseInt(limit as string, 10) || 25;
+
+        const filters: any = {
+            page: pageNum,
+            limit: limitNum,
+            sort: sort as string,
+            mode: (mode as 'safe' | 'mixed' | 'adult') || 'safe'
+        };
+
+        if (type) filters.type = type as string;
+        if (genre) filters.genres = (genre as string).split(',').filter(Boolean);
+        if (status) filters.status = status as string;
+        if (year) filters.year = parseInt(year as string, 10);
+        if (startYear) filters.startYear = parseInt(startYear as string, 10);
+        if (endYear) filters.endYear = parseInt(endYear as string, 10);
+        if (order) filters.order = order as string;
+        if (source) filters.source = source as string;
+
+        const result = await sourceManager.browseAnime(filters);
+        
+        res.json({
+            results: result.anime,
+            totalPages: result.totalPages,
+            currentPage: pageNum,
+            hasNextPage: result.hasNextPage,
+            totalResults: result.totalResults,
+            source: source || 'default'
+        });
+    } catch (error) {
+        console.error('Browse error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

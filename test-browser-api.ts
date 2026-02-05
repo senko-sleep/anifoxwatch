@@ -65,6 +65,26 @@ async function testBrowserAPI() {
         {
             name: 'Multiple Filters (Movie + Romance + Completed)',
             endpoint: '/api/anime/browse?type=Movie&genre=Romance&status=Completed&sort=popularity&page=1&limit=25'
+        },
+        {
+            name: 'WatchHentai - Adult Mode Browse',
+            endpoint: '/api/anime/browse?mode=adult&sort=popularity&page=1&limit=25'
+        },
+        {
+            name: 'WatchHentai - Adult Mode Search',
+            endpoint: '/api/anime/search?q=yuri&mode=adult&page=1'
+        },
+        {
+            name: 'WatchHentai - Explicit Source',
+            endpoint: '/api/anime/browse?source=WatchHentai&sort=popularity&page=1&limit=25'
+        },
+        {
+            name: 'WatchHentai - Genre Filter (Yuri)',
+            endpoint: '/api/anime/browse?mode=adult&genre=Yuri&sort=popularity&page=1&limit=25'
+        },
+        {
+            name: 'Mixed Mode - Safe + Adult',
+            endpoint: '/api/anime/browse?mode=mixed&sort=popularity&page=1&limit=25'
         }
     ];
 
