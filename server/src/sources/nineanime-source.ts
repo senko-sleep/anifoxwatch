@@ -32,7 +32,7 @@ export class NineAnimeSource extends BaseAnimeSource {
     // HiAnime API instances for streaming fallback
     private hianimeApis = [
         'http://localhost:4000',
-        'https://aniwatch-api-v2.vercel.app',
+        'https://anifoxwatch-api.anifoxwatch.workers.dev',
     ];
 
     constructor() {

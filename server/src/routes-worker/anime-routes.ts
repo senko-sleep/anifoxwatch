@@ -1,12 +1,30 @@
 import { Hono } from 'hono';
-import { SourceManager } from '../services/source-manager.js';
 import { anilistService } from '../services/anilist-service.js';
+
+// Use a flexible interface that works with both SourceManager and CloudflareSourceManager
+interface SourceManagerLike {
+    search(query: string, page?: number, sourceName?: string, options?: { mode?: string }): Promise<any>;
+    getAnime(id: string): Promise<any>;
+    getEpisodes(animeId: string): Promise<any[]>;
+    getTrending(page?: number, sourceName?: string): Promise<any[]>;
+    getLatest(page?: number, sourceName?: string): Promise<any[]>;
+    getTopRated(page?: number, limit?: number, sourceName?: string): Promise<any[]>;
+    getStreamingLinks?(episodeId: string, server?: string, category?: string): Promise<any>;
+    getEpisodeServers?(episodeId: string): Promise<any[]>;
+    // Optional methods that may not exist in CloudflareSourceManager
+    getAnimeByGenre?(genre: string, page?: number, source?: string): Promise<any>;
+    getAnimeByGenreAniList?(genre: string, page?: number): Promise<any>;
+    getFilteredAnime?(filters: any): Promise<any>;
+    browseAnime?(filters: any): Promise<any>;
+    getRandomAnime?(source?: string): Promise<any>;
+}
 
 /**
  * Anime routes for Cloudflare Worker (Hono)
  * Mirrors the Express anime routes functionality
+ * Compatible with both SourceManager and CloudflareSourceManager
  */
-export function createAnimeRoutes(sourceManager: SourceManager) {
+export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     const app = new Hono();
 
     // Search anime
@@ -199,6 +217,9 @@ export function createAnimeRoutes(sourceManager: SourceManager) {
         const source = c.req.query('source');
 
         try {
+            if (!sourceManager.getAnimeByGenre) {
+                return c.json({ error: 'Genre browsing not available in this environment', results: [] }, 501);
+            }
             const data = await sourceManager.getAnimeByGenre(genre, page, source);
             return c.json(data);
         } catch (e: any) {
@@ -214,6 +235,11 @@ export function createAnimeRoutes(sourceManager: SourceManager) {
         if (!genre) return c.json({ error: 'Genre parameter is required' }, 400);
 
         try {
+            if (!sourceManager.getAnimeByGenreAniList) {
+                // Fallback to AniList service directly
+                const result = await anilistService.searchByGenre(genre, page, 25);
+                return c.json(result);
+            }
             const result = await sourceManager.getAnimeByGenreAniList(genre, page);
             return c.json(result);
         } catch (e: any) {
@@ -245,6 +271,18 @@ export function createAnimeRoutes(sourceManager: SourceManager) {
         });
 
         try {
+            if (!sourceManager.getFilteredAnime) {
+                // Fallback to trending
+                const trending = await sourceManager.getTrending(page);
+                return c.json({
+                    results: trending || [],
+                    currentPage: page,
+                    totalPages: 1,
+                    hasNextPage: false,
+                    totalResults: trending?.length || 0,
+                    filters, source: 'fallback'
+                });
+            }
             const result = await sourceManager.getFilteredAnime(filters);
             return c.json({
                 results: result.anime || [],
@@ -286,6 +324,19 @@ export function createAnimeRoutes(sourceManager: SourceManager) {
         });
 
         try {
+            if (!sourceManager.browseAnime) {
+                // Fallback to trending
+                const trending = await sourceManager.getTrending(page);
+                return c.json({
+                    results: trending || [],
+                    currentPage: page,
+                    totalPages: 1,
+                    hasNextPage: false,
+                    totalResults: trending?.length || 0,
+                    filters: { type: query.type, genre: query.genre, status: query.status, year: query.year, sort: query.sort, order: query.order },
+                    source: 'fallback'
+                });
+            }
             const result = await sourceManager.browseAnime(filters);
             return c.json({
                 results: result.anime || [],
@@ -306,6 +357,15 @@ export function createAnimeRoutes(sourceManager: SourceManager) {
         const source = c.req.query('source');
         
         try {
+            if (!sourceManager.getRandomAnime) {
+                // Fallback: get trending and pick random
+                const trending = await sourceManager.getTrending(1);
+                if (!trending || trending.length === 0) {
+                    return c.json({ error: 'No random anime found' }, 404);
+                }
+                const randomIndex = Math.floor(Math.random() * trending.length);
+                return c.json(trending[randomIndex]);
+            }
             const data = await sourceManager.getRandomAnime(source);
             if (!data) return c.json({ error: 'No random anime found' }, 404);
             return c.json(data);

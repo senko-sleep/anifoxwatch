@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     fonts-kacst \
     fonts-freefont-ttf \
     libxss1 \
+    dumb-init \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
@@ -17,23 +18,34 @@ RUN apt-get update && apt-get install -y \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Production environment
+ENV NODE_ENV=production
+
 # Create app directory
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
+COPY tsconfig.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies (production only for smaller image)
+RUN npm ci --only=production && \
+    npm install typescript --save-dev
 
 # Copy source code
-COPY . .
+COPY src ./src
 
 # Build the project
 RUN npm run build
 
-# Expose port (Koyeb uses PORT env var)
-EXPOSE 3001
+# Remove dev dependencies after build
+RUN npm prune --production
+
+# Expose port (Koyeb uses PORT env var, defaults to 8000)
+EXPOSE 8000
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
 
 # Start the application
-CMD ["npm", "start"]
+CMD ["node", "dist/index.js"]

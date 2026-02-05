@@ -162,7 +162,7 @@ export class HiAnimeSource extends BaseAnimeSource {
     // List of API instances to try (in order of preference)
     private apiInstances = [
         //'http://localhost:3001',
-        'https://aniwatch-api-v2.vercel.app',
+        'https://anifoxwatch-api.anifoxwatch.workers.dev',
         'https://api-aniwatch.onrender.com',
         'https://aniwatch-api.onrender.com',
         'https://hianime-api-chi.vercel.app',

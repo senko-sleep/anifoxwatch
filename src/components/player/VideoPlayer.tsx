@@ -28,6 +28,7 @@ import {
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { PostProxyLoader } from '@/lib/hls-post-loader';
 
 interface VideoSubtitle {
   url: string;
@@ -215,6 +216,7 @@ export const VideoPlayer = ({
         levelLoadingMaxRetry: 4,
         fragLoadingRetryDelay: 1000,
         manifestLoadingRetryDelay: 1000,
+        loader: PostProxyLoader,
         xhrSetup: (xhr) => {
           xhr.timeout = 30000;
         }

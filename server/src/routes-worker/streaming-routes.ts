@@ -1,9 +1,17 @@
 import { Hono } from 'hono';
-import { SourceManager } from '../services/source-manager.js';
+
+// Flexible interface for both SourceManager and CloudflareSourceManager
+interface StreamingSourceManager {
+    getEpisodeServers?(episodeId: string): Promise<Array<{ name: string; url: string; type: string }>>;
+    getStreamingLinks?(episodeId: string, server?: string, category?: 'sub' | 'dub'): Promise<{
+        sources: Array<{ url: string; quality: string; isM3U8?: boolean }>;
+        subtitles?: Array<{ url: string; lang: string }>;
+    }>;
+}
 
 /**
  * Streaming routes for Cloudflare Worker (Hono)
- * Mirrors the Express streaming routes functionality
+ * Compatible with both SourceManager and CloudflareSourceManager
  */
 
 // Helper proxy URL generator
@@ -12,12 +20,12 @@ const proxyUrl = (url: string, proxyBase: string): string => {
 };
 
 // Helper to get proxy base URL from Hono context
-const getProxyBaseUrl = (c: any): string => {
+const getProxyBaseUrl = (c: { req: { url: string } }): string => {
     const url = new URL(c.req.url);
     return `${url.protocol}//${url.host}/api/stream/proxy`;
 };
 
-export function createStreamingRoutes(sourceManager: SourceManager) {
+export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
     const app = new Hono();
 
     // Get episode servers
@@ -108,11 +116,25 @@ export function createStreamingRoutes(sourceManager: SourceManager) {
         }
     });
 
-    // Proxy endpoint
+    // Proxy endpoint - GET (for backward compatibility)
     app.get('/proxy', async (c) => {
         const url = c.req.query('url');
         if (!url) return c.json({ error: 'URL is required' }, 400);
 
+        return handleProxyRequest(c, url);
+    });
+
+    // Proxy endpoint - POST (for long URLs)
+    app.post('/proxy', async (c) => {
+        const body = await c.req.json().catch(() => ({}));
+        const url = body.url;
+        if (!url) return c.json({ error: 'URL is required in request body' }, 400);
+
+        return handleProxyRequest(c, url);
+    });
+
+    // Shared proxy handler
+    async function handleProxyRequest(c: any, url: string) {
         const proxyBase = getProxyBaseUrl(c);
 
         try {
@@ -174,14 +196,14 @@ export function createStreamingRoutes(sourceManager: SourceManager) {
         } catch (e: any) {
             return c.json({ error: 'Proxy failed', message: e.message }, 502);
         }
-    });
+    }
 
     // CORS preflight
     app.options('/proxy', (c) => {
         return c.text('', 204, {
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, OPTIONS',
-            'Access-Control-Allow-Headers': 'Range, Origin, Accept',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Range, Origin, Accept',
             'Access-Control-Max-Age': '86400'
         });
     });

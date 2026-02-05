@@ -1,11 +1,18 @@
 import { Hono } from 'hono';
-import { SourceManager } from '../services/source-manager.js';
+
+// Flexible interface for both SourceManager and CloudflareSourceManager
+interface SourcesManagerLike {
+    getAvailableSources(): string[];
+    getHealthStatus(): Array<{ name: string; status: string; latency?: number; lastCheck?: Date }>;
+    checkAllHealth(): Promise<Map<string, { name: string; status: string; latency?: number; lastCheck?: Date }>>;
+    setPreferredSource?(source: string): boolean;
+}
 
 /**
  * Sources routes for Cloudflare Worker (Hono)
- * Mirrors the Express sources routes functionality
+ * Compatible with both SourceManager and CloudflareSourceManager
  */
-export function createSourcesRoutes(sourceManager: SourceManager) {
+export function createSourcesRoutes(sourceManager: SourcesManagerLike) {
     const app = new Hono();
 
     // Get all sources
@@ -36,6 +43,10 @@ export function createSourcesRoutes(sourceManager: SourceManager) {
                 return c.json({ error: 'Source name is required' }, 400);
             }
 
+            if (!sourceManager.setPreferredSource) {
+                return c.json({ error: 'Setting preferred source not supported in this environment' }, 501);
+            }
+
             const success = sourceManager.setPreferredSource(source);
 
             if (!success) {
@@ -43,8 +54,9 @@ export function createSourcesRoutes(sourceManager: SourceManager) {
             }
 
             return c.json({ message: `Preferred source set to ${source}` });
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : 'Unknown error';
+            return c.json({ error: message }, 500);
         }
     });
 

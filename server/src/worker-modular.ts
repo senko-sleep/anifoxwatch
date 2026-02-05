@@ -1,23 +1,21 @@
 import './polyfills.js';
 import { Hono } from 'hono';
 import { logger } from './utils/logger.js';
-import { SourceManager } from './services/source-manager.js';
+import { CloudflareSourceManager } from './services/source-manager-cloudflare.js';
 import { createAnimeRoutes } from './routes-worker/anime-routes.js';
 import { createStreamingRoutes } from './routes-worker/streaming-routes.js';
 import { createSourcesRoutes } from './routes-worker/sources-routes.js';
 
 /**
  * Modular Cloudflare Worker
- * Uses the same route structure as the Express server
- * 
- * This worker imports routes dynamically and only includes what's needed,
- * making it maintainable and avoiding code duplication.
+ * Uses CloudflareSourceManager with fetch-based sources for Workers compatibility
+ * No Node.js dependencies (axios, http.Agent, aniwatch package) required
  */
 
 const app = new Hono();
 
-// Initialize SourceManager (shared instance)
-const sourceManager = new SourceManager();
+// Initialize CloudflareSourceManager (uses fetch-based sources)
+const sourceManager = new CloudflareSourceManager();
 
 logger.info('Cloudflare Worker initialized with modular routing', undefined, 'Worker');
 
@@ -91,7 +89,8 @@ app.get('/api', (c) => c.json({
             setPreferred: 'POST /api/sources/preferred'
         }
     },
-    availableSources: ['HiAnimeDirect', 'HiAnime', 'Gogoanime', '9Anime', 'Aniwave', 'Aniwatch', 'Consumet', 'WatchHentai']
+    availableSources: ['CloudflareHiAnimeAPI'],
+    note: 'Using Cloudflare Workers-compatible fetch-based sources'
 }));
 
 // ============================================

@@ -1,9 +1,14 @@
-import axios, { AxiosInstance } from 'axios';
+/**
+ * Cloudflare HiAnime API Source - Uses native fetch to call external aniwatch APIs
+ * This source is designed specifically for Cloudflare Workers environment
+ * No Node.js dependencies (axios, http.Agent) required
+ * 
+ * Uses external aniwatch-api instances for streaming data extraction
+ */
+
 import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
-
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
-import { Agent } from 'node:http';
 import { logger } from '../utils/logger.js';
 
 // ============ API RESPONSE INTERFACES ============
@@ -97,13 +102,6 @@ interface ServersResponse {
     dub?: ServerRaw[];
 }
 
-interface ChiServersResponse {
-    success?: boolean;
-    results?: {
-        servers?: ServerRaw[];
-    };
-}
-
 interface SourceRaw {
     url: string;
     quality?: string;
@@ -132,25 +130,13 @@ interface StreamSourcesResponse {
     };
 }
 
-interface ChiStreamResponse {
-    success?: boolean;
-    results?: StreamSourcesResponse;
-}
-
 /**
- * HiAnime Source - Primary reliable anime source using the aniwatch-api
- * API Documentation: https://github.com/ghoshRitesh12/aniwatch-api
- * 
- * Features:
- * - High-quality HD streams (720p, 1080p)
- * - Both Sub and Dub support
- * - Multiple server fallbacks
- * - Proper data scraping from hianime.to
+ * CloudflareHiAnimeAPISource - Cloudflare Workers compatible HiAnime source
+ * Uses native fetch API to call external aniwatch-api instances
  */
-export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
-    name = 'HiAnime';
+export class CloudflareHiAnimeAPISource extends BaseAnimeSource implements GenreAwareSource {
+    name = 'CloudflareHiAnimeAPI';
     baseUrl: string;
-    private client: AxiosInstance;
 
     // Smart caching with TTL
     private cache: Map<string, { data: unknown; expires: number }> = new Map();
@@ -165,7 +151,6 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
 
     // List of API instances to try (in order of preference)
     private apiInstances = [
-        //'http://localhost:3001',
         'https://anifoxwatch-api.anifoxwatch.workers.dev',
         'https://api-aniwatch.onrender.com',
         'https://aniwatch-api.onrender.com',
@@ -176,23 +161,6 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     constructor(apiUrl?: string) {
         super();
         this.baseUrl = apiUrl || this.apiInstances[0];
-        this.client = axios.create({
-            baseURL: `${this.baseUrl}/api/v2/hianime`,
-            timeout: 15000,
-            headers: {
-                'Accept': 'application/json',
-                'User-Agent': 'AniStreamHub/1.0'
-            }
-        });
-
-        // Connection pooling
-        this.client.defaults.httpAgent = new Agent({
-            keepAlive: true,
-            maxSockets: 10
-        });
-
-        // Note: Cache cleanup is done on-demand in getCached/setCache
-        // setInterval is not allowed in Cloudflare Workers global scope
     }
 
     // ============ CACHING ============
@@ -210,14 +178,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
-    private cleanupCache(): void {
-        const now = Date.now();
-        for (const [key, value] of this.cache.entries()) {
-            if (value.expires < now) this.cache.delete(key);
-        }
-    }
-
-    // ============ API REQUEST WITH FALLBACK ============
+    // ============ NATIVE FETCH API REQUEST WITH FALLBACK ============
 
     private async apiRequest<T>(path: string, params?: Record<string, unknown>, options?: SourceRequestOptions): Promise<T> {
         let lastError: Error | null = null;
@@ -228,24 +189,48 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
             const apiUrl = this.apiInstances[apiIndex];
 
             try {
-                const response = await axios.get<HiAnimeAPIResponse>(`${apiUrl}/api/v2/hianime${path}`, {
-                    params,
-                    timeout: options?.timeout || 15000,
-                    signal: options?.signal,
+                // Build URL with query params
+                const url = new URL(`${apiUrl}/api/v2/hianime${path}`);
+                if (params) {
+                    Object.entries(params).forEach(([key, value]) => {
+                        if (value !== undefined && value !== null) {
+                            url.searchParams.set(key, String(value));
+                        }
+                    });
+                }
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), options?.timeout || 15000);
+
+                // Combine signals if provided
+                if (options?.signal) {
+                    options.signal.addEventListener('abort', () => controller.abort());
+                }
+
+                const response = await fetch(url.toString(), {
+                    method: 'GET',
                     headers: {
                         'Accept': 'application/json',
                         'User-Agent': 'AniStreamHub/1.0'
-                    }
+                    },
+                    signal: controller.signal
                 });
 
-                const isSuccess = response.data?.success === true || response.data?.status === 200;
+                clearTimeout(timeoutId);
+
+                if (!response.ok) {
+                    throw new Error(`API returned status: ${response.status}`);
+                }
+
+                const data = await response.json() as HiAnimeAPIResponse;
+                const isSuccess = data?.success === true || data?.status === 200;
 
                 if (isSuccess) {
                     // Update current API index to this working one
                     this.currentApiIndex = apiIndex;
-                    return (response.data.data || response.data) as T;
+                    return (data.data || data) as T;
                 }
-                throw new Error(`API returned success: false or status: ${response.data?.status}`);
+                throw new Error(`API returned success: false or status: ${data?.status}`);
             } catch (error) {
                 if (error instanceof Error && (error.name === 'AbortError' || error.message === 'Aborted')) throw error;
                 const err = error as Error;
@@ -324,6 +309,16 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         return 'Completed';
     }
 
+    private normalizeQuality(quality: string): VideoSource['quality'] {
+        if (!quality) return 'auto';
+        const q = quality.toLowerCase();
+        if (q.includes('1080') || q.includes('fhd')) return '1080p';
+        if (q.includes('720') || q.includes('hd')) return '720p';
+        if (q.includes('480') || q.includes('sd')) return '480p';
+        if (q.includes('360')) return '360p';
+        return 'auto';
+    }
+
     // ============ API METHODS ============
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
@@ -372,14 +367,13 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         try {
             const animeId = id.replace('hianime-', '');
             const data = await this.apiRequest<AnimeDetailResponse>(`/anime/${animeId}`, {}, options);
-            // Handle nested structure
+            
             const animeInfo = (typeof data.anime === 'object' && 'info' in data.anime)
                 ? data.anime.info
                 : data.anime || data as unknown as AnimeInfoRaw;
 
             const anime = this.mapAnime(animeInfo as AnimeInfoRaw);
 
-            // Merge in moreInfo if available
             if (typeof data.anime === 'object' && 'moreInfo' in data.anime && data.anime.moreInfo) {
                 anime.genres = data.anime.moreInfo.genres || anime.genres;
                 anime.studios = data.anime.moreInfo.studios ? [data.anime.moreInfo.studios] : anime.studios;
@@ -409,7 +403,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
                 title: ep.title || `Episode ${ep.number || 1}`,
                 isFiller: ep.isFiller || false,
                 hasSub: true,
-                hasDub: true, // Will be determined by server response
+                hasDub: true,
                 thumbnail: undefined
             }));
 
@@ -421,71 +415,38 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    /**
-     * Get streaming servers for an episode
-     */
     async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         const cacheKey = `servers:${episodeId}`;
         const cached = this.getCached<EpisodeServer[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            // episodeId is already in full format "anime-id?ep=number"
-            const apiUrl = this.apiInstances[this.currentApiIndex];
-
             let servers: EpisodeServer[] = [];
 
-            if (apiUrl.includes('chi.vercel.app')) {
-                // Use new ZEN API structure
-                try {
-                    const response = await axios.get<ChiServersResponse>(`${apiUrl}/api/stream`, {
-                        params: { id: episodeId, server: 'hd-1', type: 'sub' },
-                        timeout: options?.timeout || 15000,
-                        signal: options?.signal
+            try {
+                const data = await this.apiRequest<ServersResponse>('/episode/servers', { animeEpisodeId: episodeId }, options);
+                if (data.sub) {
+                    data.sub.forEach((s) => {
+                        servers.push({ name: s.serverName || 'unknown', url: '', type: 'sub' });
                     });
-
-                    if (response.data?.success && response.data.results?.servers) {
-                        servers = response.data.results.servers.map((s) => ({
-                            name: s.server_name || s.name || 'unknown',
-                            url: '',
-                            type: s.type || 'sub'
-                        }));
-                    }
-                } catch (e) {
-                    if (e instanceof Error && (e.name === 'AbortError' || e.message === 'Aborted')) throw e;
-                    logger.warn('CHI API /api/stream failed for servers', undefined, this.name);
                 }
-            }
-
-            // Try legacy endpoint if chi failed or not chi instance
-            if (servers.length === 0) {
-                try {
-                    const data = await this.apiRequest<ServersResponse>('/episode/servers', { animeEpisodeId: episodeId }, options);
-                    if (data.sub) {
-                        data.sub.forEach((s) => {
-                            servers.push({ name: s.serverName || 'unknown', url: '', type: 'sub' });
-                        });
-                    }
-                    if (data.dub) {
-                        data.dub.forEach((s) => {
-                            servers.push({ name: s.serverName || 'unknown', url: '', type: 'dub' });
-                        });
-                    }
-                } catch (e) {
-                    if (e instanceof Error && (e.name === 'AbortError' || e.message === 'Aborted')) throw e;
-                    logger.warn('Legacy /episode/servers endpoint failed', undefined, this.name);
+                if (data.dub) {
+                    data.dub.forEach((s) => {
+                        servers.push({ name: s.serverName || 'unknown', url: '', type: 'dub' });
+                    });
                 }
+            } catch (e) {
+                if (e instanceof Error && (e.name === 'AbortError' || e.message === 'Aborted')) throw e;
+                logger.warn('/episode/servers endpoint failed', undefined, this.name);
             }
 
             if (servers.length === 0) {
-                // Fallback defaults
                 servers = [
                     { name: 'hd-2', url: '', type: 'sub' },
                     { name: 'hd-1', url: '', type: 'sub' }
                 ];
             }
 
-            // Sort servers to prioritize hd-2
             servers.sort((a, b) => {
                 if (a.name === 'hd-2') return -1;
                 if (b.name === 'hd-2') return 1;
@@ -503,113 +464,63 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    /**
-     * Get HD streaming links for an episode
-     */
     async getStreamingLinks(episodeId: string, server: string = 'hd-2', category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         const cacheKey = `stream:${episodeId}:${server}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
 
-        try {
-            const apiUrl = this.apiInstances[this.currentApiIndex];
-            let streamData: StreamingData = { sources: [], subtitles: [] };
+        logger.info(`[${this.name}] Getting streaming links for ${episodeId} (server: ${server}, category: ${category})`);
 
-            // If we're on the chi.vercel.app instance, prefer its /api/stream endpoint
-            if (apiUrl.includes('chi.vercel.app')) {
-                try {
-                    const response = await axios.get<ChiStreamResponse>(`${apiUrl}/api/stream`, {
-                        params: { id: episodeId, server, type: category },
-                        timeout: options?.timeout || 15000,
-                        signal: options?.signal
-                    });
+        // Try servers in priority order
+        const serversToTry = [server, 'hd-2', 'hd-1', 'hd-3'].filter((s, i, arr) => arr.indexOf(s) === i);
 
-                    if (response.data?.success && response.data?.results) {
-                        const results = response.data.results;
-                        streamData = {
-                            sources: (results.sources || []).map((s): VideoSource => ({
-                                url: s.url,
-                                quality: this.normalizeQuality(s.quality || s.label || 'auto'),
-                                isM3U8: s.isM3U8 || (typeof s.url === 'string' && s.url.includes('.m3u8')),
-                                isDASH: typeof s.url === 'string' && s.url.includes('.mpd'),
-                            })),
-                            subtitles: (results.subtitles || []).map((sub) => ({
-                                url: sub.url,
-                                lang: sub.lang || sub.language || 'Unknown',
-                                label: sub.label || sub.lang || sub.language
-                            })),
-                            headers: results.headers,
-                            intro: results.intro,
-                            outro: results.outro,
-                            source: this.name
-                        };
+        for (const currentServer of serversToTry) {
+            try {
+                const data = await this.apiRequest<StreamSourcesResponse>('/episode/sources', {
+                    animeEpisodeId: episodeId,
+                    server: currentServer,
+                    category
+                }, options);
 
-                        // Sort sources by quality (highest first)
-                        if (streamData.sources.length > 1) {
-                            streamData.sources.sort((a, b) => {
-                                const order: Record<string, number> = { '1080p': 0, '720p': 1, '480p': 2, '360p': 3, 'auto': 4, 'default': 5 };
-                                return (order[a.quality] || 5) - (order[b.quality] || 5);
-                            });
-                        }
+                if (data.sources && data.sources.length > 0) {
+                    const streamData: StreamingData = {
+                        sources: data.sources.map((s): VideoSource => ({
+                            url: s.url,
+                            quality: this.normalizeQuality(s.quality || 'auto'),
+                            isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
+                            isDASH: s.url?.includes('.mpd'),
+                        })),
+                        subtitles: (data.subtitles || []).map((sub) => ({
+                            url: sub.url,
+                            lang: sub.lang || 'Unknown',
+                            label: sub.lang || 'Unknown'
+                        })),
+                        headers: data.headers,
+                        intro: data.intro,
+                        outro: data.outro,
+                        source: this.name
+                    };
 
-                        this.setCache(cacheKey, streamData, this.cacheTTL.stream);
-                        return streamData;
+                    if (streamData.sources.length > 1) {
+                        streamData.sources.sort((a, b) => {
+                            const order: Record<string, number> = { '1080p': 0, '720p': 1, '480p': 2, '360p': 3, 'auto': 4, 'default': 5 };
+                            return (order[a.quality] || 5) - (order[b.quality] || 5);
+                        });
                     }
-                } catch (e) {
-                    if (e instanceof Error && (e.name === 'AbortError' || e.message === 'Aborted')) throw e;
-                    logger.warn(`CHI /api/stream failed, falling back to legacy endpoints`, undefined, this.name);
+
+                    logger.info(`[${this.name}] ✅ Found ${streamData.sources.length} sources from server ${currentServer}`);
+                    this.setCache(cacheKey, streamData, this.cacheTTL.stream);
+                    return streamData;
                 }
+            } catch (error) {
+                if (error instanceof Error && (error.name === 'AbortError' || error.message === 'Aborted')) throw error;
+                logger.warn(`[${this.name}] Server ${currentServer} failed: ${(error as Error).message}`);
+                continue;
             }
-
-            // Try standard endpoint structure (for legacy instances or if chi failed)
-            const data = await this.apiRequest<StreamSourcesResponse>('/episode/sources', {
-                animeEpisodeId: episodeId,
-                server,
-                category
-            }, options);
-
-            streamData = {
-                sources: (data.sources || []).map((s): VideoSource => ({
-                    url: s.url,
-                    quality: this.normalizeQuality(s.quality || 'auto'),
-                    isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-                    isDASH: s.url?.includes('.mpd'),
-                })),
-                subtitles: (data.subtitles || []).map((sub) => ({
-                    url: sub.url,
-                    lang: sub.lang || 'Unknown',
-                    label: sub.lang || 'Unknown'
-                })),
-                headers: data.headers,
-                intro: data.intro,
-                outro: data.outro,
-                source: this.name
-            };
-
-            // Sort sources by quality (highest first) if multiple sources available
-            if (streamData.sources.length > 1) {
-                streamData.sources.sort((a, b) => {
-                    const order: Record<string, number> = { '1080p': 0, '720p': 1, '480p': 2, '360p': 3, 'auto': 4, 'default': 5 };
-                    return (order[a.quality] || 5) - (order[b.quality] || 5);
-                });
-            }
-
-            this.setCache(cacheKey, streamData, this.cacheTTL.stream);
-            return streamData;
-        } catch (error) {
-            this.handleError(error, 'getStreamingLinks');
-            return { sources: [], subtitles: [] };
         }
-    }
 
-    private normalizeQuality(quality: string): VideoSource['quality'] {
-        if (!quality) return 'auto';
-        const q = quality.toLowerCase();
-        if (q.includes('1080') || q.includes('fhd')) return '1080p';
-        if (q.includes('720') || q.includes('hd')) return '720p';
-        if (q.includes('480') || q.includes('sd')) return '480p';
-        if (q.includes('360')) return '360p';
-        return 'auto';
+        logger.warn(`[${this.name}] All servers failed for ${episodeId}`);
+        return { sources: [], subtitles: [] };
     }
 
     async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
@@ -619,8 +530,6 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
 
         try {
             const data = await this.apiRequest<HomeResponse>('/home', {}, options);
-
-            // Get trending animes from home page
             const trending = data.trendingAnimes || data.spotlightAnimes || [];
             const results = trending.map((a) => this.mapAnimeFromSearch(a));
 
@@ -639,8 +548,6 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
 
         try {
             const data = await this.apiRequest<HomeResponse>('/home', {}, options);
-
-            // Get latest episode animes from home page
             const latest = data.latestEpisodeAnimes || [];
             const results = latest.map((a) => this.mapAnimeFromSearch(a));
 
@@ -659,8 +566,6 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
 
         try {
             const data = await this.apiRequest<HomeResponse>('/home', {}, options);
-
-            // Get top 10 animes from home page
             const topAnimes = data.top10Animes?.today || data.top10Animes?.week || [];
             const results = topAnimes.slice(0, limit).map((a, i) => ({
                 rank: a.rank || ((page - 1) * limit + i + 1),
@@ -675,9 +580,6 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    /**
-     * Get popular animes
-     */
     async getPopular(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `popular:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
@@ -695,9 +597,6 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         }
     }
 
-    /**
-     * Get top airing animes
-     */
     async getTopAiring(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         const cacheKey = `topAiring:${page}`;
         const cached = this.getCached<AnimeBase[]>(cacheKey);
@@ -742,7 +641,6 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     }
 
     async getGenres(): Promise<string[]> {
-        // Return standard HiAnime genres
         return [
             "Action", "Adventure", "Cars", "Comedy", "Dementia", "Demons", "Drama", "Ecchi",
             "Fantasy", "Game", "Harem", "Historical", "Horror", "Isekai", "Josei", "Kids",

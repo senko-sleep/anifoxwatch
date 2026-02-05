@@ -1,4 +1,5 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
+import { getApiConfig } from './api-config';
 
 interface BrowseFilters {
     type?: string;
@@ -13,9 +14,8 @@ interface BrowseFilters {
     mode?: 'safe' | 'mixed' | 'adult';
 }
 
-// Use different API URLs based on environment
-const API_BASE_URL = import.meta.env.VITE_API_URL ||
-    (import.meta.env.DEV ? 'http://localhost:3001' : '/api');
+// Use API configuration from api-config.ts
+const API_BASE_URL = getApiConfig().baseUrl;
 
 // Streaming types
 export interface VideoSource {
