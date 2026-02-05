@@ -200,12 +200,11 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
 
     // CORS preflight
     app.options('/proxy', (c) => {
-        return c.text('', 204, {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type, Range, Origin, Accept',
-            'Access-Control-Max-Age': '86400'
-        });
+        c.header('Access-Control-Allow-Origin', '*');
+        c.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        c.header('Access-Control-Allow-Headers', 'Range, Origin, Accept, Content-Type');
+        c.header('Access-Control-Max-Age', '86400');
+        return c.body(null, 204);
     });
 
     return app;

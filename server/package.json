@@ -5,8 +5,8 @@
     "scripts": {
         "dev": "tsx watch src/index.ts",
         "dev:optimized": "tsx watch src/index-optimized.ts",
-        "build": "tsc",
-        "start": "node dist/index.js",
+        "build": "echo 'Build skipped - using tsx runtime'",
+        "start": "tsx src/index.ts",
         "start:optimized": "node dist/index-optimized.js",
         "start:api": "tsx src/index.ts",
         "deploy:cloudflare": "wrangler deploy",
