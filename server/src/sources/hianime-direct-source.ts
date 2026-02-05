@@ -170,10 +170,17 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                 source: this.name
             };
 
+            if (!result.results || result.results.length === 0) {
+                logger.warn(`Direct search returned no results for query "${query}"`, { query, page }, this.name);
+            } else {
+                logger.info(`Direct search returned ${result.results.length} results for query "${query}"`, { query, page, count: result.results.length }, this.name);
+            }
+
             this.setCache(cacheKey, result, this.cacheTTL.search);
             return result;
         } catch (error) {
             this.handleError(error, 'search');
+            logger.warn(`Direct search failed for query "${query}", returning empty results`, { query, page }, this.name);
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
         }
     }

@@ -16,11 +16,6 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
 
     return (
         <div className="space-y-4 animate-fade-in">
-            <div className="flex items-center gap-2 mb-2">
-                <Clock className="w-5 h-5 text-fox-orange" />
-                <h2 className="text-xl font-bold">Continue Watching</h2>
-            </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {items.map((item) => (
                     <div key={item.animeId} className="group relative flex gap-4 p-3 rounded-xl bg-fox-surface/40 hover:bg-fox-surface/60 transition-colors border border-white/5">

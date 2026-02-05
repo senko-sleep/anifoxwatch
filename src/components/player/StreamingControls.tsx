@@ -22,9 +22,11 @@ import {
   Server, 
   Zap,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Globe
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ProviderSelector } from '@/components/shared/ProviderSelector';
 
 interface EpisodeServer {
   name: string;
@@ -50,6 +52,9 @@ interface StreamingControlsProps {
   currentSource?: string;
   hasDub?: boolean;
   hasSub?: boolean;
+  selectedProvider?: string;
+  onProviderChange?: (provider: string) => void;
+  showProviderSelector?: boolean;
 }
 
 const qualityLabels: Record<QualityType, string> = {
@@ -74,7 +79,10 @@ export function StreamingControls({
   onAutoPlayChange,
   currentSource,
   hasDub = false,
-  hasSub = true
+  hasSub = true,
+  selectedProvider = 'HiAnimeDirect',
+  onProviderChange,
+  showProviderSelector = true
 }: StreamingControlsProps) {
   // Get unique qualities
   const qualities: QualityType[] = ['auto', '1080p', '720p', '480p', '360p'].filter(q => 
@@ -210,6 +218,18 @@ export function StreamingControls({
           onCheckedChange={onAutoPlayChange}
         />
       </div>
+
+      {/* Provider Selector */}
+      {showProviderSelector && onProviderChange && (
+        <div className="pt-2 border-t border-border/30">
+          <ProviderSelector
+            selectedProvider={selectedProvider}
+            onProviderChange={onProviderChange}
+            showHealthStatus={true}
+            compact={false}
+          />
+        </div>
+      )}
 
       {/* Current Source Info */}
       {currentSource && (

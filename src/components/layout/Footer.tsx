@@ -50,8 +50,8 @@ export const Footer = () => {
             <h4 className="font-semibold mb-4">Resources</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li><Link to="/docs" className="hover:text-fox-orange transition-colors">API Docs</Link></li>
-              <li><a href="#" className="hover:text-fox-orange transition-colors">Status</a></li>
-              <li><a href="#" className="hover:text-fox-orange transition-colors">Changelog</a></li>
+              <li><Link to="/status" className="hover:text-fox-orange transition-colors">System Status</Link></li>
+              <li><Link to="/schedule" className="hover:text-fox-orange transition-colors">Airing Schedule</Link></li>
               <li><a href="#" className="hover:text-fox-orange transition-colors">Support</a></li>
             </ul>
           </div>

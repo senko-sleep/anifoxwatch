@@ -14,11 +14,11 @@ interface CircuitBreakerState {
 // Circuit Breaker configuration per source
 const circuitBreakers = new Map<string, CircuitBreakerState>();
 
-// Default circuit breaker settings
+// Default circuit breaker settings - optimized for speed
 const DEFAULT_CIRCUIT_SETTINGS = {
-    maxFailures: 5,
-    resetTime: 30000, // 30 seconds
-    timeout: 15000 // 15 second timeout
+    maxFailures: 3, // Reduced from 5 to 3 for faster circuit breaking
+    resetTime: 20000, // Reduced from 30s to 20s for faster recovery
+    timeout: 8000 // Reduced from 15s to 8s for instant feedback
 };
 
 // Get or create circuit breaker for a source
@@ -208,8 +208,8 @@ export async function reliableRequest<T>(
     } = {}
 ): Promise<T> {
     const {
-        maxAttempts = DEFAULT_CIRCUIT_SETTINGS.maxFailures,
-        timeout = DEFAULT_CIRCUIT_SETTINGS.timeout,
+        maxAttempts = 1, // Changed from 5 to 1 - NO RETRIES for instant feedback
+        timeout = 8000, // Reduced from 15s to 8s for faster failures
         retryDelay = 1000,
         context: extraContext = {},
         signal: parentSignal
@@ -223,21 +223,16 @@ export async function reliableRequest<T>(
     };
 
     try {
-        return await retry(
-            (attemptSignal) => withCircuitBreaker(
-                sourceName,
-                () => withTimeout(
-                    (timeoutSignal) => fn(timeoutSignal),
-                    timeout,
-                    requestContext,
-                    attemptSignal
-                ),
-                requestContext
+        // NO RETRIES - just timeout and circuit breaker
+        return await withCircuitBreaker(
+            sourceName,
+            () => withTimeout(
+                (timeoutSignal) => fn(timeoutSignal),
+                timeout,
+                requestContext,
+                parentSignal
             ),
-            maxAttempts,
-            retryDelay,
-            requestContext,
-            parentSignal
+            requestContext
         );
     } catch (error) {
         logger.error(

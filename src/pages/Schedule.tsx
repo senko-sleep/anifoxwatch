@@ -5,6 +5,8 @@ import { Footer } from '@/components/layout/Footer';
 import { useSchedule } from '@/hooks/useAnime';
 import { ScheduleItem } from '@/lib/api-client';
 import { Link } from 'react-router-dom';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
 import {
     ChevronLeft,
     ChevronRight,
@@ -13,21 +15,41 @@ import {
     Clock,
     Calendar,
     Loader2,
-    AlertCircle
+    AlertCircle,
+    Search,
+    X,
+    Tv,
+    Film,
+    LayoutGrid,
+    List,
+    RefreshCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 // Day of week mapping
 const DAYS_OF_WEEK = [
-    { key: 'monday', label: 'Mon', full: 'Monday' },
-    { key: 'tuesday', label: 'Tue', full: 'Tuesday' },
-    { key: 'wednesday', label: 'Wed', full: 'Wednesday' },
-    { key: 'thursday', label: 'Thu', full: 'Thursday' },
-    { key: 'friday', label: 'Fri', full: 'Friday' },
-    { key: 'saturday', label: 'Sat', full: 'Saturday' },
-    { key: 'sunday', label: 'Sun', full: 'Sunday' }
+    { key: 'monday', label: 'Mon', full: 'Monday', short: 'M' },
+    { key: 'tuesday', label: 'Tue', full: 'Tuesday', short: 'T' },
+    { key: 'wednesday', label: 'Wed', full: 'Wednesday', short: 'W' },
+    { key: 'thursday', label: 'Thu', full: 'Thursday', short: 'T' },
+    { key: 'friday', label: 'Fri', full: 'Friday', short: 'F' },
+    { key: 'saturday', label: 'Sat', full: 'Saturday', short: 'S' },
+    { key: 'sunday', label: 'Sun', full: 'Sunday', short: 'S' }
 ];
+
+const FORMAT_FILTERS = ['all', 'TV', 'TV_SHORT', 'MOVIE', 'ONA', 'OVA'];
+
+function getDateForDay(dayKey: string): string {
+    const today = new Date();
+    const currentDayIndex = today.getDay();
+    const targetDayIndex = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'].indexOf(dayKey);
+    let diff = targetDayIndex - currentDayIndex;
+    if (diff < 0) diff += 7;
+    const targetDate = new Date(today);
+    targetDate.setDate(today.getDate() + diff);
+    return targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 // Get current day key
 function getCurrentDayKey(): string {
@@ -74,6 +96,9 @@ export const Schedule = () => {
     const [selectedDay, setSelectedDay] = useState<string>(
         searchParams.get('day') || getCurrentDayKey()
     );
+    const [searchQuery, setSearchQuery] = useState('');
+    const [formatFilter, setFormatFilter] = useState('all');
+    const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
     const [reminders, setReminders] = useState<ReminderSettings>({});
     const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
 
@@ -96,30 +121,40 @@ export const Schedule = () => {
         }
     }, []);
 
-    // Check for upcoming episodes every minute
-    useEffect(() => {
-        const checkReminders = () => {
-            const now = Date.now() / 1000;
-            Object.entries(reminders).forEach(([showId, episodes]) => {
-                episodes.forEach(episode => {
-                    // This would need to be connected to actual schedule data
-                    // For now, this is a placeholder for the notification logic
-                });
-            });
-        };
-
-        const interval = setInterval(checkReminders, 60000);
-        return () => clearInterval(interval);
-    }, [reminders]);
-
     // Fetch schedule data
     const { data: scheduleData, isLoading, error, refetch } = useSchedule();
 
-    // Get anime for selected day
-    const selectedDayAnime = useMemo(() => {
+    // Get anime for selected day with filters applied
+    const filteredAnime = useMemo(() => {
         if (!scheduleData?.groupedByDay) return [];
-        return scheduleData.groupedByDay[selectedDay] || [];
-    }, [scheduleData, selectedDay]);
+        let anime = scheduleData.groupedByDay[selectedDay] || [];
+        
+        // Apply search filter
+        if (searchQuery.trim()) {
+            const query = searchQuery.toLowerCase();
+            anime = anime.filter(item => 
+                item.title.toLowerCase().includes(query) ||
+                item.media.genres.some(g => g.toLowerCase().includes(query))
+            );
+        }
+        
+        // Apply format filter
+        if (formatFilter !== 'all') {
+            anime = anime.filter(item => item.media.format === formatFilter);
+        }
+        
+        // Sort by air time
+        return [...anime].sort((a, b) => a.airingAt - b.airingAt);
+    }, [scheduleData, selectedDay, searchQuery, formatFilter]);
+
+    // Stats for the day
+    const dayStats = useMemo(() => {
+        const allAnime = scheduleData?.groupedByDay?.[selectedDay] || [];
+        return {
+            total: allAnime.length,
+            filtered: filteredAnime.length,
+        };
+    }, [scheduleData, selectedDay, filteredAnime]);
 
     // Handle day navigation
     const handleDayChange = (day: string) => {
@@ -239,7 +274,7 @@ export const Schedule = () => {
                             Try Again
                         </Button>
                     </div>
-                ) : selectedDayAnime.length === 0 ? (
+                 ) : filteredAnime.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
                         <Calendar className="w-12 h-12 text-muted-foreground mb-4" />
                         <h3 className="text-lg font-semibold mb-2">No anime airing</h3>
@@ -250,7 +285,7 @@ export const Schedule = () => {
                 ) : (
                     <div className="space-y-4">
                         {/* Schedule List */}
-                        {selectedDayAnime.map((item) => {
+                        {filteredAnime.map((item) => {
                             const hasReminder = reminders[item.id.toString()]?.includes(item.episode);
 
                             return (

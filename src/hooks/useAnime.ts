@@ -192,6 +192,26 @@ export function useSeasonal(year?: number, season?: string, page: number = 1, en
     });
 }
 
+export function usePopular(page: number = 1, enabled: boolean = true) {
+    return useQuery<Anime[], Error>({
+        queryKey: ['popular', page],
+        queryFn: () => apiClient.getTrending(page), // Popular uses trending endpoint
+        enabled,
+        staleTime: 10 * 60 * 1000,
+        gcTime: 30 * 60 * 1000,
+    });
+}
+
+export function useUpcoming(page: number = 1, enabled: boolean = true) {
+    return useQuery<AnimeSearchResult, Error>({
+        queryKey: ['upcoming', page],
+        queryFn: () => apiClient.browseAnime({ status: 'upcoming', sort: 'popularity' }, page),
+        enabled,
+        staleTime: 30 * 60 * 1000,
+        gcTime: 60 * 60 * 1000,
+    });
+}
+
 // ============ STREAMING HOOKS ============
 
 export function useEpisodeServers(episodeId: string, enabled: boolean = true) {

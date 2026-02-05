@@ -161,12 +161,12 @@ const startServer = (port: number) => {
 ║   Port: ${port} ${isProduction ? '(Production)' : '(Local)'}                 ║
 ║                                                                  ║
 ║   📡 Streaming Sources (Priority Order):                         ║
-║   • 9Anime - Primary, HD Sub/Dub (Most Reliable)                 ║
-║   • Aniwave - Backup, HD Sub/Dub                                 ║
-║   • Aniwatch (HiAnime) - Fallback, Sub/Dub                       ║
+║   • HiAnimeDirect - Primary, HD Sub/Dub (Most Reliable)          ║
+║   • HiAnime - Backup, HD Sub/Dub                                 ║
 ║   • Gogoanime - Fallback, Sub/Dub                                ║
+║   • 9Anime - Fallback, HD Sub/Dub                                ║
+║   • + 24 more backup sources for failover                        ║
 ║   • Consumet - Multi-provider aggregator                         ║
-║   • Jikan - MAL metadata fallback                                ║
 ║                                                                  ║
 ║   ⚡ Features:                                                    ║
 ║   • Real-time streaming URLs                                     ║

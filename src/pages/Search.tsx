@@ -107,17 +107,36 @@ const YEAR_RANGES = [
 const FilterSection = ({
   title,
   children,
-  className
+  className,
+  collapsible = false,
+  defaultOpen = true
 }: {
   title: string;
   children: React.ReactNode;
   className?: string;
-}) => (
-  <div className={cn("space-y-3", className)}>
-    <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{title}</h3>
-    {children}
-  </div>
-);
+  collapsible?: boolean;
+  defaultOpen?: boolean;
+}) => {
+  const [isOpen, setIsOpen] = React.useState(defaultOpen);
+  
+  return (
+    <div className={cn("space-y-3", className)}>
+      <button 
+        onClick={() => collapsible && setIsOpen(!isOpen)}
+        className={cn(
+          "flex items-center justify-between w-full text-left",
+          collapsible && "cursor-pointer hover:text-fox-orange transition-colors"
+        )}
+      >
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{title}</h3>
+        {collapsible && (
+          <ChevronRight className={cn("w-4 h-4 text-muted-foreground transition-transform", isOpen && "rotate-90")} />
+        )}
+      </button>
+      {(!collapsible || isOpen) && children}
+    </div>
+  );
+};
 
 const Search = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -322,12 +341,41 @@ const Search = () => {
   const isFetching = hasSearchQuery ? searchFetching : browseFetching;
   const error = hasSearchQuery ? searchError : browseError;
 
-  // Process data
+  // Deduplicate results by normalizing titles
+  const normalizeTitle = (title: string): string => {
+    return title
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .replace(/season\d+/g, '')
+      .replace(/part\d+/g, '')
+      .trim();
+  };
+
+  // Process data with deduplication
   const processedData = useMemo(() => {
     const rawData = hasSearchQuery ? searchData : browseData;
     if (!rawData) return { results: [], totalPages: 0, totalResults: 0, hasNextPage: false };
 
     let results = [...(rawData.results || [])];
+
+    // Deduplicate by normalized title - keep the one with more info (higher rating, more episodes)
+    const seen = new Map<string, typeof results[0]>();
+    for (const anime of results) {
+      const key = normalizeTitle(anime.title || '');
+      const existing = seen.get(key);
+      
+      if (!existing) {
+        seen.set(key, anime);
+      } else {
+        // Keep the one with better data
+        const existingScore = (existing.rating || 0) + (existing.episodes || 0) + (existing.image ? 10 : 0);
+        const newScore = (anime.rating || 0) + (anime.episodes || 0) + (anime.image ? 10 : 0);
+        if (newScore > existingScore) {
+          seen.set(key, anime);
+        }
+      }
+    }
+    results = Array.from(seen.values());
 
     // Client-side sort for search results only
     if (hasSearchQuery) {
@@ -397,70 +445,113 @@ const Search = () => {
     setShuffleBypass(prev => prev + 1);
   };
 
-  const FiltersContent = () => (
-    <div className="space-y-8 p-1">
-      <FilterSection title="Status">
-        <Select value={statusFilter} onValueChange={(v: StatusFilter) => { setStatusFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-full bg-secondary/50 border-white/10">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="Ongoing">Ongoing</SelectItem>
-            <SelectItem value="Completed">Completed</SelectItem>
-            <SelectItem value="Upcoming">Upcoming</SelectItem>
-          </SelectContent>
-        </Select>
-      </FilterSection>
+  const FiltersContent = () => {
+    // Popular genres shown first
+    const popularGenres = mode === 'adult' 
+      ? ['Hentai', 'Ecchi', 'Uncensored', 'MILF', 'Romance', 'School Girls', 'Vanilla']
+      : ['Action', 'Romance', 'Comedy', 'Fantasy', 'Slice of Life', 'Supernatural', 'Drama'];
+    
+    let allGenres = SAFE_GENRES;
+    if (mode === 'adult') allGenres = ADULT_GENRES;
+    else if (mode === 'mixed') allGenres = MIXED_GENRES;
+    
+    const otherGenres = allGenres.filter(g => !popularGenres.includes(g));
 
-      <FilterSection title="Format">
-        <div className="grid grid-cols-2 gap-2">
-          {['TV', 'Movie', 'OVA', 'ONA', 'Special'].map((t) => (
-            <Button
-              key={t}
-              variant={typeFilter === t ? "default" : "outline"}
-              size="sm"
-              onClick={() => { setTypeFilter(typeFilter === t ? 'all' : t as TypeFilter); setPage(1); }}
-              className={cn("w-full justify-start", typeFilter === t ? "bg-fox-orange hover:bg-fox-orange/90" : "bg-transparent")}
-            >
-              {t}
-            </Button>
-          ))}
-        </div>
-      </FilterSection>
-
-      <FilterSection title="Release Year">
-        <Select value={String(selectedYearRange)} onValueChange={(v) => { setSelectedYearRange(Number(v)); setPage(1); }}>
-          <SelectTrigger className="w-full bg-secondary/50 border-white/10">
-            <SelectValue placeholder="Year" />
-          </SelectTrigger>
-          <SelectContent>
-            {YEAR_RANGES.map((range, i) => (
-              <SelectItem key={i} value={String(i)}>{range.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </FilterSection>
-
-
-
-      <FilterSection title="Genres">
-        <ScrollArea className="h-[300px] pr-4">
+    return (
+      <div className="space-y-6 p-1">
+        {/* Format Type */}
+        <FilterSection title="Format">
           <div className="flex flex-wrap gap-2">
-            {(() => {
-              let genresToDisplay = SAFE_GENRES;
-              if (mode === 'adult') {
-                genresToDisplay = ADULT_GENRES;
-              } else if (mode === 'mixed') {
-                genresToDisplay = MIXED_GENRES;
-              }
-              return genresToDisplay.map((g) => (
+            {[
+              { id: 'TV', label: 'TV Series' },
+              { id: 'Movie', label: 'Movie' },
+              { id: 'OVA', label: 'OVA' },
+              { id: 'ONA', label: 'ONA' },
+              { id: 'Special', label: 'Special' }
+            ].map((t) => (
+              <Button
+                key={t.id}
+                variant={typeFilter === t.id ? "default" : "outline"}
+                size="sm"
+                onClick={() => { setTypeFilter(typeFilter === t.id ? 'all' : t.id as TypeFilter); setPage(1); }}
+                className={cn(
+                  "h-9 rounded-lg text-xs gap-1.5",
+                  typeFilter === t.id 
+                    ? "bg-fox-orange hover:bg-fox-orange/90 border-fox-orange" 
+                    : "bg-secondary/30 border-white/10 hover:border-fox-orange/50 hover:text-fox-orange"
+                )}
+              >
+                {t.label}
+              </Button>
+            ))}
+          </div>
+        </FilterSection>
+
+        {/* Status */}
+        <FilterSection title="Status">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: 'Ongoing', label: 'Airing', color: 'green' },
+              { id: 'Completed', label: 'Finished', color: 'blue' },
+              { id: 'Upcoming', label: 'Coming Soon', color: 'yellow' }
+            ].map((s) => (
+              <Button
+                key={s.id}
+                variant={statusFilter === s.id ? "default" : "outline"}
+                size="sm"
+                onClick={() => { setStatusFilter(statusFilter === s.id ? 'all' : s.id as StatusFilter); setPage(1); }}
+                className={cn(
+                  "h-9 rounded-lg text-xs",
+                  statusFilter === s.id 
+                    ? `bg-${s.color}-600 hover:bg-${s.color}-700` 
+                    : "bg-secondary/30 border-white/10 hover:border-white/30"
+                )}
+              >
+                {s.label}
+              </Button>
+            ))}
+          </div>
+        </FilterSection>
+
+        <Separator className="bg-white/5" />
+
+        {/* Popular Genres */}
+        <FilterSection title="Popular Genres">
+          <div className="flex flex-wrap gap-2">
+            {popularGenres.map((g) => (
+              <Badge
+                key={g}
+                variant={selectedGenres.includes(g) ? "default" : "outline"}
+                className={cn(
+                  "cursor-pointer transition-all text-xs py-1.5 px-3",
+                  selectedGenres.includes(g) 
+                    ? "bg-fox-orange text-white hover:bg-fox-orange/90 border-transparent shadow-lg shadow-fox-orange/20" 
+                    : "text-muted-foreground hover:text-white hover:border-fox-orange/50 bg-secondary/20"
+                )}
+                onClick={() => {
+                  setSelectedGenres(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
+                  setPage(1);
+                }}
+              >
+                {g}
+              </Badge>
+            ))}
+          </div>
+        </FilterSection>
+
+        {/* All Genres - Collapsible */}
+        <FilterSection title="All Genres" collapsible defaultOpen={false}>
+          <ScrollArea className="h-[250px] pr-4">
+            <div className="flex flex-wrap gap-1.5">
+              {otherGenres.map((g) => (
                 <Badge
                   key={g}
                   variant={selectedGenres.includes(g) ? "default" : "outline"}
                   className={cn(
-                    "cursor-pointer hover:bg-secondary/80 transition-colors",
-                    selectedGenres.includes(g) ? "bg-fox-orange text-white hover:bg-fox-orange/90 border-transparent" : "text-muted-foreground"
+                    "cursor-pointer transition-all text-xs py-1 px-2",
+                    selectedGenres.includes(g) 
+                      ? "bg-fox-orange text-white hover:bg-fox-orange/90 border-transparent" 
+                      : "text-muted-foreground/70 hover:text-white hover:border-white/30 bg-transparent border-white/10"
                   )}
                   onClick={() => {
                     setSelectedGenres(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
@@ -469,18 +560,54 @@ const Search = () => {
                 >
                   {g}
                 </Badge>
-              ));
-            })()}
-          </div>
-        </ScrollArea>
-      </FilterSection>
+              ))}
+            </div>
+          </ScrollArea>
+        </FilterSection>
 
-      <Button variant="outline" className="w-full" onClick={clearFilters}>
-        <X className="w-4 h-4 mr-2" />
-        Reset All and Search
-      </Button>
-    </div >
-  );
+        {/* Active Filters Summary */}
+        {(selectedGenres.length > 0 || typeFilter !== 'all' || statusFilter !== 'all' || selectedYearRange > 0) && (
+          <>
+            <Separator className="bg-white/5" />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Active Filters</span>
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="h-6 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2">
+                  Clear All
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {typeFilter !== 'all' && (
+                  <Badge className="bg-purple-600/20 text-purple-400 border-purple-600/30 text-xs">
+                    {typeFilter}
+                    <X className="w-3 h-3 ml-1 cursor-pointer" onClick={() => setTypeFilter('all')} />
+                  </Badge>
+                )}
+                {statusFilter !== 'all' && (
+                  <Badge className="bg-green-600/20 text-green-400 border-green-600/30 text-xs">
+                    {statusFilter}
+                    <X className="w-3 h-3 ml-1 cursor-pointer" onClick={() => setStatusFilter('all')} />
+                  </Badge>
+                )}
+                {selectedYearRange > 0 && (
+                  <Badge className="bg-blue-600/20 text-blue-400 border-blue-600/30 text-xs">
+                    {YEAR_RANGES[selectedYearRange].label}
+                    <X className="w-3 h-3 ml-1 cursor-pointer" onClick={() => setSelectedYearRange(0)} />
+                  </Badge>
+                )}
+                {selectedGenres.map(g => (
+                  <Badge key={g} className="bg-fox-orange/20 text-fox-orange border-fox-orange/30 text-xs">
+                    {g}
+                    <X className="w-3 h-3 ml-1 cursor-pointer" onClick={() => setSelectedGenres(prev => prev.filter(x => x !== g))} />
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-background font-sans text-foreground flex flex-col">

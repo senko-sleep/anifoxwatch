@@ -1,0 +1,125 @@
+{
+  "timestamp": "2026-02-05T15:20:29.358Z",
+  "apiBase": "http://localhost:3001",
+  "summary": {
+    "total": 11,
+    "passed": 6,
+    "failed": 5,
+    "successRate": 55,
+    "homePageWorking": true
+  },
+  "results": [
+    {
+      "section": "Trending Anime",
+      "endpoint": "/api/anime/trending",
+      "success": true,
+      "itemCount": 40,
+      "sampleItems": [
+        "One Piece",
+        "Jujutsu Kaisen: The Culling Game Part 1",
+        "Case Closed"
+      ],
+      "duration": 3557
+    },
+    {
+      "section": "Latest Episodes",
+      "endpoint": "/api/anime/latest",
+      "success": true,
+      "itemCount": 12,
+      "sampleItems": [
+        "MF Ghost Season 3",
+        "Sentenced to Be a Hero",
+        "BanG Dream-chan"
+      ],
+      "duration": 912
+    },
+    {
+      "section": "Top Rated",
+      "endpoint": "/api/anime/top-rated",
+      "success": true,
+      "itemCount": 10,
+      "sampleItems": [
+        "Jack-of-All-Trades, Party of None",
+        "Jujutsu Kaisen: The Culling Game Part 1",
+        "One Piece"
+      ],
+      "duration": 512
+    },
+    {
+      "section": "Popular This Season",
+      "endpoint": "/api/anime/trending",
+      "success": true,
+      "itemCount": 40,
+      "sampleItems": [
+        "One Piece",
+        "Jujutsu Kaisen: The Culling Game Part 1",
+        "Case Closed"
+      ],
+      "duration": 9
+    },
+    {
+      "section": "Recently Added",
+      "endpoint": "/api/anime/latest",
+      "success": true,
+      "itemCount": 12,
+      "sampleItems": [
+        "MF Ghost Season 3",
+        "Sentenced to Be a Hero",
+        "BanG Dream-chan"
+      ],
+      "duration": 10
+    },
+    {
+      "section": "Trending from HiAnimeDirect",
+      "endpoint": "/api/anime/trending",
+      "success": true,
+      "itemCount": 40,
+      "sampleItems": [
+        "One Piece",
+        "Jujutsu Kaisen: The Culling Game Part 1",
+        "Case Closed"
+      ],
+      "duration": 9
+    },
+    {
+      "section": "Trending from Zoro",
+      "endpoint": "/api/anime/trending",
+      "success": false,
+      "itemCount": 0,
+      "sampleItems": [],
+      "duration": 477
+    },
+    {
+      "section": "Trending from AnimePahe",
+      "endpoint": "/api/anime/trending",
+      "success": false,
+      "itemCount": 0,
+      "sampleItems": [],
+      "duration": 86
+    },
+    {
+      "section": "Trending from Gogoanime",
+      "endpoint": "/api/anime/trending",
+      "success": false,
+      "itemCount": 0,
+      "sampleItems": [],
+      "duration": 1415
+    },
+    {
+      "section": "API Health Check",
+      "endpoint": "/api/health",
+      "success": false,
+      "itemCount": 0,
+      "sampleItems": [],
+      "duration": 8
+    },
+    {
+      "section": "Available Sources",
+      "endpoint": "/api/sources",
+      "success": false,
+      "itemCount": 0,
+      "sampleItems": [],
+      "duration": 9
+    }
+  ]
+}

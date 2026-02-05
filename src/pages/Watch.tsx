@@ -367,6 +367,57 @@ const Watch = () => {
     );
   }
 
+  // Handle case with no episodes
+  if (!episodes || episodes.length === 0) {
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <Navbar />
+        <main className="flex-1 container py-8">
+          <div className="flex flex-col items-center justify-center py-20">
+            <AlertCircle className="w-16 h-16 text-yellow-500 mb-4" />
+            <h2 className="text-2xl font-bold mb-2">No Episodes Found</h2>
+            <p className="text-muted-foreground mb-6 text-center max-w-md">
+              We couldn't find any episodes for this anime. This might be because:
+              <br /><br />
+              • The anime is not yet released
+              <br />
+              • It's a new entry that hasn't been added to streaming sources
+              <br />
+              • The AniList entry needs to be linked to streaming sources
+            </p>
+            
+            <div className="flex flex-col gap-4 w-full max-w-md">
+              <Button 
+                onClick={() => navigate(`/browse?q=${encodeURIComponent(anime.title)}`)} 
+                variant="default"
+                className="bg-fox-orange hover:bg-fox-orange/90"
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Search for "{anime.title}"
+              </Button>
+              
+              {cleanAnimeId.startsWith('anilist-') && (
+                <a 
+                  href={`https://anilist.co/anime/${cleanAnimeId.replace('anilist-', '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-muted-foreground hover:text-fox-orange text-center"
+                >
+                  View on AniList ({cleanAnimeId})
+                </a>
+              )}
+              
+              <Button onClick={() => navigate('/')} variant="outline">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Home
+              </Button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   // Error state
   if (animeError || !anime) {
     return (
@@ -541,7 +592,22 @@ const Watch = () => {
                     )}
                   </h2>
                   <p className="text-sm text-muted-foreground mt-1">
-                    {anime.title}
+                    <a 
+                      href={`/browse?q=${encodeURIComponent(anime.title)}`}
+                      className="hover:text-fox-orange hover:underline transition-colors cursor-pointer"
+                      title={`Search for "${anime.title}" - ID: ${cleanAnimeId}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        navigate(`/browse?q=${encodeURIComponent(anime.title)}`);
+                      }}
+                    >
+                      {anime.title}
+                    </a>
+                    {cleanAnimeId.startsWith('anilist-') && (
+                      <span className="ml-2 text-xs text-yellow-500/70" title="This is an AniList ID - episodes may need to be resolved via search">
+                        (AniList)
+                      </span>
+                    )}
                   </p>
                 </div>
 

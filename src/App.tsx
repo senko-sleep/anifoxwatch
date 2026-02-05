@@ -11,8 +11,9 @@ import Docs from "./pages/Docs";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 
-// Lazy load the Schedule page for better performance
+// Lazy load pages for better performance
 const Schedule = lazy(() => import("./pages/Schedule"));
+const Status = lazy(() => import("./pages/Status"));
 
 const queryClient = new QueryClient();
 
@@ -48,6 +49,14 @@ const App = () => (
             }
           />
           <Route path="/browse" element={<Search />} />
+          <Route
+            path="/status"
+            element={
+              <Suspense fallback={<ScheduleLoader />}>
+                <Status />
+              </Suspense>
+            }
+          />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

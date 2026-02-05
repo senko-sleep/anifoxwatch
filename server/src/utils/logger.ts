@@ -1,12 +1,39 @@
 import chalk from 'chalk';
 
 export enum LogLevel {
-  DEBUG = 0,
-  INFO = 1,
-  WARN = 2,
-  ERROR = 3,
-  FATAL = 4
+  TRACE = 0,
+  DEBUG = 1,
+  INFO = 2,
+  WARN = 3,
+  ERROR = 4,
+  FATAL = 5
 }
+
+// Professional emoji indicators for different log types
+const LOG_ICONS = {
+  source: '📡',
+  stream: '🎬',
+  search: '🔍',
+  cache: '💾',
+  health: '💓',
+  failover: '🔄',
+  success: '✅',
+  error: '❌',
+  warning: '⚠️',
+  info: 'ℹ️',
+  performance: '⚡',
+  aggregation: '🔗',
+  request: '📥',
+  response: '📤',
+  startup: '🚀',
+  shutdown: '🛑',
+  circuit: '🔌',
+  retry: '🔁',
+  timeout: '⏱️',
+  rateLimit: '🚦',
+  episode: '📺',
+  anime: '🎌'
+};
 
 export interface LogContext {
   source?: string;
@@ -54,16 +81,27 @@ class Logger {
   }
 
   private shouldLog(level: LogLevel, source?: string): boolean {
-    // In development, log almost everything
+    // In development, log everything for intense debugging
     if (process.env.NODE_ENV !== 'production') {
+      // Always log INFO and above
       if (level >= LogLevel.INFO) return true;
-      if (source === 'API' || source === 'STREAM' || source === 'SourceManager') return true;
+      // Log DEBUG for important sources
+      if (level >= LogLevel.DEBUG && (
+        source === 'API' || 
+        source === 'STREAM' || 
+        source === 'SourceManager' ||
+        source === 'AGGREGATOR' ||
+        source === 'HEALTH' ||
+        source === 'FAILOVER'
+      )) return true;
+      // Log TRACE only if explicitly enabled
+      if (level === LogLevel.TRACE && process.env.LOG_TRACE === 'true') return true;
       return level >= this.logLevel;
     }
 
-    // Production logic
-    if (level >= LogLevel.ERROR) return true;
-    if (source === 'API' || source === 'STREAM') return true;
+    // Production logic - still log important events
+    if (level >= LogLevel.WARN) return true;
+    if (source === 'API' || source === 'STREAM' || source === 'SourceManager') return true;
     return false;
   }
 
@@ -95,7 +133,8 @@ class Logger {
       console.log(JSON.stringify(logEntry));
     } else {
       // 2. Dev-friendly colored logging
-      const colorMap = {
+      const colorMap: Record<LogLevel, typeof chalk.gray> = {
+        [LogLevel.TRACE]: chalk.dim,
         [LogLevel.DEBUG]: chalk.gray,
         [LogLevel.INFO]: chalk.blue,
         [LogLevel.WARN]: chalk.yellow,
@@ -223,6 +262,123 @@ class Logger {
 
   public dependencyFailure(dependency: string, operation: string, error: Error, context?: LogContext) {
     this.error(`Dependency failure: ${dependency} - ${operation} failed`, error, context, 'DEPENDENCY');
+  }
+
+  // ============ ENHANCED PROFESSIONAL LOGGING ============
+
+  public sourceAggregation(operation: string, sources: string[], context?: LogContext) {
+    const sourceList = sources.join(', ');
+    this.info(`${LOG_ICONS.aggregation} Aggregating from ${sources.length} sources: [${sourceList}]`, context, 'AGGREGATOR');
+  }
+
+  public sourceResult(sourceName: string, operation: string, resultCount: number, duration: number, context?: LogContext) {
+    const icon = resultCount > 0 ? LOG_ICONS.success : LOG_ICONS.warning;
+    this.info(`${icon} ${sourceName} ${operation}: ${resultCount} results (${duration}ms)`, { ...context, resultCount, duration }, sourceName);
+  }
+
+  public streamingStart(animeId: string, episodeId: string, source: string, context?: LogContext) {
+    this.info(`${LOG_ICONS.stream} Starting stream: ${animeId} - Episode ${episodeId} from ${source}`, context, 'STREAM');
+  }
+
+  public streamingSuccess(animeId: string, episodeId: string, source: string, quality: string, duration: number, context?: LogContext) {
+    this.info(`${LOG_ICONS.success} Stream ready: ${animeId} - Episode ${episodeId} [${quality}] from ${source} (${duration}ms)`, { ...context, quality, duration }, 'STREAM');
+  }
+
+  public streamingFailed(animeId: string, episodeId: string, source: string, error: string, context?: LogContext) {
+    this.warn(`${LOG_ICONS.error} Stream failed: ${animeId} - Episode ${episodeId} from ${source}: ${error}`, context, 'STREAM');
+  }
+
+  public episodeFetch(animeId: string, episodeCount: number, source: string, duration: number, context?: LogContext) {
+    this.info(`${LOG_ICONS.episode} Fetched ${episodeCount} episodes for ${animeId} from ${source} (${duration}ms)`, { ...context, episodeCount, duration }, 'EPISODES');
+  }
+
+  public animeInfo(animeId: string, title: string, source: string, duration: number, context?: LogContext) {
+    this.info(`${LOG_ICONS.anime} Loaded: "${title}" [${animeId}] from ${source} (${duration}ms)`, { ...context, title, duration }, 'ANIME');
+  }
+
+  public multiSourceSearch(query: string, sources: string[], totalResults: number, duration: number, context?: LogContext) {
+    this.info(`${LOG_ICONS.search} Multi-source search "${query}": ${totalResults} results from ${sources.length} sources (${duration}ms)`, { ...context, sources, totalResults, duration }, 'SEARCH');
+  }
+
+  public sourceOnline(sourceName: string, latency?: number, context?: LogContext) {
+    const latencyStr = latency ? ` (${latency}ms)` : '';
+    this.info(`${LOG_ICONS.success} ${sourceName} is ONLINE${latencyStr}`, context, 'HEALTH');
+  }
+
+  public sourceOffline(sourceName: string, reason?: string, context?: LogContext) {
+    const reasonStr = reason ? `: ${reason}` : '';
+    this.warn(`${LOG_ICONS.error} ${sourceName} is OFFLINE${reasonStr}`, context, 'HEALTH');
+  }
+
+  public healthSummary(online: number, total: number, onlineSources: string[], offlineSources: string[], duration: number, context?: LogContext) {
+    console.log('');
+    console.log(chalk.cyan('╔══════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.bold.white('                    📊 SOURCE HEALTH SUMMARY                      ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╠══════════════════════════════════════════════════════════════════╣'));
+    console.log(chalk.cyan('║') + ` ${LOG_ICONS.success} Online: ${chalk.green.bold(online)}/${total} sources (${duration}ms)`.padEnd(67) + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + ` ${chalk.green('Available:')} ${onlineSources.slice(0, 8).join(', ')}`.padEnd(67) + chalk.cyan('║'));
+    if (onlineSources.length > 8) {
+      console.log(chalk.cyan('║') + `            + ${onlineSources.length - 8} more sources`.padEnd(67) + chalk.cyan('║'));
+    }
+    if (offlineSources.length > 0) {
+      console.log(chalk.cyan('║') + ` ${chalk.red('Offline:')} ${offlineSources.slice(0, 6).join(', ')}`.padEnd(67) + chalk.cyan('║'));
+      if (offlineSources.length > 6) {
+        console.log(chalk.cyan('║') + `          + ${offlineSources.length - 6} more offline`.padEnd(67) + chalk.cyan('║'));
+      }
+    }
+    console.log(chalk.cyan('╚══════════════════════════════════════════════════════════════════╝'));
+    console.log('');
+    this.info(`Health check complete: ${online}/${total} sources online`, { online, total, duration }, 'HEALTH');
+  }
+
+  public startupBanner(version: string, port: number, sources: { name: string; priority: number; status: string }[]) {
+    const onlineSources = sources.filter(s => s.status === 'online');
+    const primarySources = onlineSources.slice(0, 4);
+    
+    console.log('');
+    console.log(chalk.cyan('╔══════════════════════════════════════════════════════════════════╗'));
+    console.log(chalk.cyan('║') + chalk.bold.white('                                                                  ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.bold.hex('#FF6600')('   🎬 AniStream Hub API Server ') + chalk.white(`v${version}`.padEnd(32)) + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.gray('   ─────────────────────────────────────                        ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white(`   Server: `) + chalk.green(`http://localhost:${port}`.padEnd(52)) + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white(`   API Docs: `) + chalk.blue(`http://localhost:${port}/api`.padEnd(50)) + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white(`   Health: `) + chalk.blue(`http://localhost:${port}/api/health`.padEnd(52)) + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white(`   Port: `) + chalk.yellow(`${port} (Local)`.padEnd(54)) + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white('                                                                  ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.bold.white('   📡 Active Streaming Sources:                                   ') + chalk.cyan('║'));
+    primarySources.forEach((source, i) => {
+      const status = source.status === 'online' ? chalk.green('●') : chalk.red('○');
+      const priority = i === 0 ? chalk.yellow('★ Primary') : chalk.gray(`Priority ${i + 1}`);
+      console.log(chalk.cyan('║') + `   ${status} ${source.name.padEnd(20)} ${priority}`.padEnd(67) + chalk.cyan('║'));
+    });
+    if (onlineSources.length > 4) {
+      console.log(chalk.cyan('║') + chalk.gray(`   + ${onlineSources.length - 4} more backup sources available`.padEnd(66)) + chalk.cyan('║'));
+    }
+    console.log(chalk.cyan('║') + chalk.white('                                                                  ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.bold.white('   ⚡ Features:                                                    ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white('   • Multi-source aggregation for best results                    ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white('   • Real-time streaming with auto-failover                       ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white('   • Smart caching & rate limiting                                ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white('   • HLS proxy for CORS bypass                                    ') + chalk.cyan('║'));
+    console.log(chalk.cyan('║') + chalk.white('                                                                  ') + chalk.cyan('║'));
+    console.log(chalk.cyan('╚══════════════════════════════════════════════════════════════════╝'));
+    console.log('');
+  }
+
+  public requestStart(method: string, path: string, requestId: string, context?: LogContext) {
+    this.info(`${LOG_ICONS.request} ${method} ${path}`, { ...context, requestId }, 'API');
+  }
+
+  public requestEnd(method: string, path: string, statusCode: number, duration: number, requestId: string, context?: LogContext) {
+    const icon = statusCode < 400 ? LOG_ICONS.response : LOG_ICONS.error;
+    const statusColor = statusCode < 400 ? chalk.green : statusCode < 500 ? chalk.yellow : chalk.red;
+    this.info(`${icon} ${method} ${path} ${statusColor(statusCode)} (${duration}ms)`, { ...context, statusCode, duration, requestId }, 'API');
+  }
+
+  public aggregationComplete(operation: string, sources: string[], successfulSources: string[], totalResults: number, duration: number, context?: LogContext) {
+    const successRate = Math.round((successfulSources.length / sources.length) * 100);
+    this.info(`${LOG_ICONS.aggregation} ${operation} complete: ${totalResults} results from ${successfulSources.length}/${sources.length} sources (${successRate}% success, ${duration}ms)`, 
+      { ...context, sources, successfulSources, totalResults, duration, successRate }, 'AGGREGATOR');
   }
 }
 
