@@ -1,0 +1,25 @@
+name = "aniwatch-api"
+main = "src/worker.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ANIWATCH_API_DEPLOYMENT_ENV = "cloudflare-workers"
+NODE_ENV = "production"
+ANIWATCH_API_S_MAXAGE = "300"
+ANIWATCH_API_STALE_WHILE_REVALIDATE = "60"
+ANIWATCH_API_WINDOW_MS = "1800000"
+ANIWATCH_API_MAX_REQS = "1000"
+
+# CORS - configure this for your domain
+# ANIWATCH_API_CORS_ALLOWED_ORIGINS = "https://your-domain.com"
+
+# Build configuration
+outdir = "dist"
+
+# Enable observability
+[observability]
+enabled = true
+
+# Deploy to workers.dev subdomain
+workers_dev = true
