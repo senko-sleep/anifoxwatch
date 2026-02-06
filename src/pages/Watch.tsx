@@ -4,6 +4,7 @@ import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { VideoPlayer } from '../components/player/VideoPlayer';
 import { EpisodeList } from '../components/player/EpisodeList';
+import { MobileEpisodeDrawer } from '../components/player/MobileEpisodeDrawer';
 import { StreamingControls } from '../components/player/StreamingControls';
 import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers } from '@/hooks/useAnime';
 import { Button } from '@/components/ui/button';
@@ -593,19 +594,19 @@ const Watch = () => {
 
               {/* Episode Navigation & Details - Compact in cinema mode */}
               <div className={cn(
-                "grid md:grid-cols-[1fr_auto] gap-4 items-center bg-card/30 backdrop-blur-md border border-white/5 p-4 rounded-xl transition-all duration-500",
+                "grid md:grid-cols-[1fr_auto] gap-3 items-center bg-card/30 backdrop-blur-md border border-white/5 p-3 md:p-4 rounded-xl transition-all duration-500",
                 isCinemaMode && "max-w-4xl mx-auto"
               )}>
                 <div className="min-w-0">
-                  <h2 className="text-xl font-bold truncate">
+                  <h2 className="text-lg md:text-xl font-bold truncate">
                     Episode {currentEpisode?.number || selectedEpisodeNum}
                     {currentEpisode?.title && currentEpisode.title !== `Episode ${currentEpisode.number}` && (
-                      <span className="text-muted-foreground font-normal ml-2 text-base">
+                      <span className="text-muted-foreground font-normal ml-2 text-sm md:text-base">
                         - {currentEpisode.title}
                       </span>
                     )}
                   </h2>
-                  <p className="text-sm text-muted-foreground mt-1">
+                  <p className="text-xs md:text-sm text-muted-foreground mt-1">
                     <a 
                       href={`/browse?q=${encodeURIComponent(anime.title)}`}
                       className="hover:text-fox-orange hover:underline transition-colors cursor-pointer"
@@ -631,10 +632,10 @@ const Watch = () => {
                     size="sm"
                     onClick={handlePrevEpisode}
                     disabled={!hasPrev}
-                    className="gap-2 border-white/10 hover:bg-white/5"
+                    className="gap-1 md:gap-2 border-white/10 hover:bg-white/5 h-9 md:h-10 px-3 md:px-4 touch-manipulation"
                   >
                     <ChevronLeft className="w-4 h-4" />
-                    Prev
+                    <span className="hidden sm:inline">Prev</span>
                   </Button>
 
                   <Button
@@ -642,9 +643,9 @@ const Watch = () => {
                     size="sm"
                     onClick={handleNextEpisode}
                     disabled={!hasNext}
-                    className="gap-2 border-white/10 hover:bg-white/5"
+                    className="gap-1 md:gap-2 border-white/10 hover:bg-white/5 h-9 md:h-10 px-3 md:px-4 touch-manipulation"
                   >
-                    Next
+                    <span className="hidden sm:inline">Next</span>
                     <ChevronRight className="w-4 h-4" />
                   </Button>
                 </div>
@@ -679,25 +680,37 @@ const Watch = () => {
                 />
               </div>
 
+              {/* Mobile Episode Drawer - Only visible on mobile */}
+              <div className="lg:hidden">
+                <MobileEpisodeDrawer
+                  episodes={episodes || []}
+                  selectedEpisodeId={selectedEpisode}
+                  onEpisodeSelect={handleEpisodeSelect}
+                  isLoading={episodesLoading}
+                  anime={anime}
+                  currentEpisodeNum={selectedEpisodeNum}
+                />
+              </div>
+
               {/* Enhanced Anime Info Card - Centered in cinema mode */}
               <div className={cn(
-                "p-6 bg-card/30 backdrop-blur-md border border-white/5 rounded-xl space-y-6 shadow-xl transition-all duration-500",
+                "p-4 md:p-6 bg-card/30 backdrop-blur-md border border-white/5 rounded-xl space-y-4 md:space-y-6 shadow-xl transition-all duration-500",
                 isCinemaMode && "max-w-4xl mx-auto"
               )}>
-                <div className="flex flex-col sm:flex-row gap-6">
-                  <div className="relative group">
+                <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
+                  <div className="relative group mx-auto sm:mx-0">
                     <img
                       src={anime.image}
                       alt={anime.title}
-                      className="w-32 h-48 object-cover rounded-lg shadow-xl ring-1 ring-white/10 self-start shrink-0 transition-transform duration-300 group-hover:scale-105"
+                      className="w-24 h-36 sm:w-32 sm:h-48 object-cover rounded-lg shadow-xl ring-1 ring-white/10 transition-transform duration-300 group-hover:scale-105"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                   </div>
-                  <div className="flex-1 min-w-0 space-y-4">
+                  <div className="flex-1 min-w-0 space-y-3 md:space-y-4 text-center sm:text-left">
                     <div>
-                      <h1 className="text-2xl font-bold leading-tight bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent">{anime.title}</h1>
+                      <h1 className="text-xl md:text-2xl font-bold leading-tight bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent">{anime.title}</h1>
                       {anime.titleJapanese && (
-                        <p className="text-sm text-muted-foreground mt-1 italic">{anime.titleJapanese}</p>
+                        <p className="text-xs md:text-sm text-muted-foreground mt-1 italic">{anime.titleJapanese}</p>
                       )}
                     </div>
 

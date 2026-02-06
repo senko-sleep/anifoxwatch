@@ -14,7 +14,14 @@ import {
   RefreshCw,
   PictureInPicture,
   PictureInPicture2,
-  Check
+  Check,
+  ChevronsLeft,
+  ChevronsRight,
+  Lock,
+  Unlock,
+  Volume1,
+  Sun,
+  RotateCw
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -130,6 +137,26 @@ export const VideoPlayer = ({
   // Video preview states
   const [isProgressHovering, setIsProgressHovering] = useState(false);
   const [progressMouseX, setProgressMouseX] = useState(0);
+
+  // Double tap seek states
+  const [showSeekForwardOverlay, setShowSeekForwardOverlay] = useState(false);
+  const [showSeekBackwardOverlay, setShowSeekBackwardOverlay] = useState(false);
+  const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
+
+  // Swipe gesture states
+  const [isControlsLocked, setIsControlsLocked] = useState(false);
+  const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number } | null>(null);
+  const [touchCurrentPos, setTouchCurrentPos] = useState<{ x: number; y: number } | null>(null);
+  const [isSwiping, setIsSwiping] = useState(false);
+  const [swipeType, setSwipeType] = useState<'seek' | 'volume' | null>(null);
+  const [swipeValue, setSwipeValue] = useState<number>(0);
+  const swipeStartValueRef = useRef<number>(0);
+  const [showSwipeOverlay, setShowSwipeOverlay] = useState(false);
+
+  // Helper to detect mobile device
+  const isMobile = useCallback(() => {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  }, []);
 
   // Position persistence functions
   const getPositionKey = useCallback(() => {
@@ -596,16 +623,40 @@ export const VideoPlayer = ({
     setCurrentTime(value[0]);
   }, []);
 
-  const toggleFullscreen = useCallback(() => {
+  const toggleFullscreen = useCallback(async () => {
     const container = containerRef.current;
-    if (!container) return;
+    const video = videoRef.current;
+    if (!container || !video) return;
 
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
+    if (document.fullscreenElement || (video as any).webkitDisplayingFullscreen) {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if ((video as any).webkitExitFullscreen) {
+        (video as any).webkitExitFullscreen();
+      }
     } else {
-      container.requestFullscreen();
+      // Try native video fullscreen on iOS first for better mobile experience
+      if (isMobile() && (video as any).webkitEnterFullscreen) {
+        try {
+          (video as any).webkitEnterFullscreen();
+          return;
+        } catch (e) {
+          playerLog('warn', 'webkitEnterFullscreen failed, falling back to container fullscreen', e);
+        }
+      }
+
+      if (container.requestFullscreen) {
+        await container.requestFullscreen();
+        if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
+          try {
+            await (screen.orientation as any).lock('landscape');
+          } catch (e) {
+            playerLog('warn', 'Orientation lock failed', e);
+          }
+        }
+      }
     }
-  }, []);
+  }, [isMobile]);
 
   const skipIntro = useCallback(() => {
     const video = videoRef.current;
@@ -658,6 +709,131 @@ export const VideoPlayer = ({
     setSelectedSubtitle(lang);
     setSubtitleEnabled(!!lang);
   }, []);
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (isControlsLocked) {
+      if (e.touches.length === 1) {
+        setTouchStartPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
+      }
+      showControlsTemporarily();
+      return;
+    }
+
+    const now = Date.now();
+    const touch = e.touches[0];
+    const container = containerRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    const width = rect.width;
+
+    setTouchStartPos({ x: touch.clientX, y: touch.clientY });
+    setTouchCurrentPos({ x: touch.clientX, y: touch.clientY });
+
+    if (lastTapRef.current) {
+      const timeDiff = now - lastTapRef.current.time;
+      const xDiff = Math.abs(x - lastTapRef.current.x);
+      const yDiff = Math.abs(y - lastTapRef.current.y);
+
+      // Double tap detected (within 300ms and close proximity)
+      if (timeDiff < 300 && xDiff < 50 && yDiff < 50) {
+        if (x < width * 0.4) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 10);
+          }
+          setShowSeekBackwardOverlay(true);
+          setTimeout(() => setShowSeekBackwardOverlay(false), 800);
+          lastTapRef.current = null;
+          return;
+        } else if (x > width * 0.6) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (videoRef.current) {
+            videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + 10);
+          }
+          setShowSeekForwardOverlay(true);
+          setTimeout(() => setShowSeekForwardOverlay(false), 800);
+          lastTapRef.current = null;
+          return;
+        }
+      }
+    }
+
+    lastTapRef.current = { time: now, x, y };
+    showControlsTemporarily();
+  }, [showControlsTemporarily, isControlsLocked]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (isControlsLocked || !touchStartPos || !containerRef.current || !videoRef.current) return;
+
+    const touch = e.touches[0];
+    setTouchCurrentPos({ x: touch.clientX, y: touch.clientY });
+
+    const dx = touch.clientX - touchStartPos.x;
+    const dy = touch.clientY - touchStartPos.y;
+
+    // Detect swipe after a certain threshold
+    if (!isSwiping) {
+      if (Math.abs(dx) > 30) {
+        setIsSwiping(true);
+        setSwipeType('seek');
+        swipeStartValueRef.current = videoRef.current.currentTime;
+        setShowSwipeOverlay(true);
+        setShowControls(false); // Hide controls during swipe
+      } else if (Math.abs(dy) > 30) {
+        // Vertical swipe for volume (only on right side of screen)
+        const rect = containerRef.current.getBoundingClientRect();
+        const startXRel = touchStartPos.x - rect.left;
+        if (startXRel > rect.width * 0.5) {
+          setIsSwiping(true);
+          setSwipeType('volume');
+          swipeStartValueRef.current = volume;
+          setShowSwipeOverlay(true);
+          setShowControls(false);
+        }
+      }
+      return;
+    }
+
+    // Handle ongoing swipe
+    if (swipeType === 'seek') {
+      const rect = containerRef.current.getBoundingClientRect();
+      const seekDelta = (dx / rect.width) * (duration || 300); // Scale seek by screen width
+      const newTime = Math.max(0, Math.min(duration, swipeStartValueRef.current + seekDelta));
+      setSwipeValue(newTime);
+      // We don't update video.currentTime here to avoid lag, only on end
+      // but some players do it for real-time feedback. Let's do it for feedback.
+      videoRef.current.currentTime = newTime;
+    } else if (swipeType === 'volume') {
+      const rect = containerRef.current.getBoundingClientRect();
+      const volumeDelta = -(dy / (rect.height * 0.5)); // Inverted and scaled
+      const newVolume = Math.max(0, Math.min(1, swipeStartValueRef.current + volumeDelta));
+      videoRef.current.volume = newVolume;
+      setVolume(newVolume);
+      setSwipeValue(newVolume);
+    }
+  }, [isSwiping, swipeType, touchStartPos, duration, volume, isControlsLocked]);
+
+  const handleTouchEnd = useCallback(() => {
+    if (isSwiping) {
+      setIsSwiping(false);
+      setSwipeType(null);
+      setTimeout(() => setShowSwipeOverlay(false), 500);
+    }
+    setTouchStartPos(null);
+    setTouchCurrentPos(null);
+  }, [isSwiping]);
+
+  const toggleControlsLock = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsControlsLocked(prev => !prev);
+    showControlsTemporarily();
+  }, [showControlsTemporarily]);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -716,10 +892,59 @@ export const VideoPlayer = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-black group"
+      className={cn(
+        "relative w-full h-full bg-black group overflow-hidden touch-none",
+        isControlsLocked && "cursor-none"
+      )}
       onMouseMove={showControlsTemporarily}
       onMouseLeave={() => isPlaying && setShowControls(false)}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
     >
+      {/* Swipe Overlay */}
+      {showSwipeOverlay && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
+          <div className="bg-black/60 backdrop-blur-md px-6 py-4 rounded-2xl border border-white/20 flex flex-col items-center gap-2 animate-in fade-in zoom-in duration-200">
+            {swipeType === 'seek' ? (
+              <>
+                <div className="flex items-center gap-3">
+                  <RotateCw className={cn("w-8 h-8 text-fox-orange", (touchCurrentPos?.x || 0) < (touchStartPos?.x || 0) && "rotate-180")} />
+                  <span className="text-3xl font-bold text-white">{formatTime(swipeValue)}</span>
+                </div>
+                <span className="text-white/60 text-sm">Release to Seek</span>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-3">
+                  {swipeValue === 0 ? <VolumeX className="w-8 h-8 text-red-500" /> : <Volume2 className="w-8 h-8 text-fox-orange" />}
+                  <span className="text-3xl font-bold text-white">{Math.round(swipeValue * 100)}%</span>
+                </div>
+                <span className="text-white/60 text-sm">Volume</span>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Double Tap Seek Overlays */}
+      <div className="absolute inset-0 pointer-events-none z-10 flex">
+        <div className={cn(
+          "flex-1 flex flex-col items-center justify-center bg-white/5 backdrop-blur-sm transition-opacity duration-300",
+          showSeekBackwardOverlay ? "opacity-100" : "opacity-0"
+        )}>
+          <ChevronsLeft className="w-12 h-12 text-white animate-pulse" />
+          <span className="text-white font-bold mt-2">-10s</span>
+        </div>
+        <div className="flex-none w-1/3" />
+        <div className={cn(
+          "flex-1 flex flex-col items-center justify-center bg-white/5 backdrop-blur-sm transition-opacity duration-300",
+          showSeekForwardOverlay ? "opacity-100" : "opacity-0"
+        )}>
+          <ChevronsRight className="w-12 h-12 text-white animate-pulse" />
+          <span className="text-white font-bold mt-2">+10s</span>
+        </div>
+      </div>
       <video
         ref={videoRef}
         className="w-full h-full"
@@ -854,9 +1079,21 @@ export const VideoPlayer = ({
       <div
         className={cn(
           "absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 transition-opacity duration-300",
-          showControls ? "opacity-100" : "opacity-0 pointer-events-none"
+          (showControls && !isControlsLocked) ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
       >
+        {/* Top bar controls (Mobile only) */}
+        {isMobile() && (
+          <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-30">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-black/40 backdrop-blur-md rounded-lg border border-white/10">
+                <p className="text-white text-xs font-semibold truncate max-w-[200px]">
+                  {animeTitle} - EP {selectedEpisodeNum}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
         {/* Center play button */}
         <button
           onClick={togglePlay}
@@ -879,7 +1116,7 @@ export const VideoPlayer = ({
             onMouseLeave={() => setIsProgressHovering(false)}
             onMouseMove={(e) => setProgressMouseX(e.clientX)}
           >
-            <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20 rounded-full overflow-hidden">
+            <div className="absolute bottom-0 left-0 right-0 h-1.5 md:h-1 bg-white/20 rounded-full overflow-hidden">
               <div
                 className="absolute h-full bg-white/40"
                 style={{ width: `${(buffered / duration) * 100}%` }}
@@ -894,7 +1131,10 @@ export const VideoPlayer = ({
               max={duration || 100}
               step={0.1}
               onValueChange={handleSeek}
-              className="absolute bottom-0 left-0 right-0 opacity-0 group-hover/progress:opacity-100 transition-opacity cursor-pointer"
+              className={cn(
+                "absolute bottom-0 left-0 right-0 transition-opacity cursor-pointer",
+                isMobile() ? "opacity-100 h-6 -bottom-2" : "opacity-0 group-hover/progress:opacity-100"
+              )}
             />
 
             {/* Video Preview */}
@@ -1083,6 +1323,24 @@ export const VideoPlayer = ({
           </div>
         </div>
       </div>
+
+      {/* Lock Button for Mobile */}
+      {isMobile() && (showControls || isControlsLocked) && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={toggleControlsLock}
+          className={cn(
+            "absolute top-1/2 -translate-y-1/2 right-2 md:right-4 z-50 transition-all duration-300 h-8 w-8 rounded-full",
+            isControlsLocked
+              ? "bg-fox-orange/20 text-white/40 backdrop-blur-[2px] scale-90 border border-white/5"
+              : "bg-black/40 text-white/70 border border-white/10",
+            !showControls && "opacity-0 pointer-events-none"
+          )}
+        >
+          {isControlsLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-4 h-4" />}
+        </Button>
+      )}
     </div>
   );
 }
