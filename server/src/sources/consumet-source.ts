@@ -114,7 +114,8 @@ export class ConsumetSource extends BaseAnimeSource {
             this.isAvailable = response.status === 200;
             return this.isAvailable;
         } catch {
-            this.isAvailable = false;
+            // Don't set isAvailable=false here - let the caller decide
+            // This prevents recovery health checks from re-disabling the source
             return false;
         }
     }

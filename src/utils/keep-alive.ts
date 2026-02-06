@@ -1,49 +1,86 @@
 /**
  * Keep-Alive Utility
- * Pings the backend periodically to prevent Render free tier from spinning down
+ * Pings the backend periodically to prevent Render free tier from spinning down.
+ * Uses Page Visibility API to pause pings when tab is hidden and resume when visible.
+ * Implements exponential backoff on consecutive failures to avoid wasting bandwidth.
  */
 
-const PING_INTERVAL = 10 * 60 * 1000; // 10 minutes
+const PING_INTERVAL = 8 * 60 * 1000; // 8 minutes (under Render's 15-min spin-down)
+const MAX_BACKOFF = 30 * 60 * 1000; // 30 minutes max between pings on failure
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 let pingInterval: NodeJS.Timeout | null = null;
+let consecutiveFailures = 0;
+let isTabVisible = true;
 
 /**
  * Ping the backend health endpoint
  */
 async function ping() {
+  // Skip pings when tab is hidden to save bandwidth
+  if (!isTabVisible) return;
+
   try {
-    // Use HEAD request to minimize bandwidth
     await fetch(`${API_BASE_URL}/health`, { 
       method: 'HEAD',
-      cache: 'no-cache'
+      cache: 'no-cache',
+      signal: AbortSignal.timeout(10000)
     });
-    console.log('[Keep-Alive] Backend pinged successfully');
-  } catch (error) {
-    // Silently fail - backend might be starting up
-    console.warn('[Keep-Alive] Ping failed (backend may be starting)');
+    consecutiveFailures = 0;
+  } catch {
+    consecutiveFailures++;
+    if (consecutiveFailures > 5) {
+      console.warn('[Keep-Alive] Multiple failures, backing off');
+    }
+  }
+}
+
+/**
+ * Get the next ping interval based on failure count
+ */
+function getNextInterval(): number {
+  if (consecutiveFailures === 0) return PING_INTERVAL;
+  // Exponential backoff: 8m, 16m, 30m (capped)
+  return Math.min(PING_INTERVAL * Math.pow(2, consecutiveFailures - 1), MAX_BACKOFF);
+}
+
+/**
+ * Schedule the next ping with adaptive interval
+ */
+function scheduleNextPing() {
+  if (pingInterval) clearTimeout(pingInterval);
+  const interval = getNextInterval();
+  pingInterval = setTimeout(async () => {
+    await ping();
+    scheduleNextPing();
+  }, interval);
+}
+
+/**
+ * Handle tab visibility changes
+ */
+function handleVisibilityChange() {
+  isTabVisible = !document.hidden;
+  if (isTabVisible && pingInterval) {
+    // Tab became visible — ping immediately then resume schedule
+    ping();
+    scheduleNextPing();
   }
 }
 
 /**
  * Start the keep-alive service
- * Pings backend every 10 minutes to prevent cold starts
  */
 export function startKeepAlive() {
-  // Don't start if already running
-  if (pingInterval) {
-    return;
-  }
+  if (pingInterval) return;
 
-  console.log('[Keep-Alive] Starting backend keep-alive service');
-  
   // Ping immediately on startup
   ping();
+  scheduleNextPing();
 
-  // Then ping every 10 minutes
-  pingInterval = setInterval(ping, PING_INTERVAL);
-
-  // Cleanup on page unload
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
   if (typeof window !== 'undefined') {
     window.addEventListener('beforeunload', stopKeepAlive);
   }
@@ -54,9 +91,11 @@ export function startKeepAlive() {
  */
 export function stopKeepAlive() {
   if (pingInterval) {
-    clearInterval(pingInterval);
+    clearTimeout(pingInterval);
     pingInterval = null;
-    console.log('[Keep-Alive] Stopped backend keep-alive service');
+  }
+  if (typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   }
 }
 

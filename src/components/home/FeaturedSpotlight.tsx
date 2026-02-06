@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Play, Star, Clock, Film, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { cn, formatRating } from '@/lib/utils';
 
 interface SpotlightAnime {
   id: string;
@@ -89,7 +89,7 @@ export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
                 {current.rating && (
                   <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-yellow-500/20 text-yellow-400 text-sm font-medium">
                     <Star className="w-4 h-4 fill-yellow-400" />
-                    {(current.rating > 10 ? current.rating / 10 : current.rating).toFixed(1)}
+                    {formatRating(current.rating)}
                   </span>
                 )}
                 {current.type && (

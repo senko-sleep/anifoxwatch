@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Play, Info, ChevronLeft, ChevronRight, Star, Calendar, Tv, Flame, Clock, TrendingUp, Shuffle, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Anime } from '@/types/anime';
-import { cn } from '@/lib/utils';
+import { cn, formatRating } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
 
 interface HeroSectionProps {
@@ -150,7 +150,7 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
             {currentAnime.rating && currentAnime.rating > 0 && (
               <div className="inline-flex items-center gap-2.5 px-5 py-2.5 text-xs font-bold rounded-full bg-gradient-to-r from-amber-500/20 to-yellow-500/20 backdrop-blur-xl border border-amber-400/30 text-amber-300 shadow-lg">
                 <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
-                {(currentAnime.rating > 10 ? currentAnime.rating / 10 : currentAnime.rating).toFixed(1)}
+                {formatRating(currentAnime.rating)}
               </div>
             )}
           </div>

@@ -138,13 +138,27 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     });
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('SIGTERM received, shutting down gracefully');
-    process.exit(0);
+// ============================================
+// PROCESS CRASH PROTECTION
+// ============================================
+
+// Prevent uncaught exceptions from killing the process
+process.on('uncaughtException', (err: Error) => {
+    console.error('⚠️ UNCAUGHT EXCEPTION (process kept alive):', err.message);
+    console.error(err.stack);
+    logger.error('Uncaught exception', err, { fatal: false });
+});
+
+// Prevent unhandled promise rejections from killing the process
+process.on('unhandledRejection', (reason: unknown) => {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    console.error('⚠️ UNHANDLED REJECTION (process kept alive):', message);
+    logger.error('Unhandled rejection', reason instanceof Error ? reason : new Error(message), { fatal: false });
 });
 
 // Start server
+let activeServer: ReturnType<typeof app.listen> | null = null;
+
 const startServer = (port: number) => {
     const server = app.listen(port, () => {
         const isProduction = process.env.NODE_ENV === 'production';
@@ -178,6 +192,14 @@ const startServer = (port: number) => {
         `);
     });
 
+    // Connection timeout settings to prevent hanging connections
+    server.keepAliveTimeout = 65000; // Slightly higher than typical LB timeout (60s)
+    server.headersTimeout = 70000; // Must be higher than keepAliveTimeout
+    server.timeout = 120000; // 2 min max request time
+    server.maxConnections = 500;
+
+    activeServer = server;
+
     server.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
             console.log(`⚠️  Port ${port} is in use, trying ${port + 1}...`);
@@ -186,7 +208,46 @@ const startServer = (port: number) => {
             console.error('SERVER ERROR:', err);
         }
     });
+
+    // Self-ping keep-alive to prevent idle shutdown on Render/Koyeb free tier
+    if (process.env.NODE_ENV === 'production') {
+        const BASE_URL = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || `http://localhost:${port}`;
+        const KEEP_ALIVE_INTERVAL = 10 * 60 * 1000; // 10 minutes
+        setInterval(async () => {
+            try {
+                const res = await fetch(`${BASE_URL}/health`);
+                console.log(`🏓 Keep-alive ping: ${res.status}`);
+            } catch (err) {
+                console.log(`🏓 Keep-alive ping failed (non-fatal): ${(err as Error).message}`);
+            }
+        }, KEEP_ALIVE_INTERVAL);
+        console.log(`🏓 Keep-alive pinger started (every ${KEEP_ALIVE_INTERVAL / 60000} min)`);
+    }
 };
+
+// ============================================
+// GRACEFUL SHUTDOWN
+// ============================================
+
+const gracefulShutdown = (signal: string) => {
+    console.log(`\n${signal} received. Shutting down gracefully...`);
+    if (activeServer) {
+        activeServer.close(() => {
+            console.log('✅ Server closed. Exiting.');
+            process.exit(0);
+        });
+        // Force exit after 10s if connections don't close
+        setTimeout(() => {
+            console.log('⚠️ Forcing exit after timeout');
+            process.exit(1);
+        }, 10000).unref();
+    } else {
+        process.exit(0);
+    }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 import { fileURLToPath } from 'url';
 

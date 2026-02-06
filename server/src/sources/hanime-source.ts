@@ -69,7 +69,6 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
             this.isAvailable = response.status === 200;
             return this.isAvailable;
         } catch {
-            this.isAvailable = false;
             return false;
         }
     }
@@ -121,7 +120,16 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                 }
             );
 
-            const results = response.data.hits?.map(v => this.convertToAnimeBase(v)) || [];
+            // API returns hits as JSON string, need to parse it
+            let hits = response.data.hits;
+            if (typeof hits === 'string') {
+                try {
+                    hits = JSON.parse(hits);
+                } catch {
+                    hits = [];
+                }
+            }
+            const results = Array.isArray(hits) ? hits.map(v => this.convertToAnimeBase(v)) : [];
 
             const result: AnimeSearchResult = {
                 results,
@@ -175,7 +183,16 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                 }
             );
 
-            const results = response.data.hits?.map(v => this.convertToAnimeBase(v)) || [];
+            // API returns hits as JSON string, need to parse it
+            let hits = response.data.hits;
+            if (typeof hits === 'string') {
+                try {
+                    hits = JSON.parse(hits);
+                } catch {
+                    hits = [];
+                }
+            }
+            const results = Array.isArray(hits) ? hits.map(v => this.convertToAnimeBase(v)) : [];
             this.setCache(cacheKey, results, this.cacheTTL.search);
             return results;
         } catch (error) {
@@ -212,7 +229,16 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                 }
             );
 
-            const results = response.data.hits?.map(v => this.convertToAnimeBase(v)) || [];
+            // API returns hits as JSON string, need to parse it
+            let hits = response.data.hits;
+            if (typeof hits === 'string') {
+                try {
+                    hits = JSON.parse(hits);
+                } catch {
+                    hits = [];
+                }
+            }
+            const results = Array.isArray(hits) ? hits.map(v => this.convertToAnimeBase(v)) : [];
             this.setCache(cacheKey, results, this.cacheTTL.search);
             return results;
         } catch (error) {
@@ -249,7 +275,16 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                 }
             );
 
-            const results = response.data.hits?.map(v => this.convertToAnimeBase(v)) || [];
+            // API returns hits as JSON string, need to parse it
+            let hits = response.data.hits;
+            if (typeof hits === 'string') {
+                try {
+                    hits = JSON.parse(hits);
+                } catch {
+                    hits = [];
+                }
+            }
+            const results = Array.isArray(hits) ? hits.map(v => this.convertToAnimeBase(v)) : [];
 
             const result: AnimeSearchResult = {
                 results,
@@ -273,6 +308,80 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                 source: this.name
             };
         }
+    }
+
+    // GenreAwareSource interface methods
+    async getByGenre(genre: string, page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
+        return this.getAnimeByGenre(genre, page, options);
+    }
+
+    async getGenres(options?: SourceRequestOptions): Promise<string[]> {
+        // Common Hanime tags/genres
+        return [
+            '3d',
+            'ahegao',
+            'anal',
+            'bdsm',
+            'big boobs',
+            'blow job',
+            'bondage',
+            'boob job',
+            'censored',
+            'comedy',
+            'cosplay',
+            'creampie',
+            'dark skin',
+            'elf',
+            'facial',
+            'fantasy',
+            'femdom',
+            'foot job',
+            'futanari',
+            'gangbang',
+            'glasses',
+            'hand job',
+            'harem',
+            'horror',
+            'incest',
+            'inflation',
+            'lactation',
+            'loli',
+            'maid',
+            'masturbation',
+            'milf',
+            'mind break',
+            'mind control',
+            'monster',
+            'nekomimi',
+            'ntr',
+            'nurse',
+            'orgy',
+            'plot',
+            'pov',
+            'pregnant',
+            'public sex',
+            'rape',
+            'reverse rape',
+            'romance',
+            'school girl',
+            'shota',
+            'softcore',
+            'succubus',
+            'swimsuit',
+            'teacher',
+            'tentacle',
+            'threesome',
+            'toys',
+            'trap',
+            'tsundere',
+            'ugly bastard',
+            'uncensored',
+            'vanilla',
+            'virgin',
+            'x-ray',
+            'yaoi',
+            'yuri'
+        ];
     }
 
     async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
@@ -306,7 +415,17 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                 }
             );
 
-            const video = response.data.hits?.find(v => v.slug === slug);
+            // API returns hits as JSON string, need to parse it
+            let hits = response.data.hits;
+            if (typeof hits === 'string') {
+                try {
+                    hits = JSON.parse(hits);
+                } catch {
+                    hits = [];
+                }
+            }
+            const hitsArray = Array.isArray(hits) ? hits : [];
+            const video = hitsArray.find(v => v.slug === slug);
             if (!video) return null;
 
             const anime = this.convertToAnimeBase(video);
@@ -327,6 +446,14 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
             title: 'Full Episode',
             isFiller: false
         }];
+    }
+
+    async getTopRated(page: number = 1, limit: number = 10, options?: SourceRequestOptions): Promise<{ rank: number; anime: AnimeBase }[]> {
+        const trending = await this.getTrending(page, options);
+        return trending.slice(0, limit).map((anime, index) => ({
+            rank: index + 1,
+            anime
+        }));
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category?: string, options?: SourceRequestOptions): Promise<StreamingData> {

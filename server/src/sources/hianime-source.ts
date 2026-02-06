@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
+import { HiAnime } from 'aniwatch';
 import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 
@@ -151,6 +152,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'HiAnime';
     baseUrl: string;
     private client: AxiosInstance;
+    private scraper: HiAnime.Scraper | null = null;
 
     // Smart caching with TTL
     private cache: Map<string, { data: unknown; expires: number }> = new Map();
@@ -172,6 +174,14 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         'https://hianime-api-chi.vercel.app',
     ];
     private currentApiIndex = 0;
+
+    private getScraper(): HiAnime.Scraper {
+        if (!this.scraper) {
+            // @ts-expect-error - Pass baseUrl to constructor
+            this.scraper = new HiAnime.Scraper('https://hianime.to');
+        }
+        return this.scraper;
+    }
 
     constructor(apiUrl?: string) {
         super();
@@ -369,9 +379,27 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
             this.setCache(cacheKey, result, this.cacheTTL.search);
             return result;
         } catch (error) {
-            this.handleError(error, 'search');
-            logger.warn(`API search failed for query "${query}", returning empty results`, { query, page }, this.name);
-            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
+            // All APIs failed — fall back to direct scraping via aniwatch package
+            logger.warn(`All APIs failed for search "${query}", trying direct scraper`, { query, page }, this.name);
+            try {
+                const scraperData = await this.getScraper().search(query, page);
+                const animes = (scraperData as unknown as { animes?: AnimeInfoRaw[] }).animes || [];
+                const fallbackResult: AnimeSearchResult = {
+                    results: animes.map((a: AnimeInfoRaw) => this.mapAnimeFromSearch(a)),
+                    totalPages: (scraperData as unknown as { totalPages?: number }).totalPages || 1,
+                    currentPage: page,
+                    hasNextPage: (scraperData as unknown as { hasNextPage?: boolean }).hasNextPage || false,
+                    source: this.name
+                };
+                logger.info(`Direct scraper returned ${fallbackResult.results.length} results for "${query}"`, undefined, this.name);
+                if (fallbackResult.results.length > 0) {
+                    this.setCache(cacheKey, fallbackResult, this.cacheTTL.search);
+                }
+                return fallbackResult;
+            } catch (scraperError) {
+                this.handleError(scraperError, 'search');
+                return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
+            }
         }
     }
 
@@ -427,8 +455,30 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
             this.setCache(cacheKey, episodes, this.cacheTTL.episodes);
             return episodes;
         } catch (error) {
-            this.handleError(error, 'getEpisodes');
-            return [];
+            // All APIs failed — fall back to direct scraping via aniwatch package
+            logger.warn(`All APIs failed for episodes ${animeId}, trying direct scraper`, undefined, this.name);
+            try {
+                const id = animeId.replace('hianime-', '');
+                const scraperData = await this.getScraper().getEpisodes(id);
+                const rawEpisodes = (scraperData as unknown as { episodes?: EpisodeRaw[] }).episodes || [];
+                const episodes: Episode[] = rawEpisodes.map((ep: EpisodeRaw) => ({
+                    id: ep.episodeId,
+                    number: ep.number || 1,
+                    title: ep.title || `Episode ${ep.number || 1}`,
+                    isFiller: ep.isFiller || false,
+                    hasSub: true,
+                    hasDub: true,
+                    thumbnail: undefined
+                }));
+                logger.info(`Direct scraper returned ${episodes.length} episodes for ${animeId}`, undefined, this.name);
+                if (episodes.length > 0) {
+                    this.setCache(cacheKey, episodes, this.cacheTTL.episodes);
+                }
+                return episodes;
+            } catch (scraperError) {
+                this.handleError(scraperError, 'getEpisodes');
+                return [];
+            }
         }
     }
 
@@ -608,7 +658,46 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
             this.setCache(cacheKey, streamData, this.cacheTTL.stream);
             return streamData;
         } catch (error) {
-            this.handleError(error, 'getStreamingLinks');
+            // All APIs failed — fall back to direct scraping via aniwatch package
+            logger.warn(`All APIs failed for streaming ${episodeId}, trying direct scraper`, undefined, this.name);
+            try {
+                const serverPriority = [server, 'hd-2', 'hd-1', 'hd-3'].filter((v, i, a) => a.indexOf(v) === i);
+                for (const srv of serverPriority) {
+                    try {
+                        const data = await this.getScraper().getEpisodeSources(
+                            episodeId,
+                            srv as HiAnime.AnimeServers,
+                            category
+                        );
+                        if (data.sources && data.sources.length > 0) {
+                            const rawData = data as Record<string, unknown>;
+                            const streamData: StreamingData = {
+                                sources: (data.sources as Array<{ url: string; quality?: string; isM3U8?: boolean }>).map((s): VideoSource => ({
+                                    url: s.url,
+                                    quality: this.normalizeQuality(s.quality || 'auto'),
+                                    isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
+                                })),
+                                subtitles: ((rawData.tracks || rawData.subtitles || []) as Array<{ url: string; lang?: string; language?: string; label?: string }>)
+                                    .filter((t) => t.lang !== 'thumbnails')
+                                    .map((sub) => ({
+                                        url: sub.url,
+                                        lang: sub.lang || sub.language || 'Unknown',
+                                        label: sub.label || sub.lang || sub.language
+                                    })),
+                                headers: (rawData.headers as Record<string, string>) || { 'Referer': 'https://megacloud.blog/' },
+                                source: this.name
+                            };
+                            logger.info(`Direct scraper got ${streamData.sources.length} sources for ${episodeId} via ${srv}`, undefined, this.name);
+                            this.setCache(cacheKey, streamData, this.cacheTTL.stream);
+                            return streamData;
+                        }
+                    } catch {
+                        // Try next server
+                    }
+                }
+            } catch (scraperError) {
+                this.handleError(scraperError, 'getStreamingLinks');
+            }
             return { sources: [], subtitles: [] };
         }
     }

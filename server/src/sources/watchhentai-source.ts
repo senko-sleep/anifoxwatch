@@ -44,7 +44,6 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             this.isAvailable = response.status === 200;
             return this.isAvailable;
         } catch {
-            this.isAvailable = false;
             return false;
         }
     }

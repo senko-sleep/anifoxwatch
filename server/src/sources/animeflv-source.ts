@@ -145,16 +145,16 @@ export class AnimeFLVSource extends BaseAnimeSource {
 
             // Extract episode info from script
             const scriptContent = $('script:contains("var episodes")').html() || '';
-            const episodesMatch = scriptContent.match(/var episodes = (\[[^\]]+\])/);
+            const episodesMatch = scriptContent.match(/var episodes\s*=\s*(\[[\s\S]*?\]);/);
             if (episodesMatch) {
                 try {
                     const epList: number[][] = JSON.parse(episodesMatch[1]);
                     epList.forEach((ep) => {
                         const epNum = ep[0];
                         episodes.push({
-                            id: `${id}-${epNum}`,
+                            id: `animeflv-${id}-${epNum}`,
                             number: epNum,
-                            title: `Episodio ${epNum}`,
+                            title: `Episode ${epNum}`,
                             isFiller: false,
                             hasSub: true,
                             hasDub: false,
@@ -171,10 +171,11 @@ export class AnimeFLVSource extends BaseAnimeSource {
                 $('.ListCaps li a, #episodeList a').each((i, el) => {
                     const href = $(el).attr('href') || '';
                     const epNum = parseInt(href.split('-').pop() || '0') || i + 1;
+                    const rawEpId = href.split('/ver/').pop() || `${id}-${epNum}`;
                     episodes.push({
-                        id: href.split('/ver/').pop() || `${id}-${epNum}`,
+                        id: `animeflv-${rawEpId}`,
                         number: epNum,
-                        title: `Episodio ${epNum}`,
+                        title: `Episode ${epNum}`,
                         isFiller: false,
                         hasSub: true,
                         hasDub: false,
@@ -192,7 +193,8 @@ export class AnimeFLVSource extends BaseAnimeSource {
 
     async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         try {
-            const response = await axios.get(`${this.baseUrl}/ver/${episodeId}`, {
+            const epId = episodeId.replace('animeflv-', '');
+            const response = await axios.get(`${this.baseUrl}/ver/${epId}`, {
                 signal: options?.signal,
                 timeout: options?.timeout || 10000,
                 headers: this.getHeaders()
@@ -216,7 +218,8 @@ export class AnimeFLVSource extends BaseAnimeSource {
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         try {
-            const response = await axios.get(`${this.baseUrl}/ver/${episodeId}`, {
+            const epId = episodeId.replace('animeflv-', '');
+            const response = await axios.get(`${this.baseUrl}/ver/${epId}`, {
                 signal: options?.signal,
                 timeout: options?.timeout || 10000,
                 headers: this.getHeaders()
@@ -224,24 +227,31 @@ export class AnimeFLVSource extends BaseAnimeSource {
             const $ = cheerio.load(response.data);
             const sources: VideoSource[] = [];
 
-            // Extract videos from script
+            // Extract videos from script — format: var videos = {"SUB":[{"server":"sw","title":"SW","code":"https://..."},...]}
             const scriptContent = $('script:contains("var videos")').html() || '';
-            const videosMatch = scriptContent.match(/var videos = ({[^}]+})/);
+            const videosMatch = scriptContent.match(/var videos\s*=\s*(\{[\s\S]*?\});/);
             if (videosMatch) {
                 try {
                     const videos = JSON.parse(videosMatch[1]);
-                    if (videos.SUB) {
-                        videos.SUB.forEach((v: { code: string; title: string }) => {
-                            const urlMatch = v.code.match(/src="([^"]+)"/);
-                            if (urlMatch) {
-                                sources.push({
-                                    url: urlMatch[1],
-                                    quality: 'auto',
-                                    isM3U8: urlMatch[1].includes('.m3u8')
-                                });
-                            }
-                        });
-                    }
+                    const category_key = category === 'dub' ? 'LAT' : 'SUB';
+                    const serverList = videos[category_key] || videos.SUB || [];
+                    serverList.forEach((v: { code: string; title: string; url?: string }) => {
+                        // code can be a direct URL or an iframe src="..." string
+                        let url = '';
+                        if (v.code.startsWith('http')) {
+                            url = v.code;
+                        } else {
+                            const srcMatch = v.code.match(/src="([^"]+)"/);
+                            if (srcMatch) url = srcMatch[1];
+                        }
+                        if (url) {
+                            sources.push({
+                                url: url.startsWith('http') ? url : `https:${url}`,
+                                quality: 'auto',
+                                isM3U8: url.includes('.m3u8')
+                            });
+                        }
+                    });
                 } catch {
                     // Parse failed
                 }

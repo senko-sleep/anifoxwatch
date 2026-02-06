@@ -102,7 +102,6 @@ export class AniwatchSource extends BaseAnimeSource {
             this.isAvailable = response.status === 200;
             return this.isAvailable;
         } catch {
-            this.isAvailable = false;
             return false;
         }
     }

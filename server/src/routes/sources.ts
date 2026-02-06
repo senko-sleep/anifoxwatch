@@ -32,6 +32,50 @@ router.get('/health', async (_req: Request, res: Response): Promise<void> => {
 });
 
 /**
+ * @route GET /api/sources/health/enhanced
+ * @description Get enhanced health status with capabilities and performance metrics
+ */
+router.get('/health/enhanced', async (_req: Request, res: Response): Promise<void> => {
+    try {
+        const status = sourceManager.getSourceStatus();
+        res.json({
+            sources: status,
+            summary: {
+                total: status.length,
+                online: status.filter((s: { status: string }) => s.status === 'online').length,
+                offline: status.filter((s: { status: string }) => s.status === 'offline').length,
+                avgSuccessRate: status.reduce((acc: number, s: { successRate?: number }) => acc + (s.successRate || 0), 0) / Math.max(1, status.length),
+                lastUpdated: new Date()
+            }
+        });
+    } catch (error) {
+        console.error('Enhanced health check error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/sources/recommended
+ * @description Get recommended source based on performance metrics
+ */
+router.get('/recommended', async (_req: Request, res: Response): Promise<void> => {
+    try {
+        const bestSource = sourceManager.getBestSource({
+            preferHighQuality: true,
+            excludeAdult: true
+        });
+        
+        res.json({
+            recommended: bestSource?.name || null,
+            capabilities: bestSource ? sourceManager.getSourceCapabilities(bestSource.name) : null
+        });
+    } catch (error) {
+        console.error('Get recommended source error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
  * @route POST /api/sources/check
  * @description Trigger a health check for all sources
  */

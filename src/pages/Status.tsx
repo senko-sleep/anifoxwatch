@@ -4,8 +4,10 @@ import { useSourceHealth, useRefreshSourceHealth } from '@/hooks/useAnime';
 import { Server, Activity, CheckCircle, XCircle, AlertTriangle, RefreshCw, Wifi, Clock, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const Status = () => {
+  useDocumentTitle('System Status');
   const { data: healthData, isLoading, refetch } = useSourceHealth();
   const refreshMutation = useRefreshSourceHealth();
 

@@ -250,23 +250,43 @@ export function EpisodeList({
       </ScrollArea>
 
       {/* Quick stats */}
-      {anime && (
-        <div className="p-2 border-t border-border/30 bg-background/30">
-          <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-            <span>
-              {anime.subCount || episodes.length} Sub
-            </span>
-            <span>•</span>
-            <span className={anime.dubCount ? 'text-green-500' : ''}>
-              {anime.dubCount || 0} Dub
-            </span>
-            <span>•</span>
-            <span>
+      <div className="p-2.5 border-t border-border/30 bg-background/30">
+        <div className="flex items-center justify-between text-[10px]">
+          <div className="flex items-center gap-1 text-muted-foreground">
+            <Subtitles className="w-3 h-3" />
+            <span>{episodes.filter(e => e.hasSub).length || anime?.subCount || episodes.length} Sub</span>
+          </div>
+          <span className="text-muted-foreground/40">•</span>
+          {(() => {
+            const dubEpCount = episodes.filter(e => e.hasDub).length;
+            const dubCount = dubEpCount || anime?.dubCount || 0;
+            const hasDub = dubCount > 0;
+            return (
+              <div className={cn(
+                "flex items-center gap-1",
+                hasDub ? "text-green-500" : "text-zinc-600"
+              )}>
+                <Mic className="w-3 h-3" />
+                {hasDub ? (
+                  <span>{dubCount} Dub</span>
+                ) : (
+                  <span>No Dub</span>
+                )}
+              </div>
+            );
+          })()}
+          <span className="text-muted-foreground/40">•</span>
+          {anime && (
+            <span className={cn(
+              "text-[10px] font-medium",
+              anime.status === 'Ongoing' ? "text-green-500" :
+                anime.status === 'Completed' ? "text-blue-400" : "text-purple-400"
+            )}>
               {anime.status}
             </span>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -46,6 +46,7 @@ import { cn } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 // Scroll restoration key storage
 const SCROLL_POSITIONS_KEY = 'anistream_scroll_positions';
@@ -84,6 +85,12 @@ const ADULT_GENRES = [
   'Squirting', 'Stocking', 'Strap On', 'Strapped On', 'Succubus', 'Swimsuit',
   'Tentacles', 'Three Some', 'Tits Fuck', 'Torture', 'Toys', 'Train Molestation',
   'Tsundere', 'Uncensored', 'Urination', 'Vanilla', 'Virgins', 'Widow', 'X-Ray',
+
+  // Hanime specific genres
+  'Blow Job', 'Boob Job', 'Glasses', 'Hand Job', 'Horror', 'Inflation', 'Loli',
+  'Masturbation', 'Mind Control', 'Monster', 'Nekomimi', 'Orgy', 'Plot',
+  'Reverse Rape', 'Shota', 'Softcore', 'Teacher', 'Threesome', 'Trap',
+  'Ugly Bastard',
 
   // Shared genres that appear in both
   'Female Doctor', 'Female Teacher'
@@ -139,6 +146,7 @@ const FilterSection = ({
 };
 
 const Search = () => {
+  useDocumentTitle('Browse');
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
 
@@ -446,16 +454,9 @@ const Search = () => {
   };
 
   const FiltersContent = () => {
-    // Popular genres shown first
-    const popularGenres = mode === 'adult' 
-      ? ['Hentai', 'Ecchi', 'Uncensored', 'MILF', 'Romance', 'School Girls', 'Vanilla']
-      : ['Action', 'Romance', 'Comedy', 'Fantasy', 'Slice of Life', 'Supernatural', 'Drama'];
-    
     let allGenres = SAFE_GENRES;
     if (mode === 'adult') allGenres = ADULT_GENRES;
     else if (mode === 'mixed') allGenres = MIXED_GENRES;
-    
-    const otherGenres = allGenres.filter(g => !popularGenres.includes(g));
 
     return (
       <div className="space-y-6 p-1">
@@ -515,43 +516,19 @@ const Search = () => {
 
         <Separator className="bg-white/5" />
 
-        {/* Popular Genres */}
-        <FilterSection title="Popular Genres">
-          <div className="flex flex-wrap gap-2">
-            {popularGenres.map((g) => (
-              <Badge
-                key={g}
-                variant={selectedGenres.includes(g) ? "default" : "outline"}
-                className={cn(
-                  "cursor-pointer transition-all text-xs py-1.5 px-3",
-                  selectedGenres.includes(g) 
-                    ? "bg-fox-orange text-white hover:bg-fox-orange/90 border-transparent shadow-lg shadow-fox-orange/20" 
-                    : "text-muted-foreground hover:text-white hover:border-fox-orange/50 bg-secondary/20"
-                )}
-                onClick={() => {
-                  setSelectedGenres(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
-                  setPage(1);
-                }}
-              >
-                {g}
-              </Badge>
-            ))}
-          </div>
-        </FilterSection>
-
-        {/* All Genres - Collapsible */}
-        <FilterSection title="All Genres" collapsible defaultOpen={false}>
-          <ScrollArea className="h-[250px] pr-4">
+        {/* Genres */}
+        <FilterSection title="Genres">
+          <ScrollArea className="h-[300px] pr-4">
             <div className="flex flex-wrap gap-1.5">
-              {otherGenres.map((g) => (
+              {allGenres.map((g) => (
                 <Badge
                   key={g}
                   variant={selectedGenres.includes(g) ? "default" : "outline"}
                   className={cn(
-                    "cursor-pointer transition-all text-xs py-1 px-2",
+                    "cursor-pointer transition-all text-xs py-1.5 px-2.5",
                     selectedGenres.includes(g) 
-                      ? "bg-fox-orange text-white hover:bg-fox-orange/90 border-transparent" 
-                      : "text-muted-foreground/70 hover:text-white hover:border-white/30 bg-transparent border-white/10"
+                      ? "bg-fox-orange text-white hover:bg-fox-orange/90 border-transparent shadow-lg shadow-fox-orange/20" 
+                      : "text-muted-foreground hover:text-white hover:border-fox-orange/50 bg-secondary/20"
                   )}
                   onClick={() => {
                     setSelectedGenres(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);

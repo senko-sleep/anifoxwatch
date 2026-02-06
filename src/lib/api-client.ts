@@ -127,36 +127,78 @@ export interface SeasonalResponse {
 class AnimeApiClient {
     private baseUrl: string;
     private cache: Map<string, CacheEntry<unknown>> = new Map();
+    private inflight: Map<string, Promise<unknown>> = new Map();
     private readonly MAX_RETRIES = 3;
     private readonly TIMEOUT_MS = 30000;
+    private _online = true;
+    private _lastOnlineCheck = 0;
 
     constructor(baseUrl: string = API_BASE_URL) {
         this.baseUrl = baseUrl;
+        if (typeof window !== 'undefined') {
+            window.addEventListener('online', () => { this._online = true; });
+            window.addEventListener('offline', () => { this._online = false; });
+            this._online = navigator.onLine;
+        }
+    }
+
+    get isOnline(): boolean {
+        return this._online;
     }
 
     /**
-     * Execute fetch with retry logic and timeout
+     * Execute fetch with retry logic, timeout, and request deduplication
      */
     private async fetchWithRetry<T>(
         endpoint: string,
         options?: RequestInit,
         retries: number = this.MAX_RETRIES
     ): Promise<T> {
+        const isGet = !options?.method || options.method === 'GET';
+
         // Check cache first for GET requests
-        if (!options?.method || options.method === 'GET') {
-            const cacheKey = `${endpoint}`;
+        if (isGet) {
+            const cacheKey = endpoint;
             const cached = this.cache.get(cacheKey);
             if (cached && cached.expires > Date.now()) {
                 return cached.data as T;
             }
+
+            // Deduplicate in-flight GET requests
+            const existing = this.inflight.get(cacheKey);
+            if (existing) {
+                return existing as Promise<T>;
+            }
         }
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
+        // Fail fast if offline
+        if (!this._online) {
+            throw new Error('You appear to be offline. Please check your connection.');
+        }
 
+        const promise = this._doFetch<T>(endpoint, options, retries);
+
+        // Track in-flight GET requests for deduplication
+        if (isGet) {
+            this.inflight.set(endpoint, promise);
+            promise.finally(() => this.inflight.delete(endpoint));
+        }
+
+        return promise;
+    }
+
+    private async _doFetch<T>(
+        endpoint: string,
+        options?: RequestInit,
+        retries: number = this.MAX_RETRIES
+    ): Promise<T> {
+        const isGet = !options?.method || options.method === 'GET';
         let lastError: Error | null = null;
 
         for (let attempt = 0; attempt <= retries; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
+
             try {
                 const response = await fetch(`${this.baseUrl}${endpoint}`, {
                     ...options,
@@ -182,47 +224,71 @@ class AnimeApiClient {
                         // Ignore JSON parse errors
                     }
 
-                    throw new Error(errorMessage);
+                    const err = Object.assign(new Error(errorMessage), { status: response.status });
+
+                    // Retry on 5xx server errors
+                    if (response.status >= 500 && attempt < retries) {
+                        lastError = err;
+                        const delay = Math.min(Math.pow(2, attempt) * 1000, 4000);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+
+                    throw err;
                 }
 
                 const data = await response.json();
 
-                // Cache for 2 minutes - store with proper type
-                if (!options?.method || options.method === 'GET') {
-                    const cacheKey = `${endpoint}`;
-                    this.cache.set(cacheKey, { data, expires: Date.now() + 2 * 60 * 1000 } as CacheEntry<T>);
+                // Cache with endpoint-aware TTL
+                if (isGet) {
+                    const ttl = this.getCacheTTL(endpoint);
+                    this.cache.set(endpoint, { data, expires: Date.now() + ttl } as CacheEntry<T>);
                 }
 
+                this._online = true;
                 return data;
             } catch (error) {
+                clearTimeout(timeoutId);
                 lastError = error as Error;
 
-                // Check if it's a timeout
                 if (lastError.name === 'AbortError') {
                     throw new Error('Request timeout - please try again');
                 }
 
-                // Check if we should retry (network errors)
+                // Retry on network errors and server errors
                 const isRetryable = attempt < retries && (
                     lastError.message.includes('network') ||
                     lastError.message.includes('Failed to fetch') ||
-                    lastError.message.includes('timeout')
+                    lastError.message.includes('timeout') ||
+                    lastError.message.includes('502') ||
+                    lastError.message.includes('503') ||
+                    lastError.message.includes('504')
                 );
 
                 if (isRetryable) {
-                    // Exponential backoff
-                    const delay = Math.pow(2, attempt) * 1000;
+                    const delay = Math.min(Math.pow(2, attempt) * 1000, 4000);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }
 
                 throw lastError;
-            } finally {
-                clearTimeout(timeoutId);
             }
         }
 
         throw lastError || new Error('Unknown error');
+    }
+
+    /**
+     * Get cache TTL based on endpoint type
+     */
+    private getCacheTTL(endpoint: string): number {
+        if (endpoint.includes('/stream/')) return 3 * 60 * 1000; // 3 min for streams
+        if (endpoint.includes('/trending') || endpoint.includes('/latest')) return 5 * 60 * 1000; // 5 min
+        if (endpoint.includes('/top-rated') || endpoint.includes('/seasonal')) return 15 * 60 * 1000; // 15 min
+        if (endpoint.includes('/schedule')) return 5 * 60 * 1000; // 5 min
+        if (endpoint.includes('/sources')) return 30 * 1000; // 30s for health
+        if (endpoint.includes('/anime?id=') || endpoint.includes('/episodes')) return 10 * 60 * 1000; // 10 min
+        return 2 * 60 * 1000; // default 2 min
     }
 
     private async fetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -232,6 +298,7 @@ class AnimeApiClient {
     // Clear cache for fresh data
     clearCache(): void {
         this.cache.clear();
+        this.inflight.clear();
     }
 
     // ============ ANIME ENDPOINTS ============
@@ -416,6 +483,66 @@ class AnimeApiClient {
     async getSourceHealth(): Promise<SourceHealth[]> {
         const response = await this.fetch<{ sources: SourceHealth[] }>('/api/sources/health');
         return response.sources || [];
+    }
+
+    /**
+     * Get enhanced source health with capabilities and performance metrics
+     */
+    async getSourceHealthEnhanced(): Promise<Array<{
+        name: string;
+        status: string;
+        lastCheck: string;
+        capabilities?: {
+            supportsDub: boolean;
+            supportsSub: boolean;
+            hasScheduleData: boolean;
+            hasGenreFiltering: boolean;
+            quality: 'high' | 'medium' | 'low';
+        };
+        successRate?: number;
+        avgLatency?: number;
+    }>> {
+        const response = await this.fetch<{ sources: Array<{
+            name: string;
+            status: string;
+            lastCheck: Date;
+            capabilities?: {
+                supportsDub: boolean;
+                supportsSub: boolean;
+                hasScheduleData: boolean;
+                hasGenreFiltering: boolean;
+                quality: 'high' | 'medium' | 'low';
+            };
+            successRate?: number;
+            avgLatency?: number;
+        }> }>('/api/sources/health/enhanced');
+        return response.sources || [];
+    }
+
+    /**
+     * Get recommended source based on performance metrics
+     */
+    async getRecommendedSource(): Promise<{
+        recommended: string | null;
+        capabilities?: {
+            supportsDub: boolean;
+            supportsSub: boolean;
+            hasScheduleData: boolean;
+            hasGenreFiltering: boolean;
+            quality: 'high' | 'medium' | 'low';
+        };
+    }> {
+        const response = await this.fetch<{
+            recommended: string | null;
+            capabilities?: {
+                supportsDub: boolean;
+                supportsSub: boolean;
+                hasScheduleData: boolean;
+                hasGenreFiltering: boolean;
+                quality: 'high' | 'medium' | 'low';
+            };
+        }>('/api/sources/recommended');
+        return response;
     }
 
     async checkSourceHealth(): Promise<SourceHealth[]> {

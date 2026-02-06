@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import * as cheerio from 'cheerio';
+import { HiAnime } from 'aniwatch';
 import type { Browser, Page } from 'puppeteer';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
@@ -18,6 +19,15 @@ export class NineAnimeSource extends BaseAnimeSource {
     name = '9Anime';
     baseUrl = 'https://9animetv.to';
     private client: AxiosInstance;
+    private scraper: HiAnime.Scraper | null = null;
+
+    private getScraper(): HiAnime.Scraper {
+        if (!this.scraper) {
+            // @ts-expect-error - aniwatch scraper constructor
+            this.scraper = new HiAnime.Scraper('https://hianime.to');
+        }
+        return this.scraper;
+    }
 
     // Smart caching with TTL
     private cache: Map<string, { data: any; expires: number }> = new Map();
@@ -84,18 +94,32 @@ export class NineAnimeSource extends BaseAnimeSource {
         const subCount = parseInt(subText) || 0;
         const dubCount = parseInt(dubText) || 0;
 
+        // Extract genres from the card's detail/tooltip elements
+        const genres: string[] = [];
+        el.find('.fd-infor .fdi-item a, .film-detail .fd-infor a').each((_, genreEl) => {
+            const genre = $(genreEl).text().trim();
+            if (genre && !genre.match(/^\d+$/) && genre.length < 30) {
+                genres.push(genre);
+            }
+        });
+
+        // Extract description from tooltip or detail text
+        const description = el.find('.film-detail .description, .description').text().trim()
+            || el.find('.desi-description').text().trim()
+            || '';
+
         return {
             id: `9anime-${id}`,
             title,
             image,
             cover: image,
-            description: 'No description available.',
+            description,
             type: this.mapType(type),
             status: 'Completed',
             episodes: subCount,
             episodesAired: subCount,
             duration: '24m',
-            genres: [],
+            genres,
             studios: [],
             subCount,
             dubCount,
@@ -341,7 +365,6 @@ export class NineAnimeSource extends BaseAnimeSource {
             this.isAvailable = response.status === 200;
             return this.isAvailable;
         } catch {
-            this.isAvailable = false;
             return false;
         }
     }
@@ -563,71 +586,43 @@ export class NineAnimeSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            // 1. Try Puppeteer Scraping first (Primary Strategy)
-            logger.info(`Attempting Puppeteer scraping for ${episodeId}`, undefined, this.name);
+            // 9Anime and HiAnime share the same backend (same episode IDs).
+            // Use the aniwatch scraper directly — it can decode rapid-cloud embeds.
+            logger.info(`Using aniwatch scraper for ${episodeId}`, undefined, this.name);
 
-            // We need a server ID to scrape. If server is "hd-1" (default), we might need to fetch real server ID first
-            let targetServerId = '';
-
-            // If server param looks like a real ID (numeric), use it. otherwise fetch servers
-            if (server && server !== 'hd-1' && server !== 'hd-2') {
-                targetServerId = server; // It's likely the data-id from getEpisodeServers
-            } else {
-                // Fetch servers to get a real ID
-                const servers = await this.getEpisodeServers(episodeId, options);
-                const matchingServer = servers.find(s => s.type === category) || servers[0];
-                if (matchingServer && matchingServer.url) {
-                    targetServerId = matchingServer.url;
-                }
-            }
-
-            if (targetServerId) {
-                const scrapedData = await this.getStreamsFromPuppeteer(episodeId, targetServerId, options?.signal);
-                if (scrapedData) {
-                    this.setCache(cacheKey, scrapedData, this.cacheTTL.stream);
-                    return scrapedData;
-                }
-            }
-
-            // 2. Fallback: Try HiAnime API
-            for (const apiUrl of this.hianimeApis) {
+            const serverPriority = [server, 'hd-2', 'hd-1', 'hd-3'].filter((v, i, a) => a.indexOf(v) === i);
+            for (const srv of serverPriority) {
                 try {
-                    const response = await axios.get(`${apiUrl}/api/v2/hianime/episode/sources`, {
-                        params: {
-                            animeEpisodeId: episodeId,
-                            server,
-                            category
-                        },
-                        signal: options?.signal,
-                        timeout: options?.timeout || 30000
-                    });
-
-                    const data = response.data?.data || response.data;
-
-                    if (data?.sources && data.sources.length > 0) {
+                    const data = await this.getScraper().getEpisodeSources(
+                        episodeId,
+                        srv as HiAnime.AnimeServers,
+                        category
+                    );
+                    if (data.sources && data.sources.length > 0) {
+                        const rawData = data as Record<string, unknown>;
                         const streamData: StreamingData = {
-                            sources: data.sources.map((s: any): VideoSource => ({
+                            sources: (data.sources as Array<{ url: string; quality?: string; isM3U8?: boolean }>).map((s): VideoSource => ({
                                 url: s.url,
                                 quality: this.normalizeQuality(s.quality || 'auto'),
                                 isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-                                isDASH: s.url?.includes('.mpd')
                             })),
-                            subtitles: (data.subtitles || []).map((sub: any) => ({
-                                url: sub.url,
-                                lang: sub.lang,
-                                label: sub.lang
-                            })),
-                            headers: data.headers,
-                            intro: data.intro,
-                            outro: data.outro,
+                            subtitles: ((rawData.tracks || rawData.subtitles || []) as Array<{ url: string; lang?: string; language?: string; label?: string }>)
+                                .filter((t) => t.lang !== 'thumbnails')
+                                .map((sub) => ({
+                                    url: sub.url,
+                                    lang: sub.lang || sub.language || 'Unknown',
+                                    label: sub.label || sub.lang || sub.language
+                                })),
+                            headers: (rawData.headers as Record<string, string>) || { 'Referer': 'https://megacloud.blog/' },
                             source: this.name
                         };
-
+                        logger.info(`Scraper got ${streamData.sources.length} sources for ${episodeId} via ${srv}`, undefined, this.name);
                         this.setCache(cacheKey, streamData, this.cacheTTL.stream);
+                        this.handleSuccess();
                         return streamData;
                     }
                 } catch {
-                    continue;
+                    // Try next server
                 }
             }
 

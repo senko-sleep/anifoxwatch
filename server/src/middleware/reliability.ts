@@ -16,9 +16,9 @@ const circuitBreakers = new Map<string, CircuitBreakerState>();
 
 // Default circuit breaker settings - optimized for speed
 const DEFAULT_CIRCUIT_SETTINGS = {
-    maxFailures: 3, // Reduced from 5 to 3 for faster circuit breaking
-    resetTime: 20000, // Reduced from 30s to 20s for faster recovery
-    timeout: 8000 // Reduced from 15s to 8s for instant feedback
+    maxFailures: 5, // Allow more failures before tripping - prevents transient errors from killing sources
+    resetTime: 15000, // 15s recovery - fast enough to recover from brief outages
+    timeout: 8000 // 8s timeout for instant feedback
 };
 
 // Get or create circuit breaker for a source
@@ -184,7 +184,13 @@ export async function withCircuitBreaker<T>(
         recordSuccess(sourceName);
         return result;
     } catch (error) {
-        const isAbort = error instanceof Error && (error.name === 'AbortError' || error.message === 'Aborted' || error.message.includes('timeout'));
+        const isAbort = error instanceof Error && (
+            error.name === 'AbortError' || 
+            error.message === 'Aborted' || 
+            error.message.includes('timeout') || 
+            error.message.includes('timed out') ||
+            error.message.includes('Circuit breaker')
+        );
         if (!isAbort) {
             recordFailure(sourceName);
         }
@@ -208,8 +214,8 @@ export async function reliableRequest<T>(
     } = {}
 ): Promise<T> {
     const {
-        maxAttempts = 1, // Changed from 5 to 1 - NO RETRIES for instant feedback
-        timeout = 8000, // Reduced from 15s to 8s for faster failures
+        maxAttempts = 2, // 1 retry for transient failures - prevents single blips from cascading
+        timeout = 8000, // 8s timeout for fast failures
         retryDelay = 1000,
         context: extraContext = {},
         signal: parentSignal
@@ -223,16 +229,21 @@ export async function reliableRequest<T>(
     };
 
     try {
-        // NO RETRIES - just timeout and circuit breaker
-        return await withCircuitBreaker(
-            sourceName,
-            () => withTimeout(
-                (timeoutSignal) => fn(timeoutSignal),
-                timeout,
-                requestContext,
-                parentSignal
+        return await retry(
+            (signal) => withCircuitBreaker(
+                sourceName,
+                () => withTimeout(
+                    (timeoutSignal) => fn(timeoutSignal),
+                    timeout,
+                    requestContext,
+                    signal
+                ),
+                requestContext
             ),
-            requestContext
+            maxAttempts,
+            retryDelay,
+            requestContext,
+            parentSignal
         );
     } catch (error) {
         logger.error(

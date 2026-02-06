@@ -330,7 +330,6 @@ export class CloudflareHiAnimeAPISource extends BaseAnimeSource implements Genre
             this.isAvailable = true;
             return true;
         } catch {
-            this.isAvailable = false;
             return false;
         }
     }

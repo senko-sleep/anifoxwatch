@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Star, TrendingUp } from 'lucide-react';
 import { Anime } from '@/types/anime';
-import { cn } from '@/lib/utils';
+import { cn, formatRating } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 interface WeeklyLeaderboardProps {
@@ -89,7 +89,7 @@ export const WeeklyLeaderboard = ({ anime, isLoading }: WeeklyLeaderboardProps) 
                                     <div className="flex items-center gap-1 text-amber-400">
                                         <Star className="w-3 h-3 fill-amber-400" />
                                         <span className="font-bold">
-                                            {(item.rating > 10 ? item.rating / 10 : item.rating).toFixed(1)}
+                                            {formatRating(item.rating)}
                                         </span>
                                     </div>
                                 )}

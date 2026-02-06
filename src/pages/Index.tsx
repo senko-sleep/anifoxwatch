@@ -17,8 +17,10 @@ import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
 import { SectionHeader } from '@/components/shared/SectionHeader';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const Index = () => {
+  useDocumentTitle('Home');
   const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useTrending(1, 20);
   const { data: latestAnime, isLoading: latestLoading, error: latestError, refetch: refetchLatest } = useLatest();
   const { data: topAnimeList, isLoading: topLoading, refetch: refetchTop } = useTopRated(1, 15);
@@ -36,6 +38,67 @@ const Index = () => {
   const [featuredAnime, setFeaturedAnime] = useState([]);
   const [featuredLoading, setFeaturedLoading] = useState(false);
 
+  // Filter out hentai content from homepage
+  const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (string | null)[] | null } | null) => {
+    if (!anime) return false;
+    
+    const title = anime.title ? String(anime.title).toLowerCase() : '';
+    const id = anime.id ? String(anime.id).toLowerCase() : '';
+    const genres = anime.genres ? anime.genres
+      .filter((g): g is string => g != null)
+      .map((g: string) => String(g).toLowerCase()) : [];
+    
+    // Check for hentai-related keywords
+    if (title.includes('hentai') || 
+        id.includes('hentai') || 
+        id.includes('hanime') ||
+        genres.includes('hentai') || 
+        genres.includes('adult') ||
+        title.includes('girls love') ||
+        title.includes('boys love') ||
+        title.includes('yaoi') ||
+        title.includes('yuri')) {
+      return true;
+    }
+    return false;
+  };
+
+  // Filter all anime lists to exclude hentai content
+  const filteredTrending = trendingAnime?.filter(a => !isHentai(a)) || [];
+  const filteredLatest = latestAnime?.filter(a => !isHentai(a)) || [];
+  const filteredSeasonal = seasonalData?.results?.filter(a => !isHentai(a)) || [];
+  const filteredPopular = popularAnime?.filter(a => !isHentai(a)) || [];
+  const filteredUpcoming = upcomingData?.results?.filter(a => !isHentai(a)) || [];
+  const filteredLeaderboard = leaderboardData?.results?.filter(a => !isHentai(a)) || [];
+
+  // Filter best anime from top rated
+  const filteredTopRated = topAnimeList?.map(item => item.anime).filter(a => !isHentai(a)) || [];
+
+  // Deduplicate anime across all sections - track which IDs have been used
+  const usedAnimeIds = new Set<string>();
+  
+  const getUniqueAnime = <T extends { id: string }>(animeList: T[]): T[] => {
+    return animeList.filter(anime => {
+      if (usedAnimeIds.has(anime.id)) return false;
+      usedAnimeIds.add(anime.id);
+      return true;
+    });
+  };
+
+  // Apply deduplication to each section
+  const dedupTrending = getUniqueAnime(filteredTrending);
+  const dedupLatest = getUniqueAnime(filteredLatest);
+  const dedupSeasonal = getUniqueAnime(filteredSeasonal);
+  const dedupPopular = getUniqueAnime(filteredPopular);
+  const dedupUpcoming = getUniqueAnime(filteredUpcoming);
+  const dedupLeaderboard = getUniqueAnime(filteredLeaderboard);
+  const dedupTopRated = getUniqueAnime(filteredTopRated);
+
+  // Create featured anime from trending (reset used IDs)
+  usedAnimeIds.clear();
+  const featuredAnimeIds = new Set(dedupTrending.slice(0, 5).map(a => a.id));
+  const featuredAnimeList = dedupTrending.filter(a => featuredAnimeIds.has(a.id));
+
   // Filter schedule for today
   const todaySchedule = scheduleData?.schedule?.filter(item => {
     // Only show items airing in next 24h
@@ -49,10 +112,10 @@ const Index = () => {
 
   // Fetch detailed info for featured anime with AniList images
   useEffect(() => {
-    if (trendingAnime && trendingAnime.length > 0) {
+    if (dedupTrending && dedupTrending.length > 0) {
       const fetchFeaturedDetails = async () => {
         setFeaturedLoading(true);
-        const featuredIds = trendingAnime.slice(0, 5);
+        const featuredIds = dedupTrending.filter(a => a.status !== 'Upcoming').slice(0, 5);
 
         try {
           // Fetch detailed info for each featured anime with AniList enrichment
@@ -119,16 +182,14 @@ const Index = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const bestAnime = topAnimeList?.map(item => item.anime) || [];
-
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
       <Navbar />
 
       {/* Hero Section with Enhanced Design */}
-      {featuredAnime.length > 0 ? (
+      {(featuredAnime.length > 0 || dedupTrending.length > 0) ? (
         <div className="relative">
-          <HeroSection featuredAnime={featuredAnime} />
+          <HeroSection featuredAnime={featuredAnime.length > 0 ? featuredAnime : dedupTrending.slice(0, 5)} />
           <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-background via-background/90 to-transparent pointer-events-none" />
         </div>
       ) : isLoading ? (
@@ -166,7 +227,7 @@ const Index = () => {
       )}
 
       {/* Main Content Layout */}
-      <main className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-12">
+      <main className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-16">
 
         {/* Continue Watching - Full Width */}
         {history.length > 0 && (
@@ -185,7 +246,7 @@ const Index = () => {
         {/* Two Column Layout for Main Content + Sidebar */}
         <div className="flex flex-col lg:flex-row gap-8 lg:gap-12">
           {/* Main Column */}
-          <div className="flex-1 min-w-0 space-y-12">
+          <div className="flex-1 min-w-0 space-y-16">
 
             {/* New This Season */}
             <section className="animate-fade-in">
@@ -198,13 +259,13 @@ const Index = () => {
                 linkText="View All"
               />
               {seasonalLoading ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-8">
                   {[...Array(10)].map((_, i) => (
                     <div key={i} className="aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
                   ))}
                 </div>
-              ) : seasonalData?.results && seasonalData.results.length > 0 ? (
-                <AnimeGrid anime={seasonalData.results.slice(0, 10)} columns={5} />
+              ) : dedupSeasonal.length > 0 ? (
+                <AnimeGrid anime={dedupSeasonal.slice(0, 10)} columns={5} />
               ) : (
                 <EmptyState message="No seasonal content available" />
               )}
@@ -221,13 +282,13 @@ const Index = () => {
                 linkText="Full Schedule"
               />
               {latestLoading ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-8">
                   {[...Array(10)].map((_, i) => (
                     <div key={i} className="aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
                   ))}
                 </div>
-              ) : latestAnime && latestAnime.length > 0 ? (
-                <AnimeGrid anime={latestAnime.slice(0, 10)} columns={5} />
+              ) : dedupLatest && dedupLatest.length > 0 ? (
+                <AnimeGrid anime={dedupLatest.slice(0, 10)} columns={5} />
               ) : (
                 <EmptyState message="No new episodes available" />
               )}
@@ -248,9 +309,9 @@ const Index = () => {
                     <div key={i} className="w-44 shrink-0 aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
                   ))}
                 </div>
-              ) : trendingAnime && trendingAnime.length > 0 ? (
+              ) : dedupTrending && dedupTrending.length > 0 ? (
                 <AnimeSlider 
-                  anime={trendingAnime.filter(a => a.status !== 'Upcoming').slice(0, 15)} 
+                  anime={dedupTrending.filter(a => a.status !== 'Upcoming').slice(0, 15)} 
                   cardSize="md"
                 />
               ) : (
@@ -274,8 +335,8 @@ const Index = () => {
                     <div key={i} className="w-44 shrink-0 aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
                   ))}
                 </div>
-              ) : popularAnime && popularAnime.length > 0 ? (
-                <AnimeSlider anime={popularAnime.slice(0, 12)} cardSize="md" />
+              ) : dedupPopular && dedupPopular.length > 0 ? (
+                <AnimeSlider anime={dedupPopular.slice(0, 12)} cardSize="md" />
               ) : null}
             </section>
 
@@ -290,20 +351,20 @@ const Index = () => {
                 linkText="View Rankings"
               />
               {topLoading ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-x-6 gap-y-8">
                   {[...Array(10)].map((_, i) => (
                     <div key={i} className="aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
                   ))}
                 </div>
-              ) : bestAnime.length > 0 ? (
-                <AnimeGrid anime={bestAnime.slice(0, 10)} columns={5} />
+              ) : dedupTopRated.length > 0 ? (
+                <AnimeGrid anime={dedupTopRated.slice(0, 10)} columns={5} />
               ) : (
                 <EmptyState message="No top rated content available" />
               )}
             </section>
 
             {/* Upcoming Anime */}
-            {upcomingData?.results && upcomingData.results.length > 0 && (
+            {dedupUpcoming && dedupUpcoming.length > 0 && (
               <section className="animate-fade-in">
                 <SectionHeader
                   title="Coming Soon"
@@ -313,7 +374,7 @@ const Index = () => {
                   link="/browse?status=upcoming"
                   linkText="See All Upcoming"
                 />
-                <AnimeSlider anime={upcomingData.results.slice(0, 10)} cardSize="md" />
+                <AnimeSlider anime={dedupUpcoming.slice(0, 10)} cardSize="md" />
               </section>
             )}
 
@@ -353,7 +414,7 @@ const Index = () => {
                   <p className="text-xs text-muted-foreground">Most watched this week</p>
                 </div>
               </div>
-              <WeeklyLeaderboard anime={leaderboardData?.results || []} isLoading={leaderboardLoading} />
+              <WeeklyLeaderboard anime={dedupLeaderboard} isLoading={leaderboardLoading} />
             </div>
 
             {/* Quick Stats */}
@@ -373,15 +434,15 @@ const Index = () => {
                   <p className="text-xs text-muted-foreground">Watching</p>
                 </div>
                 <div className="bg-fox-surface/30 rounded-xl p-4 text-center">
-                  <p className="text-2xl font-bold text-green-500">{trendingAnime?.length || 0}</p>
+                  <p className="text-2xl font-bold text-green-500">{dedupTrending.length}</p>
                   <p className="text-xs text-muted-foreground">Trending</p>
                 </div>
                 <div className="bg-fox-surface/30 rounded-xl p-4 text-center">
-                  <p className="text-2xl font-bold text-purple-500">{seasonalData?.results?.length || 0}</p>
+                  <p className="text-2xl font-bold text-purple-500">{dedupSeasonal.length}</p>
                   <p className="text-xs text-muted-foreground">This Season</p>
                 </div>
                 <div className="bg-fox-surface/30 rounded-xl p-4 text-center">
-                  <p className="text-2xl font-bold text-yellow-500">{bestAnime.length}</p>
+                  <p className="text-2xl font-bold text-yellow-500">{dedupTopRated.length}</p>
                   <p className="text-xs text-muted-foreground">Top Rated</p>
                 </div>
               </div>

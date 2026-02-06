@@ -65,7 +65,8 @@ export const ALL_PROVIDERS = {
     { id: 'Consumet', name: 'Consumet', description: 'Multi-provider API' },
   ],
   adult: [
-    { id: 'WatchHentai', name: 'WatchHentai', description: 'Adult content only' },
+    { id: 'WatchHentai', name: 'WatchHentai', description: 'Hentai streaming' },
+    { id: 'Hanime', name: 'Hanime', description: 'Adult anime content' },
   ]
 };
 

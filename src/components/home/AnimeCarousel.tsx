@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Play, Star, Info } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatRating } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 interface CarouselAnime {
@@ -106,7 +106,7 @@ export const AnimeCarousel = ({ anime, title, autoPlay = false, showDetails = tr
                   {currentAnime.rating && (
                     <span className="flex items-center gap-1 px-3 py-1 rounded-full bg-yellow-500/20 text-yellow-400 text-sm font-medium">
                       <Star className="w-4 h-4 fill-yellow-400" />
-                      {(currentAnime.rating > 10 ? currentAnime.rating / 10 : currentAnime.rating).toFixed(1)}
+                      {formatRating(currentAnime.rating)}
                     </span>
                   )}
                   {currentAnime.type && (

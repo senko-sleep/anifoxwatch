@@ -244,6 +244,22 @@ app.get('/api', (_req: Request, res: Response) => {
 });
 
 // ============================================
+// PROCESS CRASH PROTECTION
+// ============================================
+
+process.on('uncaughtException', (err: Error) => {
+    console.error('⚠️ UNCAUGHT EXCEPTION (process kept alive):', err.message);
+    console.error(err.stack);
+    enhancedLogger.error('Uncaught exception', err, { fatal: false });
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    console.error('⚠️ UNHANDLED REJECTION (process kept alive):', message);
+    enhancedLogger.error('Unhandled rejection', reason instanceof Error ? reason : new Error(message), { fatal: false });
+});
+
+// ============================================
 // ERROR HANDLING
 // ============================================
 
@@ -352,11 +368,56 @@ const startServer = (port: number) => {
         }
     });
 
-    // Setup graceful shutdown
-    // setupGracefulShutdown(server); // TODO: Re-implement if needed
+    // Connection timeout settings to prevent hanging connections
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 70000;
+    server.timeout = 120000;
+    server.maxConnections = 500;
+
+    activeServer = server;
+
+    // Self-ping keep-alive to prevent idle shutdown on Render/Koyeb free tier
+    if (process.env.NODE_ENV === 'production') {
+        const BASE_URL = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || `http://localhost:${port}`;
+        const KEEP_ALIVE_INTERVAL = 10 * 60 * 1000; // 10 minutes
+        setInterval(async () => {
+            try {
+                const res = await fetch(`${BASE_URL}/health`);
+                console.log(`🏓 Keep-alive ping: ${res.status}`);
+            } catch (err) {
+                console.log(`🏓 Keep-alive ping failed (non-fatal): ${(err as Error).message}`);
+            }
+        }, KEEP_ALIVE_INTERVAL);
+        console.log(`🏓 Keep-alive pinger started (every ${KEEP_ALIVE_INTERVAL / 60000} min)`);
+    }
 
     return server;
 };
+
+// ============================================
+// GRACEFUL SHUTDOWN
+// ============================================
+
+let activeServer: ReturnType<typeof app.listen> | null = null;
+
+const gracefulShutdown = (signal: string) => {
+    console.log(`\n${signal} received. Shutting down gracefully...`);
+    if (activeServer) {
+        activeServer.close(() => {
+            console.log('✅ Server closed. Exiting.');
+            process.exit(0);
+        });
+        setTimeout(() => {
+            console.log('⚠️ Forcing exit after timeout');
+            process.exit(1);
+        }, 10000).unref();
+    } else {
+        process.exit(0);
+    }
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Start the server
 import { fileURLToPath } from 'url';

@@ -15,6 +15,122 @@ const DEAD_DOMAINS = [
 ];
 
 /**
+ * Enhanced CDN configurations with fallback URLs for better reliability
+ */
+const CDN_CONFIGS: Array<{
+    pattern: RegExp;
+    configs: Array<{ referer: string; origin?: string; userAgent?: string }>;
+}> = [
+    {
+        pattern: /rapid-cloud\.co/i,
+        configs: [
+            { referer: 'https://rapid-cloud.co/', origin: 'https://rapid-cloud.co' },
+            { referer: 'https://9anime.lu/', origin: 'https://9anime.lu' }
+        ]
+    },
+    {
+        pattern: /megacloud/i,
+        configs: [
+            { referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' },
+            { referer: 'https://aniwave.to/', origin: 'https://aniwave.to' }
+        ]
+    },
+    {
+        pattern: /vidcloud/i,
+        configs: [
+            { referer: 'https://vidcloud9.com/', origin: 'https://vidcloud9.com' },
+            { referer: 'https://vidstreaming.io/', origin: 'https://vidstreaming.io' }
+        ]
+    },
+    {
+        pattern: /gogocdn/i,
+        configs: [
+            { referer: 'https://gogoanime.run/', origin: 'https://gogoanime.run' },
+            { referer: 'https://gogoanime.ai/', origin: 'https://gogoanime.ai' }
+        ]
+    },
+    {
+        pattern: /hianime/i,
+        configs: [
+            { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
+            { referer: 'https://hianime.pe/', origin: 'https://hianime.pe' }
+        ]
+    },
+    {
+        pattern: /watchhentai/i,
+        configs: [
+            { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
+            { referer: 'https://hentai19.net/', origin: 'https://hentai19.net' }
+        ]
+    }
+];
+
+/**
+ * Get CDN configuration with fallback support
+ */
+function getCdnConfigs(hostname: string): Array<{ referer: string; origin?: string; userAgent?: string }> {
+    for (const config of CDN_CONFIGS) {
+        if (config.pattern.test(hostname)) {
+            return config.configs;
+        }
+    }
+    // Default config
+    return [
+        { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
+        { referer: 'https://9anime.lu/', origin: 'https://9anime.lu' }
+    ];
+}
+
+/**
+ * Retry logic for failed proxy requests with exponential backoff
+ */
+async function retryProxyRequest(
+    url: string,
+    configs: Array<{ referer: string; origin?: string; userAgent?: string }>,
+    maxRetries: number = 2,
+    rangeHeader?: string
+): Promise<axios.AxiosResponse> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const config = configs[attempt % configs.length];
+        
+        try {
+            const headers: Record<string, string> = {
+                'User-Agent': config.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': config.referer,
+                'Origin': config.origin || config.referer.replace(/\/$/, ''),
+                'Connection': 'keep-alive'
+            };
+            
+            // Forward Range header if present (crucial for seeking)
+            if (rangeHeader) {
+                headers['Range'] = rangeHeader;
+            }
+            
+            return await axios({
+                method: 'get',
+                url,
+                responseType: 'stream',
+                headers,
+                timeout: 30000,
+                maxRedirects: 5
+            });
+        } catch (error) {
+            lastError = error as Error;
+            if (attempt < maxRetries) {
+                // Exponential backoff: 500ms, 1000ms, 2000ms...
+                await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 500));
+            }
+        }
+    }
+    
+    throw lastError;
+}
+
+/**
  * Check if a domain is resolvable (has valid DNS)
  */
 async function isDomainResolvable(hostname: string): Promise<boolean> {
@@ -55,14 +171,18 @@ const getProxyBaseUrl = (req: Request): string => {
 /**
  * Convert a raw stream URL to a proxied URL
  */
-const proxyUrl = (url: string, proxyBase: string): string => {
-    return `${proxyBase}?url=${encodeURIComponent(url)}`;
+const proxyUrl = (url: string, proxyBase: string, referer?: string): string => {
+    let proxyStr = `${proxyBase}?url=${encodeURIComponent(url)}`;
+    if (referer) {
+        proxyStr += `&referer=${encodeURIComponent(referer)}`;
+    }
+    return proxyStr;
 };
 
 /**
  * Rewrite m3u8 content to proxy all segment URLs
  */
-const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: string): string => {
+const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: string, referer?: string): string => {
     const baseUrl = originalUrl.substring(0, originalUrl.lastIndexOf('/') + 1);
     const lines = content.split('\n');
 
@@ -75,7 +195,7 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
             if (trimmedLine.includes('URI="')) {
                 return trimmedLine.replace(/URI="([^"]+)"/g, (match, uri) => {
                     const absoluteUri = uri.startsWith('http') ? uri : `${baseUrl}${uri}`;
-                    return `URI="${proxyUrl(absoluteUri, proxyBase)}"`;
+                    return `URI="${proxyUrl(absoluteUri, proxyBase, referer)}"`;
                 });
             }
             return line;
@@ -86,7 +206,7 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
             const absoluteUrl = trimmedLine.startsWith('http')
                 ? trimmedLine
                 : `${baseUrl}${trimmedLine}`;
-            return proxyUrl(absoluteUrl, proxyBase);
+            return proxyUrl(absoluteUrl, proxyBase, referer);
         }
 
         return line;
@@ -236,9 +356,12 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 
     // Proxy the stream URLs if requested
     if (shouldProxy) {
+        // Extract referer from stream headers for proxy passthrough
+        const streamReferer = streamData.headers?.Referer || streamData.headers?.referer || 'https://megacloud.blog/';
+
         streamData.sources = streamData.sources.map((source: any) => ({
             ...source,
-            url: proxyUrl(source.url, proxyBase),
+            url: proxyUrl(source.url, proxyBase, streamReferer),
             originalUrl: source.url // Keep original for debugging
         }));
 
@@ -246,7 +369,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         if (streamData.subtitles) {
             streamData.subtitles = streamData.subtitles.map((sub: any) => ({
                 ...sub,
-                url: proxyUrl(sub.url, proxyBase)
+                url: proxyUrl(sub.url, proxyBase, streamReferer)
             }));
         }
 
@@ -275,6 +398,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const { url } = req.query;
     const requestId = (req as any).id;
     const proxyBase = getProxyBaseUrl(req);
+
+    const refererParam = req.query.referer as string | undefined;
 
     if (!url || typeof url !== 'string') {
         logger.warn(`[PROXY] Missing URL parameter`, { requestId });
@@ -320,12 +445,13 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'hstorage.xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'googlevideo': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
-            'default': { referer: 'https://hianimez.to/' }
+            'default': { referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' }
         };
 
-        const matchedConfig = Object.entries(cdnConfig).find(([key]) => domain.includes(key));
+        const matchedConfig = Object.entries(cdnConfig).find(([key]) => key !== 'default' && domain.includes(key));
+        // Priority: 1) explicit referer param from client, 2) CDN config match, 3) megacloud.blog default
         const config = matchedConfig ? matchedConfig[1] : cdnConfig.default;
-        const referer = config.referer;
+        const referer = refererParam || config.referer;
         const origin = config.origin || referer.replace(/\/$/, '');
 
         // Check if domain is dead/unresolvable before making request
@@ -407,7 +533,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         if (isUpstreamM3u8) {
             try {
                 const content = await streamToString(response.data);
-                const rewrittenContent = rewriteM3u8Content(content, url, proxyBase);
+                const rewrittenContent = rewriteM3u8Content(content, url, proxyBase, referer);
 
                 res.set('Content-Type', 'application/vnd.apple.mpegurl');
                 res.set('Cache-Control', 'private, max-age=5');

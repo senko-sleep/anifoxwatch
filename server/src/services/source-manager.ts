@@ -2,34 +2,12 @@ import {
     AnimeSource,
     HiAnimeDirectSource,
     HiAnimeSource,
-    AniwatchSource,
-    GogoanimeSource,
-    ConsumetSource,
     NineAnimeSource,
-    AniwaveSource,
     WatchHentaiSource,
     HanimeSource,
-    // New backup sources
-    ZoroSource,
-    AnimePaheSource,
-    AnimeSugeSource,
+    // Backup sources (verified search works)
     KaidoSource,
-    AnixSource,
-    KickassAnimeSource,
-    YugenAnimeSource,
-    AniMixPlaySource,
-    AnimeFoxSource,
-    AnimeDAOSource,
     AnimeFLVSource,
-    AnimeSaturnSource,
-    CrunchyrollSource,
-    AnimeOnsenSource,
-    MarinSource,
-    AnimeHeavenSource,
-    AnimeKisaSource,
-    AnimeOwlSource,
-    AnimeLandSource,
-    AnimeFreakSource
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -45,6 +23,28 @@ interface StreamingSource extends AnimeSource {
 }
 
 /**
+ * Source capabilities for intelligent routing
+ */
+interface SourceCapabilities {
+    supportsDub: boolean;
+    supportsSub: boolean;
+    hasScheduleData: boolean;
+    hasGenreFiltering: boolean;
+    quality: 'high' | 'medium' | 'low'; // Response quality based on source reliability
+}
+
+/**
+ * Enhanced source metadata for intelligent routing
+ */
+interface SourceMetadata {
+    capabilities: SourceCapabilities;
+    successRate: number; // 0-1, calculated from recent requests
+    avgLatency: number; // in ms
+    lastSuccessTime: number;
+    consecutiveFailures: number;
+}
+
+/**
  * SourceManager handles multiple anime streaming sources
  * Features:
  * - Automatic fallback if a source fails
@@ -53,101 +53,84 @@ interface StreamingSource extends AnimeSource {
  * - Aggregation of results from multiple sources
  * - Smart caching for performance
  * - Concurrency control with request queueing
+ * - Intelligent routing based on source capabilities
  */
 export class SourceManager {
     private sources: Map<string, StreamingSource> = new Map();
-    private primarySource: string = 'HiAnimeDirect'; // Back to HiAnimeDirect - proven to work
+    private primarySource: string = 'HiAnimeDirect';
     private healthStatus: Map<string, SourceHealth> = new Map();
+    private sourceMetadata: Map<string, SourceMetadata> = new Map();
+    
     // Reordered - working sources first, then new backups
     private sourceOrder: string[] = [
-        'HiAnimeDirect', 'HiAnime', 'Gogoanime', '9Anime', 'Aniwave', 'Aniwatch',
-        'Zoro', 'AnimePahe', 'AnimeSuge', 'Kaido', 'Anix', 'KickassAnime', 
-        'YugenAnime', 'AniMixPlay', 'AnimeFox', 'AnimeDAO', 'AnimeFLV', 'AnimeSaturn', 
-        'Crunchyroll', 'AnimeOnsen', 'Marin', 'AnimeHeaven', 'AnimeKisa', 'AnimeOwl', 
-        'AnimeLand', 'AnimeFreak', 'Consumet', 'WatchHentai', 'Hanime'
+        'HiAnimeDirect', 'HiAnime', '9Anime', 'Kaido', 'AnimeFLV',
+        'WatchHentai', 'Hanime'
     ];
+
+    // Source capabilities mapping
+    private sourceCapabilities: Map<string, SourceCapabilities> = new Map([
+        ['HiAnimeDirect', { supportsDub: true, supportsSub: true, hasScheduleData: true, hasGenreFiltering: true, quality: 'high' }],
+        ['HiAnime', { supportsDub: true, supportsSub: true, hasScheduleData: true, hasGenreFiltering: true, quality: 'high' }],
+        ['9Anime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
+        ['Kaido', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['AnimeFLV', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
+        ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
+    ]);
 
     // Concurrency control for API requests with better reliability
     private globalActiveRequests = 0;
     private maxGlobalConcurrent = 8;
     private requestQueue: Array<{
         fn: (signal: AbortSignal) => Promise<unknown>;
-        resolve: (v: unknown) => void;
-        reject: (e: unknown) => void;
+        resolve: (value: unknown) => void;
+        reject: (reason: unknown) => void;
         context: string;
         options: SourceRequestOptions;
+        priority: number;
     }> = [];
+
+    // Priority levels for request queue
+    private readonly PRIORITY_HIGH = 1;
+    private readonly PRIORITY_NORMAL = 2;
+    private readonly PRIORITY_LOW = 3;
 
     // Rate limiting by source
     private sourceRequestCounts = new Map<string, number>();
     private sourceRateLimits = new Map<string, { limit: number; resetTime: number }>();
 
+    // Performance tracking for smart source selection
+    private recentLatencies: Map<string, number[]> = new Map();
+    private readonly LATENCY_SAMPLE_SIZE = 10;
+    private readonly SUCCESS_RATE_WINDOW = 50; // Number of requests to track
+    private sourceSuccessRates: Map<string, { success: number; total: number }> = new Map();
+
     constructor() {
         // Register streaming sources in priority order
+        // HiAnimeDirect: STREAM_OK (full pipeline, aniwatch scraper)
+        // HiAnime: URL_VALID (scraper fallback when APIs dead)
+        // 9Anime: SEARCH_ONLY (26 results, 1 ep, no stream yet)
         this.registerSource(new HiAnimeDirectSource());
         this.registerSource(new HiAnimeSource());
-        this.registerSource(new GogoanimeSource());
         this.registerSource(new NineAnimeSource());
-        this.registerSource(new AniwaveSource());
-        this.registerSource(new AniwatchSource());
-        this.registerSource(new ConsumetSource());
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
 
-        // Register NEW backup sources (20+ alternatives)
-        this.registerSource(new ZoroSource());
-        this.registerSource(new AnimePaheSource());
-        this.registerSource(new AnimeSugeSource());
+        // Backup sources (search works, no streaming)
         this.registerSource(new KaidoSource());
-        this.registerSource(new AnixSource());
-        this.registerSource(new KickassAnimeSource());
-        this.registerSource(new YugenAnimeSource());
-        this.registerSource(new AniMixPlaySource());
-        this.registerSource(new AnimeFoxSource());
-        this.registerSource(new AnimeDAOSource());
         this.registerSource(new AnimeFLVSource());
-        this.registerSource(new AnimeSaturnSource());
-        this.registerSource(new CrunchyrollSource());
-        this.registerSource(new AnimeOnsenSource());
-        this.registerSource(new MarinSource());
-        this.registerSource(new AnimeHeavenSource());
-        this.registerSource(new AnimeKisaSource());
-        this.registerSource(new AnimeOwlSource());
-        this.registerSource(new AnimeLandSource());
-        this.registerSource(new AnimeFreakSource());
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
 
-        // Configure rate limits for each source (requests per minute) - Higher limits for faster sources
-        this.sourceRateLimits.set('Gogoanime', { limit: 150, resetTime: 60000 }); // Increased - primary source
-        this.sourceRateLimits.set('Zoro', { limit: 150, resetTime: 60000 }); // Increased - high priority
-        this.sourceRateLimits.set('AnimePahe', { limit: 120, resetTime: 60000 }); // Increased
-        this.sourceRateLimits.set('9Anime', { limit: 100, resetTime: 60000 }); // Increased
-        this.sourceRateLimits.set('Aniwave', { limit: 100, resetTime: 60000 }); // Increased
-        this.sourceRateLimits.set('AnimeSuge', { limit: 120, resetTime: 60000 }); // Increased
-        this.sourceRateLimits.set('Kaido', { limit: 120, resetTime: 60000 }); // Increased
-        this.sourceRateLimits.set('Anix', { limit: 100, resetTime: 60000 }); // Increased
-        this.sourceRateLimits.set('KickassAnime', { limit: 100, resetTime: 60000 }); // Increased
-        this.sourceRateLimits.set('YugenAnime', { limit: 100, resetTime: 60000 }); // Increased
-        this.sourceRateLimits.set('AniMixPlay', { limit: 100, resetTime: 60000 }); // Increased
-        this.sourceRateLimits.set('Aniwatch', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('HiAnimeDirect', { limit: 60, resetTime: 60000 }); // Reduced - slower
-        this.sourceRateLimits.set('HiAnime', { limit: 60, resetTime: 60000 }); // Reduced - slower
-        this.sourceRateLimits.set('AnimeFox', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeDAO', { limit: 80, resetTime: 60000 });
+        // Configure rate limits for each source (requests per minute)
+        this.sourceRateLimits.set('HiAnimeDirect', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('HiAnime', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('9Anime', { limit: 100, resetTime: 60000 });
+        this.sourceRateLimits.set('Kaido', { limit: 120, resetTime: 60000 });
         this.sourceRateLimits.set('AnimeFLV', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeSaturn', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('Crunchyroll', { limit: 40, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeOnsen', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('Marin', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeHeaven', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeKisa', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeOwl', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeLand', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeFreak', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('Consumet', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
+        this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
 
         // Start health monitoring and perform initial health check
         this.startHealthMonitor();
@@ -172,6 +155,112 @@ export class SourceManager {
         this.performInitialHealthCheck().catch(err => {
             logger.error('Initial health check failed', err, undefined, 'SourceManager');
         });
+
+        // CRITICAL: Periodic health recovery - re-enable sources that were marked offline
+        // Without this, sources marked isAvailable=false stay dead forever until server restart
+        setInterval(() => {
+            this.recoverOfflineSources().catch(err => {
+                logger.error('Periodic health recovery failed', err, undefined, 'SourceManager');
+            });
+        }, 60000); // Every 60 seconds
+
+        // Memory cleanup: cap performance tracking maps and drain stale queue entries
+        setInterval(() => {
+            this.cleanupMemory();
+        }, 5 * 60 * 1000); // Every 5 minutes
+    }
+
+    /**
+     * Periodically attempt to recover sources that were marked offline.
+     * This prevents transient failures from permanently disabling sources.
+     */
+    private async recoverOfflineSources(): Promise<void> {
+        const offlineSources = Array.from(this.sources.entries())
+            .filter(([_, source]) => !source.isAvailable);
+
+        if (offlineSources.length === 0) return;
+
+        logger.info(`Attempting recovery for ${offlineSources.length} offline sources: ${offlineSources.map(([n]) => n).join(', ')}`, undefined, 'SourceManager');
+        console.log(`🔄 [SourceManager] Recovering ${offlineSources.length} offline sources...`);
+
+        for (const [name, source] of offlineSources) {
+            try {
+                const isHealthy = await Promise.race([
+                    source.healthCheck({ timeout: 8000 }),
+                    new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 8000))
+                ]);
+
+                if (isHealthy !== false) {
+                    source.isAvailable = true;
+                    this.healthStatus.set(name, {
+                        name,
+                        status: 'online',
+                        lastCheck: new Date()
+                    });
+                    console.log(`   ✅ ${name} recovered`);
+                    logger.info(`Source ${name} recovered and marked online`, undefined, 'SourceManager');
+                }
+            } catch {
+                // On error, optimistically re-enable - the source will be marked offline again
+                // if it actually fails during a real request
+                source.isAvailable = true;
+                this.healthStatus.set(name, {
+                    name,
+                    status: 'online',
+                    lastCheck: new Date()
+                });
+                console.log(`   ⚡ ${name} recovery inconclusive, re-enabling optimistically`);
+                logger.info(`Source ${name} re-enabled optimistically after inconclusive recovery`, undefined, 'SourceManager');
+            }
+        }
+    }
+
+    /**
+     * Periodic memory cleanup to prevent unbounded growth
+     */
+    private cleanupMemory(): void {
+        // Cap latency samples
+        for (const [name, latencies] of this.recentLatencies.entries()) {
+            if (latencies.length > this.LATENCY_SAMPLE_SIZE) {
+                this.recentLatencies.set(name, latencies.slice(-this.LATENCY_SAMPLE_SIZE));
+            }
+        }
+
+        // Cap success rate counters
+        for (const [name, rate] of this.sourceSuccessRates.entries()) {
+            if (rate.total > this.SUCCESS_RATE_WINDOW * 2) {
+                const ratio = rate.success / rate.total;
+                rate.total = this.SUCCESS_RATE_WINDOW;
+                rate.success = Math.round(ratio * this.SUCCESS_RATE_WINDOW);
+                this.sourceSuccessRates.set(name, rate);
+            }
+        }
+
+        // Drain stale queue entries (older than 60s)
+        const now = Date.now();
+        const staleThreshold = 60000;
+        const staleEntries = this.requestQueue.filter((entry: any) => entry.queuedAt && (now - entry.queuedAt) > staleThreshold);
+        for (const entry of staleEntries) {
+            const idx = this.requestQueue.indexOf(entry);
+            if (idx !== -1) {
+                this.requestQueue.splice(idx, 1);
+                entry.reject(new Error('Request expired in queue'));
+            }
+        }
+
+        // Reset rate limit counters
+        this.sourceRequestCounts.clear();
+
+        const memUsage = process.memoryUsage();
+        const heapMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+        if (heapMB > 400) {
+            console.log(`⚠️ [SourceManager] High memory usage: ${heapMB}MB heap. Running GC if available.`);
+            if (global.gc) {
+                global.gc();
+            }
+        }
+
+        logger.info(`Memory cleanup complete. Queue: ${this.requestQueue.length}, Heap: ${heapMB}MB`, undefined, 'SourceManager');
     }
 
     /**
@@ -272,13 +361,41 @@ export class SourceManager {
         options: SourceRequestOptions = {}
     ): Promise<T> {
         return new Promise<T>((resolve, reject) => {
-            this.requestQueue.push({
+            const queuedAt = Date.now();
+            const QUEUE_TIMEOUT = 30000; // 30s max wait in queue
+
+            // Reject if queue is too large (backpressure)
+            if (this.requestQueue.length >= 50) {
+                reject(new Error(`Request queue full (${this.requestQueue.length} pending). Try again later.`));
+                return;
+            }
+
+            const entry = {
                 fn: fn as any,
                 resolve: resolve as any,
                 reject: reject as any,
                 context,
-                options
-            });
+                options,
+                priority: this.PRIORITY_NORMAL,
+                queuedAt
+            };
+            this.requestQueue.push(entry);
+
+            // Auto-reject if stuck in queue too long
+            const queueTimer = setTimeout(() => {
+                const idx = this.requestQueue.indexOf(entry);
+                if (idx !== -1) {
+                    this.requestQueue.splice(idx, 1);
+                    reject(new Error(`Request queued too long (${QUEUE_TIMEOUT}ms) for: ${context}`));
+                }
+            }, QUEUE_TIMEOUT);
+
+            // Clear timer when resolved/rejected
+            const origResolve = resolve;
+            const origReject = reject;
+            entry.resolve = ((val: unknown) => { clearTimeout(queueTimer); origResolve(val as T); }) as any;
+            entry.reject = ((err: unknown) => { clearTimeout(queueTimer); origReject(err); }) as any;
+
             this.processQueue();
         });
     }
@@ -293,20 +410,36 @@ export class SourceManager {
 
         this.globalActiveRequests++;
 
-        // Handle priority if needed in future
+        // Safety: cap active requests at a sane value to prevent counter drift
+        if (this.globalActiveRequests > this.maxGlobalConcurrent + 5) {
+            console.warn(`⚠️ [SourceManager] Active request counter drifted to ${this.globalActiveRequests}, resetting`);
+            this.globalActiveRequests = Math.max(0, this.maxGlobalConcurrent);
+        }
+
+        const requestTimeout = request.options.timeout || 30000;
+        // Safety timeout: if withTimeout itself hangs, force-complete after 2x the timeout
+        const safetyTimer = setTimeout(() => {
+            console.warn(`⚠️ [SourceManager] Safety timeout hit for: ${request.context}`);
+            this.globalActiveRequests = Math.max(0, this.globalActiveRequests - 1);
+            try { request.reject(new Error(`Safety timeout for: ${request.context}`)); } catch { /* already resolved */ }
+            this.processQueue();
+        }, requestTimeout * 2);
 
         try {
             const result = await withTimeout(
                 (signal) => request.fn(signal),
-                request.options.timeout || 30000,
+                requestTimeout,
                 { operation: request.context },
                 request.options.signal
             );
+            clearTimeout(safetyTimer);
             request.resolve(result);
         } catch (error) {
+            clearTimeout(safetyTimer);
             request.reject(error);
         } finally {
-            this.globalActiveRequests--;
+            this.globalActiveRequests = Math.max(0, this.globalActiveRequests - 1);
+            // Continue draining the queue
             this.processQueue();
         }
     }
@@ -371,8 +504,214 @@ export class SourceManager {
         return Array.from(this.healthStatus.values());
     }
 
+    /**
+     * Get enhanced source status with metadata
+     */
+    getSourceStatus(): Array<{
+        name: string;
+        status: string;
+        lastCheck: Date;
+        capabilities?: SourceCapabilities;
+        successRate?: number;
+        avgLatency?: number;
+    }> {
+        return Array.from(this.sources.entries()).map(([name, source]) => {
+            const health = this.healthStatus.get(name);
+            const metadata = this.sourceMetadata.get(name);
+            const capabilities = this.sourceCapabilities.get(name);
+            
+            // Calculate success rate
+            let successRate = 1.0;
+            if (metadata) {
+                const rate = this.sourceSuccessRates.get(name);
+                if (rate && rate.total > 0) {
+                    successRate = rate.success / rate.total;
+                }
+            }
+            
+            return {
+                name,
+                status: health?.status || (source.isAvailable ? 'online' : 'offline'),
+                lastCheck: health?.lastCheck || new Date(),
+                capabilities,
+                successRate: Math.round(successRate * 100),
+                avgLatency: metadata?.avgLatency
+            };
+        });
+    }
+
     getAvailableSources(): string[] {
-        return Array.from(this.sources.keys());
+        return Array.from(this.sources.keys()).filter(name => {
+            const source = this.sources.get(name);
+            return source?.isAvailable;
+        });
+    }
+
+    /**
+     * Get best available source based on requirements and performance
+     * Uses intelligent selection considering:
+     * - Source capabilities (dub/sub support, quality)
+     * - Recent success rate
+     * - Average latency
+     * - Availability status
+     */
+    getBestSource(options?: {
+        preferDub?: boolean;
+        preferHighQuality?: boolean;
+        requireSchedule?: boolean;
+        excludeAdult?: boolean;
+    }): StreamingSource | null {
+        const { preferDub = false, preferHighQuality = false, requireSchedule = false, excludeAdult = true } = options || {};
+        
+        const availableSources: Array<{
+            name: string;
+            source: StreamingSource;
+            score: number;
+            capabilities: SourceCapabilities;
+        }> = [];
+        
+        // Score available sources
+        for (const name of this.sourceOrder) {
+            // Skip adult sources if excluded
+            if (excludeAdult && name === 'WatchHentai') continue;
+            
+            const source = this.sources.get(name);
+            if (!source?.isAvailable) continue;
+            
+            const capabilities = this.sourceCapabilities.get(name) || {
+                supportsDub: true,
+                supportsSub: true,
+                hasScheduleData: false,
+                hasGenreFiltering: true,
+                quality: 'medium' as const
+            };
+            
+            // Skip if requirements not met
+            if (preferDub && !capabilities.supportsDub) continue;
+            if (requireSchedule && !capabilities.hasScheduleData) continue;
+            
+            // Calculate score (higher is better)
+            let score = 100;
+            
+            // Quality bonus
+            if (capabilities.quality === 'high') score += 30;
+            else if (capabilities.quality === 'medium') score += 15;
+            
+            // Latency bonus (lower latency = higher score)
+            const latencies = this.recentLatencies.get(name);
+            if (latencies && latencies.length > 0) {
+                const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+                if (avgLatency < 500) score += 20;
+                else if (avgLatency < 1000) score += 10;
+                else if (avgLatency < 2000) score += 5;
+            } else {
+                // No latency data, give neutral score
+                score += 10;
+            }
+            
+            // Success rate bonus
+            const rate = this.sourceSuccessRates.get(name);
+            if (rate && rate.total > 5) {
+                const successRate = rate.success / rate.total;
+                score += successRate * 30;
+            } else {
+                // No history, assume good
+                score += 20;
+            }
+            
+            // Dub preference bonus
+            if (preferDub && capabilities.supportsDub) score += 10;
+            
+            availableSources.push({ name, source, score, capabilities });
+        }
+        
+        // Sort by score descending
+        availableSources.sort((a, b) => b.score - a.score);
+        
+        // Return best source
+        return availableSources.length > 0 ? availableSources[0].source : null;
+    }
+
+    /**
+     * Record successful request for performance tracking
+     */
+    recordSuccess(sourceName: string, latency: number): void {
+        // Update latency tracking
+        let latencies = this.recentLatencies.get(sourceName) || [];
+        latencies.push(latency);
+        if (latencies.length > this.LATENCY_SAMPLE_SIZE) {
+            latencies = latencies.slice(-this.LATENCY_SAMPLE_SIZE);
+        }
+        this.recentLatencies.set(sourceName, latencies);
+        
+        // Update success rate
+        const rate = this.sourceSuccessRates.get(sourceName) || { success: 0, total: 0 };
+        rate.success++;
+        rate.total++;
+        if (rate.total > this.SUCCESS_RATE_WINDOW) {
+            // Keep window sliding
+            rate.success = Math.max(0, rate.success - 1);
+            rate.total = this.SUCCESS_RATE_WINDOW;
+        }
+        this.sourceSuccessRates.set(sourceName, rate);
+        
+        // Update metadata
+        const avgLatency = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+        this.sourceMetadata.set(sourceName, {
+            capabilities: this.sourceCapabilities.get(sourceName)!,
+            successRate: rate.success / Math.max(1, rate.total),
+            avgLatency,
+            lastSuccessTime: Date.now(),
+            consecutiveFailures: 0
+        });
+    }
+
+    /**
+     * Record failed request for performance tracking
+     */
+    recordFailure(sourceName: string): void {
+        // Update success rate
+        const rate = this.sourceSuccessRates.get(sourceName) || { success: 0, total: 0 };
+        rate.total++;
+        if (rate.total > this.SUCCESS_RATE_WINDOW) {
+            rate.total = this.SUCCESS_RATE_WINDOW;
+        }
+        this.sourceSuccessRates.set(sourceName, rate);
+        
+        // Update metadata
+        const metadata = this.sourceMetadata.get(sourceName) || {
+            capabilities: this.sourceCapabilities.get(sourceName)!,
+            successRate: 0,
+            avgLatency: 0,
+            lastSuccessTime: 0,
+            consecutiveFailures: 0
+        };
+        metadata.consecutiveFailures++;
+        metadata.successRate = rate.success / Math.max(1, rate.total);
+        this.sourceMetadata.set(sourceName, metadata);
+        
+        // Mark source unavailable after too many consecutive failures
+        if (metadata.consecutiveFailures >= 5) {
+            const source = this.sources.get(sourceName);
+            if (source) {
+                source.isAvailable = false;
+                this.healthStatus.set(sourceName, {
+                    name: sourceName,
+                    status: 'offline',
+                    lastCheck: new Date()
+                });
+                logger.warn(`Source ${sourceName} marked offline after ${metadata.consecutiveFailures} consecutive failures`, undefined, 'SourceManager');
+                // Reset counter so recovery gets a fresh start
+                metadata.consecutiveFailures = 0;
+            }
+        }
+    }
+
+    /**
+     * Get source capabilities
+     */
+    getSourceCapabilities(sourceName: string): SourceCapabilities | undefined {
+        return this.sourceCapabilities.get(sourceName);
     }
 
     private getAvailableSource(preferred?: string): StreamingSource | null {
@@ -506,6 +845,8 @@ export class SourceManager {
             { prefix: 'watchhentai-', source: 'WatchHentai' },
             { prefix: 'watchhentai-series/', source: 'WatchHentai' },
             { prefix: 'watchhentai-videos/', source: 'WatchHentai' },
+            { prefix: 'animeflv-', source: 'AnimeFLV' },
+            { prefix: 'kaido-', source: 'Kaido' },
         ];
 
         for (const { prefix, source } of prefixes) {
@@ -534,14 +875,14 @@ export class SourceManager {
         console.log(`🔍 [SourceManager] Search request: "${query}" (page: ${page}, mode: ${mode}, source: ${sourceName || 'auto'})`);
 
         if (mode === 'adult') {
-            const adultSources = ['WatchHentai']
+            const adultSources = ['WatchHentai', 'Hanime']
                 .map(name => this.getAvailableSource(name))
                 .filter(source => source && source.isAvailable) as StreamingSource[];
 
             if (adultSources.length === 0) {
                 // Try to force get them if getAvailableSource failed due to strict checks but we want to try?
                 // getAvailableSource uses isAvailable check.
-                throw new Error('Adult source (WatchHentai/Gogoanime) are not available');
+                throw new Error('Adult sources (WatchHentai/Hanime) are not available');
             }
 
             try {
@@ -588,7 +929,7 @@ export class SourceManager {
                 .filter(source => source && source.isAvailable)
                 .slice(0, 2) as StreamingSource[];
 
-            const adultSources = ['WatchHentai']
+            const adultSources = ['WatchHentai', 'Hanime']
                 .map(name => this.getAvailableSource(name))
                 .filter(source => source && source.isAvailable) as StreamingSource[];
 
@@ -992,56 +1333,151 @@ export class SourceManager {
             return [];
         }
 
-        // Has known prefix - can try multiple sources with converted IDs
-        const rawId = this.extractRawId(animeId);
-        const sourcesToTry: StreamingSource[] = [];
-        
-        // Add primary source first
-        if (primarySource?.isAvailable) {
-            sourcesToTry.push(primarySource);
-        }
-
-        // Add a few backup sources (limit to 2-3 to avoid slowdown)
-        const backupSourceNames = ['HiAnimeDirect', 'HiAnime', 'Gogoanime'].filter(
-            name => name !== primarySource?.name
-        );
-        for (const name of backupSourceNames) {
-            if (isAdultContent && name !== 'WatchHentai') continue;
-            if (!isAdultContent && name === 'WatchHentai') continue;
-            
-            const source = this.sources.get(name) as StreamingSource;
-            if (source?.isAvailable) {
-                sourcesToTry.push(source);
-            }
-        }
-
-        if (sourcesToTry.length === 0) {
-            console.log(`   ❌ No available sources`);
+        // Has known prefix - try primary source first
+        if (!primarySource?.isAvailable) {
+            console.log(`   ❌ Primary source ${primarySource?.name || 'unknown'} not available`);
             timer.end();
             return [];
         }
 
-        console.log(`   📋 Sources to try: ${sourcesToTry.map(s => s.name).join(', ')}`);
+        console.log(`   ⏳ Trying primary source ${primarySource.name} with ID: ${animeId}`);
 
-        // Try sources - primary first, then backups
-        for (const source of sourcesToTry) {
-            const idToUse = source === primarySource ? animeId : this.buildSourceId(rawId, source.name);
-            console.log(`   ⏳ Trying ${source.name} with ID: ${idToUse}`);
-            
+        let episodes: Episode[] = [];
+        try {
+            episodes = await this.executeReliably(primarySource.name, 'getEpisodes',
+                (signal) => primarySource.getEpisodes(animeId, { signal }),
+                { timeout: 15000 }
+            );
+        } catch (err) {
+            console.log(`   ❌ Primary source failed: ${(err as Error).message}`);
+        }
+
+        // If primary source returned episodes, try to enrich with HiAnimeDirect data (sub/dub info)
+        // This is a best-effort enrichment — if it fails, we still return the primary episodes
+        const needsEnrichment = episodes.length > 0 && 
+            primarySource.name !== 'HiAnimeDirect' && primarySource.name !== 'HiAnime' &&
+            !isAdultContent;
+
+        if (needsEnrichment) {
+            console.log(`   🔄 Attempting cross-reference with HiAnimeDirect for sub/dub enrichment...`);
             try {
-                const episodes = await this.executeReliably(source.name, 'getEpisodes',
-                    (signal) => source.getEpisodes(idToUse, { signal }),
+                // Get the anime title from the raw ID (convert slug to search query)
+                const rawId = this.extractRawId(animeId);
+                const searchQuery = rawId.replace(/-/g, ' ').replace(/\d+$/, '').trim();
+                
+                // Detect season indicators in the original ID
+                const seasonMatch = rawId.match(/(\d+)(?:st|nd|rd|th)[\s-]*season/i) || rawId.match(/season[\s-]*(\d+)/i);
+                const querySeason = seasonMatch ? parseInt(seasonMatch[1]) : 0;
+                
+                const hiAnimeSource = this.sources.get('HiAnimeDirect') as StreamingSource;
+                if (hiAnimeSource?.isAvailable && searchQuery.length > 3) {
+                    const searchResult = await Promise.race([
+                        hiAnimeSource.search(searchQuery, 1),
+                        new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000))
+                    ]);
+                    
+                    if (searchResult && searchResult.results?.length > 0) {
+                        // Find best title match — must match season if specified
+                        const normalizedQuery = this.normalizeTitle(searchQuery);
+                        let bestMatch: typeof searchResult.results[0] | null = null;
+                        
+                        for (const result of searchResult.results) {
+                            const normalizedResult = this.normalizeTitle(result.title);
+                            const normalizedJp = result.titleJapanese ? this.normalizeTitle(result.titleJapanese) : '';
+                            const combinedText = `${result.title} ${result.titleJapanese || ''}`.toLowerCase();
+                            
+                            // Check if base title matches
+                            const baseQuery = normalizedQuery.replace(/\d+(st|nd|rd|th)\s*season/i, '').replace(/season\s*\d+/i, '').trim();
+                            const titleMatches = normalizedResult.includes(baseQuery) || baseQuery.includes(normalizedResult) ||
+                                normalizedJp.includes(baseQuery) || baseQuery.includes(normalizedJp);
+                            
+                            if (!titleMatches) continue;
+                            
+                            // If we need a specific season, verify the match has it
+                            if (querySeason > 1) {
+                                const resultSeasonMatch = combinedText.match(/(\d+)(?:st|nd|rd|th)[\s-]*season/i) || 
+                                    combinedText.match(/season[\s-]*(\d+)/i) ||
+                                    combinedText.match(/\b(\d+)\b/);
+                                const resultSeason = resultSeasonMatch ? parseInt(resultSeasonMatch[1]) : 1;
+                                
+                                if (resultSeason !== querySeason) {
+                                    console.log(`   ⏭️ Skipping "${result.title}" (season ${resultSeason} != ${querySeason})`);
+                                    continue;
+                                }
+                            }
+                            
+                            bestMatch = result;
+                            break;
+                        }
+                        
+                        if (bestMatch) {
+                            console.log(`   🔍 Found HiAnime match: "${bestMatch.title}" (${bestMatch.id})`);
+                            
+                            // Try to get episodes from HiAnimeDirect
+                            const hiEpisodes = await Promise.race([
+                                this.executeReliably('HiAnimeDirect', 'getEpisodes',
+                                    (signal) => hiAnimeSource.getEpisodes(bestMatch!.id, { signal }),
+                                    { timeout: 10000 }
+                                ),
+                                new Promise<Episode[]>((resolve) => setTimeout(() => resolve([]), 10000))
+                            ]);
+                            
+                            // Only use enriched episodes if count is reasonable vs primary
+                            if (hiEpisodes && hiEpisodes.length > 0 && hiEpisodes.length >= episodes.length) {
+                                console.log(`   ✅ Enriched with ${hiEpisodes.length} HiAnime episodes (sub/dub data)`);
+                                const duration = Date.now() - startTime;
+                                logger.episodeFetch(animeId, hiEpisodes.length, 'HiAnimeDirect (enriched)', duration);
+                                timer.end();
+                                return hiEpisodes;
+                            } else {
+                                console.log(`   ⚠️ HiAnime returned ${hiEpisodes?.length || 0} eps vs ${episodes.length} from primary, skipping enrichment`);
+                            }
+                        } else {
+                            console.log(`   ℹ️ No season-matching HiAnime result found`);
+                        }
+                    }
+                }
+                console.log(`   ℹ️ Using ${primarySource.name} episodes (${episodes.length} eps)`);
+            } catch (err) {
+                console.log(`   ℹ️ Enrichment failed (non-fatal): ${(err as Error).message}`);
+            }
+        }
+
+        if (episodes.length > 0) {
+            const duration = Date.now() - startTime;
+            console.log(`   ✅ Got ${episodes.length} episodes from ${primarySource.name} in ${duration}ms`);
+            logger.episodeFetch(animeId, episodes.length, primarySource.name, duration);
+            timer.end();
+            return episodes;
+        }
+
+        // Primary source returned no episodes — try backup sources with converted IDs
+        const rawId = this.extractRawId(animeId);
+        const backupSourceNames = ['HiAnimeDirect', 'HiAnime'].filter(
+            name => name !== primarySource.name
+        );
+        
+        for (const name of backupSourceNames) {
+            if (isAdultContent) continue;
+            const source = this.sources.get(name) as StreamingSource;
+            if (!source?.isAvailable) continue;
+            
+            const backupId = this.buildSourceId(rawId, name);
+            console.log(`   ⏳ Trying backup ${name} with ID: ${backupId}`);
+            try {
+                const backupEpisodes = await this.executeReliably(name, 'getEpisodes',
+                    (signal) => source.getEpisodes(backupId, { signal }),
                     { timeout: 12000 }
                 );
-                if (episodes && episodes.length > 0) {
+                if (backupEpisodes && backupEpisodes.length > 0) {
                     const duration = Date.now() - startTime;
-                    console.log(`   ✅ Got ${episodes.length} episodes from ${source.name} in ${duration}ms`);
-                    logger.episodeFetch(idToUse, episodes.length, source.name, duration);
+                    console.log(`   ✅ Got ${backupEpisodes.length} episodes from backup ${name} in ${duration}ms`);
+                    logger.episodeFetch(backupId, backupEpisodes.length, name, duration);
                     timer.end();
-                    return episodes;
+                    return backupEpisodes;
                 }
             } catch (err) {
-                console.log(`   ❌ ${source.name} failed: ${(err as Error).message}`);
+                console.log(`   ❌ Backup ${name} failed: ${(err as Error).message}`);
             }
         }
 
@@ -1374,8 +1810,7 @@ export class SourceManager {
             };
         } catch (error) {
             logger.error(`Filtered anime failed for ${source.name}`, error as Error, filters, 'SourceManager');
-            // Try fallback
-            source.isAvailable = false;
+            // Try fallback - don't permanently disable the source for a single failure
             const fallback = this.getAvailableSource();
             if (fallback && fallback !== source) {
                 logger.failover(source.name, fallback.name, 'filtered anime failed', filters);
@@ -1417,40 +1852,98 @@ export class SourceManager {
         let effectiveSource = filters.source;
 
         if (mode === 'adult') {
-            if (filters.source && ['WatchHentai'].includes(filters.source)) {
+            if (filters.source && ['WatchHentai', 'Hanime'].includes(filters.source)) {
                 effectiveSource = filters.source;
             } else {
-                effectiveSource = 'WatchHentai';
+                // Fetch from both adult sources and combine results for more diversity
+                const watchHentai = this.getAvailableSource('WatchHentai');
+                const hanime = this.getAvailableSource('Hanime');
+                const adultSources = [];
+                if (watchHentai?.isAvailable) adultSources.push(watchHentai);
+                if (hanime?.isAvailable) adultSources.push(hanime);
+
+                if (adultSources.length > 0) {
+                    try {
+                        const results = await Promise.all(
+                            adultSources.map(source => this._executeBrowse(source, filters))
+                        );
+
+                        // Combine and deduplicate results
+                        const combinedAnime = results.flatMap(result => result.anime);
+                        const uniqueAnime = Array.from(new Map(combinedAnime.map(a => [a.id, a])).values());
+
+                        logger.sourceResponse('Adult', 'browseAnime', true, {
+                            returned: uniqueAnime.length,
+                            page: filters.page,
+                            sources: adultSources.map(s => s.name)
+                        });
+                        timer.end();
+
+                        // Calculate total pages and hasNextPage based on all sources
+                        const totalPages = Math.max(...results.map(r => r.totalPages));
+                        const hasNextPage = results.some(r => r.hasNextPage);
+
+                        return {
+                            anime: uniqueAnime,
+                            totalPages,
+                            hasNextPage,
+                            totalResults: uniqueAnime.length
+                        };
+                    } catch (error) {
+                        logger.error(`Adult browse failed: ${error}`, error as Error, filters);
+                        // Fallback to WatchHentai if combined approach fails
+                        effectiveSource = watchHentai?.isAvailable ? 'WatchHentai' : (hanime?.isAvailable ? 'Hanime' : 'WatchHentai');
+                    }
+                } else {
+                    effectiveSource = 'WatchHentai';
+                }
             }
         } else if (mode === 'mixed') {
             // For mixed mode, we'll fetch from both standard sources and adult sources and combine results
             const standardSource = this.getAvailableSource(filters.source);
-            const adultSource = this.getAvailableSource('WatchHentai');
+            const adultSources = ['WatchHentai', 'Hanime']
+                .map(name => this.getAvailableSource(name))
+                .filter(s => s?.isAvailable) as StreamingSource[];
 
-            // If both sources are available, fetch from both and combine
-            if (standardSource && adultSource) {
+            // If standard source and at least one adult source are available
+            if (standardSource && adultSources.length > 0) {
                 try {
-                    const [standardResult, adultResult] = await Promise.all([
-                        this._executeBrowse(standardSource, filters),
-                        this._executeBrowse(adultSource, filters)
-                    ]);
+                    const promises = [
+                        this._executeBrowse(standardSource, filters)
+                    ].concat(
+                        adultSources.map(source => this._executeBrowse(source, filters))
+                    );
+
+                    const results = await Promise.all(promises);
 
                     // Combine and deduplicate results - adult content first
-                    const combinedAnime = [...adultResult.anime, ...standardResult.anime];
+                    const standardResult = results[0];
+                    const adultResults = results.slice(1);
+                    
+                    const combinedAnime = [
+                        ...adultResults.flatMap(r => r.anime),
+                        ...standardResult.anime
+                    ];
+                    
                     const uniqueAnime = Array.from(new Map(combinedAnime.map(a => [a.id, a])).values());
 
                     logger.sourceResponse('Mixed', 'browseAnime', true, {
                         returned: uniqueAnime.length,
                         page: filters.page,
                         standard: standardResult.anime.length,
-                        adult: adultResult.anime.length
+                        adult: adultResults.flatMap(r => r.anime).length,
+                        sources: ['Standard', ...adultSources.map(s => s.name)]
                     });
                     timer.end();
 
+                    // Calculate total pages and hasNextPage based on all sources
+                    const totalPages = Math.max(...results.map(r => r.totalPages));
+                    const hasNextPage = results.some(r => r.hasNextPage);
+
                     return {
                         anime: uniqueAnime,
-                        totalPages: Math.max(standardResult.totalPages, adultResult.totalPages),
-                        hasNextPage: standardResult.hasNextPage || adultResult.hasNextPage,
+                        totalPages,
+                        hasNextPage,
                         totalResults: uniqueAnime.length
                     };
                 } catch (error) {
@@ -1783,13 +2276,13 @@ export class SourceManager {
                     // Exclude adult content
                     filtered = filtered.filter(a => {
                         if (!a.genres || a.genres.length === 0) return true;
-                        return !a.genres.some(g => adultGenres.includes(g.toLowerCase()));
+                        return !a.genres.some(g => g && adultGenres.includes(g.toLowerCase()));
                     });
                 } else if (mode === 'adult') {
                     // Only show adult content
                     filtered = filtered.filter(a => {
                         if (!a.genres || a.genres.length === 0) return false;
-                        return a.genres.some(g => adultGenres.includes(g.toLowerCase()));
+                        return a.genres.some(g => g && adultGenres.includes(g.toLowerCase()));
                     });
                 }
                 // mixed mode: show everything (no filtering)
@@ -1974,7 +2467,7 @@ export class SourceManager {
         // Only add backup sources if the ID has a known prefix (can be converted)
         // Limit to reliable sources only to avoid slowdowns
         if (hasSourcePrefix) {
-            const backupNames = ['HiAnimeDirect', 'HiAnime', 'Gogoanime'].filter(n => n !== primarySource?.name);
+            const backupNames = ['HiAnimeDirect', 'HiAnime', '9Anime'].filter(n => n !== primarySource?.name);
             for (const name of backupNames) {
                 if (isAdultContent && name !== 'WatchHentai') continue;
                 if (!isAdultContent && name === 'WatchHentai') continue;

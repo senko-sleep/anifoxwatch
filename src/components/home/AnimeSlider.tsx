@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Play, Star } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatRating } from '@/lib/utils';
 
 interface AnimeItem {
   id: string;
@@ -117,7 +117,7 @@ export const AnimeSlider = ({ anime, cardSize = 'md', showRank = false, minimal 
               {!minimal && item.rating && (
                 <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-md bg-black/60 backdrop-blur-sm text-xs font-medium">
                   <Star className="w-3 h-3 text-yellow-400 fill-yellow-400" />
-                  <span className="text-white">{(item.rating > 10 ? item.rating / 10 : item.rating).toFixed(1)}</span>
+                  <span className="text-white">{formatRating(item.rating)}</span>
                 </div>
               )}
 

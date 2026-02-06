@@ -9,7 +9,7 @@ import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers } from '@/h
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { cn } from '@/lib/utils';
+import { cn, formatRating } from '@/lib/utils';
 import {
   ArrowLeft,
   Play,
@@ -23,6 +23,9 @@ import {
   Loader2,
   RefreshCw
 } from 'lucide-react';
+
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { toast } from 'sonner';
 
 type AudioType = 'sub' | 'dub';
 type QualityType = '1080p' | '720p' | '480p' | '360p' | 'auto';
@@ -75,7 +78,7 @@ const Watch = () => {
   // State
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(1);
-  const [audioType, setAudioType] = useState<AudioType>('dub');
+  const [audioType, setAudioType] = useState<AudioType>('sub');
   const [audioManuallySet, setAudioManuallySet] = useState(false);
   const [quality, setQuality] = useState<QualityType>('auto');
   const [selectedServer, setSelectedServer] = useState<string>('');
@@ -102,6 +105,9 @@ const Watch = () => {
     error: streamError,
     refetch: refetchStream
   } = useStreamingLinks(selectedEpisode || '', selectedServer || undefined, audioType, !!selectedEpisode);
+
+  // Dynamic page title
+  useDocumentTitle(anime?.title ? `${anime.title} — EP ${selectedEpisodeNum}` : 'Watch');
 
   // Initialize episode from URL or first episode (runs once on mount)
   useEffect(() => {
@@ -170,6 +176,10 @@ const Watch = () => {
       const currentIndex = servers.findIndex(s => s.name === selectedServer);
       const nextServer = servers[(currentIndex + 1) % servers.length];
       console.log(`[Watch] 🔄 Failover to server: ${nextServer.name} (attempt ${serverRetryCount + 1}/${servers.length})`);
+      toast.info(`Switching to server ${nextServer.name}...`, {
+        description: `Attempt ${serverRetryCount + 1} of ${servers.length}`,
+        duration: 3000,
+      });
       setSelectedServer(nextServer.name);
       setServerRetryCount(prev => prev + 1);
     }
@@ -388,12 +398,12 @@ const Watch = () => {
             
             <div className="flex flex-col gap-4 w-full max-w-md">
               <Button 
-                onClick={() => navigate(`/browse?q=${encodeURIComponent(anime.title)}`)} 
+                onClick={() => navigate(`/browse?q=${encodeURIComponent(anime?.title || 'anime')}`)} 
                 variant="default"
                 className="bg-fox-orange hover:bg-fox-orange/90"
               >
                 <Play className="w-4 h-4 mr-2" />
-                Search for "{anime.title}"
+                Search for "{anime?.title || 'anime'}"
               </Button>
               
               {cleanAnimeId.startsWith('anilist-') && (
@@ -502,7 +512,11 @@ const Watch = () => {
                         <Loader2 className="w-12 h-12 animate-spin text-fox-orange" />
                         <div className="text-center">
                           <p className="text-lg font-medium text-white">Loading Stream...</p>
-                          <p className="text-sm text-zinc-400">Scraping best quality sources</p>
+                          <p className="text-sm text-zinc-400">
+                            {serverRetryCount > 0
+                              ? `Trying server ${serverRetryCount + 1} of ${servers?.length || '?'}...`
+                              : 'Finding best quality source'}
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -660,7 +674,8 @@ const Watch = () => {
                   autoPlay={autoPlay}
                   onAutoPlayChange={setAutoPlay}
                   currentSource={streamData?.source}
-                  hasDub={currentEpisode?.hasDub}
+                  hasDub={currentEpisode?.hasDub || (anime?.dubCount != null && anime.dubCount > 0) || (episodes?.some(e => e.hasDub) ?? false)}
+                  hasSub={currentEpisode?.hasSub !== false}
                 />
               </div>
 
@@ -687,10 +702,10 @@ const Watch = () => {
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      {anime.rating && (
+                      {formatRating(anime.rating) && (
                         <Badge variant="secondary" className="gap-1 bg-yellow-500/10 text-yellow-500 border-yellow-500/20">
                           <Star className="w-3 h-3 fill-current" />
-                          {anime.rating.toFixed(1)}
+                          {formatRating(anime.rating)}
                         </Badge>
                       )}
                       <Badge variant="outline" className="border-white/10">{anime.type}</Badge>

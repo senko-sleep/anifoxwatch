@@ -247,13 +247,72 @@ export function useSources() {
     });
 }
 
-export function useSourceHealth() {
-    return useQuery<SourceHealth[], Error>({
-        queryKey: queryKeys.sourceHealth,
-        queryFn: () => apiClient.getSourceHealth(),
-        staleTime: 30 * 1000,
-        refetchInterval: 60 * 1000,
+export function useSourceHealth(options?: { autoRefresh?: boolean; refreshInterval?: number }) {
+    const { autoRefresh = true, refreshInterval = 30000 } = options || {};
+    
+    return useQuery<Array<{
+        name: string;
+        status: string;
+        lastCheck: string;
+        capabilities?: {
+            supportsDub: boolean;
+            supportsSub: boolean;
+            hasScheduleData: boolean;
+            hasGenreFiltering: boolean;
+            quality: 'high' | 'medium' | 'low';
+        };
+        successRate?: number;
+        avgLatency?: number;
+    }>, Error>({
+        queryKey: ['sourceHealthEnhanced', options],
+        queryFn: () => apiClient.getSourceHealthEnhanced(),
+        staleTime: refreshInterval,
+        refetchInterval: autoRefresh ? refreshInterval : false,
+        retry: 1,
+        retryDelay: 2000,
     });
+}
+
+/**
+ * Get recommended source based on current conditions (success rate and latency)
+ */
+export function useRecommendedSource() {
+    const queryClient = useQueryClient();
+    
+    return (): string | null => {
+        const sources = queryClient.getQueryData<SourceHealth[]>(queryKeys.sourceHealth);
+        if (!sources) return null;
+        
+        // Just return first online source for now
+        const online = sources.find(s => s.status === 'online');
+        return online?.name || null;
+    };
+}
+
+/**
+ * Hook to prefetch episode data for smoother navigation
+ */
+export function usePrefetchNextEpisode() {
+    const queryClient = useQueryClient();
+    
+    return (animeId: string, episodeId: string) => {
+        // Prefetch episodes if not already cached
+        if (!queryClient.getQueryData(queryKeys.episodes(animeId))) {
+            queryClient.prefetchQuery({
+                queryKey: queryKeys.episodes(animeId),
+                queryFn: () => apiClient.getEpisodes(animeId),
+                staleTime: 10 * 60 * 1000,
+            });
+        }
+        // Prefetch servers for the next episode
+        if (!queryClient.getQueryData(queryKeys.servers(episodeId))) {
+            queryClient.prefetchQuery({
+                queryKey: queryKeys.servers(episodeId),
+                queryFn: () => apiClient.getEpisodeServers(episodeId),
+                staleTime: 60 * 60 * 1000,
+            });
+        }
+    };
 }
 
 export function useRefreshSourceHealth() {

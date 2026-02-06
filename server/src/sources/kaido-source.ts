@@ -1,12 +1,23 @@
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { HiAnime } from 'aniwatch';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js';
+import { logger } from '../utils/logger.js';
 
 export class KaidoSource extends BaseAnimeSource {
     name = 'Kaido';
     baseUrl = 'https://kaido.to';
+    private scraper: HiAnime.Scraper | null = null;
+
+    private getScraper(): HiAnime.Scraper {
+        if (!this.scraper) {
+            // @ts-expect-error - aniwatch scraper constructor
+            this.scraper = new HiAnime.Scraper('https://hianime.to');
+        }
+        return this.scraper;
+    }
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
@@ -151,8 +162,14 @@ export class KaidoSource extends BaseAnimeSource {
                 const href = $(el).attr('href') || '';
                 const title = $(el).attr('title') || `Episode ${epNum}`;
 
+                // Build episode ID in aniwatch format: "anime-slug?ep=12345"
+                // href is like "/watch/road-of-naruto-18220?ep=94736"
+                const hrefSlug = href.replace(/^\/watch\//, '').replace(/\?.*/, '');
+                const hrefEpId = href.split('?ep=')[1] || epId;
+                const fullEpId = hrefSlug ? `${hrefSlug}?ep=${hrefEpId}` : (hrefEpId || `${id}-${epNum}`);
+
                 episodes.push({
-                    id: href.split('?ep=')[1] || epId || `${id}-${epNum}`,
+                    id: fullEpId,
                     number: epNum,
                     title,
                     isFiller: $(el).hasClass('ssl-item-filler'),
@@ -201,33 +218,45 @@ export class KaidoSource extends BaseAnimeSource {
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         try {
-            const serverId = server || episodeId;
-            const response = await axios.get(`${this.baseUrl}/ajax/episode/sources?id=${serverId}`, {
-                signal: options?.signal,
-                timeout: options?.timeout || 10000,
-                headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
-            });
+            // Kaido shares the same backend as HiAnime (same episode IDs).
+            // Use the aniwatch scraper directly to decode rapid-cloud embeds.
+            logger.info(`Using aniwatch scraper for ${episodeId}`, undefined, this.name);
 
-            const embedUrl = response.data?.link;
-            if (!embedUrl) {
-                return { sources: [], subtitles: [] };
+            const serverPriority = [server || 'hd-2', 'hd-2', 'hd-1', 'hd-3'].filter((v, i, a) => a.indexOf(v) === i);
+            for (const srv of serverPriority) {
+                try {
+                    const data = await this.getScraper().getEpisodeSources(
+                        episodeId,
+                        srv as HiAnime.AnimeServers,
+                        category
+                    );
+                    if (data.sources && data.sources.length > 0) {
+                        const rawData = data as Record<string, unknown>;
+                        const streamData: StreamingData = {
+                            sources: (data.sources as Array<{ url: string; quality?: string; isM3U8?: boolean }>).map((s): VideoSource => ({
+                                url: s.url,
+                                quality: 'auto',
+                                isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
+                            })),
+                            subtitles: ((rawData.tracks || rawData.subtitles || []) as Array<{ url: string; lang?: string; language?: string; label?: string }>)
+                                .filter((t) => t.lang !== 'thumbnails')
+                                .map((sub) => ({
+                                    url: sub.url,
+                                    lang: sub.lang || sub.language || 'Unknown',
+                                    label: sub.label || sub.lang || sub.language
+                                })),
+                            headers: (rawData.headers as Record<string, string>) || { 'Referer': 'https://megacloud.blog/' },
+                            source: this.name
+                        };
+                        logger.info(`Scraper got ${streamData.sources.length} sources for ${episodeId} via ${srv}`, undefined, this.name);
+                        return streamData;
+                    }
+                } catch {
+                    // Try next server
+                }
             }
 
-            const sources: VideoSource[] = [];
-            const subtitles: Array<{ url: string; lang: string }> = [];
-
-            const embedResponse = await axios.get(embedUrl, {
-                signal: options?.signal,
-                timeout: options?.timeout || 10000,
-                headers: this.getHeaders()
-            });
-
-            const m3u8Match = embedResponse.data.match(/file:\s*["']([^"']*\.m3u8[^"']*)["']/);
-            if (m3u8Match) {
-                sources.push({ url: m3u8Match[1], quality: 'auto', isM3U8: true });
-            }
-
-            return { sources, subtitles, headers: { 'Referer': this.baseUrl } };
+            return { sources: [], subtitles: [] };
         } catch (error) {
             this.handleError(error, 'getStreamingLinks');
             return { sources: [], subtitles: [] };

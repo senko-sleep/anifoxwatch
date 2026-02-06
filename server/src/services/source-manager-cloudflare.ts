@@ -65,13 +65,15 @@ export class CloudflareSourceManager {
                 source.isAvailable = isHealthy;
             } catch (error) {
                 const latency = Date.now() - start;
+                // Don't change isAvailable on health check errors - keep current state
+                // Source will be marked offline only after consecutive real request failures
+                const currentStatus = this.healthStatus.get(name);
                 this.healthStatus.set(name, {
                     name,
-                    status: 'offline',
+                    status: currentStatus?.status || 'online',
                     latency,
                     lastCheck: new Date()
                 });
-                source.isAvailable = false;
             }
         });
 

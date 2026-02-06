@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Play, Star, Tv, Calendar, Clock } from 'lucide-react';
+import { Play, Star, Film } from 'lucide-react';
 import { Anime } from '@/types/anime';
-import { cn } from '@/lib/utils';
+import { cn, normalizeRating } from '@/lib/utils';
 import { WatchHistory } from '@/lib/watch-history';
+import { getDisplayGenres } from '@/utils/genre-utils';
 
 interface AnimeCardProps {
   anime: Anime;
@@ -13,20 +15,18 @@ interface AnimeCardProps {
 }
 
 export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: AnimeCardProps) => {
-  // Use streamingId if available (for AniList results), otherwise use id
   const navigateId = anime.streamingId || anime.id;
   const navigate = useNavigate();
   const location = useLocation();
+  const displayRating = normalizeRating(anime.rating);
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
-
-    // Check watch history for last watched episode
     const history = WatchHistory.get();
     const historyItem = history.find(item => item.animeId === anime.id);
     const episodeParam = historyItem ? `&ep=${historyItem.episodeNumber}` : '';
-
-    // Navigate to watch page with current location as state for preserving browse state
     navigate(`/watch?id=${encodeURIComponent(navigateId)}${episodeParam}`, {
       state: { from: location.pathname + location.search }
     });
@@ -45,16 +45,68 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: A
     >
       {/* Image Container */}
       <div className="relative aspect-[2/3] overflow-hidden rounded-xl bg-fox-surface shadow-lg ring-1 ring-white/5 group-hover:ring-fox-orange/50 transition-all duration-500 group-hover:shadow-xl group-hover:shadow-fox-orange/10">
+        {/* Loading skeleton */}
+        {!imgLoaded && !imgError && (
+          <div className="absolute inset-0 bg-fox-surface animate-pulse" />
+        )}
+
+        {/* Broken image fallback */}
+        {imgError && (
+          <div className="absolute inset-0 bg-fox-surface flex flex-col items-center justify-center gap-2">
+            <Film className="w-8 h-8 text-zinc-600" />
+            <span className="text-[10px] text-zinc-500 text-center px-2 line-clamp-2">{anime.title}</span>
+          </div>
+        )}
+
         {/* Image */}
         <img
           src={anime.image}
           alt={anime.title}
-          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
+          className={cn(
+            "w-full h-full object-cover transition-all duration-700 group-hover:scale-110",
+            imgLoaded ? "opacity-100" : "opacity-0"
+          )}
           loading="lazy"
+          onLoad={() => setImgLoaded(true)}
+          onError={() => setImgError(true)}
         />
 
         {/* Gradient Overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity duration-300" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent opacity-70 group-hover:opacity-95 transition-opacity duration-300" />
+
+        {/* Hover Info Overlay - Shows on hover */}
+        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3">
+          {/* Status badges */}
+          <div className="flex items-center gap-2 mb-2">
+            {anime.status && (
+              <span className="text-[10px] font-medium text-white uppercase tracking-wider">
+                {anime.status}
+              </span>
+            )}
+            {anime.episodes && anime.episodes > 0 && (
+              <span className="text-[10px] text-white/80">
+                {anime.episodes} EP
+              </span>
+            )}
+            {anime.duration && (
+              <span className="text-[10px] text-white/80">
+                · {anime.duration}
+              </span>
+            )}
+          </div>
+          
+          {/* Genres */}
+          <div className="flex flex-wrap gap-1">
+            {getDisplayGenres(anime, { maxGenres: 4, includeDefaults: true }).slice(0, 4).map((genre) => (
+              <span 
+                key={genre}
+                className="text-[9px] text-white/70 border border-white/20 px-1.5 py-0.5 rounded"
+              >
+                {genre}
+              </span>
+            ))}
+          </div>
+        </div>
 
         {/* Play Button Overlay */}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-300">
@@ -71,74 +123,21 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: A
         )}
 
         {/* Rating Badge */}
-        {anime.rating && anime.rating > 0 && (
+        {displayRating && displayRating >= 1 && (
           <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-md border border-white/10">
             <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
             <span className="text-xs font-bold text-white">
-              {(anime.rating > 10 ? anime.rating / 10 : anime.rating).toFixed(1)}
+              {displayRating.toFixed(1)}
             </span>
           </div>
         )}
-
-        {/* Bottom Info Overlay */}
-        <div className="absolute bottom-0 left-0 right-0 p-3 translate-y-full group-hover:translate-y-0 transition-transform duration-300">
-          <div className="flex items-center gap-2 text-[10px] text-white/80">
-            {anime.type && (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm">
-                <Tv className="w-2.5 h-2.5" />
-                {anime.type}
-              </span>
-            )}
-            {anime.episodes && (
-              <span className="px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm">
-                {anime.episodes} EP
-              </span>
-            )}
-            {anime.year && (
-              <span className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/20 backdrop-blur-sm">
-                <Calendar className="w-2.5 h-2.5" />
-                {anime.year}
-              </span>
-            )}
-          </div>
-        </div>
       </div>
 
-      {/* Title & Info */}
-      <div className="mt-3 px-1 space-y-1">
+      {/* Title */}
+      <div className="mt-2.5">
         <h3 className="font-semibold text-sm text-zinc-200 group-hover:text-white transition-colors duration-200 line-clamp-2 leading-tight">
           {anime.title}
         </h3>
-        <div className="flex items-center gap-2 text-[10px] text-zinc-500">
-          {anime.status && (
-            <span className={cn(
-              "flex items-center gap-1.5 px-2 py-0.5 rounded-md font-medium uppercase tracking-wider text-[10px]",
-              anime.status === 'Ongoing' && "bg-green-500/10 text-green-400 border border-green-500/20",
-              anime.status === 'Completed' && "bg-blue-500/10 text-blue-400 border border-blue-500/20",
-              anime.status === 'Upcoming' && "bg-purple-500/10 text-purple-400 border border-purple-500/20"
-            )}>
-              <span className={cn(
-                "w-1.5 h-1.5 rounded-full animate-pulse",
-                anime.status === 'Ongoing' ? "bg-green-500" :
-                  anime.status === 'Completed' ? "bg-blue-500" : "bg-purple-500"
-              )} />
-              {anime.status}
-            </span>
-          )} and
-
-          {/* Next Episode Countdown */}
-          {anime.status === 'Ongoing' && anime.timeUntilAiring && anime.timeUntilAiring > 0 && (
-            <span className="flex items-center gap-1 text-[10px] text-zinc-400 bg-zinc-800/50 px-2 py-0.5 rounded-md border border-white/5">
-              <Clock className="w-3 h-3" />
-              EP {anime.nextAiringEpisode || '?'} in {Math.floor(anime.timeUntilAiring / 3600)}h
-            </span>
-          )}
-          {anime.genres && anime.genres.length > 0 && (
-            <span className="text-zinc-600 truncate">
-              {anime.genres.slice(0, 2).join(' • ')}
-            </span>
-          )}
-        </div>
       </div>
     </a>
   );

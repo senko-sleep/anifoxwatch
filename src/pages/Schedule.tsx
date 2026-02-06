@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 // Day of week mapping
 const DAYS_OF_WEEK = [
@@ -91,6 +92,7 @@ interface ReminderSettings {
 }
 
 export const Schedule = () => {
+    useDocumentTitle('Airing Schedule');
     const location = useLocation();
     const [searchParams, setSearchParams] = useSearchParams();
     const [selectedDay, setSelectedDay] = useState<string>(
