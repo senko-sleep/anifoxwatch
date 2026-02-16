@@ -163,11 +163,16 @@ export class AniListService {
 
     /**
      * Execute a GraphQL query against AniList
+     * Handles rate limiting by returning stale cache if available
      */
     private async query<T>(query: string, variables: Record<string, unknown> = {}): Promise<T | null> {
         const cacheKey = `graphql:${query.substring(0, 50)}:${JSON.stringify(variables)}`;
         const cached = this.getCached<T>(cacheKey);
         if (cached) return cached;
+
+        // Also check for stale cache (expired but still usable as fallback)
+        const staleEntry = this.cache.get(cacheKey);
+        const staleData = staleEntry?.data as T | undefined;
 
         try {
             const response = await fetch(ANILIST_API_URL, {
@@ -182,21 +187,37 @@ export class AniListService {
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error(`[AniList] API error: ${response.status}`, errorText);
+                // On rate limit (429), return stale cache if available
+                if (response.status === 429 && staleData) {
+                    console.log('[AniList] Rate limited, using stale cache');
+                    return staleData;
+                }
                 return null;
             }
 
             const data = await response.json();
 
-            // Check for GraphQL errors
+            // Check for GraphQL errors (including rate limit errors in response body)
             if (data && typeof data === 'object' && 'errors' in data) {
-                console.error('[AniList] GraphQL errors:', JSON.stringify((data as { errors: unknown }).errors));
-                return null;
+                const errors = (data as { errors: Array<{ status?: number; message?: string }> }).errors;
+                const isRateLimited = errors.some(e => e.status === 429 || e.message?.includes('Too Many Requests'));
+                if (isRateLimited && staleData) {
+                    console.log('[AniList] Rate limited (GraphQL error), using stale cache');
+                    return staleData;
+                }
+                console.error('[AniList] GraphQL errors:', JSON.stringify(errors));
+                return staleData || null;
             }
 
             this.setCache(cacheKey, data);
             return data as T;
         } catch (error) {
             console.error('[AniList] Query failed:', error);
+            // Return stale cache on network errors
+            if (staleData) {
+                console.log('[AniList] Network error, using stale cache');
+                return staleData;
+            }
             return null;
         }
     }

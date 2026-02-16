@@ -1508,8 +1508,9 @@ export class SourceManager {
         }
 
         // Multi-source aggregation mode - query MORE sources for better diversity
+        // Exclude adult sources (WatchHentai, Hanime) and Consumet from trending
         const availableSources = this.sourceOrder
-            .filter(name => name !== 'WatchHentai' && name !== 'Consumet')
+            .filter(name => name !== 'WatchHentai' && name !== 'Hanime' && name !== 'Consumet')
             .map(name => this.sources.get(name))
             .filter(source => source && source.isAvailable)
             .slice(0, 6) as StreamingSource[]; // Increased from 3 to 6
@@ -1592,8 +1593,9 @@ export class SourceManager {
         }
 
         // Multi-source aggregation mode - query MORE sources for better diversity
+        // Exclude adult sources (WatchHentai, Hanime) and Consumet from latest
         const availableSources = this.sourceOrder
-            .filter(name => name !== 'WatchHentai' && name !== 'Consumet')
+            .filter(name => name !== 'WatchHentai' && name !== 'Hanime' && name !== 'Consumet')
             .map(name => this.sources.get(name))
             .filter(source => source && source.isAvailable)
             .slice(0, 6) as StreamingSource[]; // Increased from 3 to 6

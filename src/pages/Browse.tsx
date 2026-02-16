@@ -170,10 +170,12 @@ const Browse = () => {
   const [infinitePage, setInfinitePage] = useState(1);
   const [hasMorePages, setHasMorePages] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [currentSection, setCurrentSection] = useState(1); // Track current visible section for seamless mode switching
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
   const hasMorePagesRef = useRef(hasMorePages);
   const isLoadingMoreRef = useRef(isLoadingMore);
+  const resultsContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => { hasMorePagesRef.current = hasMorePages; }, [hasMorePages]);
@@ -189,20 +191,24 @@ const Browse = () => {
     localStorage.setItem(SCROLL_MODE_KEY, scrollMode);
   }, [scrollMode]);
 
-  // Toggle scroll mode handler
+  // Toggle scroll mode handler with seamless page conversion
   const toggleScrollMode = useCallback(() => {
     setScrollMode(prev => {
       const newMode = prev === 'infinite' ? 'paginated' : 'infinite';
       if (newMode === 'infinite') {
-        // Reset infinite scroll state when switching to infinite
+        // Switching to infinite: reset state, start from page 1 but preserve position via currentSection
         setAllResults([]);
         setInfinitePage(1);
+        setCurrentSection(page); // Remember where we were in paginated mode
         setHasMorePages(true);
-        setPage(1);
+        setPage(1); // Reset page to 1 for infinite mode (won't show in URL)
+      } else {
+        // Switching to paginated: convert current section to page number
+        setPage(currentSection);
       }
       return newMode;
     });
-  }, []);
+  }, [page, currentSection]);
 
   useEffect(() => {
     if (isUpdatingFromUrl.current) return;
@@ -247,15 +253,17 @@ const Browse = () => {
   }, [searchParams]);
 
   useEffect(() => {
+    const container = resultsContainerRef.current;
+    if (!container) return;
     const handleScroll = () => {
       try {
         const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
-        positions[filterStateKey] = window.scrollY;
+        positions[filterStateKey] = container.scrollTop;
         sessionStorage.setItem(SCROLL_POSITIONS_KEY, JSON.stringify(positions));
       } catch (e) { /* ignore */ }
     };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
   }, [filterStateKey]);
 
   useEffect(() => {
@@ -276,8 +284,8 @@ const Browse = () => {
   // Only scroll to top in paginated mode, not infinite scroll
   useEffect(() => {
     if (isFirstMount.current) return;
-    if (scrollMode === 'paginated') {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (scrollMode === 'paginated' && resultsContainerRef.current) {
+      resultsContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }, [page, scrollMode]);
 
@@ -289,14 +297,15 @@ const Browse = () => {
     if (statusFilter !== 'all') params.status = statusFilter;
     if (selectedYearRange > 0) params.year = selectedYearRange.toString();
     if (browseSortBy !== 'popularity') params.sort = browseSortBy;
-    if (page > 1) params.page = page.toString();
+    // Only add page to URL in paginated mode, not infinite scroll
+    if (scrollMode === 'paginated' && page > 1) params.page = page.toString();
     if (mode !== 'safe') params.mode = mode;
 
     const newSearch = new URLSearchParams(params).toString();
     const fullUrl = `${location.pathname}${newSearch ? `?${newSearch}` : ''}`;
     sessionStorage.setItem('last_browse_url', fullUrl);
     setSearchParams(params, { replace: true });
-  }, [debouncedQuery, selectedGenres, typeFilter, statusFilter, selectedYearRange, browseSortBy, page, mode, setSearchParams, location.pathname]);
+  }, [debouncedQuery, selectedGenres, typeFilter, statusFilter, selectedYearRange, browseSortBy, page, mode, scrollMode, setSearchParams, location.pathname]);
 
   const browseFilters = useMemo(() => ({
     type: typeFilter !== 'all' ? typeFilter : undefined,
@@ -314,8 +323,11 @@ const Browse = () => {
   // Use 100 results per page in infinite scroll mode for seamless experience
   const resultsPerPage = scrollMode === 'infinite' ? 100 : 25;
 
-  const { data: browseData, isLoading: browseLoading, isFetching: browseFetching, error: browseError } = useBrowse(browseFilters, page, !hasSearchQuery, shuffleBypass > 0, resultsPerPage);
-  const { data: searchData, isLoading: searchLoading, isFetching: searchFetching, error: searchError } = useSearch(debouncedQuery, page, undefined, hasSearchQuery, mode);
+  // In infinite mode, use infinitePage for API calls; in paginated mode, use page
+  const apiPage = scrollMode === 'infinite' ? infinitePage : page;
+
+  const { data: browseData, isLoading: browseLoading, isFetching: browseFetching, error: browseError } = useBrowse(browseFilters, apiPage, !hasSearchQuery, shuffleBypass > 0, resultsPerPage);
+  const { data: searchData, isLoading: searchLoading, isFetching: searchFetching, error: searchError } = useSearch(debouncedQuery, apiPage, undefined, hasSearchQuery, mode);
 
   const isLoading = hasSearchQuery ? searchLoading : browseLoading;
   const isFetching = hasSearchQuery ? searchFetching : browseFetching;
@@ -361,16 +373,19 @@ const Browse = () => {
     };
   }, [hasSearchQuery, searchData, browseData, searchSortBy]);
 
+  // Get display results based on scroll mode - MUST be after processedData
+  const displayResults = scrollMode === 'infinite' ? allResults : processedData.results;
+
   // Restore scroll position when returning to browse page
   useEffect(() => {
-    if (!isLoading && displayResults.length > 0 && !scrollRestored.current) {
+    if (!isLoading && displayResults.length > 0 && !scrollRestored.current && resultsContainerRef.current) {
       try {
         const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
         const pos = positions[filterStateKey];
         if (pos > 0) {
           // Use requestAnimationFrame for smoother restoration
           requestAnimationFrame(() => {
-            window.scrollTo({ top: pos, behavior: 'instant' });
+            resultsContainerRef.current?.scrollTo({ top: pos, behavior: 'instant' as ScrollBehavior });
           });
           scrollRestored.current = true;
         } else {
@@ -398,13 +413,14 @@ const Browse = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [browseFilters, debouncedQuery, scrollMode]);
 
-  // Accumulate results for infinite scroll
+  // Accumulate results for infinite scroll with section tracking
   useEffect(() => {
     if (scrollMode !== 'infinite' || !processedData.results.length) return;
     
     if (filtersChangedRef.current) {
       // First page after filter change - replace all results
       setAllResults(processedData.results);
+      setCurrentSection(1);
       filtersChangedRef.current = false;
     } else if (page > 1 || infinitePage > 1) {
       // Subsequent pages - append results (deduplicate by id)
@@ -413,15 +429,18 @@ const Browse = () => {
         const newItems = processedData.results.filter(a => !existingIds.has(a.id));
         return [...prev, ...newItems];
       });
+      // Update current section based on loaded pages
+      setCurrentSection(infinitePage);
     } else {
       // Initial load
       setAllResults(processedData.results);
+      setCurrentSection(1);
     }
     
     setHasMorePages(processedData.hasNextPage);
     setIsLoadingMore(false);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [processedData.results, scrollMode, page]);
+  }, [processedData.results, scrollMode, page, infinitePage]);
 
   // Callback ref for infinite scroll trigger element
   const setLoadMoreRef = useCallback((node: HTMLDivElement | null) => {
@@ -436,17 +455,17 @@ const Browse = () => {
     // Don't observe if not in infinite mode or no node
     if (scrollMode !== 'infinite' || !node) return;
 
-    // Create new observer
+    // Create new observer rooted in the results container
     observerRef.current = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
         if (entry.isIntersecting && hasMorePagesRef.current && !isLoadingMoreRef.current) {
           setIsLoadingMore(true);
-          setPage(prev => prev + 1);
+          // Only increment infinitePage, not page (page stays at 1 in infinite mode)
           setInfinitePage(prev => prev + 1);
         }
       },
-      { rootMargin: '600px', threshold: 0 }
+      { root: resultsContainerRef.current, rootMargin: '600px', threshold: 0 }
     );
 
     observerRef.current.observe(node);
@@ -460,9 +479,6 @@ const Browse = () => {
       }
     };
   }, []);
-
-  // Get display results based on scroll mode
-  const displayResults = scrollMode === 'infinite' ? allResults : processedData.results;
 
   const clearFilters = () => {
     setTypeFilter('all');
@@ -491,31 +507,31 @@ const Browse = () => {
   const FilterPanel = ({ isMobile = false }: { isMobile?: boolean }) => (
     <div className={cn("flex flex-col h-full", isMobile ? "p-4" : "")}>
       {/* Filter Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-fox-orange/20 flex items-center justify-center">
-            <SlidersHorizontal className="w-5 h-5 text-fox-orange" />
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-fox-orange/[0.1] border border-fox-orange/20 flex items-center justify-center">
+            <SlidersHorizontal className="w-4 h-4 text-fox-orange" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">Filters</h2>
-            <p className="text-xs text-zinc-500">Refine your search</p>
+            <h2 className="text-sm font-bold text-white/90">Filters</h2>
+            <p className="text-[10px] text-zinc-600">Refine results</p>
           </div>
         </div>
         {activeFilterCount > 0 && (
           <button
             onClick={clearFilters}
-            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-fox-orange transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-zinc-500 hover:text-fox-orange hover:bg-fox-orange/[0.06] transition-all"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
+            <RotateCcw className="w-3 h-3" />
             Reset
           </button>
         )}
       </div>
 
       {/* Format Section */}
-      <div className="mb-6">
-        <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Format</h3>
-        <div className="grid grid-cols-2 gap-2">
+      <div className="mb-5">
+        <h3 className="fox-section-title mb-2.5">Format</h3>
+        <div className="grid grid-cols-2 gap-1.5">
           {FORMAT_OPTIONS.map((opt) => {
             const Icon = opt.icon;
             const isActive = typeFilter === opt.id;
@@ -524,24 +540,24 @@ const Browse = () => {
                 key={opt.id}
                 onClick={() => { setTypeFilter(isActive ? 'all' : opt.id as TypeFilter); setPage(1); }}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
-                  isActive
-                    ? "glass-button-active"
-                    : "glass-button text-zinc-400 hover:text-white"
+                  "fox-filter-btn flex items-center gap-2 px-2.5 py-2",
+                  isActive && "fox-filter-btn-active"
                 )}
               >
-                <Icon className="w-4 h-4" />
-                <span className="truncate">{opt.label}</span>
+                <Icon className="w-3.5 h-3.5" />
+                <span className="truncate text-xs">{opt.label}</span>
               </button>
             );
           })}
         </div>
       </div>
 
+      <div className="fox-divider my-1" />
+
       {/* Status Section */}
-      <div className="mb-6">
-        <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Status</h3>
-        <div className="flex flex-col gap-2">
+      <div className="mb-5 mt-4">
+        <h3 className="fox-section-title mb-2.5">Status</h3>
+        <div className="flex flex-col gap-1.5">
           {STATUS_OPTIONS.map((opt) => {
             const Icon = opt.icon;
             const isActive = statusFilter === opt.id;
@@ -550,31 +566,31 @@ const Browse = () => {
                 key={opt.id}
                 onClick={() => { setStatusFilter(isActive ? 'all' : opt.id as StatusFilter); setPage(1); }}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
-                  isActive
-                    ? "glass-button-active"
-                    : "glass-button text-zinc-400 hover:text-white"
+                  "fox-filter-btn flex items-center gap-2.5 px-2.5 py-2",
+                  isActive && "fox-filter-btn-active"
                 )}
               >
-                <Icon className={cn("w-4 h-4", isActive && `text-${opt.color}-400`)} />
-                <span>{opt.label}</span>
+                <Icon className={cn("w-3.5 h-3.5", isActive && `text-${opt.color}-400`)} />
+                <span className="text-xs">{opt.label}</span>
               </button>
             );
           })}
         </div>
       </div>
 
+      <div className="fox-divider my-1" />
+
       {/* Year Section */}
-      <div className="mb-6">
-        <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Year</h3>
-        <div className="flex flex-wrap gap-2">
+      <div className="mb-5 mt-4">
+        <h3 className="fox-section-title mb-2.5">Year</h3>
+        <div className="flex flex-wrap gap-1.5">
           {YEAR_RANGES.map((range, idx) => (
             <button
               key={idx}
               onClick={() => { setSelectedYearRange(selectedYearRange === idx ? 0 : idx); setPage(1); }}
               className={cn(
-                "filter-badge",
-                selectedYearRange === idx ? "filter-badge-active" : "filter-badge-inactive"
+                "fox-chip",
+                selectedYearRange === idx ? "fox-chip-active" : "fox-chip-inactive"
               )}
             >
               {range.label}
@@ -583,24 +599,26 @@ const Browse = () => {
         </div>
       </div>
 
+      <div className="fox-divider my-1" />
+
       {/* Genres Section */}
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 mt-4">
         <button
           onClick={() => setGenresExpanded(!genresExpanded)}
-          className="flex items-center justify-between w-full mb-3"
+          className="flex items-center justify-between w-full mb-2.5 group"
         >
-          <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-            Genres {selectedGenres.length > 0 && `(${selectedGenres.length})`}
+          <h3 className="fox-section-title">
+            Genres {selectedGenres.length > 0 && <span className="text-fox-orange">({selectedGenres.length})</span>}
           </h3>
           {genresExpanded ? (
-            <ChevronUp className="w-4 h-4 text-zinc-500" />
+            <ChevronUp className="w-3.5 h-3.5 text-zinc-600 group-hover:text-fox-orange/60 transition-colors" />
           ) : (
-            <ChevronDown className="w-4 h-4 text-zinc-500" />
+            <ChevronDown className="w-3.5 h-3.5 text-zinc-600 group-hover:text-fox-orange/60 transition-colors" />
           )}
         </button>
         {genresExpanded && (
           <div className="overflow-y-auto max-h-[280px] scrollbar-thin pr-1">
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1">
               {allGenres.map((genre) => (
                 <button
                   key={genre}
@@ -609,8 +627,8 @@ const Browse = () => {
                     setPage(1);
                   }}
                   className={cn(
-                    "filter-badge text-[11px]",
-                    selectedGenres.includes(genre) ? "filter-badge-active" : "filter-badge-inactive"
+                    "fox-chip",
+                    selectedGenres.includes(genre) ? "fox-chip-active" : "fox-chip-inactive"
                   )}
                 >
                   {genre}
@@ -625,7 +643,7 @@ const Browse = () => {
   );
 
   return (
-    <div className="min-h-screen bg-background font-sans text-foreground">
+    <div className="h-screen flex flex-col overflow-hidden bg-background font-sans text-foreground">
       <Navbar />
 
       {/* Cinematic Background */}
@@ -635,181 +653,98 @@ const Browse = () => {
         <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-600/[0.03] rounded-full blur-[150px]" />
       </div>
 
-      {/* Main Layout */}
-      <div className="relative flex min-h-[calc(100vh-64px)]">
-        {/* Desktop Sidebar Filter Panel */}
-        <aside className="hidden lg:flex flex-col w-[280px] xl:w-[300px] shrink-0 sidebar-glass sticky top-16 h-[calc(100vh-64px)] overflow-hidden">
-          <div className="flex-1 overflow-y-auto scrollbar-thin p-5">
+      {/* App Shell Body — fills remaining height below navbar */}
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* Desktop Sidebar Filter Panel — own scroll */}
+        <aside className="hidden lg:flex flex-col w-[200px] xl:w-[220px] shrink-0 fox-sidebar overflow-hidden">
+          <div className="flex-1 overflow-y-auto scrollbar-thin p-4 pt-5">
             <FilterPanel />
           </div>
         </aside>
 
-        {/* Main Content Area */}
-        <main className="flex-1 min-w-0">
-          {/* Search Header - Sticky */}
-          <div className="sticky top-16 z-20 glass-panel-dark border-b border-white/[0.04] px-4 sm:px-6 lg:px-8 py-4">
-            <div className="max-w-[1600px] mx-auto">
-              <div className="flex items-center gap-4">
-                {/* Search Input */}
-                <div className="relative flex-1 max-w-2xl">
-                  <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
-                  <Input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search anime titles..."
-                    className="pl-12 h-12 glass-input rounded-xl text-base focus:ring-2 focus:ring-fox-orange/30 transition-all font-medium placeholder:text-zinc-600"
-                  />
-                  {query && (
-                    <button
-                      onClick={() => setQuery('')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg bg-white/[0.08] hover:bg-white/[0.12] flex items-center justify-center transition-colors"
-                    >
-                      <X className="w-4 h-4 text-zinc-400" />
-                    </button>
-                  )}
+        {/* Right Panel — header + scrollable results */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          {/* Fixed Header — never scrolls */}
+          <div className="shrink-0 z-20 fox-search-bar">
+            {/* Row 1: Search + Mode + Mobile Filter */}
+            <div className="px-4 sm:px-6 lg:px-8 py-2">
+              <div className="max-w-[1600px] mx-auto">
+                <div className="flex items-center gap-3">
+                  {/* Search Input */}
+                  <div className="relative flex-1 max-w-2xl fox-search-input">
+                    <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+                    <Input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search anime titles..."
+                      className="pl-10 h-10 bg-transparent border-0 rounded-xl text-sm focus:ring-0 focus-visible:ring-0 transition-all font-medium placeholder:text-zinc-600"
+                    />
+                    {query && (
+                      <button
+                        onClick={() => setQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md bg-white/[0.06] hover:bg-fox-orange/20 hover:text-fox-orange flex items-center justify-center transition-all"
+                      >
+                        <X className="w-3.5 h-3.5 text-zinc-500" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Content Mode Selector */}
+                  <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
+                    <SelectTrigger className={cn(
+                      "w-[130px] h-10 rounded-xl text-sm font-medium transition-all fox-mode-select",
+                      mode !== 'safe' && "fox-mode-select-active"
+                    )}>
+                      <SelectValue placeholder="Content" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-black/90 backdrop-blur-2xl rounded-xl border border-white/[0.08]">
+                      <SelectItem value="safe">Safe Only</SelectItem>
+                      <SelectItem value="mixed">Mixed Content</SelectItem>
+                      <SelectItem value="adult">+18 Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Mobile Filter Button */}
+                  <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
+                    <SheetTrigger asChild>
+                      <button className="lg:hidden relative flex items-center justify-center w-10 h-10 rounded-xl fox-filter-btn">
+                        <SlidersHorizontal className="w-4 h-4 text-zinc-500" />
+                        {activeFilterCount > 0 && (
+                          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-fox-orange text-white text-[8px] font-bold flex items-center justify-center shadow-lg shadow-fox-orange/30">
+                            {activeFilterCount}
+                          </span>
+                        )}
+                      </button>
+                    </SheetTrigger>
+                    <SheetContent side="left" className="w-[300px] bg-black/95 backdrop-blur-2xl border-r border-fox-orange/[0.06] p-0 overflow-y-auto">
+                      <SheetHeader className="p-4 border-b border-fox-orange/[0.08]">
+                        <SheetTitle className="text-white/90 text-sm font-bold">Filters</SheetTitle>
+                      </SheetHeader>
+                      <FilterPanel isMobile />
+                    </SheetContent>
+                  </Sheet>
                 </div>
-
-                {/* Content Mode Selector */}
-                <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
-                  <SelectTrigger className={cn(
-                    "w-[160px] h-12 rounded-xl glass-input font-medium transition-all",
-                    mode !== 'safe' && "border-fox-orange/40 text-fox-orange bg-fox-orange/10"
-                  )}>
-                    <SelectValue placeholder="Content" />
-                  </SelectTrigger>
-                  <SelectContent className="glass-panel rounded-xl border-white/[0.1]">
-                    <SelectItem value="safe">Safe Only</SelectItem>
-                    <SelectItem value="mixed">Mixed Content</SelectItem>
-                    <SelectItem value="adult">+18 Only</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {/* Mobile Filter Button */}
-                <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
-                  <SheetTrigger asChild>
-                    <button className="lg:hidden relative flex items-center justify-center w-12 h-12 rounded-xl glass-button">
-                      <SlidersHorizontal className="w-5 h-5 text-zinc-400" />
-                      {activeFilterCount > 0 && (
-                        <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-fox-orange text-white text-[10px] font-bold flex items-center justify-center">
-                          {activeFilterCount}
-                        </span>
-                      )}
-                    </button>
-                  </SheetTrigger>
-                  <SheetContent side="left" className="w-[320px] glass-panel border-r-white/[0.06] p-0 overflow-y-auto">
-                    <SheetHeader className="p-4 border-b border-white/[0.06]">
-                      <SheetTitle className="text-white">Filters</SheetTitle>
-                    </SheetHeader>
-                    <FilterPanel isMobile />
-                  </SheetContent>
-                </Sheet>
               </div>
             </div>
-          </div>
 
-          {/* Content Area */}
-          <div className="px-4 sm:px-6 lg:px-8 py-6">
-            <div className="max-w-[1600px] mx-auto">
-              {/* Active Filters Section */}
-              {activeFilterCount > 0 && (
-                <div className="mb-6 glass-card p-4 animate-fade-in">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <SlidersHorizontal className="w-4 h-4 text-fox-orange" />
-                      <h3 className="text-sm font-semibold text-white">
-                        Active Filters ({activeFilterCount})
-                      </h3>
-                    </div>
-                    <button
-                      onClick={clearFilters}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                      Clear All
-                    </button>
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-2">
-                    {/* Type Filter */}
-                    {typeFilter !== 'all' && (
-                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 text-sm">
-                        <Tv className="w-3.5 h-3.5" />
-                        <span className="font-medium">{typeFilter}</span>
-                        <button
-                          onClick={() => setTypeFilter('all')}
-                          className="ml-1 hover:bg-purple-500/20 rounded p-0.5 transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Status Filter */}
-                    {statusFilter !== 'all' && (
-                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-sm">
-                        {statusFilter === 'Ongoing' && <CalendarClock className="w-3.5 h-3.5" />}
-                        {statusFilter === 'Completed' && <CheckCircle2 className="w-3.5 h-3.5" />}
-                        {statusFilter === 'Upcoming' && <Clock className="w-3.5 h-3.5" />}
-                        <span className="font-medium">{statusFilter}</span>
-                        <button
-                          onClick={() => setStatusFilter('all')}
-                          className="ml-1 hover:bg-emerald-500/20 rounded p-0.5 transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Year Filter */}
-                    {selectedYearRange > 0 && (
-                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 text-sm">
-                        <Calendar className="w-3.5 h-3.5" />
-                        <span className="font-medium">{YEAR_RANGES[selectedYearRange].label}</span>
-                        <button
-                          onClick={() => setSelectedYearRange(0)}
-                          className="ml-1 hover:bg-blue-500/20 rounded p-0.5 transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Genre Filters */}
-                    {selectedGenres.map((genre) => (
-                      <div
-                        key={genre}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-fox-orange/20 border border-fox-orange/30 text-fox-orange text-sm"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        <span className="font-medium">{genre}</span>
-                        <button
-                          onClick={() => setSelectedGenres(prev => prev.filter(g => g !== genre))}
-                          className="ml-1 hover:bg-fox-orange/20 rounded p-0.5 transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Results Header */}
-              <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between mb-6">
-                <div>
-                  <h1 className="text-2xl sm:text-3xl font-bold text-white">
+            {/* Row 2: Sort + Controls + Results Count */}
+            <div className="px-4 sm:px-6 lg:px-8 pb-2">
+              <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-3">
+                {/* Results info */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <h1 className="text-sm font-bold text-white truncate">
                     {hasSearchQuery ? (
                       <>Results for "<span className="text-fox-orange">{debouncedQuery}</span>"</>
                     ) : (
                       'Discover Anime'
                     )}
                   </h1>
-                  <p className="text-sm text-zinc-500 mt-1">
-                    {isLoading ? 'Searching...' : `${processedData.totalResults.toLocaleString()} titles found`}
-                  </p>
+                  <span className="text-xs text-zinc-500 shrink-0">
+                    {isLoading ? 'Searching...' : `${processedData.totalResults.toLocaleString()} titles`}
+                  </span>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 shrink-0">
                   {/* Sort Options */}
                   {!hasSearchQuery && (
                     <div className="flex glass-card p-1">
@@ -821,15 +756,15 @@ const Browse = () => {
                             key={opt.id}
                             onClick={opt.id === 'shuffle' ? handleShuffle : () => { setBrowseSortBy(opt.id as BrowseSortOption); setPage(1); }}
                             className={cn(
-                              "flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all",
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
                               isActive
                                 ? "bg-fox-orange/20 text-fox-orange"
                                 : "text-zinc-500 hover:text-white hover:bg-white/[0.06]"
                             )}
                             title={opt.label}
                           >
-                            <Icon className="w-4 h-4" />
-                            <span className="hidden sm:inline">{opt.label}</span>
+                            <Icon className="w-3.5 h-3.5" />
+                            <span className="hidden lg:inline">{opt.label}</span>
                           </button>
                         );
                       })}
@@ -838,7 +773,7 @@ const Browse = () => {
 
                   {hasSearchQuery && (
                     <Select value={searchSortBy} onValueChange={(v: SearchSortOption) => setSearchSortBy(v)}>
-                      <SelectTrigger className="w-32 h-10 rounded-xl glass-input text-sm">
+                      <SelectTrigger className="w-28 h-9 rounded-xl glass-input text-xs">
                         <SelectValue placeholder="Sort" />
                       </SelectTrigger>
                       <SelectContent className="glass-panel rounded-xl">
@@ -854,21 +789,21 @@ const Browse = () => {
                     <button
                       onClick={toggleScrollMode}
                       className={cn(
-                        "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all",
+                        "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
                         "text-zinc-400 hover:text-white hover:bg-white/[0.06]"
                       )}
                     >
                       {scrollMode === 'infinite' ? (
                         <>
-                          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.133-8-12.739-8-4.585 0-4.585 8 0 8 5.606 0 7.644-8 12.74-8z" />
                           </svg>
-                          <span className="hidden sm:inline">Infinite</span>
+                          <span className="hidden lg:inline">Infinite</span>
                         </>
                       ) : (
                         <>
-                          <Layers className="w-4 h-4" />
-                          <span className="hidden sm:inline">Pages</span>
+                          <Layers className="w-3.5 h-3.5" />
+                          <span className="hidden lg:inline">Pages</span>
                         </>
                       )}
                     </button>
@@ -879,204 +814,295 @@ const Browse = () => {
                     <button
                       onClick={() => setGridSize('compact')}
                       className={cn(
-                        "w-9 h-9 rounded-lg flex items-center justify-center transition-all",
+                        "w-8 h-8 rounded-lg flex items-center justify-center transition-all",
                         gridSize === 'compact' ? "bg-fox-orange/20 text-fox-orange" : "text-zinc-500 hover:text-white"
                       )}
                     >
-                      <Grid3X3 className="w-4 h-4" />
+                      <Grid3X3 className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => setGridSize('normal')}
                       className={cn(
-                        "w-9 h-9 rounded-lg flex items-center justify-center transition-all",
+                        "w-8 h-8 rounded-lg flex items-center justify-center transition-all",
                         gridSize === 'normal' ? "bg-fox-orange/20 text-fox-orange" : "text-zinc-500 hover:text-white"
                       )}
                     >
-                      <LayoutGrid className="w-4 h-4" />
+                      <LayoutGrid className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
               </div>
-
-              {/* Error State */}
-              {error && (
-                <div className="glass-card p-6 mb-6 border-red-500/20">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center">
-                      <X className="w-6 h-6 text-red-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-red-400">Something went wrong</h3>
-                      <p className="text-sm text-zinc-500">{error.message || 'Failed to load anime. Please try again.'}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Loading State */}
-              {isLoading ? (
-                <div className={cn(
-                  "grid gap-4 sm:gap-5",
-                  gridSize === 'compact'
-                    ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
-                    : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
-                )}>
-                  {Array.from({ length: 24 }).map((_, i) => (
-                    <div key={i} className="space-y-3">
-                      <Skeleton className="aspect-[2/3] w-full rounded-xl bg-white/[0.04]" />
-                      <Skeleton className="h-4 w-3/4 rounded-lg bg-white/[0.04]" />
-                    </div>
-                  ))}
-                </div>
-              ) : displayResults.length === 0 ? (
-                /* Empty State */
-                <div className="flex flex-col items-center justify-center py-24 text-center">
-                  <div className="w-20 h-20 rounded-2xl glass-card flex items-center justify-center mb-6">
-                    <SearchIcon className="w-10 h-10 text-zinc-600" />
-                  </div>
-                  <h3 className="text-xl font-bold text-white mb-2">No results found</h3>
-                  <p className="text-zinc-500 max-w-md mb-6">
-                    We couldn't find any anime matching your criteria. Try adjusting your filters or search query.
-                  </p>
-                  <Button onClick={clearFilters} className="bg-fox-orange hover:bg-fox-orange/90 text-white rounded-xl px-6">
-                    Clear All Filters
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  {/* Results Grid */}
-                  <AnimeGrid
-                    anime={displayResults}
-                    columns={gridSize === 'compact' ? 7 : 6}
-                  />
-
-                  {/* Infinite Scroll Loading Indicator */}
-                  {scrollMode === 'infinite' && (
-                    <>
-                      <div ref={setLoadMoreRef} className="h-20" />
-                      {(isLoadingMore || isFetching) && hasMorePages && (
-                        <div className="mt-4 flex justify-center">
-                          <div className="flex items-center gap-2 px-4 py-2 rounded-full glass-card">
-                            <Loader2 className="w-4 h-4 animate-spin text-fox-orange" />
-                            <span className="text-xs text-zinc-500">Loading...</span>
-                          </div>
-                        </div>
-                      )}
-                      {!hasMorePages && displayResults.length > 0 && (
-                        <div className="mt-12 flex flex-col items-center gap-2 py-8">
-                          <div className="w-12 h-1 rounded-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
-                          <p className="text-sm text-zinc-600">You've reached the end</p>
-                          <p className="text-xs text-zinc-700">{displayResults.length} titles loaded</p>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {/* Pagination (only in paginated mode) */}
-                  {scrollMode === 'paginated' && processedData.totalPages > 1 && (
-                    <div className="mt-12 flex flex-col items-center gap-6">
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => setPage(p => Math.max(1, p - 1))}
-                          disabled={page === 1 || isFetching}
-                          className="w-10 h-10 rounded-xl glass-button border-0"
-                        >
-                          <ChevronLeft className="w-4 h-4" />
-                        </Button>
-
-                        <div className="flex items-center gap-1">
-                          {(() => {
-                            const total = processedData.totalPages;
-                            const current = page;
-                            const delta = 2;
-                            const range: number[] = [];
-                            const rangeWithDots: (number | string)[] = [];
-
-                            for (let i = Math.max(2, current - delta); i <= Math.min(total - 1, current + delta); i++) {
-                              range.push(i);
-                            }
-
-                            if (current - delta > 2) rangeWithDots.push(1, "...");
-                            else rangeWithDots.push(1);
-
-                            rangeWithDots.push(...range);
-
-                            if (current + delta < total - 1) rangeWithDots.push("...", total);
-                            else if (total > 1) rangeWithDots.push(total);
-
-                            return rangeWithDots.map((p, i) => (
-                              <React.Fragment key={i}>
-                                {p === "..." ? (
-                                  <span className="px-2 text-zinc-600">...</span>
-                                ) : (
-                                  <button
-                                    onClick={() => setPage(p as number)}
-                                    className={cn(
-                                      "min-w-[40px] h-10 rounded-xl font-medium transition-all",
-                                      page === p
-                                        ? "bg-fox-orange text-white shadow-lg shadow-fox-orange/30"
-                                        : "glass-button text-zinc-400 hover:text-white"
-                                    )}
-                                  >
-                                    {p}
-                                  </button>
-                                )}
-                              </React.Fragment>
-                            ));
-                          })()}
-                        </div>
-
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={() => setPage(p => p + 1)}
-                          disabled={!processedData.hasNextPage || isFetching}
-                          className="w-10 h-10 rounded-xl glass-button border-0"
-                        >
-                          {isFetching ? <Loader2 className="w-4 h-4 animate-spin text-fox-orange" /> : <ChevronRight className="w-4 h-4" />}
-                        </Button>
-                      </div>
-
-                      {/* Jump to Page */}
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          const p = parseInt(jumpPage);
-                          if (!isNaN(p) && p >= 1 && p <= processedData.totalPages) {
-                            setPage(p);
-                            setJumpPage("");
-                          }
-                        }}
-                        className="flex items-center gap-3 glass-card px-4 py-2"
-                      >
-                        <span className="text-sm text-zinc-500">Go to page</span>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={processedData.totalPages}
-                          value={jumpPage}
-                          onChange={(e) => setJumpPage(e.target.value)}
-                          className="w-16 h-8 glass-input text-center text-sm rounded-lg"
-                          placeholder="#"
-                        />
-                        <Button
-                          type="submit"
-                          size="sm"
-                          className="h-8 rounded-lg bg-fox-orange hover:bg-fox-orange/90 text-white"
-                          disabled={!jumpPage || parseInt(jumpPage) < 1 || parseInt(jumpPage) > processedData.totalPages}
-                        >
-                          Go
-                        </Button>
-                      </form>
-                    </div>
-                  )}
-                </>
-              )}
             </div>
           </div>
-        </main>
+
+          {/* Scrollable Results Area — ONLY this scrolls */}
+          <div ref={resultsContainerRef} className="flex-1 overflow-y-auto scrollbar-thin">
+            <div className="px-3 sm:px-4 lg:px-6 py-4">
+              <div className="max-w-[1600px] mx-auto">
+                {/* Active Filters Section */}
+                {activeFilterCount > 0 && (
+                  <div className="mb-6 glass-card p-4 animate-fade-in">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <SlidersHorizontal className="w-4 h-4 text-fox-orange" />
+                        <h3 className="text-sm font-semibold text-white">
+                          Active Filters ({activeFilterCount})
+                        </h3>
+                      </div>
+                      <button
+                        onClick={clearFilters}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        Clear All
+                      </button>
+                    </div>
+                    
+                    <div className="flex flex-wrap gap-2">
+                      {/* Type Filter */}
+                      {typeFilter !== 'all' && (
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 text-sm">
+                          <Tv className="w-3.5 h-3.5" />
+                          <span className="font-medium">{typeFilter}</span>
+                          <button
+                            onClick={() => setTypeFilter('all')}
+                            className="ml-1 hover:bg-purple-500/20 rounded p-0.5 transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Status Filter */}
+                      {statusFilter !== 'all' && (
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-sm">
+                          {statusFilter === 'Ongoing' && <CalendarClock className="w-3.5 h-3.5" />}
+                          {statusFilter === 'Completed' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                          {statusFilter === 'Upcoming' && <Clock className="w-3.5 h-3.5" />}
+                          <span className="font-medium">{statusFilter}</span>
+                          <button
+                            onClick={() => setStatusFilter('all')}
+                            className="ml-1 hover:bg-emerald-500/20 rounded p-0.5 transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Year Filter */}
+                      {selectedYearRange > 0 && (
+                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 text-sm">
+                          <CalendarClock className="w-3.5 h-3.5" />
+                          <span className="font-medium">{YEAR_RANGES[selectedYearRange].label}</span>
+                          <button
+                            onClick={() => setSelectedYearRange(0)}
+                            className="ml-1 hover:bg-blue-500/20 rounded p-0.5 transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Genre Filters */}
+                      {selectedGenres.map((genre) => (
+                        <div
+                          key={genre}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-fox-orange/20 border border-fox-orange/30 text-fox-orange text-sm"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span className="font-medium">{genre}</span>
+                          <button
+                            onClick={() => setSelectedGenres(prev => prev.filter(g => g !== genre))}
+                            className="ml-1 hover:bg-fox-orange/20 rounded p-0.5 transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Error State */}
+                {error && (
+                  <div className="glass-card p-6 mb-6 border-red-500/20">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center">
+                        <X className="w-6 h-6 text-red-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-red-400">Something went wrong</h3>
+                        <p className="text-sm text-zinc-500">{error.message || 'Failed to load anime. Please try again.'}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Loading State */}
+                {isLoading ? (
+                  <div className={cn(
+                    "grid gap-4 sm:gap-5",
+                    gridSize === 'compact'
+                      ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
+                      : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+                  )}>
+                    {Array.from({ length: 24 }).map((_, i) => (
+                      <div key={i} className="space-y-3">
+                        <Skeleton className="aspect-[2/3] w-full rounded-xl bg-white/[0.04]" />
+                        <Skeleton className="h-4 w-3/4 rounded-lg bg-white/[0.04]" />
+                      </div>
+                    ))}
+                  </div>
+                ) : displayResults.length === 0 ? (
+                  /* Empty State */
+                  <div className="flex flex-col items-center justify-center py-24 text-center">
+                    <div className="w-20 h-20 rounded-2xl glass-card flex items-center justify-center mb-6">
+                      <SearchIcon className="w-10 h-10 text-zinc-600" />
+                    </div>
+                    <h3 className="text-xl font-bold text-white mb-2">No results found</h3>
+                    <p className="text-zinc-500 max-w-md mb-6">
+                      We couldn't find any anime matching your criteria. Try adjusting your filters or search query.
+                    </p>
+                    <Button onClick={clearFilters} className="bg-fox-orange hover:bg-fox-orange/90 text-white rounded-xl px-6">
+                      Clear All Filters
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Results Grid */}
+                    <AnimeGrid
+                      anime={displayResults}
+                      columns={gridSize === 'compact' ? 5 : 4}
+                    />
+
+                    {/* Infinite Scroll Loading Indicator */}
+                    {scrollMode === 'infinite' && (
+                      <>
+                        <div ref={setLoadMoreRef} className="h-20" />
+                        {(isLoadingMore || isFetching) && hasMorePages && (
+                          <div className="mt-4 flex justify-center">
+                            <div className="flex items-center gap-2 px-4 py-2 rounded-full glass-card">
+                              <Loader2 className="w-4 h-4 animate-spin text-fox-orange" />
+                              <span className="text-xs text-zinc-500">Loading...</span>
+                            </div>
+                          </div>
+                        )}
+                        {!hasMorePages && displayResults.length > 0 && (
+                          <div className="mt-12 flex flex-col items-center gap-2 py-8">
+                            <div className="w-12 h-1 rounded-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
+                            <p className="text-sm text-zinc-600">You've reached the end</p>
+                            <p className="text-xs text-zinc-700">{displayResults.length} titles loaded</p>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {/* Pagination (only in paginated mode) */}
+                    {scrollMode === 'paginated' && processedData.totalPages > 1 && (
+                      <div className="mt-12 flex flex-col items-center gap-6 pb-8">
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setPage(p => Math.max(1, p - 1))}
+                            disabled={page === 1 || isFetching}
+                            className="w-10 h-10 rounded-xl glass-button border-0"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </Button>
+
+                          <div className="flex items-center gap-1">
+                            {(() => {
+                              const total = processedData.totalPages;
+                              const current = page;
+                              const delta = 2;
+                              const range: number[] = [];
+                              const rangeWithDots: (number | string)[] = [];
+
+                              for (let i = Math.max(2, current - delta); i <= Math.min(total - 1, current + delta); i++) {
+                                range.push(i);
+                              }
+
+                              if (current - delta > 2) rangeWithDots.push(1, "...");
+                              else rangeWithDots.push(1);
+
+                              rangeWithDots.push(...range);
+
+                              if (current + delta < total - 1) rangeWithDots.push("...", total);
+                              else if (total > 1) rangeWithDots.push(total);
+
+                              return rangeWithDots.map((p, i) => (
+                                <React.Fragment key={i}>
+                                  {p === "..." ? (
+                                    <span className="px-2 text-zinc-600">...</span>
+                                  ) : (
+                                    <button
+                                      onClick={() => setPage(p as number)}
+                                      className={cn(
+                                        "min-w-[40px] h-10 rounded-xl font-medium transition-all",
+                                        page === p
+                                          ? "bg-fox-orange text-white shadow-lg shadow-fox-orange/30"
+                                          : "glass-button text-zinc-400 hover:text-white"
+                                      )}
+                                    >
+                                      {p}
+                                    </button>
+                                  )}
+                                </React.Fragment>
+                              ));
+                            })()}
+                          </div>
+
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setPage(p => p + 1)}
+                            disabled={!processedData.hasNextPage || isFetching}
+                            className="w-10 h-10 rounded-xl glass-button border-0"
+                          >
+                            {isFetching ? <Loader2 className="w-4 h-4 animate-spin text-fox-orange" /> : <ChevronRight className="w-4 h-4" />}
+                          </Button>
+                        </div>
+
+                        {/* Jump to Page */}
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            const p = parseInt(jumpPage);
+                            if (!isNaN(p) && p >= 1 && p <= processedData.totalPages) {
+                              setPage(p);
+                              setJumpPage("");
+                            }
+                          }}
+                          className="flex items-center gap-3 glass-card px-4 py-2"
+                        >
+                          <span className="text-sm text-zinc-500">Go to page</span>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={processedData.totalPages}
+                            value={jumpPage}
+                            onChange={(e) => setJumpPage(e.target.value)}
+                            className="w-16 h-8 glass-input text-center text-sm rounded-lg"
+                            placeholder="#"
+                          />
+                          <Button
+                            type="submit"
+                            size="sm"
+                            className="h-8 rounded-lg bg-fox-orange hover:bg-fox-orange/90 text-white"
+                            disabled={!jumpPage || parseInt(jumpPage) < 1 || parseInt(jumpPage) > processedData.totalPages}
+                          >
+                            Go
+                          </Button>
+                        </form>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

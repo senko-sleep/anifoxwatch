@@ -7,14 +7,14 @@ import { ContinueWatching } from '@/components/home/ContinueWatching';
 import { AnimeSlider } from '@/components/home/AnimeSlider';
 import { useTrending, useTopRated, useSchedule, useLeaderboard, useSeasonal, usePopular, useUpcoming } from '@/hooks/useAnime';
 import { useWatchHistory } from '@/hooks/useWatchHistory';
-import { apiClient } from '@/lib/api-client';
-import { AniListClient } from '@/lib/anilist-client';
+import { useHeroAnime } from '@/hooks/useHeroAnimeMultiSource';
 import { AlertCircle, RefreshCw, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLocation } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { SectionHeader } from '@/components/shared/SectionHeader';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+
 
 const Index = () => {
   useDocumentTitle('Home');
@@ -31,8 +31,8 @@ const Index = () => {
   const SCROLL_POSITIONS_KEY = 'anistream_scroll_positions';
   const pageKey = 'home_page';
 
-  const [featuredAnime, setFeaturedAnime] = useState([]);
-  const [featuredLoading, setFeaturedLoading] = useState(false);
+  // Hero banner data fetched directly from AniList GraphQL (no rate limits, HD banners)
+  const { heroAnime, isLoading: heroLoading } = useHeroAnime();
 
   // Filter out hentai content from homepage
   const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (string | null)[] | null } | null) => {
@@ -59,39 +59,43 @@ const Index = () => {
     return false;
   };
 
-  // Filter all anime lists to exclude hentai content
-  const filteredTrending = trendingAnime?.filter(a => !isHentai(a)) || [];
-  const filteredSeasonal = seasonalData?.results?.filter(a => !isHentai(a)) || [];
-  const filteredPopular = popularAnime?.filter(a => !isHentai(a)) || [];
-  const filteredUpcoming = upcomingData?.results?.filter(a => !isHentai(a)) || [];
-  const filteredLeaderboard = leaderboardData?.results?.filter(a => !isHentai(a)) || [];
+  // Deduplicate and filter anime across all sections using useMemo
+  const {
+    dedupTrending,
+    dedupSeasonal,
+    dedupPopular,
+    dedupUpcoming,
+    dedupLeaderboard,
+    dedupTopRated
+  } = useMemo(() => {
+    // Filter hentai content
+    const filteredTrending = trendingAnime?.filter(a => !isHentai(a)) || [];
+    const filteredSeasonal = seasonalData?.results?.filter(a => !isHentai(a)) || [];
+    const filteredPopular = popularAnime?.filter(a => !isHentai(a)) || [];
+    const filteredUpcoming = upcomingData?.results?.filter(a => !isHentai(a)) || [];
+    const filteredLeaderboard = leaderboardData?.results?.filter(a => !isHentai(a)) || [];
+    const filteredTopRated = topAnimeList?.map(item => item.anime).filter(a => !isHentai(a)) || [];
 
-  // Filter best anime from top rated
-  const filteredTopRated = topAnimeList?.map(item => item.anime).filter(a => !isHentai(a)) || [];
+    // Deduplicate across sections
+    const usedIds = new Set<string>();
+    
+    const getUnique = <T extends { id: string }>(list: T[]): T[] => {
+      return list.filter(item => {
+        if (usedIds.has(item.id)) return false;
+        usedIds.add(item.id);
+        return true;
+      });
+    };
 
-  // Deduplicate anime across all sections - track which IDs have been used
-  const usedAnimeIds = new Set<string>();
-  
-  const getUniqueAnime = <T extends { id: string }>(animeList: T[]): T[] => {
-    return animeList.filter(anime => {
-      if (usedAnimeIds.has(anime.id)) return false;
-      usedAnimeIds.add(anime.id);
-      return true;
-    });
-  };
-
-  // Apply deduplication to each section
-  const dedupTrending = getUniqueAnime(filteredTrending);
-  const dedupSeasonal = getUniqueAnime(filteredSeasonal);
-  const dedupPopular = getUniqueAnime(filteredPopular);
-  const dedupUpcoming = getUniqueAnime(filteredUpcoming);
-  const dedupLeaderboard = getUniqueAnime(filteredLeaderboard);
-  const dedupTopRated = getUniqueAnime(filteredTopRated);
-
-  // Create featured anime from trending (reset used IDs)
-  usedAnimeIds.clear();
-  const featuredAnimeIds = new Set(dedupTrending.slice(0, 5).map(a => a.id));
-  const featuredAnimeList = dedupTrending.filter(a => featuredAnimeIds.has(a.id));
+    return {
+      dedupTrending: getUnique(filteredTrending),
+      dedupSeasonal: getUnique(filteredSeasonal),
+      dedupPopular: getUnique(filteredPopular),
+      dedupUpcoming: getUnique(filteredUpcoming),
+      dedupLeaderboard: getUnique(filteredLeaderboard),
+      dedupTopRated: getUnique(filteredTopRated)
+    };
+  }, [trendingAnime, seasonalData?.results, popularAnime, upcomingData?.results, leaderboardData?.results, topAnimeList]);
 
   // Filter schedule for today
   const todaySchedule = scheduleData?.schedule?.filter(item => {
@@ -101,89 +105,64 @@ const Index = () => {
     return timeUntil < 86400 && timeUntil > -3600;
   }).slice(0, 10) || [];
 
-  const isLoading = trendingLoading || topLoading || featuredLoading;
+  const isLoading = trendingLoading || topLoading || heroLoading;
   const hasError = trendingError;
-
-  // Fetch detailed info for featured anime with AniList images
-  useEffect(() => {
-    if (dedupTrending && dedupTrending.length > 0) {
-      const fetchFeaturedDetails = async () => {
-        setFeaturedLoading(true);
-        const featuredIds = dedupTrending.filter(a => a.status !== 'Upcoming').slice(0, 5);
-
-        try {
-          // Fetch detailed info for each featured anime with AniList enrichment
-          const detailedAnime = await Promise.all(
-            featuredIds.map(async (anime) => {
-              try {
-                // First get detailed info from our API
-                const detailed = await apiClient.getAnime(anime.id);
-                const baseAnime = detailed || anime;
-
-                // Then enrich with AniList images
-                const enrichedAnime = await AniListClient.enrichAnimeWithImages(baseAnime);
-                return enrichedAnime;
-              } catch {
-                // Fallback to just AniList enrichment
-                return await AniListClient.enrichAnimeWithImages(anime);
-              }
-            })
-          );
-          setFeaturedAnime(detailedAnime);
-        } catch (error) {
-          console.error('Failed to fetch featured anime details:', error);
-          // Fallback to basic trending anime
-          setFeaturedAnime(featuredIds);
-        } finally {
-          setFeaturedLoading(false);
-        }
-      };
-
-      fetchFeaturedDetails();
-    }
-  }, [trendingAnime]);
 
   const handleRefresh = () => {
     refetchTrending();
     refetchTop();
   };
 
-  // Save/Restore scroll position
+  // Save/Restore scroll position with better timing
   useEffect(() => {
     if (!isLoading) {
       try {
         const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
         const pos = positions[pageKey];
         if (pos > 0) {
-          setTimeout(() => {
+          // Wait for images to load before restoring scroll
+          const restoreScroll = () => {
             window.scrollTo({ top: pos, behavior: 'instant' });
-          }, 100);
+          };
+          
+          // Try multiple times to ensure images are loaded
+          setTimeout(restoreScroll, 100);
+          setTimeout(restoreScroll, 300);
+          setTimeout(restoreScroll, 500);
         }
       } catch (e) { /* ignore */ }
     }
-  }, [isLoading]);
+  }, [isLoading, pageKey]);
 
   useEffect(() => {
+    let scrollTimeout: NodeJS.Timeout;
     const handleScroll = () => {
-      try {
-        const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
-        positions[pageKey] = window.scrollY;
-        sessionStorage.setItem(SCROLL_POSITIONS_KEY, JSON.stringify(positions));
-      } catch (e) { /* ignore */ }
+      // Debounce scroll saving to improve performance
+      clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        try {
+          const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
+          positions[pageKey] = window.scrollY;
+          sessionStorage.setItem(SCROLL_POSITIONS_KEY, JSON.stringify(positions));
+        } catch (e) { /* ignore */ }
+      }, 150);
     };
     window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      clearTimeout(scrollTimeout);
+    };
+  }, [pageKey]);
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
       <Navbar />
 
-      {/* Hero Section with Enhanced Design */}
-      {(featuredAnime.length > 0 || dedupTrending.length > 0) ? (
-        <div className="relative">
-          <HeroSection featuredAnime={featuredAnime.length > 0 ? featuredAnime : dedupTrending.slice(0, 5)} />
-          <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-background via-background/90 to-transparent pointer-events-none" />
+      {/* Hero Section — powered by AniList GraphQL for HD banners & rich metadata */}
+      {heroAnime.length > 0 ? (
+        <div className="relative mb-16">
+          <HeroSection heroAnime={heroAnime} />
+          <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background via-background/95 to-transparent pointer-events-none z-[6]" />
         </div>
       ) : isLoading ? (
         <div className="h-[70vh] flex items-center justify-center bg-gradient-to-b from-fox-dark to-background">
@@ -220,7 +199,7 @@ const Index = () => {
       )}
 
       {/* Main Content Layout */}
-      <main className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 -mt-20 relative z-10 space-y-12 pb-16">
+      <main className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 relative z-10 space-y-12 pb-16">
 
         {/* Continue Watching */}
         {history.length > 0 && (
@@ -302,36 +281,6 @@ const Index = () => {
             </div>
           ) : dedupPopular && dedupPopular.length > 0 ? (
             <AnimeSlider anime={dedupPopular.slice(0, 15)} cardSize="md" />
-          ) : null}
-        </section>
-
-        {/* Top 10 */}
-        <section className="animate-fade-in">
-          <SectionHeader
-            title="Top 10"
-            subtitle="Most watched this week"
-            link="/browse?sort=trending"
-            linkText="View All"
-          />
-          <WeeklyLeaderboard anime={dedupLeaderboard} isLoading={leaderboardLoading} />
-        </section>
-
-        {/* Top Rated */}
-        <section className="animate-fade-in">
-          <SectionHeader
-            title="Top Rated"
-            subtitle="Highest rated anime of all time"
-            link="/browse?sort=rating"
-            linkText="View Rankings"
-          />
-          {topLoading ? (
-            <div className="flex gap-4 overflow-hidden">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="w-44 shrink-0 aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
-              ))}
-            </div>
-          ) : dedupTopRated.length > 0 ? (
-            <AnimeSlider anime={dedupTopRated.slice(0, 15)} cardSize="md" />
           ) : null}
         </section>
 

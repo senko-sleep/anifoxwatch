@@ -127,17 +127,17 @@ const FilterSection = ({
   const [isOpen, setIsOpen] = React.useState(defaultOpen);
   
   return (
-    <div className={cn("space-y-3", className)}>
+    <div className={cn("space-y-2.5", className)}>
       <button 
         onClick={() => collapsible && setIsOpen(!isOpen)}
         className={cn(
-          "flex items-center justify-between w-full text-left",
-          collapsible && "cursor-pointer hover:text-fox-orange transition-colors"
+          "flex items-center justify-between w-full text-left group",
+          collapsible && "cursor-pointer"
         )}
       >
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">{title}</h3>
+        <h3 className="fox-section-title">{title}</h3>
         {collapsible && (
-          <ChevronRight className={cn("w-4 h-4 text-muted-foreground transition-transform", isOpen && "rotate-90")} />
+          <ChevronRight className={cn("w-3.5 h-3.5 text-zinc-600 transition-transform group-hover:text-fox-orange/60", isOpen && "rotate-90")} />
         )}
       </button>
       {(!collapsible || isOpen) && children}
@@ -187,6 +187,7 @@ const Search = () => {
   const isUpdatingFromUrl = useRef(false);
   const isFirstMount = useRef(true);
   const scrollRestored = useRef(false);
+  const resultsContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Sync state with URL params when they change (e.g., after navigating back from watch page)
   useEffect(() => {
@@ -241,15 +242,17 @@ const Search = () => {
   }, [searchParams]);
 
   useEffect(() => {
+    const container = resultsContainerRef.current;
+    if (!container) return;
     const handleScroll = () => {
       try {
         const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
-        positions[filterStateKey] = window.scrollY;
+        positions[filterStateKey] = container.scrollTop;
         sessionStorage.setItem(SCROLL_POSITIONS_KEY, JSON.stringify(positions));
       } catch (e) { /* ignore */ }
     };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
   }, [filterStateKey]);
 
   // Debounce search query
@@ -279,7 +282,9 @@ const Search = () => {
   // Scroll to top on page change (skip on first mount to allow scroll restoration)
   useEffect(() => {
     if (isFirstMount.current) return;
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (resultsContainerRef.current) {
+      resultsContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   }, [page]);
 
   // Update URL params
@@ -406,20 +411,13 @@ const Search = () => {
   // Save/Restore scroll position
   useEffect(() => {
     // Only restore once when not loading and data is present
-    if (!isLoading && processedData.results.length > 0 && !scrollRestored.current) {
+    if (!isLoading && processedData.results.length > 0 && !scrollRestored.current && resultsContainerRef.current) {
       try {
         const positions = JSON.parse(sessionStorage.getItem(SCROLL_POSITIONS_KEY) || '{}');
         const pos = positions[filterStateKey];
         if (pos > 0) {
-          // Use multiple attempts to ensure rendering is complete across various devices/loads
-          const attempts = [0, 20, 50, 100, 200, 400, 600, 800, 1000];
-          attempts.forEach(delay => {
-            setTimeout(() => {
-              // Only scroll if we haven't manually scrolled away yet (approximate)
-              if (window.scrollY < pos + 100) {
-                window.scrollTo({ top: pos, behavior: 'instant' });
-              }
-            }, delay);
+          requestAnimationFrame(() => {
+            resultsContainerRef.current?.scrollTo({ top: pos, behavior: 'instant' as ScrollBehavior });
           });
           scrollRestored.current = true;
         } else {
@@ -458,11 +456,13 @@ const Search = () => {
     if (mode === 'adult') allGenres = ADULT_GENRES;
     else if (mode === 'mixed') allGenres = MIXED_GENRES;
 
+    const activeFilterCount = selectedGenres.length + (typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (selectedYearRange > 0 ? 1 : 0);
+
     return (
-      <div className="space-y-6 p-1">
+      <div className="space-y-5 p-1">
         {/* Format Type */}
         <FilterSection title="Format">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             {[
               { id: 'TV', label: 'TV Series' },
               { id: 'Movie', label: 'Movie' },
@@ -470,113 +470,102 @@ const Search = () => {
               { id: 'ONA', label: 'ONA' },
               { id: 'Special', label: 'Special' }
             ].map((t) => (
-              <Button
+              <button
                 key={t.id}
-                variant={typeFilter === t.id ? "default" : "outline"}
-                size="sm"
                 onClick={() => { setTypeFilter(typeFilter === t.id ? 'all' : t.id as TypeFilter); setPage(1); }}
                 className={cn(
-                  "h-9 rounded-lg text-xs gap-1.5",
-                  typeFilter === t.id 
-                    ? "bg-fox-orange hover:bg-fox-orange/90 border-fox-orange" 
-                    : "bg-secondary/30 border-white/10 hover:border-fox-orange/50 hover:text-fox-orange"
+                  "fox-chip",
+                  typeFilter === t.id ? "fox-chip-active" : "fox-chip-inactive"
                 )}
               >
                 {t.label}
-              </Button>
+              </button>
             ))}
           </div>
         </FilterSection>
 
         {/* Status */}
         <FilterSection title="Status">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             {[
-              { id: 'Ongoing', label: 'Airing', color: 'green' },
-              { id: 'Completed', label: 'Finished', color: 'blue' },
-              { id: 'Upcoming', label: 'Coming Soon', color: 'yellow' }
+              { id: 'Ongoing', label: 'Airing' },
+              { id: 'Completed', label: 'Finished' },
+              { id: 'Upcoming', label: 'Coming Soon' }
             ].map((s) => (
-              <Button
+              <button
                 key={s.id}
-                variant={statusFilter === s.id ? "default" : "outline"}
-                size="sm"
                 onClick={() => { setStatusFilter(statusFilter === s.id ? 'all' : s.id as StatusFilter); setPage(1); }}
                 className={cn(
-                  "h-9 rounded-lg text-xs",
-                  statusFilter === s.id 
-                    ? `bg-${s.color}-600 hover:bg-${s.color}-700` 
-                    : "bg-secondary/30 border-white/10 hover:border-white/30"
+                  "fox-chip",
+                  statusFilter === s.id ? "fox-chip-active" : "fox-chip-inactive"
                 )}
               >
                 {s.label}
-              </Button>
+              </button>
             ))}
           </div>
         </FilterSection>
 
-        <Separator className="bg-white/5" />
+        <div className="fox-divider" />
 
         {/* Genres */}
         <FilterSection title="Genres">
-          <ScrollArea className="h-[300px] pr-4">
-            <div className="flex flex-wrap gap-1.5">
+          <ScrollArea className="h-[300px] pr-3">
+            <div className="flex flex-wrap gap-1">
               {allGenres.map((g) => (
-                <Badge
+                <button
                   key={g}
-                  variant={selectedGenres.includes(g) ? "default" : "outline"}
-                  className={cn(
-                    "cursor-pointer transition-all text-xs py-1.5 px-2.5",
-                    selectedGenres.includes(g) 
-                      ? "bg-fox-orange text-white hover:bg-fox-orange/90 border-transparent shadow-lg shadow-fox-orange/20" 
-                      : "text-muted-foreground hover:text-white hover:border-fox-orange/50 bg-secondary/20"
-                  )}
                   onClick={() => {
                     setSelectedGenres(prev => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
                     setPage(1);
                   }}
+                  className={cn(
+                    "fox-chip",
+                    selectedGenres.includes(g) ? "fox-chip-active" : "fox-chip-inactive"
+                  )}
                 >
                   {g}
-                </Badge>
+                </button>
               ))}
             </div>
           </ScrollArea>
         </FilterSection>
 
         {/* Active Filters Summary */}
-        {(selectedGenres.length > 0 || typeFilter !== 'all' || statusFilter !== 'all' || selectedYearRange > 0) && (
+        {activeFilterCount > 0 && (
           <>
-            <Separator className="bg-white/5" />
-            <div className="space-y-3">
+            <div className="fox-divider" />
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Active Filters</span>
-                <Button variant="ghost" size="sm" onClick={clearFilters} className="h-6 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2">
+                <span className="fox-section-title">Active ({activeFilterCount})</span>
+                <button onClick={clearFilters} className="text-[10px] font-medium text-zinc-500 hover:text-fox-orange transition-colors px-1.5 py-0.5 rounded">
                   Clear All
-                </Button>
+                </button>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1">
                 {typeFilter !== 'all' && (
-                  <Badge className="bg-purple-600/20 text-purple-400 border-purple-600/30 text-xs">
+                  <span className="fox-chip fox-chip-active flex items-center gap-1">
                     {typeFilter}
-                    <X className="w-3 h-3 ml-1 cursor-pointer" onClick={() => setTypeFilter('all')} />
-                  </Badge>
+                    <X className="w-2.5 h-2.5 cursor-pointer opacity-60 hover:opacity-100" onClick={() => setTypeFilter('all')} />
+                  </span>
                 )}
                 {statusFilter !== 'all' && (
-                  <Badge className="bg-green-600/20 text-green-400 border-green-600/30 text-xs">
+                  <span className="fox-chip fox-chip-active flex items-center gap-1">
                     {statusFilter}
-                    <X className="w-3 h-3 ml-1 cursor-pointer" onClick={() => setStatusFilter('all')} />
-                  </Badge>
+                    <X className="w-2.5 h-2.5 cursor-pointer opacity-60 hover:opacity-100" onClick={() => setStatusFilter('all')} />
+                  </span>
                 )}
                 {selectedYearRange > 0 && (
-                  <Badge className="bg-blue-600/20 text-blue-400 border-blue-600/30 text-xs">
+                  <span className="fox-chip fox-chip-active flex items-center gap-1">
                     {YEAR_RANGES[selectedYearRange].label}
-                    <X className="w-3 h-3 ml-1 cursor-pointer" onClick={() => setSelectedYearRange(0)} />
-                  </Badge>
+                    <X className="w-2.5 h-2.5 cursor-pointer opacity-60 hover:opacity-100" onClick={() => setSelectedYearRange(0)} />
+                  </span>
                 )}
                 {selectedGenres.map(g => (
-                  <Badge key={g} className="bg-fox-orange/20 text-fox-orange border-fox-orange/30 text-xs">
+                  <span key={g} className="fox-chip fox-chip-active flex items-center gap-1">
                     {g}
-                    <X className="w-3 h-3 ml-1 cursor-pointer" onClick={() => setSelectedGenres(prev => prev.filter(x => x !== g))} />
-                  </Badge>
+                    <X className="w-2.5 h-2.5 cursor-pointer opacity-60 hover:opacity-100" onClick={() => setSelectedGenres(prev => prev.filter(x => x !== g))} />
+                  </span>
                 ))}
               </div>
             </div>
@@ -587,305 +576,334 @@ const Search = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background font-sans text-foreground flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden bg-background font-sans text-foreground">
       <Navbar />
 
-      {/* Search Header */}
-      <div className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-white/5 py-4 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto flex gap-4 items-center justify-center">
+      {/* App Shell Body — fills remaining height below navbar */}
+      <div className="relative flex flex-1 overflow-hidden">
+        {/* Desktop Sidebar Filter Panel — own scroll */}
+        <aside className="hidden lg:flex flex-col w-[200px] shrink-0 fox-sidebar overflow-hidden">
+          <div className="flex-1 overflow-y-auto scrollbar-thin p-4 pt-5 pb-10">
+            <div className="mb-5">
+              <div className="flex items-center gap-2.5 mb-1">
+                <div className="w-7 h-7 rounded-lg bg-fox-orange/[0.1] border border-fox-orange/20 flex items-center justify-center">
+                  <Filter className="w-3.5 h-3.5 text-fox-orange" />
+                </div>
+                <h2 className="text-sm font-bold text-white/90">Filters</h2>
+              </div>
+              <p className="text-[10px] text-zinc-600 ml-[2.375rem]">Find your next favorite</p>
+            </div>
+            <FiltersContent />
+          </div>
+        </aside>
 
-          <div className="flex-1 max-w-4xl flex items-center gap-4">
-            {/* Search Input */}
-            <div className="relative flex-1">
-              <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search anime..."
-                className="pl-12 h-12 bg-secondary/50 border-white/10 rounded-xl text-lg focus:ring-fox-orange/50 transition-all font-medium"
-              />
-              {query && (
-                <Button variant="ghost" size="icon" className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8" onClick={() => setQuery('')}>
-                  <X className="w-4 h-4" />
-                </Button>
-              )}
+        {/* Right Panel — header + scrollable results */}
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          {/* Fixed Header — never scrolls */}
+          <div className="shrink-0 z-20 fox-search-bar">
+            {/* Row 1: Search + Mode + Mobile Filter */}
+            <div className="py-2 px-4 sm:px-6 lg:px-8">
+              <div className="max-w-7xl mx-auto flex gap-3 items-center justify-center">
+                <div className="flex-1 max-w-4xl flex items-center gap-3">
+                  {/* Search Input */}
+                  <div className="relative flex-1 fox-search-input">
+                    <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+                    <Input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search anime..."
+                      className="pl-10 h-10 bg-transparent border-0 rounded-xl text-sm focus:ring-0 focus-visible:ring-0 transition-all font-medium placeholder:text-zinc-600"
+                    />
+                    {query && (
+                      <button
+                        onClick={() => setQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md bg-white/[0.06] hover:bg-fox-orange/20 hover:text-fox-orange flex items-center justify-center transition-all"
+                      >
+                        <X className="w-3.5 h-3.5 text-zinc-500" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Content Settings Dropdown */}
+                  <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
+                    <SelectTrigger className={cn(
+                      "w-[130px] h-10 rounded-xl text-sm font-medium transition-all fox-mode-select",
+                      mode !== 'safe' && "fox-mode-select-active"
+                    )}>
+                      <SelectValue placeholder="Content" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-black/90 backdrop-blur-2xl rounded-xl border border-white/[0.08]">
+                      <SelectItem value="safe">Safe Only</SelectItem>
+                      <SelectItem value="mixed">Mixed Content</SelectItem>
+                      <SelectItem value="adult">+18 Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Mobile Filter Button */}
+                  <div className="flex items-center gap-2 lg:hidden">
+                    <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
+                      <SheetTrigger asChild>
+                        <button className="relative flex items-center justify-center w-10 h-10 rounded-xl fox-filter-btn">
+                          <Filter className="w-4 h-4 text-zinc-500" />
+                          {(selectedGenres.length > 0 || typeFilter !== 'all' || statusFilter !== 'all') && (
+                            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-fox-orange text-white text-[8px] font-bold flex items-center justify-center shadow-lg shadow-fox-orange/30">
+                              {selectedGenres.length + (typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0)}
+                            </span>
+                          )}
+                        </button>
+                      </SheetTrigger>
+                      <SheetContent side="left" className="w-[300px] bg-black/95 backdrop-blur-2xl border-r border-fox-orange/[0.06] p-0 overflow-y-auto">
+                        <SheetHeader className="p-4 border-b border-fox-orange/[0.08]">
+                          <SheetTitle className="text-white/90 text-sm font-bold">Filters</SheetTitle>
+                          <SheetDescription className="text-zinc-600 text-xs">Narrow down results</SheetDescription>
+                        </SheetHeader>
+                        <div className="p-4">
+                          <FiltersContent />
+                        </div>
+                      </SheetContent>
+                    </Sheet>
+                  </div>
+                </div>
+              </div>
             </div>
 
-            {/* Content Settings Dropdown */}
-            <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
-              <SelectTrigger className={cn(
-                "w-[180px] h-12 rounded-xl bg-secondary/50 border-white/10 font-medium transition-colors",
-                mode !== 'safe' && "border-fox-orange/50 text-fox-orange bg-fox-orange/10"
-              )}>
-                <SelectValue placeholder="Content Visibility" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="safe">Safe Only (Default)</SelectItem>
-                <SelectItem value="mixed">Mixed Content</SelectItem>
-                <SelectItem value="adult">+18 Only</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Mobile Filter Button */}
-            <div className="flex items-center gap-2 lg:hidden">
-              <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
-                <SheetTrigger asChild>
-                  <Button variant="outline" size="lg" className="gap-2 h-12 rounded-xl px-3">
-                    <Filter className="w-5 h-5" />
-                    {(selectedGenres.length > 0 || typeFilter !== 'all' || statusFilter !== 'all') && (
-                      <Badge variant="secondary" className="px-1.5 h-5 min-w-[1.25rem] flex items-center justify-center bg-fox-orange text-white">
-                        {selectedGenres.length + (typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0)}
-                      </Badge>
+            {/* Row 2: Sort + Controls + Results Count */}
+            <div className="px-4 sm:px-6 lg:px-8 pb-2">
+              <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+                {/* Results info */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <h1 className="text-sm font-bold text-white truncate">
+                    {hasSearchQuery ? (
+                      <>Results for "<span className="text-fox-orange">{debouncedQuery}</span>"</>
+                    ) : (
+                      'Browse Anime'
                     )}
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="left" className="w-[300px] sm:w-[400px] overflow-y-auto">
-                  <SheetHeader className="mb-6">
-                    <SheetTitle>Filter Anime</SheetTitle>
-                    <SheetDescription>Narrow down results by genre, status, and more.</SheetDescription>
-                  </SheetHeader>
-                  <FiltersContent />
-                </SheetContent>
-              </Sheet>
+                  </h1>
+                  <span className="text-xs text-zinc-500 shrink-0">
+                    {isLoading ? 'Searching...' : `${processedData.totalResults.toLocaleString()} results`}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Sort Options */}
+                  {!hasSearchQuery && (
+                    <div className="flex bg-secondary/30 rounded-lg p-1 border border-white/5">
+                      {[
+                        { id: 'popularity', icon: Flame, tooltip: 'Popular' },
+                        { id: 'trending', icon: TrendingUp, tooltip: 'Trending' },
+                        { id: 'recently_released', icon: Clock, tooltip: 'Newest' },
+                        { id: 'shuffle', icon: Shuffle, tooltip: 'Random' }
+                      ].map((opt) => (
+                        <Button
+                          key={opt.id}
+                          variant={browseSortBy === opt.id ? 'secondary' : 'ghost'}
+                          size="sm"
+                          onClick={opt.id === 'shuffle' ? handleShuffle : () => { setBrowseSortBy(opt.id as BrowseSortOption); setPage(1); }}
+                          className={cn("h-8 w-8 px-0 rounded-md", browseSortBy === opt.id && "bg-background text-fox-orange shadow-sm")}
+                          title={opt.tooltip}
+                        >
+                          <opt.icon className="w-4 h-4" />
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+
+                  {hasSearchQuery && (
+                    <Select value={searchSortBy} onValueChange={(v: SearchSortOption) => setSearchSortBy(v)}>
+                      <SelectTrigger className="w-32 h-9 text-xs">
+                        <SelectValue placeholder="Sort" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="relevance">Relevance</SelectItem>
+                        <SelectItem value="rating">Rating</SelectItem>
+                        <SelectItem value="year">Newest</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+
+                  {/* Grid Size Toggle */}
+                  <div className="flex bg-secondary/30 rounded-lg p-1 border border-white/5">
+                    <Button
+                      variant={gridSize === 'compact' ? 'secondary' : 'ghost'}
+                      size="sm"
+                      onClick={() => setGridSize('compact')}
+                      className={cn("h-8 w-8 px-0 rounded-md", gridSize === 'compact' && "bg-background text-fox-orange shadow-sm")}
+                    >
+                      <Grid3X3 className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant={gridSize === 'normal' ? 'secondary' : 'ghost'}
+                      size="sm"
+                      onClick={() => setGridSize('normal')}
+                      className={cn("h-8 w-8 px-0 rounded-md", gridSize === 'normal' && "bg-background text-fox-orange shadow-sm")}
+                    >
+                      <LayoutGrid className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Scrollable Results Area — ONLY this scrolls */}
+          <div ref={resultsContainerRef} className="flex-1 overflow-y-auto scrollbar-thin">
+            <div className="max-w-7xl mx-auto w-full px-3 sm:px-4 lg:px-6 py-4">
+              {/* Error Message */}
+              {error && (
+                <Alert variant="destructive" className="mb-6 bg-destructive/10 border-destructive/20 text-destructive-foreground">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription>{error.message || 'Something went wrong while fetching anime.'}</AlertDescription>
+                </Alert>
+              )}
+
+              {/* Loading or Results */}
+              {isLoading ? (
+                <div className={cn(
+                  "grid gap-4",
+                  gridSize === 'compact'
+                    ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6"
+                    : "grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4"
+                )}>
+                  {Array.from({ length: 24 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <Skeleton className="aspect-[2/3] w-full rounded-lg" />
+                      <Skeleton className="h-4 w-2/3" />
+                      <Skeleton className="h-3 w-1/2" />
+                    </div>
+                  ))}
+                </div>
+              ) : processedData.results.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center border-2 border-dashed border-white/5 rounded-2xl bg-secondary/5">
+                  <div className="bg-secondary/50 p-4 rounded-full mb-4">
+                    <SearchIcon className="w-8 h-8 text-muted-foreground" />
+                  </div>
+                  <h3 className="text-xl font-bold mb-2">No results found</h3>
+                  <p className="text-muted-foreground max-w-sm mb-6">
+                    We couldn't find any anime that matches your filters. Try adjusting your search query or filters.
+                  </p>
+                  <Button onClick={clearFilters}>Clear Filters</Button>
+                </div>
+              ) : (
+                <>
+                  <AnimeGrid
+                    anime={processedData.results}
+                    columns={gridSize === 'compact' ? 6 : 4}
+                  />
+
+                  {/* Pagination */}
+                  {processedData.totalPages > 1 && (
+                    <div className="mt-12 mb-8 flex flex-col items-center gap-6">
+                      <div className="flex flex-wrap justify-center items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setPage(p => Math.max(1, p - 1))}
+                          disabled={page === 1 || isFetching}
+                          className="rounded-xl border-white/10 hover:border-fox-orange/50 hover:text-fox-orange"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </Button>
+
+                        <div className="flex items-center gap-1">
+                          {(() => {
+                            const total = processedData.totalPages;
+                            const current = page;
+                            const delta = 1;
+                            const range = [];
+                            const rangeWithDots = [];
+
+                            for (let i = Math.max(2, current - delta); i <= Math.min(total - 1, current + delta); i++) {
+                              range.push(i);
+                            }
+
+                            if (current - delta > 2) {
+                              rangeWithDots.push(1, "...");
+                            } else {
+                              rangeWithDots.push(1);
+                            }
+
+                            rangeWithDots.push(...range);
+
+                            if (current + delta < total - 1) {
+                              rangeWithDots.push("...", total);
+                            } else if (total > 1) {
+                              rangeWithDots.push(total);
+                            }
+
+                            return rangeWithDots.map((p, i) => (
+                              <React.Fragment key={i}>
+                                {p === "..." ? (
+                                  <span className="px-2 text-muted-foreground">...</span>
+                                ) : (
+                                  <Button
+                                    variant={page === p ? "default" : "outline"}
+                                    size="sm"
+                                    onClick={() => setPage(p as number)}
+                                    className={cn(
+                                      "min-w-[40px] h-10 rounded-xl transition-all font-medium",
+                                      page === p
+                                        ? "bg-fox-orange text-white hover:bg-fox-orange/90 shadow-[0_0_15px_rgba(255,102,0,0.3)]"
+                                        : "border-white/10 hover:border-fox-orange/50 hover:text-fox-orange bg-secondary/30"
+                                    )}
+                                  >
+                                    {p}
+                                  </Button>
+                                )}
+                              </React.Fragment>
+                            ));
+                          })()}
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => setPage(p => p + 1)}
+                          disabled={!processedData.hasNextPage || isFetching}
+                          className="rounded-xl border-white/10 hover:border-fox-orange/50 hover:text-fox-orange"
+                        >
+                          {isFetching ? <Loader2 className="w-4 h-4 animate-spin text-fox-orange" /> : <ChevronRight className="w-4 h-4" />}
+                        </Button>
+                      </div>
+
+                      {/* Jump to page */}
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const p = parseInt(jumpPage);
+                          if (!isNaN(p) && p >= 1 && p <= processedData.totalPages) {
+                            setPage(p);
+                            setJumpPage("");
+                          }
+                        }}
+                        className="flex items-center gap-3 bg-secondary/30 p-1.5 pl-4 rounded-xl border border-white/5"
+                      >
+                        <span className="text-sm text-muted-foreground font-medium">Jump to page</span>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={processedData.totalPages}
+                          value={jumpPage}
+                          onChange={(e) => setJumpPage(e.target.value)}
+                          className="w-16 h-8 bg-background/50 border-white/10 text-center text-sm rounded-lg"
+                          placeholder="#"
+                        />
+                        <Button
+                          type="submit"
+                          size="sm"
+                          className="h-8 rounded-lg bg-fox-orange hover:bg-fox-orange/90"
+                          disabled={!jumpPage || parseInt(jumpPage) < 1 || parseInt(jumpPage) > processedData.totalPages}
+                        >
+                          Go
+                        </Button>
+                      </form>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </div>
-      </div>
-
-      <div className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 flex items-start gap-8">
-        {/* Desktop Sidebar */}
-        <aside className="hidden lg:block w-72 shrink-0 sticky top-24 max-h-[calc(100vh-8rem)] overflow-y-auto pr-2 pb-10 scrollbar-none">
-          <div className="mb-6">
-            <h2 className="text-xl font-bold bg-gradient-to-r from-white to-white/60 bg-clip-text text-transparent mb-1">Filters</h2>
-            <p className="text-sm text-muted-foreground">Find your next favorite.</p>
-          </div>
-          <FiltersContent />
-        </aside>
-
-        {/* Main Content */}
-        <main className="flex-1 min-w-0">
-          {/* Active Filters & Controls */}
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between mb-6">
-            <div className="flex flex-col gap-1">
-              <h1 className="text-2xl font-bold">
-                {hasSearchQuery ? `Search Results for "${debouncedQuery}"` : 'Browse Anime'}
-              </h1>
-              <p className="text-sm text-muted-foreground">
-                {isLoading ? 'Searching...' : `Found ${processedData.totalResults} results`}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3 self-end sm:self-auto">
-              {!hasSearchQuery && (
-                <div className="flex bg-secondary/30 rounded-lg p-1 border border-white/5">
-                  {[
-                    { id: 'popularity', icon: Flame, tooltip: 'Popular' },
-                    { id: 'trending', icon: TrendingUp, tooltip: 'Trending' },
-                    { id: 'recently_released', icon: Clock, tooltip: 'Newest' },
-                    { id: 'shuffle', icon: Shuffle, tooltip: 'Random' }
-                  ].map((opt) => (
-                    <Button
-                      key={opt.id}
-                      variant={browseSortBy === opt.id ? 'secondary' : 'ghost'}
-                      size="sm"
-                      onClick={opt.id === 'shuffle' ? handleShuffle : () => { setBrowseSortBy(opt.id as BrowseSortOption); setPage(1); }}
-                      className={cn("h-8 w-8 px-0 rounded-md", browseSortBy === opt.id && "bg-background text-fox-orange shadow-sm")}
-                      title={opt.tooltip}
-                    >
-                      <opt.icon className="w-4 h-4" />
-                    </Button>
-                  ))}
-                </div>
-              )}
-
-              {hasSearchQuery && (
-                <Select value={searchSortBy} onValueChange={(v: SearchSortOption) => setSearchSortBy(v)}>
-                  <SelectTrigger className="w-32 h-9 text-xs">
-                    <SelectValue placeholder="Sort" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="relevance">Relevance</SelectItem>
-                    <SelectItem value="rating">Rating</SelectItem>
-                    <SelectItem value="year">Newest</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-
-              <div className="flex bg-secondary/30 rounded-lg p-1 border border-white/5">
-                <Button
-                  variant={gridSize === 'compact' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setGridSize('compact')}
-                  className={cn("h-8 w-8 px-0 rounded-md", gridSize === 'compact' && "bg-background text-fox-orange shadow-sm")}
-                >
-                  <Grid3X3 className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant={gridSize === 'normal' ? 'secondary' : 'ghost'}
-                  size="sm"
-                  onClick={() => setGridSize('normal')}
-                  className={cn("h-8 w-8 px-0 rounded-md", gridSize === 'normal' && "bg-background text-fox-orange shadow-sm")}
-                >
-                  <LayoutGrid className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          {/* Error Message */}
-          {error && (
-            <Alert variant="destructive" className="mb-6 bg-destructive/10 border-destructive/20 text-destructive-foreground">
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error.message || 'Something went wrong while fetching anime.'}</AlertDescription>
-            </Alert>
-          )}
-
-          {/* Loading or Results */}
-          {isLoading ? (
-            <div className={cn(
-              "grid gap-4",
-              gridSize === 'compact'
-                ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6"
-                : "grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4"
-            )}>
-              {Array.from({ length: 24 }).map((_, i) => (
-                <div key={i} className="space-y-2">
-                  <Skeleton className="aspect-[2/3] w-full rounded-lg" />
-                  <Skeleton className="h-4 w-2/3" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
-              ))}
-            </div>
-          ) : processedData.results.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center border-2 border-dashed border-white/5 rounded-2xl bg-secondary/5">
-              <div className="bg-secondary/50 p-4 rounded-full mb-4">
-                <SearchIcon className="w-8 h-8 text-muted-foreground" />
-              </div>
-              <h3 className="text-xl font-bold mb-2">No results found</h3>
-              <p className="text-muted-foreground max-w-sm mb-6">
-                We couldn't find any anime that matches your filters. Try adjusting your search query or filters.
-              </p>
-              <Button onClick={clearFilters}>Clear Filters</Button>
-            </div>
-          ) : (
-            <>
-              <AnimeGrid
-                anime={processedData.results}
-                columns={gridSize === 'compact' ? 6 : 4}
-              />
-
-              {/* Pagination */}
-              {processedData.totalPages > 1 && (
-                <div className="mt-12 mb-20 flex flex-col items-center gap-6">
-                  <div className="flex flex-wrap justify-center items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setPage(p => Math.max(1, p - 1))}
-                      disabled={page === 1 || isFetching}
-                      className="rounded-xl border-white/10 hover:border-fox-orange/50 hover:text-fox-orange"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </Button>
-
-                    <div className="flex items-center gap-1">
-                      {(() => {
-                        const total = processedData.totalPages;
-                        const current = page;
-                        const delta = 1;
-                        const range = [];
-                        const rangeWithDots = [];
-
-                        for (let i = Math.max(2, current - delta); i <= Math.min(total - 1, current + delta); i++) {
-                          range.push(i);
-                        }
-
-                        if (current - delta > 2) {
-                          rangeWithDots.push(1, "...");
-                        } else {
-                          rangeWithDots.push(1);
-                        }
-
-                        rangeWithDots.push(...range);
-
-                        if (current + delta < total - 1) {
-                          rangeWithDots.push("...", total);
-                        } else if (total > 1) {
-                          rangeWithDots.push(total);
-                        }
-
-                        return rangeWithDots.map((p, i) => (
-                          <React.Fragment key={i}>
-                            {p === "..." ? (
-                              <span className="px-2 text-muted-foreground">...</span>
-                            ) : (
-                              <Button
-                                variant={page === p ? "default" : "outline"}
-                                size="sm"
-                                onClick={() => setPage(p as number)}
-                                className={cn(
-                                  "min-w-[40px] h-10 rounded-xl transition-all font-medium",
-                                  page === p
-                                    ? "bg-fox-orange text-white hover:bg-fox-orange/90 shadow-[0_0_15px_rgba(255,102,0,0.3)]"
-                                    : "border-white/10 hover:border-fox-orange/50 hover:text-fox-orange bg-secondary/30"
-                                )}
-                              >
-                                {p}
-                              </Button>
-                            )}
-                          </React.Fragment>
-                        ));
-                      })()}
-                    </div>
-
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setPage(p => p + 1)}
-                      disabled={!processedData.hasNextPage || isFetching}
-                      className="rounded-xl border-white/10 hover:border-fox-orange/50 hover:text-fox-orange"
-                    >
-                      {isFetching ? <Loader2 className="w-4 h-4 animate-spin text-fox-orange" /> : <ChevronRight className="w-4 h-4" />}
-                    </Button>
-                  </div>
-
-                  {/* Jump to page */}
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const p = parseInt(jumpPage);
-                      if (!isNaN(p) && p >= 1 && p <= processedData.totalPages) {
-                        setPage(p);
-                        setJumpPage("");
-                      }
-                    }}
-                    className="flex items-center gap-3 bg-secondary/30 p-1.5 pl-4 rounded-xl border border-white/5"
-                  >
-                    <span className="text-sm text-muted-foreground font-medium">Jump to page</span>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={processedData.totalPages}
-                      value={jumpPage}
-                      onChange={(e) => setJumpPage(e.target.value)}
-                      className="w-16 h-8 bg-background/50 border-white/10 text-center text-sm rounded-lg"
-                      placeholder="#"
-                    />
-                    <Button
-                      type="submit"
-                      size="sm"
-                      className="h-8 rounded-lg bg-fox-orange hover:bg-fox-orange/90"
-                      disabled={!jumpPage || parseInt(jumpPage) < 1 || parseInt(jumpPage) > processedData.totalPages}
-                    >
-                      Go
-                    </Button>
-                  </form>
-                </div>
-              )}
-            </>
-          )}
-        </main>
       </div>
     </div>
   );

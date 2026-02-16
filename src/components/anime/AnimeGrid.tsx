@@ -14,7 +14,7 @@ export const AnimeGrid = ({ anime, title, className, columns = 'auto' }: AnimeGr
   const prefetchAnime = usePrefetchAnime();
 
   const gridCols = columns === 'auto'
-    ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6'
+    ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4'
     : {
       2: 'grid-cols-2',
       3: 'grid-cols-2 sm:grid-cols-3',

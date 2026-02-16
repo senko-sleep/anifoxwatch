@@ -594,12 +594,14 @@ export const VideoPlayer = ({
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
     }
+    // Faster auto-hide on mobile (2s vs 3s)
+    const hideDelay = isMobile() ? 2000 : 3000;
     controlsTimeoutRef.current = setTimeout(() => {
       if (isPlaying) {
         setShowControls(false);
       }
-    }, 3000);
-  }, [isPlaying]);
+    }, hideDelay);
+  }, [isPlaying, isMobile]);
 
   // Player controls
   const togglePlay = useCallback(() => {
@@ -753,8 +755,8 @@ export const VideoPlayer = ({
       const xDiff = Math.abs(x - lastTapRef.current.x);
       const yDiff = Math.abs(y - lastTapRef.current.y);
 
-      // Double tap detected (within 300ms and close proximity)
-      if (timeDiff < 300 && xDiff < 50 && yDiff < 50) {
+      // Double tap detected (within 300ms and close proximity) - increased threshold
+      if (timeDiff < 300 && xDiff < 80 && yDiff < 80) {
         if (x < width * 0.4) {
           e.preventDefault();
           e.stopPropagation();
@@ -792,15 +794,16 @@ export const VideoPlayer = ({
     const dx = touch.clientX - touchStartPos.x;
     const dy = touch.clientY - touchStartPos.y;
 
-    // Detect swipe after a certain threshold
+    // Detect swipe after a higher threshold to prevent accidental triggers
     if (!isSwiping) {
-      if (Math.abs(dx) > 30) {
+      // Increased threshold from 30px to 60px for less sensitivity
+      if (Math.abs(dx) > 60) {
         setIsSwiping(true);
         setSwipeType('seek');
         swipeStartValueRef.current = videoRef.current.currentTime;
         setShowSwipeOverlay(true);
         setShowControls(false); // Hide controls during swipe
-      } else if (Math.abs(dy) > 30) {
+      } else if (Math.abs(dy) > 60) {
         // Vertical swipe for volume (only on right side of screen)
         const rect = containerRef.current.getBoundingClientRect();
         const startXRel = touchStartPos.x - rect.left;
@@ -1168,45 +1171,54 @@ export const VideoPlayer = ({
 
           {/* Control buttons */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 md:gap-3">
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={togglePlay}
-                className="text-white hover:bg-white/20"
+                className={cn(
+                  "text-white hover:bg-white/20",
+                  isMobile() && "h-11 w-11"
+                )}
               >
                 {isPlaying ? (
-                  <Pause className="w-5 h-5" />
+                  <Pause className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
                 ) : (
-                  <Play className="w-5 h-5" />
+                  <Play className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
                 )}
               </Button>
 
-              <div className="flex items-center gap-2 group/volume">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={toggleMute}
-                  className="text-white hover:bg-white/20"
-                >
-                  {isMuted || volume === 0 ? (
-                    <VolumeX className="w-5 h-5" />
-                  ) : (
-                    <Volume2 className="w-5 h-5" />
-                  )}
-                </Button>
-                <div className="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-200">
-                  <Slider
-                    value={[isMuted ? 0 : volume]}
-                    max={1}
-                    step={0.01}
-                    onValueChange={handleVolumeChange}
-                    className="w-20"
-                  />
+              {/* Volume - Desktop only, mobile uses swipe gesture */}
+              {!isMobile() && (
+                <div className="flex items-center gap-2 group/volume">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={toggleMute}
+                    className="text-white hover:bg-white/20"
+                  >
+                    {isMuted || volume === 0 ? (
+                      <VolumeX className="w-5 h-5" />
+                    ) : (
+                      <Volume2 className="w-5 h-5" />
+                    )}
+                  </Button>
+                  <div className="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-200">
+                    <Slider
+                      value={[isMuted ? 0 : volume]}
+                      max={1}
+                      step={0.01}
+                      onValueChange={handleVolumeChange}
+                      className="w-20"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <span className="text-white text-sm ml-2">
+              <span className={cn(
+                "text-white ml-1 md:ml-2",
+                isMobile() ? "text-xs font-medium" : "text-sm"
+              )}>
                 {formatTime(currentTime)} / {formatTime(duration)}
               </span>
 
@@ -1227,10 +1239,11 @@ export const VideoPlayer = ({
                       size="icon"
                       className={cn(
                         "text-white hover:bg-white/20",
-                        subtitleEnabled && "text-fox-orange"
+                        subtitleEnabled && "text-fox-orange",
+                        isMobile() && "h-11 w-11"
                       )}
                     >
-                      <Subtitles className="w-5 h-5" />
+                      <Subtitles className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -1253,86 +1266,94 @@ export const VideoPlayer = ({
                 </DropdownMenu>
               )}
 
-              {/* Picture-in-Picture */}
-              {document.pictureInPictureEnabled && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={togglePiP}
-                  className={cn(
-                    "text-white hover:bg-white/20",
-                    isPiPActive && "text-fox-orange"
-                  )}
-                >
-                  {isPiPActive ? (
-                    <PictureInPicture2 className="w-5 h-5" />
-                  ) : (
-                    <PictureInPicture className="w-5 h-5" />
-                  )}
-                </Button>
-              )}
-
-              {/* Settings */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="text-white hover:bg-white/20"
-                  >
-                    <Settings className="w-5 h-5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-48">
-                  {/* Quality Settings */}
-                  {availableLevels.length > 0 && (
-                    <>
-                      <DropdownMenuLabel>Quality</DropdownMenuLabel>
-                      <DropdownMenuItem onClick={() => handleQualityChange(-1)}>
-                        <span className="flex-1">Auto</span>
-                        {currentLevel === -1 && <Check className="w-4 h-4 ml-2" />}
-                      </DropdownMenuItem>
-                      {[...availableLevels].reverse().map((level, index) => {
-                        const levelIndex = availableLevels.length - 1 - index;
-                        return (
-                          <DropdownMenuItem
-                            key={levelIndex}
-                            onClick={() => handleQualityChange(levelIndex)}
-                          >
-                            <span className="flex-1">{level.height}p</span>
-                            {currentLevel === levelIndex && <Check className="w-4 h-4 ml-2" />}
-                          </DropdownMenuItem>
-                        );
-                      })}
-                      <DropdownMenuSeparator />
-                    </>
-                  )}
-
-                  {/* Playback Speed */}
-                  <DropdownMenuLabel>Playback Speed</DropdownMenuLabel>
-                  {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                    <DropdownMenuItem
-                      key={speed}
-                      onClick={() => handlePlaybackSpeedChange(speed)}
+              {/* Picture-in-Picture & Settings - Desktop only */}
+              {!isMobile() && (
+                <>
+                  {/* Picture-in-Picture */}
+                  {document.pictureInPictureEnabled && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={togglePiP}
+                      className={cn(
+                        "text-white hover:bg-white/20",
+                        isPiPActive && "text-fox-orange"
+                      )}
                     >
-                      <span className="flex-1">{speed}x</span>
-                      {playbackSpeed === speed && <Check className="w-4 h-4 ml-2" />}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                      {isPiPActive ? (
+                        <PictureInPicture2 className="w-5 h-5" />
+                      ) : (
+                        <PictureInPicture className="w-5 h-5" />
+                      )}
+                    </Button>
+                  )}
+
+                  {/* Settings */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-white hover:bg-white/20"
+                      >
+                        <Settings className="w-5 h-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      {/* Quality Settings */}
+                      {availableLevels.length > 0 && (
+                        <>
+                          <DropdownMenuLabel>Quality</DropdownMenuLabel>
+                          <DropdownMenuItem onClick={() => handleQualityChange(-1)}>
+                            <span className="flex-1">Auto</span>
+                            {currentLevel === -1 && <Check className="w-4 h-4 ml-2" />}
+                          </DropdownMenuItem>
+                          {[...availableLevels].reverse().map((level, index) => {
+                            const levelIndex = availableLevels.length - 1 - index;
+                            return (
+                              <DropdownMenuItem
+                                key={levelIndex}
+                                onClick={() => handleQualityChange(levelIndex)}
+                              >
+                                <span className="flex-1">{level.height}p</span>
+                                {currentLevel === levelIndex && <Check className="w-4 h-4 ml-2" />}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                          <DropdownMenuSeparator />
+                        </>
+                      )}
+
+                      {/* Playback Speed */}
+                      <DropdownMenuLabel>Playback Speed</DropdownMenuLabel>
+                      {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                        <DropdownMenuItem
+                          key={speed}
+                          onClick={() => handlePlaybackSpeedChange(speed)}
+                        >
+                          <span className="flex-1">{speed}x</span>
+                          {playbackSpeed === speed && <Check className="w-4 h-4 ml-2" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </>
+              )}
 
               {/* Fullscreen */}
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={toggleFullscreen}
-                className="text-white hover:bg-white/20"
+                className={cn(
+                  "text-white hover:bg-white/20",
+                  isMobile() && "h-11 w-11"
+                )}
               >
                 {isFullscreen ? (
-                  <Minimize className="w-5 h-5" />
+                  <Minimize className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
                 ) : (
-                  <Maximize className="w-5 h-5" />
+                  <Maximize className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
                 )}
               </Button>
             </div>

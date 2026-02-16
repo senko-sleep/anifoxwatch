@@ -235,7 +235,7 @@ router.get('/schedule', async (req: Request, res: Response): Promise<void> => {
  * @route GET /api/anime/leaderboard
  * @query page - Page number (default: 1)
  * @query type - Leaderboard type: 'trending' or 'top-rated' (default: 'trending')
- * @description Get weekly leaderboard from AniList with movement indicators
+ * @description Get weekly leaderboard from AniList with fallback to source manager
  */
 router.get('/leaderboard', async (req: Request, res: Response): Promise<void> => {
     try {
@@ -245,10 +245,47 @@ router.get('/leaderboard', async (req: Request, res: Response): Promise<void> =>
         console.log(`[AnimeRoutes] 🏆 Fetching leaderboard, type: ${type}, page ${pageNum}`);
 
         let result;
-        if (type === 'top-rated') {
-            result = await anilistService.getTopRatedAnime(pageNum, 10);
-        } else {
-            result = await anilistService.getTrendingThisWeek(pageNum, 10);
+        let source = 'AniList';
+        
+        try {
+            if (type === 'top-rated') {
+                result = await anilistService.getTopRatedAnime(pageNum, 10);
+            } else {
+                result = await anilistService.getTrendingThisWeek(pageNum, 10);
+            }
+        } catch (anilistError) {
+            console.warn('[AnimeRoutes] AniList leaderboard failed, will use fallback:', anilistError);
+            result = null;
+        }
+
+        // Fallback to source manager if AniList returns empty or fails
+        if (!result || !result.results || result.results.length === 0) {
+            console.log('[AnimeRoutes] Using source manager fallback for leaderboard');
+            source = 'SourceManager';
+            
+            // Get trending from source manager as fallback
+            const trendingResults = await sourceManager.getTrending(pageNum);
+            
+            // Filter out adult content for homepage leaderboard
+            const filteredResults = trendingResults.filter(anime => {
+                const title = anime.title?.toLowerCase() || '';
+                const id = anime.id?.toLowerCase() || '';
+                const genres = anime.genres?.map(g => g?.toLowerCase()) || [];
+                
+                return !title.includes('hentai') && 
+                       !id.includes('hentai') && 
+                       !id.includes('hanime') &&
+                       !genres.includes('hentai');
+            }).slice(0, 10);
+
+            result = {
+                results: filteredResults,
+                pageInfo: {
+                    hasNextPage: trendingResults.length > 10,
+                    currentPage: pageNum,
+                    totalCount: filteredResults.length
+                }
+            };
         }
 
         // Handle both old AnimeSearchResult and new pageInfo format
@@ -266,7 +303,7 @@ router.get('/leaderboard', async (req: Request, res: Response): Promise<void> =>
                 totalPages: 'totalPages' in result ? result.totalPages : Math.ceil(pageInfo.totalCount / 10)
             },
             type,
-            source: 'AniList'
+            source
         });
     } catch (error) {
         console.error('Leaderboard error:', error);

@@ -82,11 +82,28 @@
 
   html {
     scroll-behavior: smooth;
+    overflow-y: scroll;
   }
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', system-ui, sans-serif;
+    /* Prevent layout shifts and improve scroll performance */
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Improve scroll performance and prevent blackouts */
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Ensure images don't cause layout shifts */
+  img {
+    display: block;
+    max-width: 100%;
+    height: auto;
   }
 
   /* Custom scrollbar */
@@ -369,5 +386,69 @@
 
   .scrollbar-none::-webkit-scrollbar {
     display: none;
+  }
+
+  /* Fox-fire search bar */
+  .fox-search-bar {
+    @apply bg-black/60 backdrop-blur-2xl border-b border-fox-orange/[0.08];
+    box-shadow: 0 1px 20px -4px hsl(var(--fox-orange) / 0.06), 0 4px 12px -2px rgba(0,0,0,0.5);
+  }
+
+  .fox-search-input {
+    @apply bg-white/[0.04] border border-white/[0.06] rounded-xl transition-all duration-300;
+  }
+  .fox-search-input:focus-within {
+    @apply border-fox-orange/30 bg-white/[0.06];
+    box-shadow: 0 0 0 1px hsl(var(--fox-orange) / 0.15), 0 0 20px -6px hsl(var(--fox-orange) / 0.15);
+  }
+
+  /* Fox-fire sidebar */
+  .fox-sidebar {
+    @apply bg-gradient-to-b from-black/50 via-black/40 to-black/30 backdrop-blur-2xl border-r border-fox-orange/[0.06];
+  }
+
+  /* Fox-fire filter section header */
+  .fox-section-title {
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-fox-orange/60;
+  }
+
+  /* Fox-fire filter button */
+  .fox-filter-btn {
+    @apply relative bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm font-medium text-zinc-500 transition-all duration-200;
+  }
+  .fox-filter-btn:hover {
+    @apply bg-white/[0.06] border-fox-orange/20 text-zinc-300;
+  }
+  .fox-filter-btn-active {
+    @apply bg-fox-orange/[0.12] border-fox-orange/30 text-fox-orange;
+    box-shadow: 0 0 12px -3px hsl(var(--fox-orange) / 0.2);
+  }
+
+  /* Fox-fire genre chip */
+  .fox-chip {
+    @apply px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-200 cursor-pointer border;
+  }
+  .fox-chip-inactive {
+    @apply bg-white/[0.03] text-zinc-500 border-white/[0.05];
+  }
+  .fox-chip-inactive:hover {
+    @apply bg-white/[0.06] text-zinc-300 border-white/[0.1];
+  }
+  .fox-chip-active {
+    @apply bg-fox-orange/[0.15] text-fox-orange border-fox-orange/30;
+    box-shadow: 0 0 8px -2px hsl(var(--fox-orange) / 0.25);
+  }
+
+  /* Fox-fire divider */
+  .fox-divider {
+    @apply h-px bg-gradient-to-r from-transparent via-fox-orange/[0.12] to-transparent;
+  }
+
+  /* Fox-fire mode selector */
+  .fox-mode-select {
+    @apply bg-white/[0.04] border border-white/[0.06] rounded-xl transition-all duration-200;
+  }
+  .fox-mode-select-active {
+    @apply border-fox-orange/30 bg-fox-orange/[0.08] text-fox-orange;
   }
 }
