@@ -101,7 +101,7 @@ export function StreamingControls({
     : servers;
 
   return (
-    <div className="p-4 bg-fox-surface/30 rounded-xl space-y-4">
+    <div className="p-3 sm:p-4 bg-fox-surface/30 rounded-xl space-y-3 sm:space-y-4">
       {/* Audio Type Toggle */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -115,7 +115,7 @@ export function StreamingControls({
             onClick={() => onAudioTypeChange('sub')}
             disabled={!isSubAvailable}
             className={cn(
-              "gap-2 h-8",
+              "gap-1.5 sm:gap-2 h-9 sm:h-8 px-3 sm:px-3 touch-manipulation",
               audioType === 'sub' && "bg-fox-orange hover:bg-fox-orange/90"
             )}
           >
@@ -129,7 +129,7 @@ export function StreamingControls({
             onClick={() => onAudioTypeChange('dub')}
             disabled={!isDubAvailable}
             className={cn(
-              "gap-2 h-8",
+              "gap-1.5 sm:gap-2 h-9 sm:h-8 px-3 sm:px-3 touch-manipulation",
               audioType === 'dub' && "bg-green-600 hover:bg-green-600/90",
               !isDubAvailable && "opacity-50"
             )}
@@ -151,7 +151,7 @@ export function StreamingControls({
         </div>
         
         <Select value={quality} onValueChange={(v) => onQualityChange(v as QualityType)}>
-          <SelectTrigger className="w-40 bg-background/50">
+          <SelectTrigger className="w-36 sm:w-40 h-9 sm:h-10 bg-background/50">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -178,7 +178,7 @@ export function StreamingControls({
           <Skeleton className="w-40 h-10" />
         ) : (
           <Select value={selectedServer} onValueChange={onServerChange}>
-            <SelectTrigger className="w-44 bg-background/50">
+            <SelectTrigger className="w-36 sm:w-44 h-9 sm:h-10 bg-background/50">
               <SelectValue placeholder="Select server" />
             </SelectTrigger>
             <SelectContent>

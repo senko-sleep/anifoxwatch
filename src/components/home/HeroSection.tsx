@@ -135,7 +135,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
   return (
     <section
-      className="relative w-full h-[100vh] min-h-[700px] overflow-hidden"
+      className="relative w-full h-[70vh] sm:h-[80vh] lg:h-[100vh] min-h-[500px] sm:min-h-[600px] lg:min-h-[700px] overflow-hidden"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -204,12 +204,12 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
       )}>
         <div
           className={cn(
-            "max-w-lg space-y-3 transition-all ease-out",
+            "max-w-lg space-y-2 sm:space-y-3 transition-all ease-out",
             contentVisible ? "opacity-100 translate-y-0 duration-600" : "opacity-0 translate-y-3 duration-200"
           )}
         >
           {/* Meta line */}
-          <div className="flex items-center gap-2 text-xs text-zinc-400">
+          <div className="flex items-center gap-2 text-[11px] sm:text-xs text-zinc-400 flex-wrap">
             {rating && (
               <span className="inline-flex items-center gap-1 text-fox-orange font-semibold">
                 <Star className="w-3.5 h-3.5 fill-fox-orange text-fox-orange" />
@@ -224,7 +224,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
           </div>
 
           {/* Title */}
-          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white leading-snug">
+          <h1 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-white leading-snug">
             {title}
           </h1>
 
@@ -240,17 +240,17 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
           )}
 
           {/* Description */}
-          <p className="text-zinc-500 text-[13px] leading-relaxed line-clamp-2 max-w-md">
+          <p className="text-zinc-500 text-xs sm:text-[13px] leading-relaxed line-clamp-2 max-w-md">
             {anime.description || 'Discover this trending anime now.'}
           </p>
 
           {/* Buttons — match site style */}
-          <div className="flex items-center gap-2.5 pt-1">
+          <div className="flex items-center gap-2 sm:gap-2.5 pt-1">
             <Button
               onClick={() => navigate(`/browse?q=${encodeURIComponent(watchId)}`, {
                 state: { from: location.pathname + location.search }
               })}
-              className="bg-fox-orange hover:bg-fox-orange/90 text-white font-semibold h-10 px-6 rounded-lg gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+              className="bg-fox-orange hover:bg-fox-orange/90 text-white font-semibold h-11 sm:h-10 px-5 sm:px-6 rounded-lg gap-2 text-sm transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] touch-manipulation"
             >
               <Play className="w-4 h-4 fill-white" />
               Watch Now
@@ -259,7 +259,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
             <Button
               variant="outline"
               onClick={() => navigate(`/browse?q=${encodeURIComponent(watchId)}`)}
-              className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] hover:border-white/[0.15] text-zinc-300 font-medium h-10 px-6 rounded-lg gap-2 transition-all duration-200"
+              className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] hover:border-white/[0.15] text-zinc-300 font-medium h-11 sm:h-10 px-5 sm:px-6 rounded-lg gap-2 text-sm transition-all duration-200 touch-manipulation"
             >
               <Info className="w-4 h-4" />
               More Info
@@ -278,7 +278,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
           <div className="h-full bg-fox-orange/60" style={{ width: `${progress}%`, transition: 'none' }} />
         </div>
 
-        <div className="flex items-center justify-between max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-4">
+        <div className="flex items-center justify-between max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
           {/* Slide counter */}
           <div className="flex items-center gap-1.5">
             {heroAnime.slice(0, 20).map((_, idx) => (
@@ -288,8 +288,8 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                 className={cn(
                   'rounded-full transition-all duration-200',
                   idx === currentIndex
-                    ? 'w-6 h-1.5 bg-fox-orange'
-                    : 'w-1.5 h-1.5 bg-white/20 hover:bg-white/40'
+                    ? 'w-6 sm:w-6 h-2 sm:h-1.5 bg-fox-orange'
+                    : 'w-2 sm:w-1.5 h-2 sm:h-1.5 bg-white/20 hover:bg-white/40'
                 )}
                 aria-label={`Slide ${idx + 1}`}
               />
@@ -300,14 +300,14 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
           <div className="flex items-center gap-2">
             <button
               onClick={handlePrev}
-              className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] flex items-center justify-center transition-colors"
+              className="w-10 h-10 sm:w-9 sm:h-9 rounded-full bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] flex items-center justify-center transition-colors touch-manipulation"
               aria-label="Previous"
             >
               <ChevronLeft className="w-4 h-4 text-zinc-400" />
             </button>
             <button
               onClick={handleNext}
-              className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] flex items-center justify-center transition-colors"
+              className="w-10 h-10 sm:w-9 sm:h-9 rounded-full bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] flex items-center justify-center transition-colors touch-manipulation"
               aria-label="Next"
             >
               <ChevronRight className="w-4 h-4 text-zinc-400" />

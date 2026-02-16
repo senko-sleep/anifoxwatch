@@ -38,7 +38,7 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: A
       onMouseEnter={onMouseEnter}
       onClick={handleClick}
       className={cn(
-        'group relative flex flex-col cursor-pointer',
+        'group relative flex flex-col cursor-pointer touch-manipulation',
         className
       )}
     >
@@ -107,8 +107,8 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter, showRank }: A
       </div>
 
       {/* Title */}
-      <div className="mt-2 px-0.5">
-        <h3 className="font-medium text-[13px] text-zinc-300 group-hover:text-white transition-colors duration-200 line-clamp-2 leading-snug">
+      <div className="mt-1.5 sm:mt-2 px-0.5">
+        <h3 className="font-medium text-xs sm:text-[13px] text-zinc-300 group-hover:text-white transition-colors duration-200 line-clamp-2 leading-snug">
           {anime.title}
         </h3>
       </div>

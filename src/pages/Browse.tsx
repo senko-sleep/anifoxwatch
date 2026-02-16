@@ -660,36 +660,37 @@ const Browse = () => {
         {/* Right Panel */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {/* Fixed search bar — matches grid padding */}
-          <div className="shrink-0 px-3 sm:px-4 lg:px-6 py-3 border-b border-white/[0.06]">
-            <div className="max-w-[1600px] mx-auto">
+          <div className="shrink-0 px-3 sm:px-4 lg:px-6 py-2.5 sm:py-3 border-b border-white/[0.06]">
+            <div className="max-w-[1600px] mx-auto space-y-2 sm:space-y-0">
+              {/* Row 1: Search + Filter button (mobile) / All controls (desktop) */}
               <div className="flex items-center gap-2">
                 {/* Search Input */}
-                <div className="relative flex-1 max-w-md">
+                <div className="relative flex-1 sm:max-w-md">
                   <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
                   <Input
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    placeholder="Search anime titles..."
-                    className="pl-9 h-9 bg-white/[0.04] border border-white/[0.06] rounded-lg text-sm focus:ring-0 focus-visible:ring-0 focus:border-white/[0.12] transition-colors placeholder:text-zinc-600"
+                    placeholder="Search anime..."
+                    className="pl-9 h-10 sm:h-9 bg-white/[0.04] border border-white/[0.06] rounded-lg text-sm focus:ring-0 focus-visible:ring-0 focus:border-white/[0.12] transition-colors placeholder:text-zinc-600"
                   />
                   {query && (
                     <button
                       onClick={() => setQuery('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors touch-manipulation"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
 
-                {/* Results count */}
+                {/* Results count — desktop only */}
                 <div className="hidden sm:flex items-center gap-1.5 min-w-0 mr-auto">
                   <span className="text-[11px] text-zinc-600 shrink-0">
                     {isLoading ? '...' : `${processedData.totalResults.toLocaleString()} titles`}
                   </span>
                 </div>
 
-                {/* Sort Options */}
+                {/* Sort Options — desktop only */}
                 {!hasSearchQuery && (
                   <div className="hidden sm:flex items-center gap-0.5 p-0.5 rounded-lg bg-white/[0.03] border border-white/[0.05]">
                     {SORT_OPTIONS.map((opt) => {
@@ -717,7 +718,7 @@ const Browse = () => {
 
                 {hasSearchQuery && (
                   <Select value={searchSortBy} onValueChange={(v: SearchSortOption) => setSearchSortBy(v)}>
-                    <SelectTrigger className="w-28 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] text-xs">
+                    <SelectTrigger className="hidden sm:flex w-28 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] text-xs">
                       <SelectValue placeholder="Sort" />
                     </SelectTrigger>
                     <SelectContent className="bg-[hsl(220,20%,8%)] rounded-lg border border-white/[0.08]">
@@ -728,10 +729,10 @@ const Browse = () => {
                   </Select>
                 )}
 
-                {/* Content Mode */}
+                {/* Content Mode — desktop only */}
                 <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
                   <SelectTrigger className={cn(
-                    "w-[100px] h-8 rounded-lg text-[11px] font-medium bg-white/[0.04] border border-white/[0.06] transition-colors",
+                    "hidden sm:flex w-[100px] h-8 rounded-lg text-[11px] font-medium bg-white/[0.04] border border-white/[0.06] transition-colors",
                     mode !== 'safe' && "border-fox-orange/30 text-fox-orange"
                   )}>
                     <SelectValue placeholder="Content" />
@@ -743,7 +744,7 @@ const Browse = () => {
                   </SelectContent>
                 </Select>
 
-                {/* Scroll Mode */}
+                {/* Scroll Mode — desktop only */}
                 <button
                   onClick={toggleScrollMode}
                   title={scrollMode === 'infinite' ? 'Switch to paginated' : 'Switch to infinite scroll'}
@@ -758,7 +759,7 @@ const Browse = () => {
                   )}
                 </button>
 
-                {/* Grid Size */}
+                {/* Grid Size — desktop only */}
                 <div className="hidden sm:flex items-center gap-0.5 p-0.5 rounded-lg bg-white/[0.03] border border-white/[0.05]">
                   <button
                     onClick={() => setGridSize('compact')}
@@ -783,22 +784,84 @@ const Browse = () => {
                 {/* Mobile Filter Button */}
                 <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
                   <SheetTrigger asChild>
-                    <button className="lg:hidden relative flex items-center justify-center w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.06] transition-colors">
-                      <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500" />
+                    <button className="lg:hidden relative flex items-center justify-center w-10 h-10 sm:w-8 sm:h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.06] transition-colors touch-manipulation">
+                      <SlidersHorizontal className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-zinc-500" />
                       {activeFilterCount > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-fox-orange text-white text-[7px] font-bold flex items-center justify-center">
+                        <span className="absolute -top-1 -right-1 w-4 h-4 sm:w-3.5 sm:h-3.5 rounded-full bg-fox-orange text-white text-[8px] sm:text-[7px] font-bold flex items-center justify-center">
                           {activeFilterCount}
                         </span>
                       )}
                     </button>
                   </SheetTrigger>
-                  <SheetContent side="left" className="w-[280px] bg-background border-r border-white/[0.06] p-0 overflow-y-auto">
+                  <SheetContent side="left" className="w-[300px] sm:w-[280px] bg-background border-r border-white/[0.06] p-0 overflow-y-auto">
                     <SheetHeader className="p-4 border-b border-white/[0.06]">
                       <SheetTitle className="text-white text-sm font-semibold">Filters</SheetTitle>
                     </SheetHeader>
                     <FilterPanel isMobile />
                   </SheetContent>
                 </Sheet>
+              </div>
+
+              {/* Row 2: Mobile-only sort & mode controls */}
+              <div className="flex sm:hidden items-center gap-1.5">
+                {/* Mobile Sort */}
+                {!hasSearchQuery ? (
+                  <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-white/[0.03] border border-white/[0.05]">
+                    {SORT_OPTIONS.map((opt) => {
+                      const Icon = opt.icon;
+                      const isActive = browseSortBy === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          onClick={opt.id === 'shuffle' ? handleShuffle : () => { setBrowseSortBy(opt.id as BrowseSortOption); setPage(1); }}
+                          className={cn(
+                            "flex items-center gap-1 px-2.5 py-2 rounded-md text-[11px] font-medium transition-colors touch-manipulation",
+                            isActive
+                              ? "bg-white/[0.08] text-white"
+                              : "text-zinc-500"
+                          )}
+                          title={opt.label}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          <span className="text-[10px]">{opt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <Select value={searchSortBy} onValueChange={(v: SearchSortOption) => setSearchSortBy(v)}>
+                    <SelectTrigger className="w-28 h-9 rounded-lg bg-white/[0.04] border border-white/[0.06] text-xs">
+                      <SelectValue placeholder="Sort" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[hsl(220,20%,8%)] rounded-lg border border-white/[0.08]">
+                      <SelectItem value="relevance">Relevance</SelectItem>
+                      <SelectItem value="rating">Rating</SelectItem>
+                      <SelectItem value="year">Newest</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+
+                <div className="ml-auto flex items-center gap-1.5">
+                  {/* Mobile Content Mode */}
+                  <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
+                    <SelectTrigger className={cn(
+                      "w-[88px] h-9 rounded-lg text-[11px] font-medium bg-white/[0.04] border border-white/[0.06] transition-colors touch-manipulation",
+                      mode !== 'safe' && "border-fox-orange/30 text-fox-orange"
+                    )}>
+                      <SelectValue placeholder="Content" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[hsl(220,20%,8%)] rounded-lg border border-white/[0.08]">
+                      <SelectItem value="safe">Safe Only</SelectItem>
+                      <SelectItem value="mixed">Mixed</SelectItem>
+                      <SelectItem value="adult">+18 Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {/* Mobile results count */}
+                  <span className="text-[10px] text-zinc-600 shrink-0">
+                    {isLoading ? '...' : processedData.totalResults.toLocaleString()}
+                  </span>
+                </div>
               </div>
             </div>
           </div>

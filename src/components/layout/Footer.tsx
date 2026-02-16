@@ -5,12 +5,12 @@ import { Github, Twitter, MessageCircle } from 'lucide-react';
 export const Footer = () => {
   return (
     <footer className="border-t border-border bg-fox-darker">
-      <div className="container py-12">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+      <div className="container py-8 sm:py-12">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 sm:gap-8">
           {/* Brand */}
-          <div className="md:col-span-1">
+          <div className="col-span-2 md:col-span-1">
             <Logo size="md" />
-            <p className="mt-4 text-sm text-muted-foreground">
+            <p className="mt-3 sm:mt-4 text-xs sm:text-sm text-muted-foreground">
               Your ultimate destination for anime streaming with support for subs and dubs.
             </p>
             <div className="flex items-center gap-3 mt-4">
@@ -66,8 +66,8 @@ export const Footer = () => {
           </div>
         </div>
 
-        <div className="mt-12 pt-6 border-t border-border">
-          <p className="text-center text-sm text-muted-foreground">
+        <div className="mt-8 sm:mt-12 pt-4 sm:pt-6 border-t border-border">
+          <p className="text-center text-xs sm:text-sm text-muted-foreground">
             © {new Date().getFullYear()} AniFox. All rights reserved.
             <span className="mx-2">•</span>
             Made with <span className="text-fox-orange">♥</span> for anime fans

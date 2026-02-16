@@ -56,15 +56,15 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
             <div
                 ref={scrollRef}
                 onScroll={checkScroll}
-                className="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4"
-                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4 -mx-1 px-1"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
             >
                 {items.map((item) => (
                     <Link
                         key={item.animeId}
                         to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}`}
                         state={{ from: location.pathname + location.search }}
-                        className="shrink-0 w-56 group/card"
+                        className="shrink-0 w-48 sm:w-56 group/card touch-manipulation"
                     >
                         <div className="relative aspect-video rounded-xl overflow-hidden bg-fox-surface shadow-lg">
                             {/* Main image: frame thumbnail if available, otherwise anime poster */}
@@ -128,8 +128,8 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                             </Button>
                         </div>
 
-                        <div className="mt-2.5">
-                            <h3 className="font-medium text-sm line-clamp-1 group-hover/card:text-fox-orange transition-colors">
+                        <div className="mt-2 sm:mt-2.5">
+                            <h3 className="font-medium text-xs sm:text-sm line-clamp-1 group-hover/card:text-fox-orange transition-colors">
                                 {item.animeTitle}
                             </h3>
                         </div>

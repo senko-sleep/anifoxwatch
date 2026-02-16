@@ -162,7 +162,7 @@ const Index = () => {
       {heroAnime.length > 0 ? (
         <HeroSection heroAnime={heroAnime} />
       ) : isLoading ? (
-        <div className="h-[70vh] flex items-center justify-center bg-gradient-to-b from-fox-dark to-background">
+        <div className="h-[50vh] sm:h-[70vh] flex items-center justify-center bg-gradient-to-b from-fox-dark to-background">
           <div className="flex flex-col items-center gap-4">
             <div className="relative">
               <div className="w-16 h-16 rounded-full border-4 border-fox-orange/20 border-t-fox-orange animate-spin" />
@@ -196,7 +196,7 @@ const Index = () => {
       )}
 
       {/* Main Content Layout */}
-      <main className="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 relative z-10 space-y-12 pb-16">
+      <main className="max-w-[1800px] mx-auto px-3 sm:px-6 lg:px-8 relative z-10 space-y-8 sm:space-y-12 pb-10 sm:pb-16">
 
         {/* Continue Watching */}
         {history.length > 0 && (

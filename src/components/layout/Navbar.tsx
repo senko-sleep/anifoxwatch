@@ -91,7 +91,7 @@ export const Navbar = () => {
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/80 backdrop-blur-xl">
-      <div className="container flex h-16 items-center justify-between gap-4">
+      <div className="container flex h-14 sm:h-16 items-center justify-between gap-3 sm:gap-4">
         {/* Logo */}
         <Link to="/" className="flex-shrink-0">
           <Logo size="md" />
@@ -202,7 +202,7 @@ export const Navbar = () => {
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden hover:bg-fox-surface"
+            className="md:hidden hover:bg-fox-surface w-10 h-10"
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           >
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -226,38 +226,38 @@ export const Navbar = () => {
               <Link
                 to="/"
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors touch-manipulation",
                   location.pathname === '/' ? "bg-fox-orange/10 text-fox-orange" : "text-zinc-400 hover:bg-fox-surface hover:text-white"
                 )}
                 onClick={() => setIsMobileMenuOpen(false)}
               >
-                <Home className="w-4 h-4" />
+                <Home className="w-5 h-5" />
                 Home
               </Link>
               <Link
                 to="/browse"
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors touch-manipulation",
                   location.pathname === '/browse' ? "bg-fox-orange/10 text-fox-orange" : "text-zinc-400 hover:bg-fox-surface hover:text-white"
                 )}
                 onClick={() => setIsMobileMenuOpen(false)}
               >
-                <Compass className="w-4 h-4" />
+                <Compass className="w-5 h-5" />
                 Browse
               </Link>
               <Link
                 to="/schedule"
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+                  "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors touch-manipulation",
                   location.pathname === '/schedule' ? "bg-fox-orange/10 text-fox-orange" : "text-zinc-400 hover:bg-fox-surface hover:text-white"
                 )}
                 onClick={() => setIsMobileMenuOpen(false)}
               >
-                <Calendar className="w-4 h-4" />
+                <Calendar className="w-5 h-5" />
                 Schedule
               </Link>
               <button
-                className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium hover:bg-fox-surface transition-colors text-left disabled:opacity-50"
+                className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium hover:bg-fox-surface transition-colors text-left disabled:opacity-50 touch-manipulation"
                 onClick={() => {
                   handleRandomAnime();
                   setIsMobileMenuOpen(false);

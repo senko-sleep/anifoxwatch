@@ -83,6 +83,8 @@
   html {
     scroll-behavior: smooth;
     overflow-y: scroll;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
   body {
@@ -90,7 +92,10 @@
     font-family: 'Inter', system-ui, sans-serif;
     /* Prevent layout shifts and improve scroll performance */
     min-height: 100vh;
+    min-height: 100dvh;
     overflow-x: hidden;
+    /* Safe area for notched phones */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 
   /* Improve scroll performance and prevent blackouts */
@@ -106,10 +111,19 @@
     height: auto;
   }
 
-  /* Custom scrollbar */
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+  /* Custom scrollbar — hide on mobile for cleaner look */
+  @media (max-width: 640px) {
+    ::-webkit-scrollbar {
+      width: 0px;
+      height: 0px;
+    }
+  }
+
+  @media (min-width: 641px) {
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
   }
 
   ::-webkit-scrollbar-track {

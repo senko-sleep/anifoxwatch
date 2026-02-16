@@ -30,9 +30,9 @@ export const AnimeSlider = ({ anime, cardSize = 'md', showRank = false, minimal 
   const location = useLocation();
 
   const cardWidths = {
-    sm: 'w-32',
-    md: 'w-44',
-    lg: 'w-56'
+    sm: 'w-28 sm:w-32',
+    md: 'w-36 sm:w-44',
+    lg: 'w-44 sm:w-56'
   };
 
   const checkScroll = () => {
@@ -78,15 +78,15 @@ export const AnimeSlider = ({ anime, cardSize = 'md', showRank = false, minimal 
       <div
         ref={scrollRef}
         onScroll={checkScroll}
-        className="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4"
-        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4 -mx-1 px-1"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
       >
         {anime.map((item, index) => (
           <Link
             key={item.id}
             to={`/watch?id=${encodeURIComponent(item.id)}`}
             state={{ from: location.pathname + location.search }}
-            className={cn("shrink-0 group/card", cardWidths[cardSize])}
+            className={cn("shrink-0 group/card touch-manipulation", cardWidths[cardSize])}
           >
             <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-fox-surface shadow-lg">
               {/* Image */}
@@ -137,8 +137,8 @@ export const AnimeSlider = ({ anime, cardSize = 'md', showRank = false, minimal 
             </div>
 
             {/* Title */}
-            <div className="mt-3 space-y-1">
-              <h3 className="font-medium text-sm line-clamp-2 group-hover/card:text-fox-orange transition-colors">
+            <div className="mt-2 sm:mt-3 space-y-1">
+              <h3 className="font-medium text-xs sm:text-sm line-clamp-2 group-hover/card:text-fox-orange transition-colors">
                 {item.title}
               </h3>
               <div className="flex items-center gap-2 text-xs text-muted-foreground">

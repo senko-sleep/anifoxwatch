@@ -478,15 +478,15 @@ const Watch = () => {
         {/* Back button - Hidden in cinema mode */}
 
         <div className={cn(
-          "max-w-[1800px] mx-auto px-4 pb-12 transition-all duration-500",
-          isCinemaMode ? "pt-6" : "pt-6"
+          "max-w-[1800px] mx-auto px-3 sm:px-4 pb-8 sm:pb-12 transition-all duration-500",
+          isCinemaMode ? "pt-4 sm:pt-6" : "pt-4 sm:pt-6"
         )}>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigate(backUrl)}
             className={cn(
-              "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-6 transition-all duration-300",
+              "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-4 sm:mb-6 transition-all duration-300 touch-manipulation",
               isCinemaMode && "opacity-0 pointer-events-none h-0 mb-0 overflow-hidden"
             )}
           >
@@ -495,14 +495,14 @@ const Watch = () => {
           </Button>
 
           <div className={cn(
-            "grid gap-8 transition-all duration-500",
+            "grid gap-4 sm:gap-6 lg:gap-8 transition-all duration-500",
             isCinemaMode
               ? "lg:grid-cols-1 max-w-7xl mx-auto"
               : "lg:grid-cols-12"
           )}>
             {/* Main Player Area */}
             <div className={cn(
-              "space-y-6 transition-all duration-500",
+              "space-y-4 sm:space-y-6 transition-all duration-500",
               isCinemaMode ? "lg:col-span-1 w-full" : "lg:col-span-9"
             )} ref={playerRef}>
               {/* Video Player Container */}
@@ -647,24 +647,24 @@ const Watch = () => {
 
                   <Button
                     variant="outline"
-                    size="sm"
+                    size="lg"
                     onClick={handlePrevEpisode}
                     disabled={!hasPrev}
-                    className="gap-1 md:gap-2 border-white/10 hover:bg-white/5 h-9 md:h-10 px-3 md:px-4 touch-manipulation"
+                    className="gap-2 border-white/10 hover:bg-white/5 h-12 px-4 touch-manipulation"
                   >
-                    <ChevronLeft className="w-4 h-4" />
+                    <ChevronLeft className="w-6 h-6" />
                     <span className="hidden sm:inline">Prev</span>
                   </Button>
 
                   <Button
                     variant="outline"
-                    size="sm"
+                    size="lg"
                     onClick={handleNextEpisode}
                     disabled={!hasNext}
-                    className="gap-1 md:gap-2 border-white/10 hover:bg-white/5 h-9 md:h-10 px-3 md:px-4 touch-manipulation"
+                    className="gap-2 border-white/10 hover:bg-white/5 h-12 px-4 touch-manipulation"
                   >
                     <span className="hidden sm:inline">Next</span>
-                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="w-6 h-6" />
                   </Button>
                 </div>
               </div>
