@@ -34,7 +34,7 @@ export const AnimeGrid = ({ anime, title, className, columns = 'auto' }: AnimeGr
           {title}
         </h2>
       )}
-      <div className={cn('grid gap-4 sm:gap-5 lg:gap-6', gridCols)}>
+      <div className={cn('grid gap-3 sm:gap-4', gridCols)}>
         {anime.map((item, index) => (
           <AnimeCard
             key={item.id}

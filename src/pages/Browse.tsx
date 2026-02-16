@@ -507,31 +507,25 @@ const Browse = () => {
   const FilterPanel = ({ isMobile = false }: { isMobile?: boolean }) => (
     <div className={cn("flex flex-col h-full", isMobile ? "p-4" : "")}>
       {/* Filter Header */}
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-fox-orange/[0.1] border border-fox-orange/20 flex items-center justify-center">
-            <SlidersHorizontal className="w-4 h-4 text-fox-orange" />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold text-white/90">Filters</h2>
-            <p className="text-[10px] text-zinc-600">Refine results</p>
-          </div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500" />
+          <h2 className="text-[13px] font-semibold text-zinc-200">Filters</h2>
         </div>
         {activeFilterCount > 0 && (
           <button
             onClick={clearFilters}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-medium text-zinc-500 hover:text-fox-orange hover:bg-fox-orange/[0.06] transition-all"
+            className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
           >
-            <RotateCcw className="w-3 h-3" />
             Reset
           </button>
         )}
       </div>
 
       {/* Format Section */}
-      <div className="mb-5">
-        <h3 className="fox-section-title mb-2.5">Format</h3>
-        <div className="grid grid-cols-2 gap-1.5">
+      <div className="mb-4">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600 mb-2">Format</h3>
+        <div className="grid grid-cols-2 gap-1">
           {FORMAT_OPTIONS.map((opt) => {
             const Icon = opt.icon;
             const isActive = typeFilter === opt.id;
@@ -540,24 +534,26 @@ const Browse = () => {
                 key={opt.id}
                 onClick={() => { setTypeFilter(isActive ? 'all' : opt.id as TypeFilter); setPage(1); }}
                 className={cn(
-                  "fox-filter-btn flex items-center gap-2 px-2.5 py-2",
-                  isActive && "fox-filter-btn-active"
+                  "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] transition-colors",
+                  isActive
+                    ? "bg-white/[0.08] text-white"
+                    : "text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]"
                 )}
               >
-                <Icon className="w-3.5 h-3.5" />
-                <span className="truncate text-xs">{opt.label}</span>
+                <Icon className="w-3 h-3" />
+                <span className="truncate">{opt.label}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      <div className="fox-divider my-1" />
+      <div className="h-px bg-white/[0.05] my-1" />
 
       {/* Status Section */}
-      <div className="mb-5 mt-4">
-        <h3 className="fox-section-title mb-2.5">Status</h3>
-        <div className="flex flex-col gap-1.5">
+      <div className="mb-4 mt-3">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600 mb-2">Status</h3>
+        <div className="flex flex-col gap-0.5">
           {STATUS_OPTIONS.map((opt) => {
             const Icon = opt.icon;
             const isActive = statusFilter === opt.id;
@@ -566,31 +562,35 @@ const Browse = () => {
                 key={opt.id}
                 onClick={() => { setStatusFilter(isActive ? 'all' : opt.id as StatusFilter); setPage(1); }}
                 className={cn(
-                  "fox-filter-btn flex items-center gap-2.5 px-2.5 py-2",
-                  isActive && "fox-filter-btn-active"
+                  "flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px] transition-colors",
+                  isActive
+                    ? "bg-white/[0.08] text-white"
+                    : "text-zinc-500 hover:text-zinc-300 hover:bg-white/[0.04]"
                 )}
               >
-                <Icon className={cn("w-3.5 h-3.5", isActive && `text-${opt.color}-400`)} />
-                <span className="text-xs">{opt.label}</span>
+                <Icon className="w-3 h-3" />
+                <span>{opt.label}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      <div className="fox-divider my-1" />
+      <div className="h-px bg-white/[0.05] my-1" />
 
       {/* Year Section */}
-      <div className="mb-5 mt-4">
-        <h3 className="fox-section-title mb-2.5">Year</h3>
-        <div className="flex flex-wrap gap-1.5">
+      <div className="mb-4 mt-3">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600 mb-2">Year</h3>
+        <div className="flex flex-wrap gap-1">
           {YEAR_RANGES.map((range, idx) => (
             <button
               key={idx}
               onClick={() => { setSelectedYearRange(selectedYearRange === idx ? 0 : idx); setPage(1); }}
               className={cn(
-                "fox-chip",
-                selectedYearRange === idx ? "fox-chip-active" : "fox-chip-inactive"
+                "px-2 py-1 rounded-md text-[10px] font-medium transition-colors",
+                selectedYearRange === idx
+                  ? "bg-fox-orange/15 text-fox-orange"
+                  : "text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.06]"
               )}
             >
               {range.label}
@@ -599,21 +599,21 @@ const Browse = () => {
         </div>
       </div>
 
-      <div className="fox-divider my-1" />
+      <div className="h-px bg-white/[0.05] my-1" />
 
       {/* Genres Section */}
-      <div className="flex-1 min-h-0 mt-4">
+      <div className="flex-1 min-h-0 mt-3">
         <button
           onClick={() => setGenresExpanded(!genresExpanded)}
-          className="flex items-center justify-between w-full mb-2.5 group"
+          className="flex items-center justify-between w-full mb-2 group"
         >
-          <h3 className="fox-section-title">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
             Genres {selectedGenres.length > 0 && <span className="text-fox-orange">({selectedGenres.length})</span>}
           </h3>
           {genresExpanded ? (
-            <ChevronUp className="w-3.5 h-3.5 text-zinc-600 group-hover:text-fox-orange/60 transition-colors" />
+            <ChevronUp className="w-3 h-3 text-zinc-700 group-hover:text-zinc-500 transition-colors" />
           ) : (
-            <ChevronDown className="w-3.5 h-3.5 text-zinc-600 group-hover:text-fox-orange/60 transition-colors" />
+            <ChevronDown className="w-3 h-3 text-zinc-700 group-hover:text-zinc-500 transition-colors" />
           )}
         </button>
         {genresExpanded && (
@@ -627,8 +627,10 @@ const Browse = () => {
                     setPage(1);
                   }}
                   className={cn(
-                    "fox-chip",
-                    selectedGenres.includes(genre) ? "fox-chip-active" : "fox-chip-inactive"
+                    "px-2 py-1 rounded-md text-[10px] font-medium transition-colors",
+                    selectedGenres.includes(genre)
+                      ? "bg-fox-orange/15 text-fox-orange"
+                      : "text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.06]"
                   )}
                 >
                   {genre}
@@ -646,325 +648,231 @@ const Browse = () => {
     <div className="h-screen flex flex-col overflow-hidden bg-background font-sans text-foreground">
       <Navbar />
 
-      {/* Cinematic Background */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute inset-0 bg-gradient-to-br from-fox-orange/[0.02] via-transparent to-purple-900/[0.03]" />
-        <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-fox-orange/[0.03] rounded-full blur-[150px]" />
-        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-purple-600/[0.03] rounded-full blur-[150px]" />
-      </div>
-
-      {/* App Shell Body — fills remaining height below navbar */}
+      {/* App Shell Body */}
       <div className="relative flex flex-1 overflow-hidden">
-        {/* Desktop Sidebar Filter Panel — own scroll */}
-        <aside className="hidden lg:flex flex-col w-[200px] xl:w-[220px] shrink-0 fox-sidebar overflow-hidden">
+        {/* Desktop Sidebar */}
+        <aside className="hidden lg:flex flex-col w-[200px] xl:w-[220px] shrink-0 border-r border-white/[0.06] overflow-hidden">
           <div className="flex-1 overflow-y-auto scrollbar-thin p-4 pt-5">
             <FilterPanel />
           </div>
         </aside>
 
-        {/* Right Panel — header + scrollable results */}
+        {/* Right Panel */}
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-          {/* Fixed Header — never scrolls */}
-          <div className="shrink-0 z-20 fox-search-bar">
-            {/* Row 1: Search + Mode + Mobile Filter */}
-            <div className="px-4 sm:px-6 lg:px-8 py-2">
-              <div className="max-w-[1600px] mx-auto">
-                <div className="flex items-center gap-3">
-                  {/* Search Input */}
-                  <div className="relative flex-1 max-w-2xl fox-search-input">
-                    <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
-                    <Input
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                      placeholder="Search anime titles..."
-                      className="pl-10 h-10 bg-transparent border-0 rounded-xl text-sm focus:ring-0 focus-visible:ring-0 transition-all font-medium placeholder:text-zinc-600"
-                    />
-                    {query && (
-                      <button
-                        onClick={() => setQuery('')}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md bg-white/[0.06] hover:bg-fox-orange/20 hover:text-fox-orange flex items-center justify-center transition-all"
-                      >
-                        <X className="w-3.5 h-3.5 text-zinc-500" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Content Mode Selector */}
-                  <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
-                    <SelectTrigger className={cn(
-                      "w-[130px] h-10 rounded-xl text-sm font-medium transition-all fox-mode-select",
-                      mode !== 'safe' && "fox-mode-select-active"
-                    )}>
-                      <SelectValue placeholder="Content" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-black/90 backdrop-blur-2xl rounded-xl border border-white/[0.08]">
-                      <SelectItem value="safe">Safe Only</SelectItem>
-                      <SelectItem value="mixed">Mixed Content</SelectItem>
-                      <SelectItem value="adult">+18 Only</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {/* Mobile Filter Button */}
-                  <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
-                    <SheetTrigger asChild>
-                      <button className="lg:hidden relative flex items-center justify-center w-10 h-10 rounded-xl fox-filter-btn">
-                        <SlidersHorizontal className="w-4 h-4 text-zinc-500" />
-                        {activeFilterCount > 0 && (
-                          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-fox-orange text-white text-[8px] font-bold flex items-center justify-center shadow-lg shadow-fox-orange/30">
-                            {activeFilterCount}
-                          </span>
-                        )}
-                      </button>
-                    </SheetTrigger>
-                    <SheetContent side="left" className="w-[300px] bg-black/95 backdrop-blur-2xl border-r border-fox-orange/[0.06] p-0 overflow-y-auto">
-                      <SheetHeader className="p-4 border-b border-fox-orange/[0.08]">
-                        <SheetTitle className="text-white/90 text-sm font-bold">Filters</SheetTitle>
-                      </SheetHeader>
-                      <FilterPanel isMobile />
-                    </SheetContent>
-                  </Sheet>
+          {/* Fixed search bar — matches grid padding */}
+          <div className="shrink-0 px-3 sm:px-4 lg:px-6 py-3 border-b border-white/[0.06]">
+            <div className="max-w-[1600px] mx-auto">
+              <div className="flex items-center gap-2">
+                {/* Search Input */}
+                <div className="relative flex-1 max-w-md">
+                  <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search anime titles..."
+                    className="pl-9 h-9 bg-white/[0.04] border border-white/[0.06] rounded-lg text-sm focus:ring-0 focus-visible:ring-0 focus:border-white/[0.12] transition-colors placeholder:text-zinc-600"
+                  />
+                  {query && (
+                    <button
+                      onClick={() => setQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 rounded flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-              </div>
-            </div>
 
-            {/* Row 2: Sort + Controls + Results Count */}
-            <div className="px-4 sm:px-6 lg:px-8 pb-2">
-              <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-3">
-                {/* Results info */}
-                <div className="flex items-center gap-2 min-w-0">
-                  <h1 className="text-sm font-bold text-white truncate">
-                    {hasSearchQuery ? (
-                      <>Results for "<span className="text-fox-orange">{debouncedQuery}</span>"</>
-                    ) : (
-                      'Discover Anime'
-                    )}
-                  </h1>
-                  <span className="text-xs text-zinc-500 shrink-0">
-                    {isLoading ? 'Searching...' : `${processedData.totalResults.toLocaleString()} titles`}
+                {/* Results count */}
+                <div className="hidden sm:flex items-center gap-1.5 min-w-0 mr-auto">
+                  <span className="text-[11px] text-zinc-600 shrink-0">
+                    {isLoading ? '...' : `${processedData.totalResults.toLocaleString()} titles`}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  {/* Sort Options */}
-                  {!hasSearchQuery && (
-                    <div className="flex glass-card p-1">
-                      {SORT_OPTIONS.map((opt) => {
-                        const Icon = opt.icon;
-                        const isActive = browseSortBy === opt.id;
-                        return (
-                          <button
-                            key={opt.id}
-                            onClick={opt.id === 'shuffle' ? handleShuffle : () => { setBrowseSortBy(opt.id as BrowseSortOption); setPage(1); }}
-                            className={cn(
-                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-                              isActive
-                                ? "bg-fox-orange/20 text-fox-orange"
-                                : "text-zinc-500 hover:text-white hover:bg-white/[0.06]"
-                            )}
-                            title={opt.label}
-                          >
-                            <Icon className="w-3.5 h-3.5" />
-                            <span className="hidden lg:inline">{opt.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {hasSearchQuery && (
-                    <Select value={searchSortBy} onValueChange={(v: SearchSortOption) => setSearchSortBy(v)}>
-                      <SelectTrigger className="w-28 h-9 rounded-xl glass-input text-xs">
-                        <SelectValue placeholder="Sort" />
-                      </SelectTrigger>
-                      <SelectContent className="glass-panel rounded-xl">
-                        <SelectItem value="relevance">Relevance</SelectItem>
-                        <SelectItem value="rating">Rating</SelectItem>
-                        <SelectItem value="year">Newest</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-
-                  {/* Scroll Mode Toggle */}
-                  <div className="flex glass-card p-1" title={scrollMode === 'infinite' ? 'Switch to paginated' : 'Switch to infinite scroll'}>
-                    <button
-                      onClick={toggleScrollMode}
-                      className={cn(
-                        "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all",
-                        "text-zinc-400 hover:text-white hover:bg-white/[0.06]"
-                      )}
-                    >
-                      {scrollMode === 'infinite' ? (
-                        <>
-                          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.133-8-12.739-8-4.585 0-4.585 8 0 8 5.606 0 7.644-8 12.74-8z" />
-                          </svg>
-                          <span className="hidden lg:inline">Infinite</span>
-                        </>
-                      ) : (
-                        <>
-                          <Layers className="w-3.5 h-3.5" />
-                          <span className="hidden lg:inline">Pages</span>
-                        </>
-                      )}
-                    </button>
+                {/* Sort Options */}
+                {!hasSearchQuery && (
+                  <div className="hidden sm:flex items-center gap-0.5 p-0.5 rounded-lg bg-white/[0.03] border border-white/[0.05]">
+                    {SORT_OPTIONS.map((opt) => {
+                      const Icon = opt.icon;
+                      const isActive = browseSortBy === opt.id;
+                      return (
+                        <button
+                          key={opt.id}
+                          onClick={opt.id === 'shuffle' ? handleShuffle : () => { setBrowseSortBy(opt.id as BrowseSortOption); setPage(1); }}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium transition-colors",
+                            isActive
+                              ? "bg-white/[0.08] text-white"
+                              : "text-zinc-500 hover:text-zinc-300"
+                          )}
+                          title={opt.label}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          <span className="hidden xl:inline">{opt.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
+                )}
 
-                  {/* Grid Size Toggle */}
-                  <div className="flex glass-card p-1">
-                    <button
-                      onClick={() => setGridSize('compact')}
-                      className={cn(
-                        "w-8 h-8 rounded-lg flex items-center justify-center transition-all",
-                        gridSize === 'compact' ? "bg-fox-orange/20 text-fox-orange" : "text-zinc-500 hover:text-white"
-                      )}
-                    >
-                      <Grid3X3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => setGridSize('normal')}
-                      className={cn(
-                        "w-8 h-8 rounded-lg flex items-center justify-center transition-all",
-                        gridSize === 'normal' ? "bg-fox-orange/20 text-fox-orange" : "text-zinc-500 hover:text-white"
-                      )}
-                    >
-                      <LayoutGrid className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+                {hasSearchQuery && (
+                  <Select value={searchSortBy} onValueChange={(v: SearchSortOption) => setSearchSortBy(v)}>
+                    <SelectTrigger className="w-28 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] text-xs">
+                      <SelectValue placeholder="Sort" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[hsl(220,20%,8%)] rounded-lg border border-white/[0.08]">
+                      <SelectItem value="relevance">Relevance</SelectItem>
+                      <SelectItem value="rating">Rating</SelectItem>
+                      <SelectItem value="year">Newest</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {/* Content Mode */}
+                <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
+                  <SelectTrigger className={cn(
+                    "w-[100px] h-8 rounded-lg text-[11px] font-medium bg-white/[0.04] border border-white/[0.06] transition-colors",
+                    mode !== 'safe' && "border-fox-orange/30 text-fox-orange"
+                  )}>
+                    <SelectValue placeholder="Content" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[hsl(220,20%,8%)] rounded-lg border border-white/[0.08]">
+                    <SelectItem value="safe">Safe Only</SelectItem>
+                    <SelectItem value="mixed">Mixed</SelectItem>
+                    <SelectItem value="adult">+18 Only</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {/* Scroll Mode */}
+                <button
+                  onClick={toggleScrollMode}
+                  title={scrollMode === 'infinite' ? 'Switch to paginated' : 'Switch to infinite scroll'}
+                  className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.05] text-[11px] font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  {scrollMode === 'infinite' ? (
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.133-8-12.739-8-4.585 0-4.585 8 0 8 5.606 0 7.644-8 12.74-8z" />
+                    </svg>
+                  ) : (
+                    <Layers className="w-3.5 h-3.5" />
+                  )}
+                </button>
+
+                {/* Grid Size */}
+                <div className="hidden sm:flex items-center gap-0.5 p-0.5 rounded-lg bg-white/[0.03] border border-white/[0.05]">
+                  <button
+                    onClick={() => setGridSize('compact')}
+                    className={cn(
+                      "w-7 h-7 rounded-md flex items-center justify-center transition-colors",
+                      gridSize === 'compact' ? "bg-white/[0.08] text-white" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    <Grid3X3 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setGridSize('normal')}
+                    className={cn(
+                      "w-7 h-7 rounded-md flex items-center justify-center transition-colors",
+                      gridSize === 'normal' ? "bg-white/[0.08] text-white" : "text-zinc-500 hover:text-zinc-300"
+                    )}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                  </button>
                 </div>
+
+                {/* Mobile Filter Button */}
+                <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
+                  <SheetTrigger asChild>
+                    <button className="lg:hidden relative flex items-center justify-center w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.06] transition-colors">
+                      <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500" />
+                      {activeFilterCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-fox-orange text-white text-[7px] font-bold flex items-center justify-center">
+                          {activeFilterCount}
+                        </span>
+                      )}
+                    </button>
+                  </SheetTrigger>
+                  <SheetContent side="left" className="w-[280px] bg-background border-r border-white/[0.06] p-0 overflow-y-auto">
+                    <SheetHeader className="p-4 border-b border-white/[0.06]">
+                      <SheetTitle className="text-white text-sm font-semibold">Filters</SheetTitle>
+                    </SheetHeader>
+                    <FilterPanel isMobile />
+                  </SheetContent>
+                </Sheet>
               </div>
             </div>
           </div>
 
-          {/* Scrollable Results Area — ONLY this scrolls */}
+          {/* Scrollable Results Area */}
           <div ref={resultsContainerRef} className="flex-1 overflow-y-auto scrollbar-thin">
             <div className="px-3 sm:px-4 lg:px-6 py-4">
               <div className="max-w-[1600px] mx-auto">
-                {/* Active Filters Section */}
+                {/* Active Filters */}
                 {activeFilterCount > 0 && (
-                  <div className="mb-6 glass-card p-4 animate-fade-in">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <SlidersHorizontal className="w-4 h-4 text-fox-orange" />
-                        <h3 className="text-sm font-semibold text-white">
-                          Active Filters ({activeFilterCount})
-                        </h3>
-                      </div>
-                      <button
-                        onClick={clearFilters}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        Clear All
+                  <div className="mb-4 flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] text-zinc-600 mr-1">Filters:</span>
+                    {typeFilter !== 'all' && (
+                      <button onClick={() => setTypeFilter('all')} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.05] border border-white/[0.06] text-[11px] text-zinc-300 hover:border-white/[0.12] transition-colors">
+                        {typeFilter}
+                        <X className="w-3 h-3 text-zinc-500" />
                       </button>
-                    </div>
-                    
-                    <div className="flex flex-wrap gap-2">
-                      {/* Type Filter */}
-                      {typeFilter !== 'all' && (
-                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 text-sm">
-                          <Tv className="w-3.5 h-3.5" />
-                          <span className="font-medium">{typeFilter}</span>
-                          <button
-                            onClick={() => setTypeFilter('all')}
-                            className="ml-1 hover:bg-purple-500/20 rounded p-0.5 transition-colors"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Status Filter */}
-                      {statusFilter !== 'all' && (
-                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-sm">
-                          {statusFilter === 'Ongoing' && <CalendarClock className="w-3.5 h-3.5" />}
-                          {statusFilter === 'Completed' && <CheckCircle2 className="w-3.5 h-3.5" />}
-                          {statusFilter === 'Upcoming' && <Clock className="w-3.5 h-3.5" />}
-                          <span className="font-medium">{statusFilter}</span>
-                          <button
-                            onClick={() => setStatusFilter('all')}
-                            className="ml-1 hover:bg-emerald-500/20 rounded p-0.5 transition-colors"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Year Filter */}
-                      {selectedYearRange > 0 && (
-                        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 text-sm">
-                          <CalendarClock className="w-3.5 h-3.5" />
-                          <span className="font-medium">{YEAR_RANGES[selectedYearRange].label}</span>
-                          <button
-                            onClick={() => setSelectedYearRange(0)}
-                            className="ml-1 hover:bg-blue-500/20 rounded p-0.5 transition-colors"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Genre Filters */}
-                      {selectedGenres.map((genre) => (
-                        <div
-                          key={genre}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-fox-orange/20 border border-fox-orange/30 text-fox-orange text-sm"
-                        >
-                          <Sparkles className="w-3.5 h-3.5" />
-                          <span className="font-medium">{genre}</span>
-                          <button
-                            onClick={() => setSelectedGenres(prev => prev.filter(g => g !== genre))}
-                            className="ml-1 hover:bg-fox-orange/20 rounded p-0.5 transition-colors"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
+                    )}
+                    {statusFilter !== 'all' && (
+                      <button onClick={() => setStatusFilter('all')} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.05] border border-white/[0.06] text-[11px] text-zinc-300 hover:border-white/[0.12] transition-colors">
+                        {statusFilter}
+                        <X className="w-3 h-3 text-zinc-500" />
+                      </button>
+                    )}
+                    {selectedYearRange > 0 && (
+                      <button onClick={() => setSelectedYearRange(0)} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.05] border border-white/[0.06] text-[11px] text-zinc-300 hover:border-white/[0.12] transition-colors">
+                        {YEAR_RANGES[selectedYearRange].label}
+                        <X className="w-3 h-3 text-zinc-500" />
+                      </button>
+                    )}
+                    {selectedGenres.map((genre) => (
+                      <button key={genre} onClick={() => setSelectedGenres(prev => prev.filter(g => g !== genre))} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-white/[0.05] border border-white/[0.06] text-[11px] text-zinc-300 hover:border-white/[0.12] transition-colors">
+                        {genre}
+                        <X className="w-3 h-3 text-zinc-500" />
+                      </button>
+                    ))}
+                    <button onClick={clearFilters} className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors ml-1">
+                      Clear all
+                    </button>
                   </div>
                 )}
 
                 {/* Error State */}
                 {error && (
-                  <div className="glass-card p-6 mb-6 border-red-500/20">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-xl bg-red-500/20 flex items-center justify-center">
-                        <X className="w-6 h-6 text-red-400" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-red-400">Something went wrong</h3>
-                        <p className="text-sm text-zinc-500">{error.message || 'Failed to load anime. Please try again.'}</p>
-                      </div>
-                    </div>
+                  <div className="mb-4 p-4 rounded-lg border border-red-500/20 bg-red-500/[0.05]">
+                    <p className="text-sm text-red-400">{error.message || 'Failed to load anime. Please try again.'}</p>
                   </div>
                 )}
 
                 {/* Loading State */}
                 {isLoading ? (
                   <div className={cn(
-                    "grid gap-4 sm:gap-5",
+                    "grid gap-3 sm:gap-4",
                     gridSize === 'compact'
                       ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
                       : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
                   )}>
                     {Array.from({ length: 24 }).map((_, i) => (
-                      <div key={i} className="space-y-3">
-                        <Skeleton className="aspect-[2/3] w-full rounded-xl bg-white/[0.04]" />
-                        <Skeleton className="h-4 w-3/4 rounded-lg bg-white/[0.04]" />
+                      <div key={i} className="space-y-2">
+                        <Skeleton className="aspect-[2/3] w-full rounded-lg bg-white/[0.03]" />
+                        <Skeleton className="h-3.5 w-3/4 rounded bg-white/[0.03]" />
                       </div>
                     ))}
                   </div>
                 ) : displayResults.length === 0 ? (
                   /* Empty State */
-                  <div className="flex flex-col items-center justify-center py-24 text-center">
-                    <div className="w-20 h-20 rounded-2xl glass-card flex items-center justify-center mb-6">
-                      <SearchIcon className="w-10 h-10 text-zinc-600" />
-                    </div>
-                    <h3 className="text-xl font-bold text-white mb-2">No results found</h3>
-                    <p className="text-zinc-500 max-w-md mb-6">
-                      We couldn't find any anime matching your criteria. Try adjusting your filters or search query.
+                  <div className="flex flex-col items-center justify-center py-20 text-center">
+                    <SearchIcon className="w-8 h-8 text-zinc-700 mb-4" />
+                    <h3 className="text-sm font-semibold text-zinc-300 mb-1">No results found</h3>
+                    <p className="text-[13px] text-zinc-600 max-w-sm mb-4">
+                      Try adjusting your filters or search query.
                     </p>
-                    <Button onClick={clearFilters} className="bg-fox-orange hover:bg-fox-orange/90 text-white rounded-xl px-6">
-                      Clear All Filters
+                    <Button onClick={clearFilters} className="bg-fox-orange hover:bg-fox-orange/90 text-white text-xs h-8 rounded-lg px-4">
+                      Clear Filters
                     </Button>
                   </div>
                 ) : (
@@ -981,17 +889,12 @@ const Browse = () => {
                         <div ref={setLoadMoreRef} className="h-20" />
                         {(isLoadingMore || isFetching) && hasMorePages && (
                           <div className="mt-4 flex justify-center">
-                            <div className="flex items-center gap-2 px-4 py-2 rounded-full glass-card">
-                              <Loader2 className="w-4 h-4 animate-spin text-fox-orange" />
-                              <span className="text-xs text-zinc-500">Loading...</span>
-                            </div>
+                            <Loader2 className="w-4 h-4 animate-spin text-zinc-600" />
                           </div>
                         )}
                         {!hasMorePages && displayResults.length > 0 && (
-                          <div className="mt-12 flex flex-col items-center gap-2 py-8">
-                            <div className="w-12 h-1 rounded-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent" />
-                            <p className="text-sm text-zinc-600">You've reached the end</p>
-                            <p className="text-xs text-zinc-700">{displayResults.length} titles loaded</p>
+                          <div className="mt-8 flex justify-center py-6">
+                            <p className="text-[11px] text-zinc-700">{displayResults.length} titles loaded</p>
                           </div>
                         )}
                       </>
@@ -999,17 +902,15 @@ const Browse = () => {
 
                     {/* Pagination (only in paginated mode) */}
                     {scrollMode === 'paginated' && processedData.totalPages > 1 && (
-                      <div className="mt-12 flex flex-col items-center gap-6 pb-8">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="icon"
+                      <div className="mt-8 flex flex-col items-center gap-4 pb-8">
+                        <div className="flex items-center gap-1">
+                          <button
                             onClick={() => setPage(p => Math.max(1, p - 1))}
                             disabled={page === 1 || isFetching}
-                            className="w-10 h-10 rounded-xl glass-button border-0"
+                            className="w-8 h-8 rounded-md bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-30"
                           >
                             <ChevronLeft className="w-4 h-4" />
-                          </Button>
+                          </button>
 
                           <div className="flex items-center gap-1">
                             {(() => {
@@ -1034,15 +935,15 @@ const Browse = () => {
                               return rangeWithDots.map((p, i) => (
                                 <React.Fragment key={i}>
                                   {p === "..." ? (
-                                    <span className="px-2 text-zinc-600">...</span>
+                                    <span className="px-1.5 text-zinc-700 text-xs">...</span>
                                   ) : (
                                     <button
                                       onClick={() => setPage(p as number)}
                                       className={cn(
-                                        "min-w-[40px] h-10 rounded-xl font-medium transition-all",
+                                        "min-w-[32px] h-8 rounded-md text-xs font-medium transition-colors",
                                         page === p
-                                          ? "bg-fox-orange text-white shadow-lg shadow-fox-orange/30"
-                                          : "glass-button text-zinc-400 hover:text-white"
+                                          ? "bg-fox-orange text-white"
+                                          : "bg-white/[0.04] border border-white/[0.06] text-zinc-400 hover:text-white hover:bg-white/[0.06]"
                                       )}
                                     >
                                       {p}
@@ -1053,15 +954,13 @@ const Browse = () => {
                             })()}
                           </div>
 
-                          <Button
-                            variant="outline"
-                            size="icon"
+                          <button
                             onClick={() => setPage(p => p + 1)}
                             disabled={!processedData.hasNextPage || isFetching}
-                            className="w-10 h-10 rounded-xl glass-button border-0"
+                            className="w-8 h-8 rounded-md bg-white/[0.04] border border-white/[0.06] flex items-center justify-center text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors disabled:opacity-30"
                           >
-                            {isFetching ? <Loader2 className="w-4 h-4 animate-spin text-fox-orange" /> : <ChevronRight className="w-4 h-4" />}
-                          </Button>
+                            {isFetching ? <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-500" /> : <ChevronRight className="w-4 h-4" />}
+                          </button>
                         </div>
 
                         {/* Jump to Page */}
@@ -1074,22 +973,22 @@ const Browse = () => {
                               setJumpPage("");
                             }
                           }}
-                          className="flex items-center gap-3 glass-card px-4 py-2"
+                          className="flex items-center gap-2"
                         >
-                          <span className="text-sm text-zinc-500">Go to page</span>
+                          <span className="text-[11px] text-zinc-600">Page</span>
                           <Input
                             type="number"
                             min={1}
                             max={processedData.totalPages}
                             value={jumpPage}
                             onChange={(e) => setJumpPage(e.target.value)}
-                            className="w-16 h-8 glass-input text-center text-sm rounded-lg"
+                            className="w-14 h-7 bg-white/[0.04] border border-white/[0.06] text-center text-xs rounded-md"
                             placeholder="#"
                           />
                           <Button
                             type="submit"
                             size="sm"
-                            className="h-8 rounded-lg bg-fox-orange hover:bg-fox-orange/90 text-white"
+                            className="h-7 text-xs rounded-md bg-fox-orange hover:bg-fox-orange/90 text-white px-3"
                             disabled={!jumpPage || parseInt(jumpPage) < 1 || parseInt(jumpPage) > processedData.totalPages}
                           >
                             Go
