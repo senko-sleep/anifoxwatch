@@ -1,8 +1,7 @@
+import { useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Clock, Calendar } from 'lucide-react';
+import { Clock, Play, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ScheduleItem } from '@/lib/api-client';
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
 
 interface AiringScheduleProps {
     schedule: ScheduleItem[];
@@ -11,113 +10,118 @@ interface AiringScheduleProps {
 
 export const AiringSchedule = ({ schedule, isLoading }: AiringScheduleProps) => {
     const location = useLocation();
-    // Filter only for today (if needed, but usually the API returns relevant sorted data)
-    // For this component we'll take the first 4-5 items or just list what's passed
-
-    const formatTime = (timestamp: number) => {
-        return new Date(timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    };
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const [canScrollLeft, setCanScrollLeft] = useState(false);
+    const [canScrollRight, setCanScrollRight] = useState(true);
 
     const formatTimeUntil = (seconds: number) => {
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
-
         if (hours > 0) return `${hours}h ${minutes}m`;
         return `${minutes}m`;
     };
 
+    const checkScroll = () => {
+        if (!scrollRef.current) return;
+        const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+        setCanScrollLeft(scrollLeft > 0);
+        setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 10);
+    };
+
+    const scroll = (direction: 'left' | 'right') => {
+        if (!scrollRef.current) return;
+        const scrollAmount = scrollRef.current.clientWidth * 0.8;
+        scrollRef.current.scrollBy({
+            left: direction === 'left' ? -scrollAmount : scrollAmount,
+            behavior: 'smooth'
+        });
+        setTimeout(checkScroll, 300);
+    };
+
     if (isLoading) {
         return (
-            <div className="space-y-4">
-                {[...Array(5)].map((_, i) => (
-                    <div key={i} className="flex gap-4 p-3 rounded-xl bg-fox-surface/30 animate-pulse">
-                        <div className="w-16 h-24 rounded-lg bg-fox-surface/50" />
-                        <div className="flex-1 py-1 space-y-2">
-                            <div className="h-4 w-3/4 rounded bg-fox-surface/50" />
-                            <div className="h-3 w-1/2 rounded bg-fox-surface/50" />
-                        </div>
-                    </div>
+            <div className="flex gap-4 overflow-hidden">
+                {[...Array(8)].map((_, i) => (
+                    <div key={i} className="w-44 shrink-0 aspect-[2/3] rounded-xl bg-fox-surface animate-pulse" />
                 ))}
             </div>
         );
     }
 
-    if (!schedule || schedule.length === 0) {
-        return (
-            <div className="text-center py-8 text-muted-foreground bg-fox-surface/10 rounded-xl">
-                <Calendar className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p>No anime airing right now.</p>
-            </div>
-        );
-    }
+    if (!schedule || schedule.length === 0) return null;
 
     return (
-        <div className="space-y-3">
-            {schedule.map((item) => (
-                <div
-                    key={item.id}
-                    className="group relative flex gap-3 p-2 rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/5"
+        <div className="relative group/slider">
+            {canScrollLeft && (
+                <button
+                    onClick={() => scroll('left')}
+                    className="absolute left-0 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full bg-fox-orange/90 backdrop-blur-sm flex items-center justify-center text-white shadow-lg opacity-0 group-hover/slider:opacity-100 transition-all hover:bg-fox-orange hover:scale-110 -translate-x-1/2"
                 >
-                    {/* Image */}
+                    <ChevronLeft className="w-6 h-6" />
+                </button>
+            )}
+            {canScrollRight && (
+                <button
+                    onClick={() => scroll('right')}
+                    className="absolute right-0 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full bg-fox-orange/90 backdrop-blur-sm flex items-center justify-center text-white shadow-lg opacity-0 group-hover/slider:opacity-100 transition-all hover:bg-fox-orange hover:scale-110 translate-x-1/2"
+                >
+                    <ChevronRight className="w-6 h-6" />
+                </button>
+            )}
+
+            <div
+                ref={scrollRef}
+                onScroll={checkScroll}
+                className="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+            >
+                {schedule.map((item) => (
                     <Link
+                        key={item.id}
                         to={`/watch?id=${encodeURIComponent(item.id)}`}
                         state={{ from: location.pathname + location.search }}
-                        className="shrink-0 relative w-16 h-20 rounded-lg overflow-hidden"
+                        className="shrink-0 w-44 group/card"
                     >
-                        <img
-                            src={item.media?.thumbnail}
-                            alt={item.title}
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                        />
-                        <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors" />
-                    </Link>
+                        <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-fox-surface shadow-lg">
+                            <img
+                                src={item.media?.thumbnail}
+                                alt={item.title}
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110"
+                                loading="lazy"
+                            />
 
-                    {/* Info */}
-                    <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
-                        <Link
-                            to={`/watch?id=${encodeURIComponent(item.id)}`}
-                            state={{ from: location.pathname + location.search }}
-                        >
-                            <h4 className="font-medium text-sm text-zinc-200 group-hover:text-fox-orange transition-colors truncate">
-                                {item.title}
-                            </h4>
-                        </Link>
+                            {/* Gradient overlay */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent" />
 
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1 text-fox-orange bg-fox-orange/10 px-1.5 py-0.5 rounded">
+                            {/* Hover play button */}
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-all duration-300">
+                                <div className="w-14 h-14 rounded-full bg-fox-orange/90 flex items-center justify-center transform scale-0 group-hover/card:scale-100 transition-transform duration-300 shadow-xl">
+                                    <Play className="w-7 h-7 text-white fill-white ml-1" />
+                                </div>
+                            </div>
+
+                            {/* Episode badge */}
+                            <div className="absolute top-2 left-2 px-2 py-1 rounded-md bg-fox-orange/90 backdrop-blur-sm text-xs font-semibold text-white">
                                 EP {item.episode}
-                            </span>
-                            <span>•</span>
-                            <span className="flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                {formatTime(item.airingAt)}
-                            </span>
+                            </div>
+
+                            {/* Countdown overlay */}
+                            <div className="absolute bottom-0 left-0 right-0 p-3">
+                                <div className="flex items-center gap-1.5 text-xs text-white/90">
+                                    <Clock className="w-3.5 h-3.5 text-fox-orange" />
+                                    <span className="font-medium">{formatTimeUntil(item.timeUntilAiring)}</span>
+                                </div>
+                            </div>
                         </div>
 
-                        <p className="text-xs text-zinc-500 mt-0.5">
-                            Airing in <span className="text-zinc-300 font-medium">{formatTimeUntil(item.timeUntilAiring)}</span>
-                        </p>
-                    </div>
-
-                    {/* Quick Action */}
-                    <div className="flex flex-col justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Link
-                            to={`/watch?id=${encodeURIComponent(item.id)}`}
-                            state={{ from: location.pathname + location.search }}
-                        >
-                            <Button size="sm" variant="ghost" className="h-8 w-8 p-0 rounded-full hover:bg-fox-orange hover:text-white">
-                                <Clock className="w-4 h-4" />
-                            </Button>
-                        </Link>
-                    </div>
-                </div>
-            ))}
-
-            <Link to="/schedule" className="block mt-4">
-                <Button variant="outline" className="w-full text-xs h-9">
-                    View Full Schedule
-                </Button>
-            </Link>
+                        <div className="mt-3 space-y-1">
+                            <h3 className="font-medium text-sm line-clamp-2 group-hover/card:text-fox-orange transition-colors">
+                                {item.title}
+                            </h3>
+                        </div>
+                    </Link>
+                ))}
+            </div>
         </div>
     );
 };

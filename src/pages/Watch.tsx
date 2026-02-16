@@ -22,7 +22,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  Maximize2,
+  MonitorPlay
 } from 'lucide-react';
 
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -396,19 +398,19 @@ const Watch = () => {
               <br />
               • The AniList entry needs to be linked to streaming sources
             </p>
-            
+
             <div className="flex flex-col gap-4 w-full max-w-md">
-              <Button 
-                onClick={() => navigate(`/browse?q=${encodeURIComponent(anime?.title || 'anime')}`)} 
+              <Button
+                onClick={() => navigate(`/browse?q=${encodeURIComponent(anime?.title || 'anime')}`)}
                 variant="default"
                 className="bg-fox-orange hover:bg-fox-orange/90"
               >
                 <Play className="w-4 h-4 mr-2" />
                 Search for "{anime?.title || 'anime'}"
               </Button>
-              
+
               {cleanAnimeId.startsWith('anilist-') && (
-                <a 
+                <a
                   href={`https://anilist.co/anime/${cleanAnimeId.replace('anilist-', '')}`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -417,7 +419,7 @@ const Watch = () => {
                   View on AniList ({cleanAnimeId})
                 </a>
               )}
-              
+
               <Button onClick={() => navigate('/')} variant="outline">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Back to Home
@@ -607,7 +609,7 @@ const Watch = () => {
                     )}
                   </h2>
                   <p className="text-xs md:text-sm text-muted-foreground mt-1">
-                    <a 
+                    <a
                       href={`/browse?q=${encodeURIComponent(anime.title)}`}
                       className="hover:text-fox-orange hover:underline transition-colors cursor-pointer"
                       title={`Search for "${anime.title}" - ID: ${cleanAnimeId}`}
@@ -627,6 +629,22 @@ const Watch = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsCinemaMode(!isCinemaMode)}
+                    className={cn(
+                      "hidden lg:flex gap-2 border-white/10 hover:bg-white/5 h-10 px-4 transition-colors",
+                      isCinemaMode && "bg-fox-orange/20 border-fox-orange/50 text-fox-orange"
+                    )}
+                    title={isCinemaMode ? "Exit Cinema Mode" : "Enter Cinema Mode"}
+                  >
+                    {isCinemaMode ? <MonitorPlay className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                    <span>Cinema</span>
+                  </Button>
+
+                  <div className="h-4 w-[1px] bg-white/10 hidden lg:block mx-1" />
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -775,13 +793,7 @@ const Watch = () => {
               "lg:col-span-3 transition-all duration-500",
               isCinemaMode && "hidden lg:hidden"
             )}>
-              <div className="bg-card/30 backdrop-blur-md border border-white/5 rounded-xl h-[800px] flex flex-col sticky top-24">
-                <div className="p-4 border-b border-white/5">
-                  <h3 className="font-bold flex items-center gap-2">
-                    <Tv className="w-4 h-4 text-fox-orange" />
-                    Episodes
-                  </h3>
-                </div>
+              <div className="bg-card/30 backdrop-blur-md border border-white/5 rounded-xl h-[calc(100vh-140px)] flex flex-col sticky top-24">
                 <div className="flex-1 overflow-hidden">
                   <EpisodeList
                     episodes={episodes || []}

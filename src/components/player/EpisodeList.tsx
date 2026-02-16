@@ -5,10 +5,10 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
-import { 
-  Search, 
-  Play, 
-  ChevronDown, 
+import {
+  Search,
+  Play,
+  ChevronDown,
   ChevronUp,
   Mic,
   Subtitles,
@@ -48,10 +48,10 @@ export function EpisodeList({
   // Group episodes by season (every 12-26 episodes typically)
   const seasons = useMemo(() => {
     if (!episodes.length) return [];
-    
+
     const episodesPerSeason = 12;
     const seasonCount = Math.ceil(episodes.length / episodesPerSeason);
-    
+
     return Array.from({ length: seasonCount }, (_, i) => ({
       id: `season-${i + 1}`,
       name: `Season ${i + 1}`,
@@ -67,7 +67,7 @@ export function EpisodeList({
     // Filter by search
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      result = result.filter(ep => 
+      result = result.filter(ep =>
         ep.title.toLowerCase().includes(query) ||
         ep.number.toString().includes(query)
       );
@@ -77,7 +77,7 @@ export function EpisodeList({
     if (selectedSeason !== 'all') {
       const season = seasons.find(s => s.id === selectedSeason);
       if (season) {
-        result = result.filter(ep => 
+        result = result.filter(ep =>
           ep.number >= season.startEp && ep.number <= season.endEp
         );
       }
@@ -89,7 +89,7 @@ export function EpisodeList({
     }
 
     // Sort
-    result.sort((a, b) => 
+    result.sort((a, b) =>
       sortOrder === 'asc' ? a.number - b.number : b.number - a.number
     );
 
@@ -111,9 +111,9 @@ export function EpisodeList({
   }
 
   return (
-    <div className="bg-fox-surface/30 rounded-xl overflow-hidden">
+    <div className="bg-fox-surface/30 rounded-xl overflow-hidden h-full flex flex-col">
       {/* Header */}
-      <div className="p-3 border-b border-border/30">
+      <div className="p-3 border-b border-border/30 flex-none">
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-semibold text-base">Episodes</h3>
           <Badge variant="secondary" className="text-xs">
@@ -176,7 +176,7 @@ export function EpisodeList({
       </div>
 
       {/* Episode List */}
-      <ScrollArea className="h-[500px]">
+      <ScrollArea className="flex-1 min-h-0">
         <div className="p-1.5 space-y-1">
           {filteredEpisodes.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground text-sm">
@@ -190,8 +190,8 @@ export function EpisodeList({
                 className={cn(
                   "w-full p-2 rounded-lg text-left transition-all",
                   "hover:bg-fox-orange/10 group",
-                  selectedEpisodeId === episode.id 
-                    ? "bg-fox-orange/20 border border-fox-orange/50" 
+                  selectedEpisodeId === episode.id
+                    ? "bg-fox-orange/20 border border-fox-orange/50"
                     : "bg-background/30"
                 )}
               >
@@ -216,12 +216,12 @@ export function EpisodeList({
                       selectedEpisodeId === episode.id && "text-fox-orange",
                       "line-clamp-2" // Allow up to 2 lines for longer titles
                     )}>
-                      {episode.title !== `Episode ${episode.number}` 
-                        ? episode.title 
+                      {episode.title !== `Episode ${episode.number}`
+                        ? episode.title
                         : `Episode ${episode.number}`
                       }
                     </p>
-                    
+
                     <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                       {episode.hasSub && (
                         <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">

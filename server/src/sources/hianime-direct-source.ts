@@ -391,7 +391,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                     options?.signal
                 );
                 if (airingData.animes && airingData.animes.length > 0) {
-                    allAnime.push(...airingData.animes.map((a: any) => this.mapAnime(a)));
+                    allAnime.push(...airingData.animes.map((a: any) => ({ ...this.mapAnime(a), status: 'Ongoing' as const })));
                 }
             } catch { }
 
@@ -402,7 +402,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                         options?.signal
                     );
                     const trending = data.trendingAnimes || data.spotlightAnimes || [];
-                    allAnime.push(...trending.map((a: any) => this.mapAnime(a)));
+                    allAnime.push(...trending.map((a: any) => ({ ...this.mapAnime(a), status: 'Ongoing' as const })));
                 } catch { }
             }
 
@@ -429,7 +429,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                     options?.signal
                 );
                 if (latestData.animes && latestData.animes.length > 0) {
-                    allAnime.push(...latestData.animes.map((a: any) => this.mapAnime(a)));
+                    allAnime.push(...latestData.animes.map((a: any) => ({ ...this.mapAnime(a), status: 'Ongoing' as const })));
                 }
             } catch { }
 
@@ -440,7 +440,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                         options?.signal
                     );
                     const latest = data.latestEpisodeAnimes || [];
-                    allAnime.push(...latest.map((a: any) => this.mapAnime(a)));
+                    allAnime.push(...latest.map((a: any) => ({ ...this.mapAnime(a), status: 'Ongoing' as const })));
                 } catch { }
             }
 
@@ -513,7 +513,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                 () => this.getScraper().getCategoryAnime('top-airing' as any, page),
                 options?.signal
             );
-            const results = (data.animes || []).map((a: any) => this.mapAnime(a));
+            const results = (data.animes || []).map((a: any) => ({ ...this.mapAnime(a), status: 'Ongoing' as const }));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
             return results;

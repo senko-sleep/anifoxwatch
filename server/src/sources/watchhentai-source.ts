@@ -21,6 +21,14 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
         stream: 2 * 60 * 60 * 1000,
     };
 
+    // Global series index for deduplication across pages
+    private seriesIndex: AnimeBase[] | null = null;
+    private seriesIndexExpires: number = 0;
+    private seriesIndexLoading: Promise<AnimeBase[]> | null = null;
+    private readonly SERIES_INDEX_TTL = 30 * 60 * 1000; // 30 minutes
+    private readonly SERIES_PER_PAGE = 25;
+    private readonly SOURCE_PAGES_TO_FETCH = 48; // Max pages on WatchHentai
+
     private getCached<T>(key: string): T | null {
         const entry = this.cache.get(key);
         if (entry && entry.expires > Date.now()) {
@@ -51,6 +59,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
     private parseAnimeItems($: cheerio.CheerioAPI): AnimeBase[] {
         const items: AnimeBase[] = [];
         const selectors = ['article'];
+        const seenSeries = new Set<string>();
 
         for (const selector of selectors) {
             $(selector).each((_, el) => {
@@ -59,7 +68,19 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                 const href = link.attr('href');
                 if (!href) return;
 
-                const id = href.replace(this.baseUrl, '').replace(/^\//, '').replace(/\/$/, '');
+                let id = href.replace(this.baseUrl, '').replace(/^\//, '').replace(/\/$/, '');
+                
+                // Convert episode pages to series pages by removing -id-## suffix
+                // This ensures we get series covers instead of episode thumbnails
+                const episodeMatch = id.match(/^(.+?)-id-\d+$/);
+                if (episodeMatch) {
+                    id = episodeMatch[1];
+                }
+                
+                // Skip duplicates (multiple episodes of same series)
+                if (seenSeries.has(id)) return;
+                seenSeries.add(id);
+
                 const prefixedId = `watchhentai-${id}`;
                 const img = $el.find('img').first();
                 const title = img.attr('alt') || $el.find('h2, h3, .title').first().text().trim() || 'Unknown Title';
@@ -414,10 +435,117 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                 timeout: options?.timeout || 15000
             });
             const $ = cheerio.load(response.data);
+            
+            // Extract total pages from pagination text like "Page 1 of 48"
+            const paginationText = $('.pagination span').first().text();
+            const totalPagesMatch = paginationText.match(/Page \d+ of (\d+)/);
+            if (totalPagesMatch) {
+                const totalPages = parseInt(totalPagesMatch[1]);
+                logger.info(`[WatchHentai] Page ${page} of ${totalPages} total pages available`);
+            }
+            
             return this.parseAnimeItems($);
         } catch (error: any) {
             this.handleError(error, 'getLatest');
             return [];
+        }
+    }
+
+    /**
+     * Build a globally deduplicated series index by fetching multiple source pages.
+     * Fetches progressively - first few pages immediately, rest in background.
+     */
+    private async buildSeriesIndex(options?: SourceRequestOptions): Promise<AnimeBase[]> {
+        // Return cached index if valid
+        if (this.seriesIndex && this.seriesIndexExpires > Date.now()) {
+            return this.seriesIndex;
+        }
+
+        // If already loading, wait for it
+        if (this.seriesIndexLoading) {
+            return this.seriesIndexLoading;
+        }
+
+        this.seriesIndexLoading = (async () => {
+            const allSeries = new Map<string, AnimeBase>();
+            const maxSourcePages = this.SOURCE_PAGES_TO_FETCH;
+
+            logger.info(`[WatchHentai] Building series index from ${maxSourcePages} source pages...`);
+
+            // Fetch pages in batches of 5 for speed
+            const batchSize = 5;
+            for (let batch = 0; batch < Math.ceil(maxSourcePages / batchSize); batch++) {
+                const promises: Promise<void>[] = [];
+                for (let i = 0; i < batchSize; i++) {
+                    const sourcePage = batch * batchSize + i + 1;
+                    if (sourcePage > maxSourcePages) break;
+
+                    promises.push((async () => {
+                        try {
+                            const url = sourcePage > 1
+                                ? `${this.baseUrl}/series/page/${sourcePage}/`
+                                : `${this.baseUrl}/series/`;
+                            const response = await axios.get(url, {
+                                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                                timeout: 15000
+                            });
+                            const $ = cheerio.load(response.data);
+                            const items = this.parseAnimeItems($);
+                            // Add to global map - deduplicates by ID
+                            for (const item of items) {
+                                if (!allSeries.has(item.id)) {
+                                    allSeries.set(item.id, item);
+                                }
+                            }
+                        } catch (e) {
+                            logger.warn(`[WatchHentai] Failed to fetch source page ${sourcePage}`);
+                        }
+                    })());
+                }
+                await Promise.all(promises);
+                
+                // After first batch, check if we have enough for immediate use
+                if (batch === 0) {
+                    logger.info(`[WatchHentai] First batch done: ${allSeries.size} unique series so far`);
+                }
+            }
+
+            const index = Array.from(allSeries.values());
+            logger.info(`[WatchHentai] Series index built: ${index.length} unique series from ${maxSourcePages} source pages`);
+
+            this.seriesIndex = index;
+            this.seriesIndexExpires = Date.now() + this.SERIES_INDEX_TTL;
+            this.seriesIndexLoading = null;
+            return index;
+        })();
+
+        return this.seriesIndexLoading;
+    }
+
+    async getByType(type: string, page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
+        try {
+            // Build/retrieve the globally deduplicated series index
+            const allSeries = await this.buildSeriesIndex(options);
+
+            // Paginate from the deduplicated index
+            const startIndex = (page - 1) * this.SERIES_PER_PAGE;
+            const endIndex = startIndex + this.SERIES_PER_PAGE;
+            const results = allSeries.slice(startIndex, endIndex);
+            const totalPages = Math.ceil(allSeries.length / this.SERIES_PER_PAGE);
+            const hasNextPage = endIndex < allSeries.length;
+
+            logger.info(`[WatchHentai] getByType page ${page}: returning ${results.length} results (${startIndex}-${endIndex} of ${allSeries.length})`);
+
+            return {
+                results,
+                totalPages,
+                currentPage: page,
+                hasNextPage,
+                source: this.name
+            };
+        } catch (error: any) {
+            this.handleError(error, 'getByType');
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
         }
     }
 

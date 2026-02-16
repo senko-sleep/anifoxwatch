@@ -652,7 +652,7 @@ export class NineAnimeSource extends BaseAnimeSource {
                 if (i < 10) {
                     const anime = this.mapAnimeFromScrape($(el), $);
                     if (anime.title) {
-                        results.push(anime);
+                        results.push({ ...anime, status: 'Ongoing' as const });
                     }
                 }
             });
@@ -662,7 +662,7 @@ export class NineAnimeSource extends BaseAnimeSource {
                     if (i < 10) {
                         const anime = this.mapAnimeFromScrape($(el), $);
                         if (anime.title) {
-                            results.push(anime);
+                            results.push({ ...anime, status: 'Ongoing' as const });
                         }
                     }
                 });
@@ -693,7 +693,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             $('.flw-item').each((i, el) => {
                 const anime = this.mapAnimeFromScrape($(el), $);
                 if (anime.title) {
-                    results.push(anime);
+                    results.push({ ...anime, status: 'Ongoing' as const });
                 }
             });
 

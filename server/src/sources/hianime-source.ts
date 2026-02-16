@@ -720,9 +720,9 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         try {
             const data = await this.apiRequest<HomeResponse>('/home', {}, options);
 
-            // Get trending animes from home page
+            // Get trending animes from home page - these are currently airing
             const trending = data.trendingAnimes || data.spotlightAnimes || [];
-            const results = trending.map((a) => this.mapAnimeFromSearch(a));
+            const results = trending.map((a) => ({ ...this.mapAnimeFromSearch(a), status: 'Ongoing' as const }));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
             return results;
@@ -740,9 +740,9 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
         try {
             const data = await this.apiRequest<HomeResponse>('/home', {}, options);
 
-            // Get latest episode animes from home page
+            // Get latest episode animes from home page - these are currently airing
             const latest = data.latestEpisodeAnimes || [];
-            const results = latest.map((a) => this.mapAnimeFromSearch(a));
+            const results = latest.map((a) => ({ ...this.mapAnimeFromSearch(a), status: 'Ongoing' as const }));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
             return results;
@@ -805,7 +805,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
 
         try {
             const data = await this.apiRequest<CategoryResponse>('/category/top-airing', { page }, options);
-            const results = (data.animes || []).map((a) => this.mapAnimeFromSearch(a));
+            const results = (data.animes || []).map((a) => ({ ...this.mapAnimeFromSearch(a), status: 'Ongoing' as const }));
 
             this.setCache(cacheKey, results, this.cacheTTL.home);
             return results;

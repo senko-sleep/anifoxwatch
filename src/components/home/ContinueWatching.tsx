@@ -1,8 +1,8 @@
+import { useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Play, X, Clock } from 'lucide-react';
+import { Play, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { WatchHistoryItem } from '@/lib/watch-history';
 import { Button } from '@/components/ui/button';
-import { Progress } from '@/components/ui/progress';
 
 interface ContinueWatchingProps {
     items: WatchHistoryItem[];
@@ -11,77 +11,129 @@ interface ContinueWatchingProps {
 
 export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => {
     const location = useLocation();
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const [canScrollLeft, setCanScrollLeft] = useState(false);
+    const [canScrollRight, setCanScrollRight] = useState(true);
+
+    const checkScroll = () => {
+        if (!scrollRef.current) return;
+        const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+        setCanScrollLeft(scrollLeft > 0);
+        setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 10);
+    };
+
+    const scroll = (direction: 'left' | 'right') => {
+        if (!scrollRef.current) return;
+        const scrollAmount = scrollRef.current.clientWidth * 0.8;
+        scrollRef.current.scrollBy({
+            left: direction === 'left' ? -scrollAmount : scrollAmount,
+            behavior: 'smooth'
+        });
+        setTimeout(checkScroll, 300);
+    };
 
     if (!items || items.length === 0) return null;
 
     return (
-        <div className="space-y-4 animate-fade-in">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div className="relative group/slider">
+            {canScrollLeft && (
+                <button
+                    onClick={() => scroll('left')}
+                    className="absolute left-0 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full bg-fox-orange/90 backdrop-blur-sm flex items-center justify-center text-white shadow-lg opacity-0 group-hover/slider:opacity-100 transition-all hover:bg-fox-orange hover:scale-110 -translate-x-1/2"
+                >
+                    <ChevronLeft className="w-6 h-6" />
+                </button>
+            )}
+            {canScrollRight && (
+                <button
+                    onClick={() => scroll('right')}
+                    className="absolute right-0 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full bg-fox-orange/90 backdrop-blur-sm flex items-center justify-center text-white shadow-lg opacity-0 group-hover/slider:opacity-100 transition-all hover:bg-fox-orange hover:scale-110 translate-x-1/2"
+                >
+                    <ChevronRight className="w-6 h-6" />
+                </button>
+            )}
+
+            <div
+                ref={scrollRef}
+                onScroll={checkScroll}
+                className="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+            >
                 {items.map((item) => (
-                    <div key={item.animeId} className="group relative flex gap-4 p-3 rounded-xl bg-fox-surface/40 hover:bg-fox-surface/60 transition-colors border border-white/5">
-                        {/* Image */}
-                        <Link
-                            to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}`}
-                            state={{ from: location.pathname + location.search }}
-                            className="shrink-0 relative w-20 h-28 rounded-lg overflow-hidden block"
-                        >
-                            <div className="absolute inset-0 bg-black/20 group-hover:bg-transparent transition-colors z-10" />
+                    <Link
+                        key={item.animeId}
+                        to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}`}
+                        state={{ from: location.pathname + location.search }}
+                        className="shrink-0 w-56 group/card"
+                    >
+                        <div className="relative aspect-video rounded-xl overflow-hidden bg-fox-surface shadow-lg">
+                            {/* Main image: frame thumbnail if available, otherwise anime poster */}
                             <img
-                                src={item.animeImage}
+                                src={item.frameThumbnail || item.animeImage}
                                 alt={item.animeTitle}
-                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110"
+                                loading="lazy"
                             />
-                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
+
+                            {/* Gradient overlay */}
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent" />
+
+                            {/* Small anime poster icon in bottom-left corner */}
+                            <div className="absolute bottom-8 left-2 w-10 h-14 rounded-md overflow-hidden shadow-lg ring-1 ring-white/20">
+                                <img
+                                    src={item.animeImage}
+                                    alt={item.animeTitle}
+                                    className="w-full h-full object-cover"
+                                />
+                            </div>
+
+                            {/* Hover play button */}
+                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-all duration-300">
+                                <div className="w-12 h-12 rounded-full bg-fox-orange/90 flex items-center justify-center transform scale-0 group-hover/card:scale-100 transition-transform duration-300 shadow-xl">
+                                    <Play className="w-6 h-6 text-white fill-white ml-0.5" />
+                                </div>
+                            </div>
+
+                            {/* Progress bar */}
+                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20">
                                 <div
-                                    className="h-full bg-fox-orange"
+                                    className="h-full bg-fox-orange rounded-full"
                                     style={{ width: `${Math.min(100, item.progress * 100)}%` }}
                                 />
                             </div>
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-20">
-                                <div className="bg-fox-orange/90 rounded-full p-1.5 shadow-lg">
-                                    <Play className="w-4 h-4 text-white fill-white ml-0.5" />
-                                </div>
-                            </div>
-                        </Link>
 
-                        {/* Info */}
-                        <div className="flex-1 min-w-0 flex flex-col justify-center">
-                            <Link
-                                to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}`}
-                                state={{ from: location.pathname + location.search }}
-                            >
-                                <h4 className="font-semibold text-sm text-zinc-200 group-hover:text-fox-orange transition-colors line-clamp-2 leading-tight mb-1">
-                                    {item.animeTitle}
-                                </h4>
-                            </Link>
-
-                            <div className="text-xs text-muted-foreground mb-2">
-                                <span className="text-fox-orange font-medium">Episode {item.episodeNumber}</span>
-                                {item.animeSeason && (
-                                    <>
-                                        <span className="mx-1">•</span>
-                                        <span className="capitalize">{item.animeSeason}</span>
-                                    </>
-                                )}
-                                <span className="mx-1">•</span>
-                                <span>{Math.floor((item.duration - item.timestamp) / 60)}m left</span>
+                            {/* Episode info overlay */}
+                            <div className="absolute bottom-2 left-14 right-3 flex items-center justify-between">
+                                <span className="text-xs font-medium text-white/90">
+                                    EP {item.episodeNumber}
+                                </span>
+                                <span className="text-xs text-white/60">
+                                    {Math.floor((item.duration - item.timestamp) / 60)}m left
+                                </span>
                             </div>
 
-                            {/* Remove Button */}
+                            {/* Remove button */}
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="absolute top-2 right-2 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/20 hover:text-red-400"
+                                className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover/card:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 hover:text-white text-white/70 rounded-full"
                                 onClick={(e) => {
                                     e.preventDefault();
+                                    e.stopPropagation();
                                     onRemove(item.animeId);
                                 }}
                                 title="Remove from history"
                             >
-                                <X className="w-3 h-3" />
+                                <X className="w-3.5 h-3.5" />
                             </Button>
                         </div>
-                    </div>
+
+                        <div className="mt-2.5">
+                            <h3 className="font-medium text-sm line-clamp-1 group-hover/card:text-fox-orange transition-colors">
+                                {item.animeTitle}
+                            </h3>
+                        </div>
+                    </Link>
                 ))}
             </div>
         </div>

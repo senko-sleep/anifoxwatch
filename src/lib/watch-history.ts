@@ -11,6 +11,7 @@ export interface WatchHistoryItem {
     duration: number;
     lastWatched: number; // Date.now()
     progress: number; // 0 to 1
+    frameThumbnail?: string; // Base64 or URL of video frame at timestamp
 }
 
 const HISTORY_KEY = 'anistream_watch_history';
@@ -22,7 +23,8 @@ export const WatchHistory = {
         episodeId: string,
         episodeNumber: number,
         timestamp: number,
-        duration: number
+        duration: number,
+        frameThumbnail?: string
     ) => {
         try {
             const historyJSON = localStorage.getItem(HISTORY_KEY);
@@ -42,7 +44,8 @@ export const WatchHistory = {
                 timestamp,
                 duration,
                 lastWatched: Date.now(),
-                progress: duration > 0 ? timestamp / duration : 0
+                progress: duration > 0 ? timestamp / duration : 0,
+                frameThumbnail
             };
 
             // Add to beginning

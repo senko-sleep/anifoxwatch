@@ -438,13 +438,29 @@ export const VideoPlayer = ({
 
         // Save to global watch history if anime details are available
         if (animeId && animeTitle && animeImage && selectedEpisodeNum) {
+          // Capture video frame as thumbnail
+          let frameThumbnail: string | undefined;
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = 180;
+            const ctx = canvas.getContext('2d');
+            if (ctx && video.videoWidth > 0) {
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              frameThumbnail = canvas.toDataURL('image/jpeg', 0.7);
+            }
+          } catch (e) {
+            // Frame capture may fail due to CORS, ignore
+          }
+
           import('@/lib/watch-history').then(({ WatchHistory }) => {
             WatchHistory.save(
               { id: animeId, title: animeTitle, image: animeImage, season: animeSeason } as any,
               selectedEpisodeNum.toString(),
               selectedEpisodeNum,
               time,
-              video.duration
+              video.duration,
+              frameThumbnail
             );
           });
         }

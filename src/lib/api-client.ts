@@ -362,8 +362,8 @@ class AnimeApiClient {
         return this.fetch<AnimeSearchResult>(`/api/anime/filter?${params}`);
     }
 
-    async browseAnime(filters: BrowseFilters, page: number = 1, bypassCache: boolean = false): Promise<AnimeSearchResult> {
-        const params = new URLSearchParams({ page: String(page), limit: '25' });
+    async browseAnime(filters: BrowseFilters, page: number = 1, bypassCache: boolean = false, limit: number = 25): Promise<AnimeSearchResult> {
+        const params = new URLSearchParams({ page: String(page), limit: String(limit) });
 
         if (filters.type) params.append('type', filters.type);
         if (filters.genre) params.append('genre', filters.genre);

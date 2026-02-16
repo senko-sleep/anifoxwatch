@@ -7,6 +7,7 @@ import { lazy, Suspense } from "react";
 import Index from "./pages/Index";
 import Watch from "./pages/Watch";
 import Search from "./pages/Search";
+import Browse from "./pages/Browse";
 import Docs from "./pages/Docs";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
@@ -88,7 +89,7 @@ const App = () => (
               </Suspense>
             }
           />
-          <Route path="/browse" element={<Search />} />
+          <Route path="/browse" element={<Browse />} />
           <Route
             path="/status"
             element={

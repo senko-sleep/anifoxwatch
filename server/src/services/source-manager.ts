@@ -1852,116 +1852,16 @@ export class SourceManager {
         let effectiveSource = filters.source;
 
         if (mode === 'adult') {
-            if (filters.source && ['WatchHentai', 'Hanime'].includes(filters.source)) {
-                effectiveSource = filters.source;
-            } else {
-                // Fetch from both adult sources and combine results for more diversity
-                const watchHentai = this.getAvailableSource('WatchHentai');
-                const hanime = this.getAvailableSource('Hanime');
-                const adultSources = [];
-                if (watchHentai?.isAvailable) adultSources.push(watchHentai);
-                if (hanime?.isAvailable) adultSources.push(hanime);
-
-                if (adultSources.length > 0) {
-                    try {
-                        const results = await Promise.all(
-                            adultSources.map(source => this._executeBrowse(source, filters))
-                        );
-
-                        // Combine and deduplicate results
-                        const combinedAnime = results.flatMap(result => result.anime);
-                        const uniqueAnime = Array.from(new Map(combinedAnime.map(a => [a.id, a])).values());
-
-                        logger.sourceResponse('Adult', 'browseAnime', true, {
-                            returned: uniqueAnime.length,
-                            page: filters.page,
-                            sources: adultSources.map(s => s.name)
-                        });
-                        timer.end();
-
-                        // Calculate total pages and hasNextPage based on all sources
-                        const totalPages = Math.max(...results.map(r => r.totalPages));
-                        const hasNextPage = results.some(r => r.hasNextPage);
-
-                        return {
-                            anime: uniqueAnime,
-                            totalPages,
-                            hasNextPage,
-                            totalResults: uniqueAnime.length
-                        };
-                    } catch (error) {
-                        logger.error(`Adult browse failed: ${error}`, error as Error, filters);
-                        // Fallback to WatchHentai if combined approach fails
-                        effectiveSource = watchHentai?.isAvailable ? 'WatchHentai' : (hanime?.isAvailable ? 'Hanime' : 'WatchHentai');
-                    }
-                } else {
-                    effectiveSource = 'WatchHentai';
-                }
-            }
+            // Use only WatchHentai for adult content - simpler and more consistent
+            effectiveSource = filters.source && ['WatchHentai', 'Hanime'].includes(filters.source) 
+                ? filters.source 
+                : 'WatchHentai';
         } else if (mode === 'mixed') {
-            // For mixed mode, we'll fetch from both standard sources and adult sources and combine results
+            // For mixed mode, just use standard source - adult content should use adult mode
+            // This avoids duplicate results across pages when combining sources
             const standardSource = this.getAvailableSource(filters.source);
-            const adultSources = ['WatchHentai', 'Hanime']
-                .map(name => this.getAvailableSource(name))
-                .filter(s => s?.isAvailable) as StreamingSource[];
-
-            // If standard source and at least one adult source are available
-            if (standardSource && adultSources.length > 0) {
-                try {
-                    const promises = [
-                        this._executeBrowse(standardSource, filters)
-                    ].concat(
-                        adultSources.map(source => this._executeBrowse(source, filters))
-                    );
-
-                    const results = await Promise.all(promises);
-
-                    // Combine and deduplicate results - adult content first
-                    const standardResult = results[0];
-                    const adultResults = results.slice(1);
-                    
-                    const combinedAnime = [
-                        ...adultResults.flatMap(r => r.anime),
-                        ...standardResult.anime
-                    ];
-                    
-                    const uniqueAnime = Array.from(new Map(combinedAnime.map(a => [a.id, a])).values());
-
-                    logger.sourceResponse('Mixed', 'browseAnime', true, {
-                        returned: uniqueAnime.length,
-                        page: filters.page,
-                        standard: standardResult.anime.length,
-                        adult: adultResults.flatMap(r => r.anime).length,
-                        sources: ['Standard', ...adultSources.map(s => s.name)]
-                    });
-                    timer.end();
-
-                    // Calculate total pages and hasNextPage based on all sources
-                    const totalPages = Math.max(...results.map(r => r.totalPages));
-                    const hasNextPage = results.some(r => r.hasNextPage);
-
-                    return {
-                        anime: uniqueAnime,
-                        totalPages,
-                        hasNextPage,
-                        totalResults: uniqueAnime.length
-                    };
-                } catch (error) {
-                    logger.error(`Mixed browse failed: ${error}`, error as Error, filters);
-                    // Fallback to standard source if mixed mode fails
-                    const fallbackSource = this.getAvailableSource(filters.source);
-                    if (fallbackSource) {
-                        const result = await this._executeBrowse(fallbackSource, filters);
-                        logger.sourceResponse(fallbackSource.name, 'browseAnime', true, {
-                            returned: result.anime.length,
-                            page: filters.page,
-                            totalPages: result.totalPages
-                        });
-                        timer.end();
-                        return result;
-                    }
-                    return { anime: [], totalPages: 0, hasNextPage: false, totalResults: 0 };
-                }
+            if (standardSource) {
+                effectiveSource = filters.source;
             }
         }
 
@@ -2137,16 +2037,20 @@ export class SourceManager {
             }
 
             // Special Case 2: Type-only browsing with source support
-            if (!isPaginatedResult && filters.type && typeof (source as any).getByType === 'function') {
+            // Also use for adult sources to get proper pagination metadata
+            const isAdultSource = ['WatchHentai', 'Hanime'].includes(source.name);
+            if (!isPaginatedResult && typeof (source as any).getByType === 'function' && (filters.type || isAdultSource)) {
                 try {
-                    const typeResult = await (source as any).getByType(filters.type, page);
+                    // For adult sources, fetch current page only to avoid cross-page duplicates
+                    // The source's parseAnimeItems already deduplicates episodes within the page
+                    const typeResult = await (source as any).getByType(filters.type || 'ONA', page);
                     if (typeResult.results && typeResult.results.length > 0) {
                         finalResults = typeResult.results;
-                        totalResults = typeResult.totalResults || 1000;
-                        totalPages = typeResult.totalPages || 100; // Boosted as requested
+                        totalResults = typeResult.totalResults || typeResult.totalPages * (filters.limit || 25);
+                        totalPages = typeResult.totalPages || 100;
                         hasNextPage = typeResult.hasNextPage;
                         isPaginatedResult = true;
-                        logger.info(`[SourceManager] Type browse success via ${source.name} for type: ${filters.type}`);
+                        logger.info(`[SourceManager] Type browse success via ${source.name} - ${typeResult.totalPages} pages, ${typeResult.results.length} results on page ${page}`);
                     }
                 } catch (e) {
                     logger.warn(`[SourceManager] Type browse failed on ${source.name}, falling back to trending`);
@@ -2157,7 +2061,9 @@ export class SourceManager {
             // Use MULTI-SOURCE aggregation for better results and streaming coverage
             if (!isPaginatedResult) {
                 // Get backup sources to aggregate from - prioritize reliable streaming sources
-                const backupSourceNames = [
+                // Skip backup sources for adult sources since they don't have adult content
+                const isAdultSource = ['WatchHentai', 'Hanime'].includes(source.name);
+                const backupSourceNames = isAdultSource ? [] : [
                     'HiAnimeDirect', 'HiAnime', 'Gogoanime', 'Zoro', 'AnimePahe', '9Anime'
                 ].filter(n => n !== source.name);
                 const backupSources = backupSourceNames
@@ -2169,8 +2075,8 @@ export class SourceManager {
                 // Fetch from primary source and backups in parallel
                 const fetchPromises: Promise<AnimeBase[]>[] = [];
                 
-                // Primary source - fetch multiple pages
-                const pagesToFetch = sortType === 'shuffle' ? 3 : 2;
+                // Primary source - fetch multiple pages (but only 1 for adult sources to avoid pagination overlap)
+                const pagesToFetch = isAdultSource ? 1 : (sortType === 'shuffle' ? 3 : 2);
                 for (let i = 0; i < pagesToFetch; i++) {
                     fetchPromises.push(
                         (async () => {
@@ -2268,24 +2174,26 @@ export class SourceManager {
                     });
                 }
 
-                // Content mode filtering
+                // Content mode filtering - skip for adult sources since all their content is adult
                 const mode = filters.mode || 'mixed';
                 const adultGenres = ['hentai', 'ecchi', 'yaoi', 'yuri'];
 
-                if (mode === 'safe') {
-                    // Exclude adult content
-                    filtered = filtered.filter(a => {
-                        if (!a.genres || a.genres.length === 0) return true;
-                        return !a.genres.some(g => g && adultGenres.includes(g.toLowerCase()));
-                    });
-                } else if (mode === 'adult') {
-                    // Only show adult content
-                    filtered = filtered.filter(a => {
-                        if (!a.genres || a.genres.length === 0) return false;
-                        return a.genres.some(g => g && adultGenres.includes(g.toLowerCase()));
-                    });
+                if (!isAdultSource) {
+                    if (mode === 'safe') {
+                        // Exclude adult content
+                        filtered = filtered.filter(a => {
+                            if (!a.genres || a.genres.length === 0) return true;
+                            return !a.genres.some(g => g && adultGenres.includes(g.toLowerCase()));
+                        });
+                    } else if (mode === 'adult') {
+                        // Only show adult content
+                        filtered = filtered.filter(a => {
+                            if (!a.genres || a.genres.length === 0) return false;
+                            return a.genres.some(g => g && adultGenres.includes(g.toLowerCase()));
+                        });
+                    }
+                    // mixed mode: show everything (no filtering)
                 }
-                // mixed mode: show everything (no filtering)
 
                 // Shuffle or Sort
                 if (sortType === 'shuffle') {
@@ -2331,11 +2239,17 @@ export class SourceManager {
 
         logger.info(`[SourceManager] Browse filtered: ${finalResults.length} -> ${streamableResults.length} streamable results`);
 
+        // For paginated results (from getByType, getByGenre, etc.), preserve the source's pagination metadata
+        // For non-paginated results (from getTrending/getLatest), keep the calculated values
+        // This ensures pagination is accurate even after deduplication
+        const streamableTotalResults = isPaginatedResult ? totalResults : totalResults;
+        const streamableTotalPages = isPaginatedResult ? totalPages : totalPages;
+
         return {
             anime: streamableResults,
-            totalPages,
+            totalPages: streamableTotalPages,
             hasNextPage,
-            totalResults: streamableResults.length
+            totalResults: streamableTotalResults
         };
     }
 

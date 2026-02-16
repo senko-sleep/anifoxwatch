@@ -99,15 +99,15 @@ interface BrowseFilters {
     mode?: 'safe' | 'mixed' | 'adult';
 }
 
-export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boolean = true, bypassCache: boolean = false) {
+export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boolean = true, bypassCache: boolean = false, limit: number = 25) {
     // Create a stable query key from filters
     const filterKey = JSON.stringify(filters);
 
     return useQuery<AnimeSearchResult, Error>({
-        queryKey: ['browse', filterKey, page, bypassCache],
+        queryKey: ['browse', filterKey, page, bypassCache, limit],
         queryFn: async () => {
             try {
-                const result = await apiClient.browseAnime(filters, page, bypassCache);
+                const result = await apiClient.browseAnime(filters, page, bypassCache, limit);
                 return result;
             } catch (error) {
                 console.error('[useBrowse] Browse failed:', error);
