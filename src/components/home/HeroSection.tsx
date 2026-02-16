@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Play, Info, Star, Clock, Tv, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Play, Info, Star, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -8,7 +8,6 @@ import {
   getHeroTitle,
   getStudioName,
   formatHeroRating,
-  getFormatLabel,
   getSeasonLabel,
   getTrailerUrl,
 } from '@/hooks/useHeroAnimeMultiSource';
@@ -18,7 +17,7 @@ interface HeroSectionProps {
 }
 
 const SLIDE_DURATION = 10000;
-const TRANSITION_DURATION = 1000;
+const TRANSITION_DURATION = 800;
 
 export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -40,9 +39,9 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const anime = heroAnime[currentIndex];
   const count = heroAnime.length;
 
-  // Preload banner images
+  // Preload next few banner images
   useEffect(() => {
-    heroAnime.forEach((a, idx) => {
+    heroAnime.slice(0, 5).forEach((a) => {
       if (a.bannerImage) {
         const img = new Image();
         img.src = a.bannerImage;
@@ -59,7 +58,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
     setCurrentIndex(index);
     progressRef.current = 0;
     setProgress(0);
-    setTimeout(() => setContentVisible(true), 200);
+    setTimeout(() => setContentVisible(true), 150);
     setTimeout(() => setPrevIndex(null), TRANSITION_DURATION);
   }, [currentIndex]);
 
@@ -100,16 +99,13 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
     return () => window.removeEventListener('keydown', onKey);
   }, [handlePrev, handleNext]);
 
-  // Show trailer immediately on hover, enable sound after 5 seconds
+  // Trailer: play muted on hover, sound after 5s
   const handleMouseEnter = useCallback(() => {
     setIsPaused(true);
-    const trailerUrl = anime ? getTrailerUrl(anime) : null;
-    if (trailerUrl) {
+    const url = anime ? getTrailerUrl(anime) : null;
+    if (url) {
       setShowTrailer(true);
-      // Enable sound after 5 seconds of continuous hover for cinematic mode
-      soundTimerRef.current = setTimeout(() => {
-        setTrailerWithSound(true);
-      }, 5000);
+      soundTimerRef.current = setTimeout(() => setTrailerWithSound(true), 5000);
     }
   }, [anime]);
 
@@ -118,21 +114,14 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
     setShowTrailer(false);
     setTrailerLoaded(false);
     setTrailerWithSound(false);
-    if (soundTimerRef.current) {
-      clearTimeout(soundTimerRef.current);
-      soundTimerRef.current = null;
-    }
+    if (soundTimerRef.current) { clearTimeout(soundTimerRef.current); soundTimerRef.current = null; }
   }, []);
 
-  // Reset trailer on slide change
   useEffect(() => {
     setShowTrailer(false);
     setTrailerLoaded(false);
     setTrailerWithSound(false);
-    if (soundTimerRef.current) {
-      clearTimeout(soundTimerRef.current);
-      soundTimerRef.current = null;
-    }
+    if (soundTimerRef.current) { clearTimeout(soundTimerRef.current); soundTimerRef.current = null; }
   }, [currentIndex]);
 
   if (!anime) return null;
@@ -140,7 +129,6 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const title = getHeroTitle(anime);
   const studio = getStudioName(anime);
   const rating = formatHeroRating(anime.averageScore);
-  const formatLabel = getFormatLabel(anime.format);
   const seasonLabel = getSeasonLabel(anime.season, anime.seasonYear);
   const trailerUrl = getTrailerUrl(anime);
   const watchId = anime.title.english || anime.title.romaji;
@@ -151,27 +139,27 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      {/* === BACKGROUND IMAGES === */}
+      {/* Background images */}
       {heroAnime.map((a, idx) => {
         const isActive = idx === currentIndex;
         const isPrev = idx === prevIndex;
         const show = isActive || isPrev;
-
         return (
           <div
             key={a.id}
             className="absolute inset-0"
             style={{
               opacity: isActive ? 1 : 0,
-              transition: show ? `opacity ${TRANSITION_DURATION}ms ease-in-out` : 'none',
               zIndex: isActive ? 2 : isPrev ? 1 : 0,
+              transition: show ? `opacity ${TRANSITION_DURATION}ms ease-in-out` : 'none',
+              willChange: show ? 'opacity' : 'auto',
             }}
           >
             <img
               src={a.bannerImage || a.coverImage.extraLarge}
               alt=""
               className="w-full h-full object-cover"
-              style={{ objectPosition: 'center 30%' }}
+              style={{ objectPosition: 'center 25%' }}
               loading={idx < 3 ? 'eager' : 'lazy'}
               decoding="async"
             />
@@ -179,196 +167,129 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
         );
       })}
 
-      {/* === YOUTUBE TRAILER OVERLAY (autoplays on hover, sound after 3s) === */}
+      {/* Trailer overlay */}
       {showTrailer && trailerUrl && (
         <div
           className={cn(
-            "absolute inset-0 z-[5] transition-opacity duration-500",
+            "absolute inset-0 z-[3] transition-opacity duration-500",
             trailerLoaded ? "opacity-100" : "opacity-0"
           )}
         >
           <iframe
-            key={`${anime.id}-${trailerWithSound ? 'sound' : 'muted'}`}
+            key={`${anime.id}-${trailerWithSound ? 's' : 'm'}`}
             src={`${trailerUrl}?autoplay=1&mute=${trailerWithSound ? '0' : '1'}&controls=0&modestbranding=1&rel=0&showinfo=0&loop=1&playlist=${anime.trailer?.id}`}
             className="w-full h-full scale-[1.3]"
             style={{ border: 'none', pointerEvents: 'none' }}
             allow="autoplay; encrypted-media"
             onLoad={() => setTrailerLoaded(true)}
-            title="Anime trailer preview"
+            title="Trailer"
           />
         </div>
       )}
 
-      {/* === GRADIENT OVERLAYS === */}
+      {/* Gradients — match site background color */}
       <div className={cn(
         "absolute inset-0 z-[4] pointer-events-none transition-opacity duration-700",
-        trailerWithSound ? "opacity-30" : "opacity-100"
+        trailerWithSound ? "opacity-20" : "opacity-100"
       )}>
-        <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/50 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[hsl(220,20%,4%)] via-[hsl(220,20%,4%)]/60 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[hsl(220,20%,4%)] via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[hsl(220,20%,4%)]/30 via-transparent to-transparent" />
       </div>
 
-      {/* === MAIN CONTENT === */}
+      {/* Content */}
       <div className={cn(
-        "relative z-[5] h-full max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-12 flex items-center transition-opacity duration-700",
-        trailerWithSound ? "opacity-20" : "opacity-100"
+        "relative z-[5] h-full max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 flex items-end pb-32 sm:pb-36 transition-opacity duration-700",
+        trailerWithSound ? "opacity-10" : "opacity-100"
       )}>
         <div
           className={cn(
-            "max-w-xl space-y-2.5 transition-all ease-out",
-            contentVisible
-              ? "opacity-100 translate-y-0 duration-700"
-              : "opacity-0 translate-y-4 duration-300"
+            "max-w-lg space-y-3 transition-all ease-out",
+            contentVisible ? "opacity-100 translate-y-0 duration-600" : "opacity-0 translate-y-3 duration-200"
           )}
         >
-          {/* Badges */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-black tracking-[0.15em] uppercase rounded bg-fox-orange text-white">
-              <span className="w-1 h-1 rounded-full bg-white animate-pulse" />
-              #{currentIndex + 1}
-            </span>
-
-            {formatLabel && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-semibold tracking-wider uppercase rounded bg-white/10 backdrop-blur text-white/70 border border-white/10">
-                <Tv className="w-2.5 h-2.5" />
-                {formatLabel}
+          {/* Meta line */}
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            {rating && (
+              <span className="inline-flex items-center gap-1 text-fox-orange font-semibold">
+                <Star className="w-3.5 h-3.5 fill-fox-orange text-fox-orange" />
+                {rating}
               </span>
             )}
-
-            {anime.nextAiringEpisode && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-semibold tracking-wider uppercase rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/20">
-                <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
-                Airing
-              </span>
+            {studio && <><span className="text-zinc-600">·</span><span>{studio}</span></>}
+            {seasonLabel && <><span className="text-zinc-600">·</span><span>{seasonLabel}</span></>}
+            {anime.episodes && (
+              <><span className="text-zinc-600">·</span><span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />{anime.episodes} Eps</span></>
             )}
           </div>
 
           {/* Title */}
-          <h1
-            className="text-2xl sm:text-3xl md:text-4xl font-black text-white leading-tight tracking-tight"
-            style={{ textShadow: '0 3px 20px rgba(0,0,0,0.8), 0 2px 6px rgba(0,0,0,0.5)' }}
-          >
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white leading-snug">
             {title}
           </h1>
 
-          {/* Meta row */}
-          <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-white/65">
-            {rating && (
-              <span className="inline-flex items-center gap-0.5 font-semibold text-amber-300">
-                <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                {rating}
-              </span>
-            )}
-            {rating && <span className="text-white/20">•</span>}
-
-            {studio && (
-              <>
-                <span className="font-medium text-white/75">{studio}</span>
-                <span className="text-white/20">•</span>
-              </>
-            )}
-
-            {seasonLabel && (
-              <>
-                <span>{seasonLabel}</span>
-                <span className="text-white/20">•</span>
-              </>
-            )}
-
-            {anime.episodes ? (
-              <span className="inline-flex items-center gap-0.5">
-                <Clock className="w-2.5 h-2.5 text-white/50" />
-                {anime.episodes} Eps
-              </span>
-            ) : anime.nextAiringEpisode ? (
-              <span className="inline-flex items-center gap-0.5">
-                <Clock className="w-2.5 h-2.5 text-white/50" />
-                Ep {anime.nextAiringEpisode.episode - 1}+
-              </span>
-            ) : null}
-
-            {anime.duration && (
-              <>
-                <span className="text-white/20">•</span>
-                <span>{anime.duration}m</span>
-              </>
-            )}
-          </div>
-
           {/* Genres */}
           {anime.genres.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1">
-              {anime.genres.slice(0, 3).map((genre) => (
-                <span
-                  key={genre}
-                  className="px-2 py-0.5 rounded text-[10px] font-medium bg-white/[0.06] text-white/60 border border-white/[0.05]"
-                >
-                  {genre}
+            <div className="flex items-center gap-1.5">
+              {anime.genres.slice(0, 3).map((g) => (
+                <span key={g} className="px-2 py-0.5 rounded-md text-[10px] font-medium text-zinc-400 bg-white/[0.05] border border-white/[0.06]">
+                  {g}
                 </span>
               ))}
             </div>
           )}
 
           {/* Description */}
-          <p
-            className="text-white/55 text-xs sm:text-[13px] leading-relaxed max-w-lg line-clamp-2"
-            style={{ textShadow: '0 2px 6px rgba(0,0,0,0.5)' }}
-          >
-            {anime.description || 'Discover this trending anime and start watching now.'}
+          <p className="text-zinc-500 text-[13px] leading-relaxed line-clamp-2 max-w-md">
+            {anime.description || 'Discover this trending anime now.'}
           </p>
 
-          {/* Action buttons */}
-          <div className="flex items-center gap-2.5 pt-1.5">
+          {/* Buttons — match site style */}
+          <div className="flex items-center gap-2.5 pt-1">
             <Button
-              size="lg"
               onClick={() => navigate(`/browse?q=${encodeURIComponent(watchId)}`, {
                 state: { from: location.pathname + location.search }
               })}
-              className="group relative bg-white hover:bg-white/95 text-black font-bold h-9 sm:h-10 px-5 sm:px-7 rounded-lg gap-2 transition-all duration-300 hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-white/10 overflow-hidden"
+              className="bg-fox-orange hover:bg-fox-orange/90 text-white font-semibold h-10 px-6 rounded-lg gap-2 transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
             >
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
-              <Play className="w-4 h-4 fill-black relative z-10" />
-              <span className="text-xs sm:text-sm relative z-10">Watch Now</span>
+              <Play className="w-4 h-4 fill-white" />
+              Watch Now
             </Button>
 
             <Button
               variant="outline"
-              size="lg"
               onClick={() => navigate(`/browse?q=${encodeURIComponent(watchId)}`)}
-              className="group bg-white/5 hover:bg-white/10 border border-white/15 hover:border-white/30 text-white h-9 sm:h-10 px-5 sm:px-7 rounded-lg gap-2 backdrop-blur-xl transition-all duration-300 hover:scale-[1.02]"
+              className="bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.1] hover:border-white/[0.15] text-zinc-300 font-medium h-10 px-6 rounded-lg gap-2 transition-all duration-200"
             >
-              <Info className="w-3.5 h-3.5" />
-              <span className="text-xs sm:text-sm font-medium">More Info</span>
+              <Info className="w-4 h-4" />
+              More Info
             </Button>
           </div>
-
         </div>
       </div>
 
-      {/* === NAVIGATION === */}
+      {/* Bottom nav */}
       <div className={cn(
-        "absolute bottom-0 left-0 right-0 z-[6] transition-opacity duration-700",
+        "absolute bottom-0 left-0 right-0 z-[6] transition-opacity duration-500",
         trailerWithSound ? "opacity-0" : "opacity-100"
       )}>
-        {/* Progress bar */}
-        <div className="h-[2px] bg-white/10">
-          <div className="h-full bg-fox-orange" style={{ width: `${progress}%`, transition: 'none' }} />
+        {/* Progress */}
+        <div className="h-px bg-white/[0.06]">
+          <div className="h-full bg-fox-orange/60" style={{ width: `${progress}%`, transition: 'none' }} />
         </div>
 
-        {/* Simple controls */}
-        <div className="flex items-center justify-between px-6 sm:px-10 py-6 bg-gradient-to-t from-black/60 via-black/40 to-transparent backdrop-blur-sm">
-          {/* Dots */}
-          <div className="flex items-center gap-2">
-            {heroAnime.map((_, idx) => (
+        <div className="flex items-center justify-between max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          {/* Slide counter */}
+          <div className="flex items-center gap-1.5">
+            {heroAnime.slice(0, 20).map((_, idx) => (
               <button
                 key={idx}
                 onClick={() => goToSlide(idx)}
                 className={cn(
-                  'rounded-full transition-all duration-300',
-                  idx === currentIndex 
-                    ? 'w-8 h-2 bg-fox-orange' 
-                    : 'w-2 h-2 bg-white/30 hover:bg-white/50'
+                  'rounded-full transition-all duration-200',
+                  idx === currentIndex
+                    ? 'w-6 h-1.5 bg-fox-orange'
+                    : 'w-1.5 h-1.5 bg-white/20 hover:bg-white/40'
                 )}
                 aria-label={`Slide ${idx + 1}`}
               />
@@ -376,20 +297,20 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
           </div>
 
           {/* Arrows */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={handlePrev}
-              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center transition-all hover:scale-110"
+              className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] flex items-center justify-center transition-colors"
               aria-label="Previous"
             >
-              <ChevronLeft className="w-5 h-5 text-white" />
+              <ChevronLeft className="w-4 h-4 text-zinc-400" />
             </button>
             <button
               onClick={handleNext}
-              className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 flex items-center justify-center transition-all hover:scale-110"
+              className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] flex items-center justify-center transition-colors"
               aria-label="Next"
             >
-              <ChevronRight className="w-5 h-5 text-white" />
+              <ChevronRight className="w-4 h-4 text-zinc-400" />
             </button>
           </div>
         </div>

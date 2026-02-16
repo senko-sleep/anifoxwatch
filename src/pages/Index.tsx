@@ -158,12 +158,9 @@ const Index = () => {
     <div className="min-h-screen bg-background text-foreground font-sans">
       <Navbar />
 
-      {/* Hero Section — powered by AniList GraphQL for HD banners & rich metadata */}
+      {/* Hero Section */}
       {heroAnime.length > 0 ? (
-        <div className="relative mb-16">
-          <HeroSection heroAnime={heroAnime} />
-          <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background via-background/95 to-transparent pointer-events-none z-[6]" />
-        </div>
+        <HeroSection heroAnime={heroAnime} />
       ) : isLoading ? (
         <div className="h-[70vh] flex items-center justify-center bg-gradient-to-b from-fox-dark to-background">
           <div className="flex flex-col items-center gap-4">
