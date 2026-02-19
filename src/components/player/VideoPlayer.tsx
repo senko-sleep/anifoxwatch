@@ -108,6 +108,10 @@ export const VideoPlayer = ({
   const errorFiredRef = useRef(false);
   const lastErrorTimeRef = useRef(0);
 
+  // Background MP4 cache for offline playback (non-M3U8 streams like WatchHentai)
+  const bgDownloadControllerRef = useRef<AbortController | null>(null);
+  const cachedBlobUrlRef = useRef<string | null>(null);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -412,6 +416,75 @@ export const VideoPlayer = ({
       }
     };
   }, [src, isM3U8, onError, loadSavedPosition]);
+
+  // Background MP4 cache: download full video in bg for instant/offline playback
+  useEffect(() => {
+    if (isM3U8 || !src) return;
+
+    // Cleanup previous blob & abort previous download
+    if (cachedBlobUrlRef.current) {
+      URL.revokeObjectURL(cachedBlobUrlRef.current);
+      cachedBlobUrlRef.current = null;
+    }
+    if (bgDownloadControllerRef.current) {
+      bgDownloadControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    bgDownloadControllerRef.current = controller;
+
+    playerLog('info', 'Starting background MP4 download for offline cache');
+
+    (async () => {
+      try {
+        const response = await fetch(src, { signal: controller.signal });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const blob = await response.blob();
+        if (controller.signal.aborted) return;
+
+        const blobUrl = URL.createObjectURL(blob);
+        cachedBlobUrlRef.current = blobUrl;
+
+        playerLog('info', `Background cache complete: ${(blob.size / 1024 / 1024).toFixed(1)}MB — switching to offline blob`);
+
+        // Swap to cached blob while preserving playback state
+        const video = videoRef.current;
+        if (!video) return;
+
+        const currentPos = video.currentTime;
+        const wasPlaying = !video.paused;
+        const currentVol = video.volume;
+        const wasMuted = video.muted;
+        const currentRate = video.playbackRate;
+
+        const onReady = () => {
+          video.currentTime = currentPos;
+          video.volume = currentVol;
+          video.muted = wasMuted;
+          video.playbackRate = currentRate;
+          if (wasPlaying) video.play().catch(() => {});
+          video.removeEventListener('loadeddata', onReady);
+          playerLog('info', `Swapped to offline blob at ${currentPos.toFixed(1)}s`);
+        };
+
+        video.addEventListener('loadeddata', onReady);
+        video.src = blobUrl;
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          playerLog('warn', 'Background MP4 cache failed, continuing with stream', e.message);
+        }
+      }
+    })();
+
+    return () => {
+      controller.abort();
+      if (cachedBlobUrlRef.current) {
+        URL.revokeObjectURL(cachedBlobUrlRef.current);
+        cachedBlobUrlRef.current = null;
+      }
+    };
+  }, [src, isM3U8]);
 
   // Video event handlers
   useEffect(() => {
