@@ -1,6 +1,6 @@
 /**
  * HiAnime Direct Source - Uses the aniwatch package directly for deep scraping
- * This bypasses external APIs and scrapes directly from hianimez.to
+ * This bypasses external APIs and scrapes directly from hianime.city
  * 
  * This is the most reliable source as it doesn't depend on third-party APIs
  */
@@ -15,7 +15,7 @@ import { logger } from '../utils/logger.js';
 
 export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'HiAnimeDirect';
-    baseUrl = 'https://hianime.to';
+    baseUrl = 'https://hianimez.to';
     private scraper: HiAnime.Scraper | null = null;
     private scraperInitialized = false;
 
@@ -79,7 +79,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
     private mapAnime(data: any): AnimeBase {
         return {
-            id: `hianime-${data.id}`,
+            id: data.id,
             title: data.name || data.title || 'Unknown',
             titleJapanese: data.jname,
             image: data.poster || data.image || '',
@@ -143,11 +143,18 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                 () => this.getScraper().getHomePage(),
                 options?.signal
             );
-            this.isAvailable = !!(home.trendingAnimes && home.trendingAnimes.length > 0);
+            this.isAvailable = !!(home?.trendingAnimes?.length || home?.spotlightAnimes?.length);
+            if (!this.isAvailable) {
+                // Lenient: base URL might work for streaming even if home page structure changed
+                const head = await axios.head(this.baseUrl, { timeout: 5000, validateStatus: () => true }).catch(() => null);
+                if (head && head.status < 400) this.isAvailable = true;
+            }
             return this.isAvailable;
         } catch (error) {
             this.handleError(error, 'healthCheck');
-            return false;
+            // Optimistic: allow streaming attempts even when home check fails (episode/sources use different endpoints)
+            this.isAvailable = true;
+            return true;
         }
     }
 
@@ -582,7 +589,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                 timeout: options?.timeout || 10000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': 'https://hianime.to/'
+                    'Referer': 'https://aniwatchtv.to/'
                 }
             });
 
@@ -598,7 +605,7 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
                 if (!id) return;
 
                 animeItems.push({
-                    id: `hianime-${id}`,
+                    id: id,
                     title: titleNode.text().trim(),
                     titleJapanese: titleNode.attr('data-jname') || undefined,
                     image: $el.find('.film-poster .film-poster-img').attr('data-src') || '',

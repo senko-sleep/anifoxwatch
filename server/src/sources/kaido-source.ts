@@ -13,8 +13,8 @@ export class KaidoSource extends BaseAnimeSource {
 
     private getScraper(): HiAnime.Scraper {
         if (!this.scraper) {
-            // @ts-expect-error - aniwatch scraper constructor
-            this.scraper = new HiAnime.Scraper('https://hianime.to');
+            // @ts-expect-error - aniwatch scraper constructor (aniwatchtv.to after hianime.city shutdown)
+            this.scraper = new HiAnime.Scraper('https://aniwatchtv.to');
         }
         return this.scraper;
     }

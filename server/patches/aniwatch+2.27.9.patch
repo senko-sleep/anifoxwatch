@@ -1,0 +1,13 @@
+diff --git a/node_modules/aniwatch/dist/index.js b/node_modules/aniwatch/dist/index.js
+index 40dbc53..f5cca55 100644
+--- a/node_modules/aniwatch/dist/index.js
++++ b/node_modules/aniwatch/dist/index.js
+@@ -23,7 +23,7 @@ import axios, { AxiosError } from "axios";
+ var ACCEPT_ENCODING_HEADER = "gzip, deflate, br";
+ var USER_AGENT_HEADER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+ var ACCEPT_HEADER = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9";
+-var DOMAIN = process.env.ANIWATCH_DOMAIN || "aniwatchtv.to";
++var DOMAIN = "aniwatchtv.to";
+ var SRC_BASE_URL = `https://${DOMAIN}`;
+ var SRC_AJAX_URL = `${SRC_BASE_URL}/ajax`;
+ var SRC_AJAX_VERSION_PREFIX = process.env.ANIWATCH_AJAX_VERSION_PREFIX ?? (["kaido.to", "9animetv.to", "4anime.gg"].includes(DOMAIN) ? "" : "/v2");

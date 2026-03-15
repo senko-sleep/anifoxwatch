@@ -146,7 +146,7 @@ interface ChiStreamResponse {
  * - High-quality HD streams (720p, 1080p)
  * - Both Sub and Dub support
  * - Multiple server fallbacks
- * - Proper data scraping from hianime.to
+ * - Proper data scraping from hianime.city
  */
 export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'HiAnime';
@@ -178,7 +178,7 @@ export class HiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     private getScraper(): HiAnime.Scraper {
         if (!this.scraper) {
             // @ts-expect-error - Pass baseUrl to constructor
-            this.scraper = new HiAnime.Scraper('https://hianime.to');
+            this.scraper = new HiAnime.Scraper('https://aniwatchtv.to');
         }
         return this.scraper;
     }

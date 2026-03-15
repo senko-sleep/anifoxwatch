@@ -6,6 +6,7 @@ import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
+import { streamExtractor } from '../services/stream-extractor.js';
 
 /**
  * 9Anime Source - Web scraper for 9animetv.to
@@ -23,8 +24,8 @@ export class NineAnimeSource extends BaseAnimeSource {
 
     private getScraper(): HiAnime.Scraper {
         if (!this.scraper) {
-            // @ts-expect-error - aniwatch scraper constructor
-            this.scraper = new HiAnime.Scraper('https://hianime.to');
+            // @ts-expect-error - aniwatch scraper constructor (aniwatchtv.to after hianime.city shutdown)
+            this.scraper = new HiAnime.Scraper('https://aniwatchtv.to');
         }
         return this.scraper;
     }
@@ -586,10 +587,46 @@ export class NineAnimeSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            // 9Anime and HiAnime share the same backend (same episode IDs).
-            // Use the aniwatch scraper directly — it can decode rapid-cloud embeds.
-            logger.info(`Using aniwatch scraper for ${episodeId}`, undefined, this.name);
+            // 1) Try native 9anime extraction (Puppeteer) when episodeId is slug?ep=id — works with 9anime episode IDs
+            if (episodeId.includes('?ep=')) {
+                const [animeSlug, epPart] = episodeId.split('?');
+                const epNum = epPart?.replace('ep=', '')?.trim() || '';
+                if (animeSlug && epNum) {
+                    try {
+                        const result = await Promise.race([
+                            streamExtractor.extractFrom9Anime(animeSlug, epNum),
+                            new Promise<{ success: false }>((_, rej) =>
+                                setTimeout(() => rej(new Error('Stream extractor timeout')), 22000)
+                            )
+                        ]).catch(() => ({ success: false, streams: [] as { url: string; quality: string; type: string }[] }));
+                        if (result.success && result.streams?.length > 0) {
+                            const streamData: StreamingData = {
+                                sources: result.streams.map((s) => ({
+                                    url: s.url,
+                                    quality: this.normalizeQuality(s.quality || 'auto') as 'auto' | '360p' | '480p' | '720p' | '1080p',
+                                    isM3U8: s.type === 'hls' || s.url?.includes('.m3u8'),
+                                })),
+                                subtitles: (result as { subtitles?: { url: string; lang: string }[] }).subtitles?.map((sub) => ({
+                                    url: sub.url,
+                                    lang: sub.lang,
+                                    label: sub.lang
+                                })) || [],
+                                headers: { Referer: 'https://9animetv.to/' },
+                                source: this.name
+                            };
+                            logger.info(`9Anime native extractor got ${streamData.sources.length} sources for ${episodeId}`, undefined, this.name);
+                            this.setCache(cacheKey, streamData, this.cacheTTL.stream);
+                            this.handleSuccess();
+                            return streamData;
+                        }
+                    } catch {
+                        // Fall through to aniwatch scraper
+                    }
+                }
+            }
 
+            // 2) Fallback: aniwatch scraper (aniwatchtv.to) — same slug?ep= format may work for shared content
+            logger.info(`Using aniwatch scraper for ${episodeId}`, undefined, this.name);
             const serverPriority = [server, 'hd-2', 'hd-1', 'hd-3'].filter((v, i, a) => a.indexOf(v) === i);
             for (const srv of serverPriority) {
                 try {

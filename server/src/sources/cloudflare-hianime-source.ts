@@ -11,7 +11,7 @@ import { logger } from '../utils/logger.js';
 
 export class CloudflareHiAnimeSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'CloudflareHiAnime';
-    baseUrl = 'https://hianime.to';
+    baseUrl = 'https://hianime.city';
 
     // Cache for performance
     private cache: Map<string, { data: unknown; expires: number }> = new Map();

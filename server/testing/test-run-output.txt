@@ -1,0 +1,148 @@
+﻿
+> anifoxwatch-api@1.0.0 test:hianime-city
+> tsx testing/test-hianime-city.ts
+
+
+============================================================
+  HIANIME.CITY + 9ANIME STREAMING TEST
+  Anime: One Piece | Episode: 1
+============================================================
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  TEST 1 ΓÇö hianime.city reachability
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Γ£à  hianime.city responded with HTTP 200
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  TEST 7 ΓÇö 9animetv.to reachability
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Γ£à  9animetv.to responded with HTTP 200
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  TEST 2 ΓÇö aniwatch scraper home page (hianime.city)
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Γ¥î  Home page returned 0 trending anime
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  TEST 3 ΓÇö aniwatch scraper episodes (hianime.city)
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Γ¥î  Scraper getEpisodes failed: getAnimeEpisodes: cheerio.load() expects a string
+  Γä╣∩╕Å   Using episode ID for streaming tests: one-piece-100?ep=10065
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  TEST 4 ΓÇö aniwatch scraper streaming sources (hianime.city)
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Γä╣∩╕Å   Trying server: hd-2 (sub)
+  Γ¥î  Server hd-2 failed: getAnimeEpisodeSources: cheerio.load() expects a string
+  Γä╣∩╕Å   Trying server: hd-1 (sub)
+[2026-03-14 22:22:12.325 -0400] [31mERROR[39m (7064): [36m[31m{
+  "status": 500,
+  "scraper": "getAnimeEpisodes",
+  "message": "getAnimeEpisodes: cheerio.load() expects a string"
+}[0m[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:12.329 -0400] [32mINFO[39m (7064): [36mEPISODE_ID: https://hianimez.to/watch/one-piece-100?ep=10065[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:12.727 -0400] [31mERROR[39m (7064): [36m[31m{
+  "status": 500,
+  "scraper": "getAnimeEpisodeSources",
+  "message": "getAnimeEpisodeSources: cheerio.load() expects a string"
+}[0m[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:12.727 -0400] [32mINFO[39m (7064): [36mEPISODE_ID: https://hianimez.to/watch/one-piece-100?ep=10065[39m
+    [35mcontext[39m: "aniwatch-pkg"
+  Γ¥î  Server hd-1 failed: getAnimeEpisodeSources: cheerio.load() expects a string
+  Γä╣∩╕Å   Trying server: hd-3 (sub)
+[2026-03-14 22:22:12.985 -0400] [31mERROR[39m (7064): [36m[31m{
+  "status": 500,
+  "scraper": "getAnimeEpisodeSources",
+  "message": "getAnimeEpisodeSources: cheerio.load() expects a string"
+}[0m[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:12.986 -0400] [32mINFO[39m (7064): [36mEPISODE_ID: https://hianimez.to/watch/one-piece-100?ep=10065[39m
+    [35mcontext[39m: "aniwatch-pkg"
+  Γ¥î  Server hd-3 failed: getAnimeEpisodeSources: cheerio.load() expects a string
+  Γä╣∩╕Å   Trying server: megacloud (sub)
+[2026-03-14 22:22:13.268 -0400] [31mERROR[39m (7064): [36m[31m{
+  "status": 500,
+  "scraper": "getAnimeEpisodeSources",
+  "message": "getAnimeEpisodeSources: cheerio.load() expects a string"
+}[0m[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:13.268 -0400] [32mINFO[39m (7064): [36mEPISODE_ID: https://hianimez.to/watch/one-piece-100?ep=10065[39m
+    [35mcontext[39m: "aniwatch-pkg"
+  Γ¥î  Server megacloud failed: getAnimeEpisodeSources: cheerio.load() expects a string
+  Γ¥î  All servers failed for hianime.city streaming
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  TEST 5 ΓÇö Local API /api/stream/watch (hianime.city)
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Γä╣∩╕Å   Requesting: http://localhost:3001/api/stream/watch/one-piece-100%3Fep%3D10065?proxy=false&category=sub
+[2026-03-14 22:22:13.546 -0400] [31mERROR[39m (7064): [36m[31m{
+  "status": 500,
+  "scraper": "getAnimeEpisodeSources",
+  "message": "getAnimeEpisodeSources: cheerio.load() expects a string"
+}[0m[39m
+    [35mcontext[39m: "aniwatch-pkg"
+  Γ¥î  Local API: HTTP 404 ΓÇö {"error":"No streaming sources found","episodeId":"one-piece-100?ep=10065","triedServers":["hd-2","hd-1","hd-3"],"lastError":null,"suggestion":"All servers failed. Please try again later."}
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  TEST 6 ΓÇö 9anime backup streaming (aniwatch scraper)
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Γä╣∩╕Å   [9anime backup] Trying server: hd-2
+[2026-03-14 22:22:19.410 -0400] [32mINFO[39m (7064): [36mEPISODE_ID: https://hianimez.to/watch/one-piece-100?ep=10065[39m
+    [35mcontext[39m: "aniwatch-pkg"
+  Γ¥î  [9anime backup] Server hd-2 failed: getAnimeEpisodeSources: cheerio.load() expects a string
+  Γä╣∩╕Å   [9anime backup] Trying server: hd-1
+  Γ¥î  [9anime backup] Server hd-1 failed: getAnimeEpisodeSources: cheerio.load() expects a string
+  Γä╣∩╕Å   [9anime backup] Trying server: hd-3
+  Γ¥î  [9anime backup] Server hd-3 failed: getAnimeEpisodeSources: cheerio.load() expects a string
+  Γä╣∩╕Å   [9anime backup] Trying server: megacloud
+[2026-03-14 22:22:21.374 -0400] [31mERROR[39m (7064): [36m[31m{
+  "status": 500,
+  "scraper": "getAnimeEpisodeSources",
+  "message": "getAnimeEpisodeSources: cheerio.load() expects a string"
+}[0m[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:21.374 -0400] [32mINFO[39m (7064): [36mEPISODE_ID: https://hianimez.to/watch/one-piece-100?ep=10065[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:21.629 -0400] [31mERROR[39m (7064): [36m[31m{
+  "status": 500,
+  "scraper": "getAnimeEpisodeSources",
+  "message": "getAnimeEpisodeSources: cheerio.load() expects a string"
+}[0m[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:21.629 -0400] [32mINFO[39m (7064): [36mEPISODE_ID: https://hianimez.to/watch/one-piece-100?ep=10065[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:21.869 -0400] [31mERROR[39m (7064): [36m[31m{
+  "status": 500,
+  "scraper": "getAnimeEpisodeSources",
+  "message": "getAnimeEpisodeSources: cheerio.load() expects a string"
+}[0m[39m
+    [35mcontext[39m: "aniwatch-pkg"
+[2026-03-14 22:22:21.869 -0400] [32mINFO[39m (7064): [36mEPISODE_ID: https://hianimez.to/watch/one-piece-100?ep=10065[39m
+    [35mcontext[39m: "aniwatch-pkg"
+  Γ¥î  [9anime backup] Server megacloud failed: getAnimeEpisodeSources: cheerio.load() expects a string
+  Γ¥î  [9anime backup] All servers failed
+
+============================================================
+  RESULTS SUMMARY
+============================================================
+  Γ£à  hianime.city reachable
+  Γ£à  9animetv.to reachable
+  Γ¥î  scraper home page
+  Γ¥î  scraper episodes
+  Γ¥î  hianime.city stream
+  Γ¥î  local API stream
+  Γ¥î  9anime backup stream
+
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  Total: 2 passed, 5 failed
+ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+
+[2026-03-14 22:22:22.144 -0400] [31mERROR[39m (7064): [36m[31m{
+  "status": 500,
+  "scraper": "getAnimeEpisodeSources",
+  "message": "getAnimeEpisodeSources: cheerio.load() expects a string"
+}[0m[39m
+    [35mcontext[39m: "aniwatch-pkg"

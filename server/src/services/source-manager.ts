@@ -5,7 +5,7 @@ import {
     NineAnimeSource,
     WatchHentaiSource,
     HanimeSource,
-    // Backup sources (verified search works)
+    ConsumetSource,
     KaidoSource,
     AnimeFLVSource,
 } from '../sources/index.js';
@@ -63,7 +63,7 @@ export class SourceManager {
     
     // Reordered - working sources first, then new backups
     private sourceOrder: string[] = [
-        'HiAnimeDirect', 'HiAnime', '9Anime', 'Kaido', 'AnimeFLV',
+        'HiAnimeDirect', 'HiAnime', '9Anime', 'Consumet', 'Kaido', 'AnimeFLV',
         'WatchHentai', 'Hanime'
     ];
 
@@ -76,6 +76,7 @@ export class SourceManager {
         ['AnimeFLV', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
+        ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -115,8 +116,9 @@ export class SourceManager {
         this.registerSource(new NineAnimeSource());
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
+        this.registerSource(new ConsumetSource(process.env.CONSUMET_API_URL || 'https://api.consumet.org', 'gogoanime'));
 
-        // Backup sources (search works, no streaming)
+        // Backup sources (search works)
         this.registerSource(new KaidoSource());
         this.registerSource(new AnimeFLVSource());
 
@@ -131,6 +133,7 @@ export class SourceManager {
         this.sourceRateLimits.set('AnimeFLV', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
+        this.sourceRateLimits.set('Consumet', { limit: 60, resetTime: 60000 });
 
         // Start health monitoring and perform initial health check
         this.startHealthMonitor();
@@ -2279,30 +2282,29 @@ export class SourceManager {
             { name: 'hd-2', url: '', type: 'sub' }
         ];
 
-        // If no known prefix, ONLY use primary source
+        // No prefix = universal slug (one-piece-100?ep=2): try any source that supports slug?ep=
         if (!hasSourcePrefix) {
-            if (!primarySource?.isAvailable || !primarySource.getEpisodeServers) {
-                console.log(`   ⚠️ No primary source with getEpisodeServers, returning defaults`);
-                timer.end();
-                return defaultServers;
-            }
-            
-            try {
-                console.log(`   ⏳ Trying primary source ${primarySource.name}`);
-                const servers = await this.executeReliably(primarySource.name, 'getEpisodeServers',
-                    (signal) => primarySource.getEpisodeServers!(episodeId, { signal }),
-                    { timeout: 10000 }
-                );
-                if (servers && servers.length > 0) {
-                    const duration = Date.now() - startTime;
-                    console.log(`   ✅ Got ${servers.length} servers from ${primarySource.name} in ${duration}ms`);
-                    timer.end();
-                    return servers;
+            const slugSources = ['HiAnimeDirect', 'HiAnime', '9Anime', 'Kaido'] as const;
+            const toTry = slugSources
+                .map(n => this.sources.get(n) as StreamingSource)
+                .filter((s): s is StreamingSource => !!s?.isAvailable && !!s.getEpisodeServers);
+            for (const source of toTry) {
+                try {
+                    console.log(`   ⏳ Trying ${source.name} with slug: ${episodeId}`);
+                    const servers = await this.executeReliably(source.name, 'getEpisodeServers',
+                        (signal) => source.getEpisodeServers!(episodeId, { signal }),
+                        { timeout: 8000 }
+                    );
+                    if (servers && servers.length > 0) {
+                        const duration = Date.now() - startTime;
+                        console.log(`   ✅ Got ${servers.length} servers from ${source.name} in ${duration}ms`);
+                        timer.end();
+                        return servers;
+                    }
+                } catch (err) {
+                    console.log(`   ❌ ${source.name} failed: ${(err as Error).message}`);
                 }
-            } catch (err) {
-                console.log(`   ❌ Primary source failed: ${(err as Error).message}`);
             }
-            
             timer.end();
             return defaultServers;
         }
@@ -2375,23 +2377,25 @@ export class SourceManager {
 
         const sourcesToTry: StreamingSource[] = [];
         
-        // Add primary source first if available
-        if (primarySource?.isAvailable && primarySource.getStreamingLinks) {
+        // Add primary source first: matching prefix (e.g. hianime-) or any available for raw slug
+        const primaryMatchesId = primarySource && hasSourcePrefix && primarySource.getStreamingLinks;
+        if (primaryMatchesId && !sourcesToTry.includes(primarySource!)) {
+            sourcesToTry.push(primarySource!);
+        }
+        if (primarySource?.isAvailable && primarySource.getStreamingLinks && !sourcesToTry.includes(primarySource)) {
             sourcesToTry.push(primarySource);
         }
 
-        // Only add backup sources if the ID has a known prefix (can be converted)
-        // Limit to reliable sources only to avoid slowdowns
-        if (hasSourcePrefix) {
-            const backupNames = ['HiAnimeDirect', 'HiAnime', '9Anime'].filter(n => n !== primarySource?.name);
-            for (const name of backupNames) {
-                if (isAdultContent && name !== 'WatchHentai') continue;
-                if (!isAdultContent && name === 'WatchHentai') continue;
-                
-                const source = this.sources.get(name) as StreamingSource;
-                if (source?.isAvailable && source.getStreamingLinks) {
-                    sourcesToTry.push(source);
-                }
+        // Backup sources: when prefix present (convert ID) OR when raw slug (one-piece-100?ep=2) try all slug-capable sources
+        const backupNames = hasSourcePrefix
+            ? ['HiAnimeDirect', 'HiAnime', '9Anime'].filter(n => n !== primarySource?.name)
+            : ['HiAnimeDirect', 'HiAnime', '9Anime', 'Kaido'];
+        for (const name of backupNames) {
+            if (isAdultContent && name !== 'WatchHentai') continue;
+            if (!isAdultContent && name === 'WatchHentai') continue;
+            const source = this.sources.get(name) as StreamingSource;
+            if (source?.isAvailable && source.getStreamingLinks && !sourcesToTry.includes(source)) {
+                sourcesToTry.push(source);
             }
         }
 
@@ -2404,8 +2408,8 @@ export class SourceManager {
             return { sources: [], subtitles: [] };
         }
 
-        // Try PRIMARY source FIRST with original ID (fast path)
-        if (primarySource?.isAvailable && primarySource.getStreamingLinks) {
+        // Try PRIMARY source FIRST with original ID (fast path) - also when marked offline for matching IDs
+        if (primarySource?.getStreamingLinks && sourcesToTry.includes(primarySource)) {
             try {
                 console.log(`   ⏳ Trying primary source ${primarySource.name} with ID: ${episodeId}`);
                 const data = await this.executeReliably(primarySource.name, 'getStreamingLinks', 
@@ -2426,20 +2430,20 @@ export class SourceManager {
             }
         }
 
-        // If primary failed and we have other sources to try, try them in parallel
-        const otherSources = sourcesToTry.filter(s => s !== primarySource).slice(0, 3);
-        if (otherSources.length > 0 && hasSourcePrefix) {
+        // If primary failed, try other sources (same raw slug for universal format, or prefixed for explicit)
+        const otherSources = sourcesToTry.filter(s => s !== primarySource).slice(0, 4);
+        if (otherSources.length > 0) {
             console.log(`   🔄 Trying ${otherSources.length} fallback sources in parallel`);
             logger.sourceAggregation('getStreamingLinks', otherSources.map(s => s.name), { episodeId, rawId, server, category });
 
             const results = await Promise.allSettled(
                 otherSources.map(source => {
-                    const idToUse = this.buildSourceId(rawId, source.name);
+                    const idToUse = hasSourcePrefix ? this.buildSourceId(rawId, source.name) : episodeId;
                     console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
                     
                     return this.executeReliably(source.name, 'getStreamingLinks', 
                         (signal) => source.getStreamingLinks!(idToUse, server, category, { signal }),
-                        { timeout: 10000 }
+                        { timeout: 28000 }
                     )
                     .then(data => {
                         const duration = Date.now() - startTime;

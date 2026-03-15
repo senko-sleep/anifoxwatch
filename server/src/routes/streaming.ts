@@ -52,7 +52,8 @@ const CDN_CONFIGS: Array<{
     {
         pattern: /hianime/i,
         configs: [
-            { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
+            { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
+            { referer: 'https://hianime.city/', origin: 'https://hianime.city' },
             { referer: 'https://hianime.pe/', origin: 'https://hianime.pe' }
         ]
     },
@@ -74,9 +75,9 @@ function getCdnConfigs(hostname: string): Array<{ referer: string; origin?: stri
             return config.configs;
         }
     }
-    // Default config
+    // Default config (aniwatchtv.to after hianime.city shutdown)
     return [
-        { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
+        { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
         { referer: 'https://9anime.lu/', origin: 'https://9anime.lu' }
     ];
 }
@@ -437,9 +438,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'megacloud': { referer: 'https://megacloud.blog/' },
             'vidcloud': { referer: 'https://vidcloud9.com/' },
             'rapid-cloud': { referer: 'https://rapid-cloud.co/' },
-            'netmagcdn': { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
-            'biananset': { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
-            'anicdnstream': { referer: 'https://hianimez.to/' },
+            'netmagcdn': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
+            'biananset': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
+            'anicdnstream': { referer: 'https://aniwatchtv.to/' },
             'gogocdn': { referer: 'https://gogoanime.run/' },
             'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'hstorage.xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },

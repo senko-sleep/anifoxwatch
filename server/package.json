@@ -11,11 +11,14 @@
         "start:api": "tsx src/index.ts",
         "deploy:cloudflare": "wrangler deploy",
         "dev:cloudflare": "wrangler dev",
-        "test": "vitest"
+        "test": "vitest",
+        "test:hianime-city": "tsx testing/test-hianime-city.ts",
+        "test:stream": "node testing/test-100-sources.js",
+        "postinstall": "patch-package"
     },
     "dependencies": {
         "@consumet/extensions": "^1.8.8",
-        "aniwatch": "^2.24.3",
+        "aniwatch": "^2.27.9",
         "axios": "^1.6.8",
         "cheerio": "^1.0.0-rc.12",
         "cli-highlight": "^2.1.11",
@@ -33,6 +36,7 @@
         "@types/express": "^4.17.21",
         "@types/node": "^20.12.7",
         "@types/uuid": "^9.0.8",
+        "patch-package": "^8.0.1",
         "typescript": "^5.4.5",
         "vitest": "^1.4.0",
         "wrangler": "^4.61.1"

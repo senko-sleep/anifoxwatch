@@ -363,7 +363,7 @@ class StreamExtractor {
      */
     async extractFromHiAnime(animeSlug: string, episodeNum: string): Promise<ExtractionResult> {
         // HiAnime uses different URL structure
-        const url = `https://hianimez.to/watch/${animeSlug}?ep=${episodeNum}`;
+        const url = `https://aniwatchtv.to/watch/${animeSlug}?ep=${episodeNum}`;
         logger.info(`[StreamExtractor] Trying HiAnime: ${url}`);
 
         const page = await this.createPage();

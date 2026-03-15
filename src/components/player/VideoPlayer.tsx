@@ -103,6 +103,7 @@ export const VideoPlayer = ({
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const retryCountRef = useRef(0);
   const maxRetries = 3;
+  const waitingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track if we've already fired an error for the current source to prevent infinite loops
   const errorFiredRef = useRef(false);
@@ -236,17 +237,25 @@ export const VideoPlayer = ({
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 90,
-        maxBufferLength: 30,
+        maxBufferLength: 60,
         maxMaxBufferLength: 600,
+        maxBufferHole: 0.5,
         startLevel: -1, // Auto quality initially
-        abrEwmaDefaultEstimate: 5000000, // 5Mbps initial estimate for HD
+        abrEwmaDefaultEstimate: 10000000, // 10Mbps initial estimate — assume fast connection for instant HD
+        abrEwmaFastLive: 3,
+        abrEwmaSlowLive: 9,
+        abrEwmaFastVoD: 3,
+        abrEwmaSlowVoD: 9,
         abrMaxWithRealBitrate: true,
         testBandwidth: true,
+        startFragPrefetch: true,
         fragLoadingMaxRetry: 6,
         manifestLoadingMaxRetry: 4,
         levelLoadingMaxRetry: 4,
-        fragLoadingRetryDelay: 1000,
-        manifestLoadingRetryDelay: 1000,
+        fragLoadingRetryDelay: 500,
+        manifestLoadingRetryDelay: 500,
+        nudgeOffset: 0.2,
+        nudgeMaxRetry: 5,
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
           xhr.timeout = 30000;
@@ -418,6 +427,7 @@ export const VideoPlayer = ({
   }, [src, isM3U8, onError, loadSavedPosition]);
 
   // Background MP4 cache: download full video in bg for instant/offline playback
+  // Waits until video is actually playing + 3s grace so it doesn't steal bandwidth
   useEffect(() => {
     if (isM3U8 || !src) return;
 
@@ -432,15 +442,15 @@ export const VideoPlayer = ({
 
     const controller = new AbortController();
     bgDownloadControllerRef.current = controller;
+    const video = videoRef.current;
+    if (!video) return;
 
-    playerLog('info', 'Starting background MP4 download for offline cache');
-
-    (async () => {
+    const doBgDownload = async () => {
       try {
-        const response = await fetch(src, { signal: controller.signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const resp = await fetch(src, { signal: controller.signal });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-        const blob = await response.blob();
+        const blob = await resp.blob();
         if (controller.signal.aborted) return;
 
         const blobUrl = URL.createObjectURL(blob);
@@ -448,37 +458,54 @@ export const VideoPlayer = ({
 
         playerLog('info', `Background cache complete: ${(blob.size / 1024 / 1024).toFixed(1)}MB — switching to offline blob`);
 
-        // Swap to cached blob while preserving playback state
-        const video = videoRef.current;
-        if (!video) return;
+        const vid = videoRef.current;
+        if (!vid) return;
 
-        const currentPos = video.currentTime;
-        const wasPlaying = !video.paused;
-        const currentVol = video.volume;
-        const wasMuted = video.muted;
-        const currentRate = video.playbackRate;
+        const pos = vid.currentTime;
+        const playing = !vid.paused;
+        const vol = vid.volume;
+        const muted = vid.muted;
+        const rate = vid.playbackRate;
 
         const onReady = () => {
-          video.currentTime = currentPos;
-          video.volume = currentVol;
-          video.muted = wasMuted;
-          video.playbackRate = currentRate;
-          if (wasPlaying) video.play().catch(() => {});
-          video.removeEventListener('loadeddata', onReady);
-          playerLog('info', `Swapped to offline blob at ${currentPos.toFixed(1)}s`);
+          vid.currentTime = pos;
+          vid.volume = vol;
+          vid.muted = muted;
+          vid.playbackRate = rate;
+          if (playing) vid.play().catch(() => {});
+          vid.removeEventListener('loadeddata', onReady);
+          playerLog('info', `Swapped to offline blob at ${pos.toFixed(1)}s`);
         };
 
-        video.addEventListener('loadeddata', onReady);
-        video.src = blobUrl;
+        vid.addEventListener('loadeddata', onReady);
+        vid.src = blobUrl;
       } catch (e: any) {
         if (e.name !== 'AbortError') {
           playerLog('warn', 'Background MP4 cache failed, continuing with stream', e.message);
         }
       }
-    })();
+    };
+
+    let delayTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const startAfterDelay = () => {
+      playerLog('info', 'Video playing — will start background cache in 3s');
+      delayTimer = setTimeout(() => {
+        if (!controller.signal.aborted) doBgDownload();
+      }, 3000);
+    };
+
+    // Wait for playback to actually start before downloading
+    if (!video.paused && video.currentTime > 0) {
+      startAfterDelay();
+    } else {
+      video.addEventListener('playing', startAfterDelay, { once: true });
+    }
 
     return () => {
       controller.abort();
+      if (delayTimer) clearTimeout(delayTimer);
+      video.removeEventListener('playing', startAfterDelay);
       if (cachedBlobUrlRef.current) {
         URL.revokeObjectURL(cachedBlobUrlRef.current);
         cachedBlobUrlRef.current = null;
@@ -575,8 +602,18 @@ export const VideoPlayer = ({
         });
       }
     };
-    const handleWaiting = () => setIsLoading(true);
-    const handleCanPlay = () => setIsLoading(false);
+    const handleWaiting = () => {
+      // Debounce: only show spinner if stall lasts >400ms to avoid flashing on brief micro-stalls
+      if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = setTimeout(() => setIsLoading(true), 400);
+    };
+    const handleCanPlay = () => {
+      if (waitingTimerRef.current) {
+        clearTimeout(waitingTimerRef.current);
+        waitingTimerRef.current = null;
+      }
+      setIsLoading(false);
+    };
 
     // Save on tab visibility change
     const handleVisibilityChange = () => {
@@ -1041,6 +1078,7 @@ export const VideoPlayer = ({
         ref={videoRef}
         className="w-full h-full"
         poster={poster}
+        preload="auto"
         playsInline
         onClick={togglePlay}
         crossOrigin="anonymous"
@@ -1069,7 +1107,7 @@ export const VideoPlayer = ({
 
       {/* Loading spinner */}
       {isLoading && !error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity duration-200">
           <div className="flex flex-col items-center gap-4">
             <div className="w-12 h-12 border-4 border-fox-orange/30 border-t-fox-orange rounded-full animate-spin"></div>
             <p className="text-white/80 text-sm">Loading stream...</p>
