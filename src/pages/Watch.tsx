@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
@@ -24,7 +24,10 @@ import {
   Loader2,
   RefreshCw,
   Maximize2,
-  MonitorPlay
+  MonitorPlay,
+  Settings,
+  List,
+  X
 } from 'lucide-react';
 
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -97,6 +100,17 @@ const Watch = () => {
 
   // Cinema mode state for layout adaptation
   const [isCinemaMode, setIsCinemaMode] = useState(false);
+
+  // Mobile fullscreen overlay state
+  const [showMobileOverlay, setShowMobileOverlay] = useState(false);
+  const [showMobileEpisodes, setShowMobileEpisodes] = useState(false);
+  const [showMobileSettings, setShowMobileSettings] = useState(false);
+  const [showExitScreen, setShowExitScreen] = useState(false);
+
+  // Helper to detect mobile
+  const isMobile = useCallback(() => {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+  }, []);
 
   // Data fetching
   const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId);
@@ -359,6 +373,36 @@ const Watch = () => {
     setAudioManuallySet(false);
   }, [selectedEpisode]);
 
+  // Mobile: Unlock orientation when leaving the watch page
+  useEffect(() => {
+    if (!isMobile()) return;
+    return () => {
+      try {
+        if (screen.orientation && (screen.orientation as any).unlock) {
+          (screen.orientation as any).unlock();
+        }
+      } catch (e) { /* ignore */ }
+    };
+  }, [isMobile]);
+
+  // Get watch progress for an episode from localStorage
+  const getEpisodeProgress = useCallback((epNumber: number): number => {
+    try {
+      const key = `video-position-${cleanAnimeId}-${epNumber}`;
+      const saved = localStorage.getItem(key);
+      if (!saved) return 0;
+      const position = parseFloat(saved);
+      const historyJSON = localStorage.getItem('anistream_watch_history');
+      if (historyJSON) {
+        const history = JSON.parse(historyJSON);
+        const item = history.find((h: any) => h.animeId === cleanAnimeId && h.episodeNumber === epNumber);
+        if (item?.duration > 0) return Math.min(1, position / item.duration);
+      }
+      return position > 0 ? Math.min(1, position / (24 * 60)) : 0;
+    } catch { return 0; }
+  }, [cleanAnimeId]);
+
+
   // Loading state
   if (animeLoading) {
     return (
@@ -455,6 +499,258 @@ const Watch = () => {
 
   const videoSource = getVideoSource();
 
+  // Mobile: Render clean player - NO overlays on top of VideoPlayer
+  if (isMobile()) {
+    return (
+      <div className="fixed inset-0 bg-black z-50">
+        {/* VideoPlayer takes full screen - all controls are INSIDE it */}
+        <div className="w-full h-full">
+          {streamLoading ? (
+            <div className="w-full h-full flex items-center justify-center bg-black">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 className="w-12 h-12 animate-spin text-fox-orange" />
+                <p className="text-white/80 text-sm">Loading stream...</p>
+              </div>
+            </div>
+          ) : videoSource ? (
+            <VideoPlayer
+              src={videoSource?.url || ''}
+              isM3U8={videoSource?.isM3U8}
+              subtitles={streamData?.subtitles}
+              intro={streamData?.intro}
+              outro={streamData?.outro}
+              onError={handlePlayerError}
+              poster={anime?.image}
+              onNextEpisode={handleNextEpisode}
+              hasNextEpisode={hasNext}
+              animeId={cleanAnimeId}
+              selectedEpisodeNum={selectedEpisodeNum}
+              animeTitle={anime?.title}
+              animeImage={anime?.image}
+              animeSeason={anime?.season}
+              onBack={() => setShowExitScreen(true)}
+              onEpisodes={() => setShowMobileEpisodes(true)}
+              onShowSettings={() => setShowMobileSettings(true)}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-black">
+              <div className="text-center p-6">
+                <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+                <p className="text-white font-medium">No stream available</p>
+                <Button
+                  size="sm"
+                  className="mt-4 bg-fox-orange"
+                  onClick={() => { setServerRetryCount(0); refetchStream(); }}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Retry
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Exit bottom sheet - appears OVER player only when triggered */}
+        {showExitScreen && (
+          <div 
+            className="fixed inset-0 z-[70] bg-black/80 animate-in fade-in duration-150"
+            onClick={() => setShowExitScreen(false)}
+          >
+            <div 
+              className="absolute bottom-0 left-0 right-0 bg-zinc-900 rounded-t-2xl p-4 space-y-4 animate-in slide-in-from-bottom duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3">
+                <img src={anime?.image} alt="" className="w-12 h-16 rounded-lg object-cover" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-medium text-sm truncate">{anime?.title}</p>
+                  <p className="text-white/50 text-xs">Episode {selectedEpisodeNum}</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowExitScreen(false)}
+                  className="flex-1 py-3 rounded-xl bg-fox-orange text-white font-medium text-sm active:scale-95 transition-transform"
+                >
+                  Resume
+                </button>
+                <button
+                  onClick={() => { setShowExitScreen(false); setShowMobileEpisodes(true); }}
+                  className="flex-1 py-3 rounded-xl bg-white/10 text-white font-medium text-sm active:scale-95 transition-transform"
+                >
+                  Episodes
+                </button>
+              </div>
+              <button
+                onClick={() => navigate(backUrl)}
+                className="w-full py-2.5 rounded-xl bg-red-500/20 text-red-400 text-sm font-medium active:scale-95 transition-transform"
+              >
+                Exit
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Episodes panel - slides up OVER player only when triggered */}
+        {showMobileEpisodes && (
+          <div
+            className="fixed inset-0 z-[70] flex flex-col justify-end"
+            onClick={() => setShowMobileEpisodes(false)}
+          >
+            <div className="absolute inset-0 bg-black/70" />
+            <div
+              className="relative bg-zinc-900 rounded-t-2xl max-h-[75vh] flex flex-col animate-in slide-in-from-bottom duration-300"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 bg-white/20 rounded-full" />
+              </div>
+              <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
+                <h3 className="text-white font-semibold text-sm">
+                  Episodes
+                  <span className="text-white/40 font-normal ml-2">{episodes?.length || 0} total</span>
+                </h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { handlePrevEpisode(); setShowMobileEpisodes(false); }}
+                    disabled={!hasPrev}
+                    className={cn("w-8 h-8 rounded-full bg-white/10 flex items-center justify-center", !hasPrev && "opacity-30")}
+                  >
+                    <ChevronLeft className="w-4 h-4 text-white" />
+                  </button>
+                  <button
+                    onClick={() => { handleNextEpisode(); setShowMobileEpisodes(false); }}
+                    disabled={!hasNext}
+                    className={cn("w-8 h-8 rounded-full bg-white/10 flex items-center justify-center", !hasNext && "opacity-30")}
+                  >
+                    <ChevronRight className="w-4 h-4 text-white" />
+                  </button>
+                  <button
+                    onClick={() => setShowMobileEpisodes(false)}
+                    className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center ml-1"
+                  >
+                    <X className="w-4 h-4 text-white" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+                {episodes?.map((ep) => {
+                  const progress = getEpisodeProgress(ep.number);
+                  return (
+                    <button
+                      key={ep.id}
+                      onClick={() => { handleEpisodeSelect(ep.id, ep.number); setShowMobileEpisodes(false); }}
+                      className={cn(
+                        "w-full rounded-xl text-left transition-colors relative overflow-hidden",
+                        selectedEpisode === ep.id ? "bg-fox-orange text-white" : "bg-white/5 text-white/80 active:bg-white/10"
+                      )}
+                    >
+                      <div className="flex items-center gap-3 p-3 relative z-10">
+                        <span className={cn(
+                          "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0",
+                          selectedEpisode === ep.id ? "bg-white/20" : "bg-white/10"
+                        )}>
+                          {selectedEpisode === ep.id ? <Play className="w-3.5 h-3.5 fill-current" /> : ep.number}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm truncate">{ep.title || `Episode ${ep.number}`}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {ep.hasSub && <span className="text-[10px] text-white/50">SUB</span>}
+                            {ep.hasDub && <span className="text-[10px] text-green-400/70">DUB</span>}
+                            {progress > 0 && progress < 0.9 && (
+                              <span className="text-[10px] text-fox-orange">{Math.round(progress * 100)}%</span>
+                            )}
+                            {progress >= 0.9 && (
+                              <span className="text-[10px] text-green-400">Watched</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {progress > 0 && selectedEpisode !== ep.id && (
+                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
+                          <div
+                            className={cn("h-full rounded-full", progress >= 0.9 ? "bg-green-500" : "bg-fox-orange")}
+                            style={{ width: `${Math.min(100, progress * 100)}%` }}
+                          />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings panel - slides up OVER player only when triggered */}
+        {showMobileSettings && (
+          <div
+            className="fixed inset-0 z-[70] flex flex-col justify-end"
+            onClick={() => setShowMobileSettings(false)}
+          >
+            <div className="absolute inset-0 bg-black/70" />
+            <div
+              className="relative bg-zinc-900 rounded-t-2xl max-h-[50vh] flex flex-col animate-in slide-in-from-bottom duration-300"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-center pt-3 pb-1">
+                <div className="w-10 h-1 bg-white/20 rounded-full" />
+              </div>
+              <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
+                <h3 className="text-white font-semibold text-sm">Settings</h3>
+                <button
+                  onClick={() => setShowMobileSettings(false)}
+                  className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center"
+                >
+                  <X className="w-4 h-4 text-white" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-5">
+                <div>
+                  <p className="text-white/50 text-xs uppercase tracking-wider mb-2">Audio</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setAudioManuallySet(true); setAudioType('sub'); }}
+                      className={cn(
+                        "flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors",
+                        audioType === 'sub' ? "bg-fox-orange text-white" : "bg-white/10 text-white/60"
+                      )}
+                    >Sub</button>
+                    <button
+                      onClick={() => { setAudioManuallySet(true); setAudioType('dub'); }}
+                      className={cn(
+                        "flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors",
+                        audioType === 'dub' ? "bg-fox-orange text-white" : "bg-white/10 text-white/60"
+                      )}
+                    >Dub</button>
+                  </div>
+                </div>
+                {servers && servers.length > 0 && (
+                  <div>
+                    <p className="text-white/50 text-xs uppercase tracking-wider mb-2">Server</p>
+                    <div className="flex flex-wrap gap-2">
+                      {servers.filter(s => s.type === audioType).map((server) => (
+                        <button
+                          key={server.name}
+                          onClick={() => { setSelectedServer(server.name); setServerRetryCount(0); }}
+                          className={cn(
+                            "px-4 py-2.5 rounded-xl text-sm transition-colors",
+                            selectedServer === server.name ? "bg-fox-orange text-white" : "bg-white/10 text-white/60"
+                          )}
+                        >{server.name}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Desktop: Regular layout
   return (
     <div className="min-h-screen flex flex-col bg-background relative overflow-x-hidden">
       {/* Cinematic Backdrop */}
@@ -475,18 +771,16 @@ const Watch = () => {
         "flex-1 relative z-10 transition-all duration-500",
         isCinemaMode && "pt-[calc(56.25vw+2rem)] md:pt-[calc(56.25vw+3rem)] lg:pt-[calc(56.25vw+4rem)]"
       )}>
-        {/* Back button - Hidden in cinema mode */}
-
         <div className={cn(
-          "max-w-[1800px] mx-auto px-0 sm:px-4 pb-4 sm:pb-12 transition-all duration-500",
-          isCinemaMode ? "pt-0 sm:pt-6" : "pt-0 sm:pt-6"
+          "max-w-[1800px] mx-auto px-4 pb-12 transition-all duration-500",
+          isCinemaMode ? "pt-6" : "pt-6"
         )}>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigate(backUrl)}
             className={cn(
-              "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-4 sm:mb-6 transition-all duration-300 touch-manipulation hidden sm:flex",
+              "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-6 transition-all duration-300",
               isCinemaMode && "opacity-0 pointer-events-none h-0 mb-0 overflow-hidden"
             )}
           >
@@ -495,20 +789,20 @@ const Watch = () => {
           </Button>
 
           <div className={cn(
-            "grid gap-4 sm:gap-6 lg:gap-8 transition-all duration-500",
+            "grid gap-6 lg:gap-8 transition-all duration-500",
             isCinemaMode
               ? "lg:grid-cols-1 max-w-7xl mx-auto"
               : "lg:grid-cols-12"
           )}>
             {/* Main Player Area */}
             <div className={cn(
-              "space-y-2 sm:space-y-6 transition-all duration-500",
+              "space-y-6 transition-all duration-500",
               isCinemaMode ? "lg:col-span-1 w-full" : "lg:col-span-9"
             )} ref={playerRef}>
               {/* Video Player Container */}
               <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-fox-orange/20 to-purple-600/20 rounded-2xl blur opacity-30 group-hover:opacity-60 transition duration-1000 hidden sm:block"></div>
-                <div className="relative aspect-video bg-black rounded-none sm:rounded-xl overflow-hidden shadow-2xl sm:ring-1 ring-white/10">
+                <div className="absolute -inset-1 bg-gradient-to-r from-fox-orange/20 to-purple-600/20 rounded-2xl blur opacity-30 group-hover:opacity-60 transition duration-1000"></div>
+                <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
                   {streamLoading ? (
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
                       <div className="flex flex-col items-center gap-4">
@@ -594,9 +888,9 @@ const Watch = () => {
                 </div>
               </div>
 
-              {/* Episode Navigation & Details - Compact in cinema mode */}
+              {/* Episode Navigation & Details */}
               <div className={cn(
-                "grid md:grid-cols-[1fr_auto] gap-2 sm:gap-3 items-center bg-card/30 backdrop-blur-md border-y sm:border border-white/5 p-3 md:p-4 sm:rounded-xl mx-0 sm:mx-0 transition-all duration-500",
+                "grid grid-cols-[1fr_auto] gap-3 items-center bg-card/30 backdrop-blur-md border border-white/5 p-4 rounded-xl transition-all duration-500",
                 isCinemaMode && "max-w-4xl mx-auto"
               )}>
                 <div className="min-w-0">
@@ -669,9 +963,9 @@ const Watch = () => {
                 </div>
               </div>
 
-              {/* Streaming Controls - Centered in cinema mode */}
+              {/* Streaming Controls */}
               <div className={cn(
-                "transition-all duration-500 px-3 sm:px-0",
+                "transition-all duration-500",
                 isCinemaMode && "max-w-4xl mx-auto"
               )}>
                 <StreamingControls
@@ -698,21 +992,10 @@ const Watch = () => {
                 />
               </div>
 
-              {/* Mobile Episode Drawer - Only visible on mobile */}
-              <div className="lg:hidden px-3 sm:px-0">
-                <MobileEpisodeDrawer
-                  episodes={episodes || []}
-                  selectedEpisodeId={selectedEpisode}
-                  onEpisodeSelect={handleEpisodeSelect}
-                  isLoading={episodesLoading}
-                  anime={anime}
-                  currentEpisodeNum={selectedEpisodeNum}
-                />
-              </div>
 
-              {/* Enhanced Anime Info Card - Centered in cinema mode */}
+              {/* Enhanced Anime Info Card */}
               <div className={cn(
-                "p-4 md:p-6 bg-card/30 backdrop-blur-md border-y sm:border border-white/5 sm:rounded-xl space-y-4 md:space-y-6 shadow-xl transition-all duration-500 mx-0 sm:mx-0",
+                "p-6 bg-card/30 backdrop-blur-md border border-white/5 rounded-xl space-y-6 shadow-xl transition-all duration-500",
                 isCinemaMode && "max-w-4xl mx-auto"
               )}>
                 <div className="flex flex-col sm:flex-row gap-4 md:gap-6">

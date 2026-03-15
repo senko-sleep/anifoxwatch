@@ -59,6 +59,9 @@ interface VideoPlayerProps {
   animeTitle?: string;
   animeImage?: string;
   animeSeason?: string;
+  onBack?: () => void;
+  onEpisodes?: () => void;
+  onShowSettings?: () => void;
 }
 
 // Logger for video player events
@@ -94,7 +97,10 @@ export const VideoPlayer = ({
   selectedEpisodeNum,
   animeTitle,
   animeImage,
-  animeSeason
+  animeSeason,
+  onBack,
+  onEpisodes,
+  onShowSettings
 }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -142,6 +148,8 @@ export const VideoPlayer = ({
   // Video preview states
   const [isProgressHovering, setIsProgressHovering] = useState(false);
   const [progressMouseX, setProgressMouseX] = useState(0);
+  const [isProgressTouching, setIsProgressTouching] = useState(false);
+  const [progressTouchX, setProgressTouchX] = useState(0);
 
   // Double tap seek states
   const [showSeekForwardOverlay, setShowSeekForwardOverlay] = useState(false);
@@ -207,8 +215,6 @@ export const VideoPlayer = ({
       setIsLoading(true);
 
       if (hlsRef.current) {
-        // Don't call startLoad() as it restarts the stream from beginning
-        // Instead, recover the current stream
         hlsRef.current.recoverMediaError();
       }
     } else {
@@ -226,7 +232,7 @@ export const VideoPlayer = ({
     setIsLoading(true);
     setError(null);
     retryCountRef.current = 0;
-    errorFiredRef.current = false; // Reset error flag for new source
+    errorFiredRef.current = false;
 
     playerLog('info', 'Initializing video player', {
       src: src.substring(0, 100) + '...',
@@ -235,7 +241,6 @@ export const VideoPlayer = ({
     });
 
     if (isM3U8 && Hls.isSupported()) {
-      // Cleanup previous instance
       if (hlsRef.current) {
         hlsRef.current.destroy();
       }
@@ -247,8 +252,8 @@ export const VideoPlayer = ({
         maxBufferLength: 60,
         maxMaxBufferLength: 600,
         maxBufferHole: 0.5,
-        startLevel: -1, // Auto quality initially
-        abrEwmaDefaultEstimate: 10000000, // 10Mbps initial estimate — assume fast connection for instant HD
+        startLevel: -1,
+        abrEwmaDefaultEstimate: 10000000,
         abrEwmaFastLive: 3,
         abrEwmaSlowLive: 9,
         abrEwmaFastVoD: 3,
@@ -272,17 +277,14 @@ export const VideoPlayer = ({
       hls.loadSource(src);
       hls.attachMedia(video);
 
-      // Track quality levels
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
         playerLog('info', 'Manifest parsed', {
           levels: data.levels.length,
           qualities: data.levels.map(l => `${l.height}p`)
         });
 
-        // Store available levels
         setAvailableLevels(data.levels.map(l => ({ height: l.height, bitrate: l.bitrate })));
 
-        // Set to highest quality by default
         const maxLevel = data.levels.length - 1;
         hls.currentLevel = maxLevel;
         setCurrentLevel(maxLevel);
@@ -292,20 +294,16 @@ export const VideoPlayer = ({
           playerLog('warn', 'Autoplay blocked', e);
         });
 
-        // Restore saved position after video is ready
         const savedPos = loadSavedPosition();
-        if (savedPos > 5) { // Only restore if more than 5 seconds
+        if (savedPos > 5) {
           video.currentTime = savedPos;
           setCurrentTime(savedPos);
           setShowPositionRestored(true);
           playerLog('info', `Restored saved position: ${savedPos.toFixed(2)}s`);
-
-          // Hide notification after 3 seconds
           setTimeout(() => setShowPositionRestored(false), 3000);
         }
       });
 
-      // Track level switching
       hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
         const level = hls.levels[data.level];
         if (level) {
@@ -315,7 +313,6 @@ export const VideoPlayer = ({
         }
       });
 
-      // Track fragment loading
       hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
         playerLog('info', `Fragment loaded`, {
           sn: data.frag.sn,
@@ -324,7 +321,6 @@ export const VideoPlayer = ({
         });
       });
 
-      // Error handling with detailed logging
       hls.on(Hls.Events.ERROR, (_, data) => {
         playerLog('error', 'HLS error', {
           type: data.type,
@@ -341,10 +337,7 @@ export const VideoPlayer = ({
                 setError('Failed to load video manifest. The stream may be unavailable.');
                 onError?.('manifest_load_error');
               } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
-                // Try to recover from fragment loading errors without restarting
                 playerLog('warn', 'Fragment load error, attempting recovery');
-                // Don't call startLoad() as it restarts the stream
-                // Instead, let HLS handle the recovery automatically
               } else {
                 setError('Network error. Check your connection and try again.');
                 onError?.('network_error');
@@ -365,7 +358,6 @@ export const VideoPlayer = ({
 
       hlsRef.current = hls;
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native HLS support (Safari)
       playerLog('info', 'Using native HLS support');
       video.src = src;
 
@@ -373,7 +365,6 @@ export const VideoPlayer = ({
         playerLog('info', 'Video metadata loaded (native)');
         setIsLoading(false);
 
-        // Restore saved position
         const savedPos = loadSavedPosition();
         if (savedPos > 5) {
           video.currentTime = savedPos;
@@ -386,10 +377,8 @@ export const VideoPlayer = ({
       });
 
       video.addEventListener('error', () => {
-        // Debounce error handling to prevent infinite loops
         const now = Date.now();
         if (errorFiredRef.current && (now - lastErrorTimeRef.current) < 1000) {
-          // Ignore rapid-fire errors for the same source
           return;
         }
 
@@ -405,13 +394,11 @@ export const VideoPlayer = ({
         onError?.('native_error');
       });
     } else {
-      // Direct video source
       playerLog('info', 'Using direct video source');
       video.src = src;
       video.addEventListener('loadedmetadata', () => {
         setIsLoading(false);
 
-        // Restore saved position
         const savedPos = loadSavedPosition();
         if (savedPos > 5) {
           video.currentTime = savedPos;
@@ -433,12 +420,10 @@ export const VideoPlayer = ({
     };
   }, [src, isM3U8, onError, loadSavedPosition]);
 
-  // Background MP4 cache: download full video in bg for instant/offline playback
-  // Waits until video is actually playing + 3s grace so it doesn't steal bandwidth
+  // Background MP4 cache
   useEffect(() => {
     if (isM3U8 || !src) return;
 
-    // Cleanup previous blob & abort previous download
     if (cachedBlobUrlRef.current) {
       URL.revokeObjectURL(cachedBlobUrlRef.current);
       cachedBlobUrlRef.current = null;
@@ -502,7 +487,6 @@ export const VideoPlayer = ({
       }, 3000);
     };
 
-    // Wait for playback to actually start before downloading
     if (!video.paused && video.currentTime > 0) {
       startAfterDelay();
     } else {
@@ -528,7 +512,6 @@ export const VideoPlayer = ({
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => {
       setIsPlaying(false);
-      // Save position on pause
       if (video.currentTime > 5 && video.duration - video.currentTime > 10) {
         savePosition(video.currentTime);
       }
@@ -538,14 +521,10 @@ export const VideoPlayer = ({
       const time = video.currentTime;
       setCurrentTime(time);
 
-      // Save position every 2 seconds for better precision
-      // Only if not near the end (within last 10 seconds)
       if (Math.floor(time) % 2 === 0 && time > 5 && video.duration - time > 10) {
         savePosition(time);
 
-        // Save to global watch history if anime details are available
         if (animeId && animeTitle && animeImage && selectedEpisodeNum) {
-          // Capture video frame as thumbnail
           let frameThumbnail: string | undefined;
           try {
             const canvas = document.createElement('canvas');
@@ -573,14 +552,12 @@ export const VideoPlayer = ({
         }
       }
 
-      // Check for intro skip
       if (intro && video.currentTime >= intro.start && video.currentTime < intro.end) {
         setShowSkipIntro(true);
       } else {
         setShowSkipIntro(false);
       }
 
-      // Check for outro skip
       if (outro && video.currentTime >= outro.start && video.currentTime < outro.end) {
         setShowSkipOutro(true);
       } else {
@@ -595,10 +572,8 @@ export const VideoPlayer = ({
     };
     const handleEnded = () => {
       setIsPlaying(false);
-      // Clear saved position when video ends
       clearSavedPosition();
 
-      // If video ended and there's a next episode, start countdown
       if (hasNextEpisode) {
         setShowNextEpisodeCountdown(prev => {
           if (!prev) {
@@ -610,7 +585,6 @@ export const VideoPlayer = ({
       }
     };
     const handleWaiting = () => {
-      // Debounce: only show spinner if stall lasts >400ms to avoid flashing on brief micro-stalls
       if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
       waitingTimerRef.current = setTimeout(() => setIsLoading(true), 400);
     };
@@ -622,7 +596,6 @@ export const VideoPlayer = ({
       setIsLoading(false);
     };
 
-    // Save on tab visibility change
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden' && video.currentTime > 5) {
         savePosition(video.currentTime);
@@ -662,46 +635,6 @@ export const VideoPlayer = ({
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  // Auto-fullscreen on mobile when video starts playing
-  useEffect(() => {
-    if (!isMobile() || autoFullscreenFiredRef.current || !isPlaying) return;
-    if (!containerRef.current || !videoRef.current) return;
-
-    autoFullscreenFiredRef.current = true;
-
-    const goFullscreen = async () => {
-      const container = containerRef.current;
-      const video = videoRef.current;
-      if (!container || !video) return;
-
-      try {
-        // iOS: use native video fullscreen for best experience
-        if ((video as any).webkitEnterFullscreen) {
-          try {
-            (video as any).webkitEnterFullscreen();
-            return;
-          } catch (e) { /* fall through */ }
-        }
-
-        // Android / other: use container fullscreen + landscape lock
-        if (container.requestFullscreen) {
-          await container.requestFullscreen();
-          if (screen.orientation && (screen.orientation as any).lock) {
-            try {
-              await (screen.orientation as any).lock('landscape');
-            } catch (e) { /* orientation lock not always supported */ }
-          }
-        }
-      } catch (e) {
-        // Fullscreen request may be blocked if not user-initiated; that's OK
-        console.log('[VideoPlayer] Auto-fullscreen blocked by browser policy');
-      }
-    };
-
-    // Trigger immediately for instant fullscreen
-    goFullscreen();
-  }, [isPlaying, isMobile]);
-
   // Next episode countdown timer
   useEffect(() => {
     if (showNextEpisodeCountdown && nextEpisodeCountdown > 0) {
@@ -710,7 +643,6 @@ export const VideoPlayer = ({
       }, 1000);
       return () => clearTimeout(timer);
     } else if (showNextEpisodeCountdown && nextEpisodeCountdown === 0) {
-      // Auto-play next episode
       setShowNextEpisodeCountdown(false);
       setNextEpisodeCountdown(10);
       onNextEpisode?.();
@@ -745,14 +677,14 @@ export const VideoPlayer = ({
     }
   }, [selectedSubtitle, subtitleEnabled]);
 
-  // Controls visibility
+  // Controls visibility — show controls temporarily then auto-hide
   const showControlsTemporarily = useCallback(() => {
     setShowControls(true);
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
     }
-    // Fast auto-hide: 1s on mobile, 1.5s on desktop
-    const hideDelay = isMobile() ? 1000 : 1500;
+    // 3s on mobile (gives time to tap buttons), 1.5s on desktop
+    const hideDelay = isMobile() ? 3000 : 1500;
     controlsTimeoutRef.current = setTimeout(() => {
       if (isPlaying) {
         setShowControls(false);
@@ -760,7 +692,7 @@ export const VideoPlayer = ({
     }, hideDelay);
   }, [isPlaying, isMobile]);
 
-  // Mobile: clean tap toggle — tap once to show, tap again to hide
+  // Mobile: tap the video surface to toggle controls visibility
   const toggleControlsVisibility = useCallback(() => {
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
@@ -768,11 +700,11 @@ export const VideoPlayer = ({
     }
     setShowControls(prev => {
       const next = !prev;
-      // Auto-hide after delay if we just showed them and video is playing
+      // Auto-hide after 3s if we just showed them and video is playing
       if (next && isPlaying) {
         controlsTimeoutRef.current = setTimeout(() => {
           setShowControls(false);
-        }, 1000);
+        }, 3000);
       }
       return next;
     });
@@ -827,8 +759,22 @@ export const VideoPlayer = ({
       } else if ((video as any).webkitExitFullscreen) {
         (video as any).webkitExitFullscreen();
       }
+      if (isMobile() && screen.orientation && (screen.orientation as any).unlock) {
+        try {
+          (screen.orientation as any).unlock();
+        } catch (e) {
+          playerLog('warn', 'Orientation unlock failed', e);
+        }
+      }
     } else {
-      // Try native video fullscreen on iOS first for better mobile experience
+      if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
+        try {
+          await (screen.orientation as any).lock('landscape');
+        } catch (e) {
+          playerLog('warn', 'Orientation lock failed', e);
+        }
+      }
+
       if (isMobile() && (video as any).webkitEnterFullscreen) {
         try {
           (video as any).webkitEnterFullscreen();
@@ -840,13 +786,6 @@ export const VideoPlayer = ({
 
       if (container.requestFullscreen) {
         await container.requestFullscreen();
-        if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
-          try {
-            await (screen.orientation as any).lock('landscape');
-          } catch (e) {
-            playerLog('warn', 'Orientation lock failed', e);
-          }
-        }
       }
     }
   }, [isMobile]);
@@ -903,7 +842,16 @@ export const VideoPlayer = ({
     setSubtitleEnabled(!!lang);
   }, []);
 
+  // ─── TOUCH HANDLERS ────────────────────────────────────────────────────────
+
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    // Don't intercept taps on buttons, sliders, or any interactive element.
+    // This prevents button taps from also toggling controls or pausing the video.
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, [role="slider"], select, a, [data-radix-slider-thumb]')) {
+      return;
+    }
+
     const now = Date.now();
     const touch = e.touches[0];
     const container = containerRef.current;
@@ -922,7 +870,7 @@ export const VideoPlayer = ({
       const xDiff = Math.abs(x - lastTapRef.current.x);
       const yDiff = Math.abs(y - lastTapRef.current.y);
 
-      // Double tap detected (within 300ms and close proximity) - increased threshold
+      // Double tap detected (within 300ms and close proximity)
       if (timeDiff < 300 && xDiff < 80 && yDiff < 80) {
         if (x < width * 0.4) {
           e.preventDefault();
@@ -950,7 +898,7 @@ export const VideoPlayer = ({
 
     lastTapRef.current = { time: now, x, y };
 
-    // Mobile: clean toggle; Desktop: show temporarily
+    // Mobile: tap video surface toggles controls; Desktop: show temporarily
     if (isMobile()) {
       toggleControlsVisibility();
     } else {
@@ -967,17 +915,14 @@ export const VideoPlayer = ({
     const dx = touch.clientX - touchStartPos.x;
     const dy = touch.clientY - touchStartPos.y;
 
-    // Detect swipe after a higher threshold to prevent accidental triggers
     if (!isSwiping) {
-      // Increased threshold from 30px to 60px for less sensitivity
       if (Math.abs(dx) > 60) {
         setIsSwiping(true);
         setSwipeType('seek');
         swipeStartValueRef.current = videoRef.current.currentTime;
         setShowSwipeOverlay(true);
-        setShowControls(false); // Hide controls during swipe
+        setShowControls(false);
       } else if (Math.abs(dy) > 60) {
-        // Vertical swipe for volume (only on right side of screen)
         const rect = containerRef.current.getBoundingClientRect();
         const startXRel = touchStartPos.x - rect.left;
         if (startXRel > rect.width * 0.5) {
@@ -991,18 +936,15 @@ export const VideoPlayer = ({
       return;
     }
 
-    // Handle ongoing swipe
     if (swipeType === 'seek') {
       const rect = containerRef.current.getBoundingClientRect();
-      const seekDelta = (dx / rect.width) * (duration || 300); // Scale seek by screen width
+      const seekDelta = (dx / rect.width) * (duration || 300);
       const newTime = Math.max(0, Math.min(duration, swipeStartValueRef.current + seekDelta));
       setSwipeValue(newTime);
-      // We don't update video.currentTime here to avoid lag, only on end
-      // but some players do it for real-time feedback. Let's do it for feedback.
       videoRef.current.currentTime = newTime;
     } else if (swipeType === 'volume') {
       const rect = containerRef.current.getBoundingClientRect();
-      const volumeDelta = -(dy / (rect.height * 0.5)); // Inverted and scaled
+      const volumeDelta = -(dy / (rect.height * 0.5));
       const newVolume = Math.max(0, Math.min(1, swipeStartValueRef.current + volumeDelta));
       videoRef.current.volume = newVolume;
       setVolume(newVolume);
@@ -1129,13 +1071,15 @@ export const VideoPlayer = ({
           <span className="text-white font-bold mt-2">+10s</span>
         </div>
       </div>
+
+      {/* Video element — no onClick on mobile to prevent accidental pauses */}
       <video
         ref={videoRef}
         className="w-full h-full"
         poster={poster}
         preload="auto"
         playsInline
-        onClick={togglePlay}
+        onClick={isMobile() ? undefined : togglePlay}
         crossOrigin="anonymous"
       >
         {subtitles.map((sub, i) => (
@@ -1269,30 +1213,61 @@ export const VideoPlayer = ({
       >
         {/* Top bar controls (Mobile only) */}
         {isMobile() && (
-          <div className="absolute top-0 left-0 right-0 p-4 flex items-center justify-between z-30">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-black/40 backdrop-blur-md rounded-lg border border-white/10">
-                <p className="text-white text-xs font-semibold truncate max-w-[200px]">
+          <div className="absolute top-2 left-2 right-2 flex items-start justify-between z-30 pointer-events-none">
+            <div className="flex items-center gap-1.5 pointer-events-auto">
+              {onBack && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onBack(); }}
+                  className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center active:scale-90 transition-transform"
+                >
+                  <ChevronsLeft className="w-4 h-4 text-white" />
+                </button>
+              )}
+              <div className="px-2 py-1 bg-black/50 backdrop-blur-sm rounded-md max-w-[160px]">
+                <p className="text-white text-[10px] font-medium truncate">
                   {animeTitle} - EP {selectedEpisodeNum}
                 </p>
               </div>
             </div>
+            <div className="flex items-center gap-1.5 pointer-events-auto">
+              {onEpisodes && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onEpisodes(); }}
+                  className="px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-sm flex items-center gap-1 active:scale-90 transition-transform"
+                >
+                  <RotateCw className="w-3 h-3 text-white" />
+                  <span className="text-white text-[10px] font-medium">Episodes</span>
+                </button>
+              )}
+              {onShowSettings && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onShowSettings(); }}
+                  className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center active:scale-90 transition-transform"
+                >
+                  <Settings className="w-3.5 h-3.5 text-white" />
+                </button>
+              )}
+            </div>
           </div>
         )}
-        {/* Center play button */}
-        <button
-          onClick={togglePlay}
-          className="absolute inset-0 flex items-center justify-center"
-        >
-          {!isPlaying && !isLoading && (
-            <div className="w-20 h-20 rounded-full bg-fox-orange/90 flex items-center justify-center hover:bg-fox-orange transition-colors">
-              <Play className="w-10 h-10 text-white ml-1" fill="white" />
-            </div>
-          )}
-        </button>
 
-        {/* Bottom controls */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 space-y-2">
+        {/* Center play button — only visible when paused */}
+        {!isPlaying && !isLoading && (
+          <button
+            onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-fox-orange/90 flex items-center justify-center hover:bg-fox-orange transition-colors z-10"
+          >
+            <Play className="w-8 h-8 text-white ml-0.5" fill="white" />
+          </button>
+        )}
+
+        {/* Bottom controls — stopPropagation on touch so taps here never reach the video */}
+        <div
+          className="absolute bottom-0 left-0 right-0 p-4 space-y-2"
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+        >
           {/* Progress bar */}
           <div
             ref={progressContainerRef}
@@ -1300,6 +1275,23 @@ export const VideoPlayer = ({
             onMouseEnter={() => setIsProgressHovering(true)}
             onMouseLeave={() => setIsProgressHovering(false)}
             onMouseMove={(e) => setProgressMouseX(e.clientX)}
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              if (e.touches[0]) {
+                setIsProgressTouching(true);
+                setProgressTouchX(e.touches[0].clientX);
+              }
+            }}
+            onTouchMove={(e) => {
+              e.stopPropagation();
+              if (e.touches[0]) {
+                setProgressTouchX(e.touches[0].clientX);
+              }
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation();
+              setTimeout(() => setIsProgressTouching(false), 300);
+            }}
           >
             <div className="absolute bottom-0 left-0 right-0 h-1.5 md:h-1 bg-white/20 rounded-full overflow-hidden">
               <div
@@ -1318,7 +1310,7 @@ export const VideoPlayer = ({
               onValueChange={handleSeek}
               className={cn(
                 "absolute bottom-0 left-0 right-0 transition-opacity cursor-pointer",
-                isMobile() ? "opacity-100 h-6 -bottom-2" : "opacity-0 group-hover/progress:opacity-100"
+                isMobile() ? "opacity-100 h-2" : "opacity-0 group-hover/progress:opacity-100"
               )}
             />
 
@@ -1328,8 +1320,8 @@ export const VideoPlayer = ({
               isM3U8={isM3U8}
               currentTime={currentTime}
               duration={duration}
-              isHovering={isProgressHovering}
-              mouseX={progressMouseX}
+              isHovering={isProgressHovering || isProgressTouching}
+              mouseX={isProgressTouching ? progressTouchX : progressMouseX}
               containerRef={progressContainerRef}
               poster={poster}
             />
@@ -1341,20 +1333,20 @@ export const VideoPlayer = ({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={togglePlay}
+                onClick={(e) => { e.stopPropagation(); togglePlay(); }}
                 className={cn(
                   "text-white hover:bg-white/20",
-                  isMobile() && "h-11 w-11"
+                  isMobile() && "h-9 w-9"
                 )}
               >
                 {isPlaying ? (
-                  <Pause className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
+                  <Pause className={cn(isMobile() ? "w-5 h-5" : "w-5 h-5")} />
                 ) : (
-                  <Play className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
+                  <Play className={cn(isMobile() ? "w-5 h-5" : "w-5 h-5")} />
                 )}
               </Button>
 
-              {/* Volume - Desktop only, mobile uses swipe gesture */}
+              {/* Volume - Desktop only */}
               {!isMobile() && (
                 <div className="flex items-center gap-2 group/volume">
                   <Button
@@ -1396,7 +1388,7 @@ export const VideoPlayer = ({
             </div>
 
             <div className="flex items-center gap-1 md:gap-2">
-              {/* Mobile: single settings gear opens slide-up panel */}
+              {/* Mobile: settings gear */}
               {isMobile() && (
                 <Button
                   variant="ghost"
@@ -1405,9 +1397,9 @@ export const VideoPlayer = ({
                     e.stopPropagation();
                     setShowMobileSettings(prev => !prev);
                   }}
-                  className="text-white hover:bg-white/20 h-11 w-11"
+                  className="text-white hover:bg-white/20 h-9 w-9"
                 >
-                  <Settings className="w-6 h-6" />
+                  <Settings className="w-5 h-5" />
                 </Button>
               )}
 
@@ -1508,16 +1500,16 @@ export const VideoPlayer = ({
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={toggleFullscreen}
+                onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
                 className={cn(
                   "text-white hover:bg-white/20",
-                  isMobile() && "h-11 w-11"
+                  isMobile() && "h-9 w-9"
                 )}
               >
                 {isFullscreen ? (
-                  <Minimize className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
+                  <Minimize className={cn(isMobile() ? "w-5 h-5" : "w-5 h-5")} />
                 ) : (
-                  <Maximize className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
+                  <Maximize className={cn(isMobile() ? "w-5 h-5" : "w-5 h-5")} />
                 )}
               </Button>
             </div>
