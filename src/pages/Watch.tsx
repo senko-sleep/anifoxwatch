@@ -478,15 +478,15 @@ const Watch = () => {
         {/* Back button - Hidden in cinema mode */}
 
         <div className={cn(
-          "max-w-[1800px] mx-auto px-3 sm:px-4 pb-8 sm:pb-12 transition-all duration-500",
-          isCinemaMode ? "pt-4 sm:pt-6" : "pt-4 sm:pt-6"
+          "max-w-[1800px] mx-auto px-0 sm:px-4 pb-4 sm:pb-12 transition-all duration-500",
+          isCinemaMode ? "pt-0 sm:pt-6" : "pt-0 sm:pt-6"
         )}>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigate(backUrl)}
             className={cn(
-              "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-4 sm:mb-6 transition-all duration-300 touch-manipulation",
+              "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-4 sm:mb-6 transition-all duration-300 touch-manipulation hidden sm:flex",
               isCinemaMode && "opacity-0 pointer-events-none h-0 mb-0 overflow-hidden"
             )}
           >
@@ -502,13 +502,13 @@ const Watch = () => {
           )}>
             {/* Main Player Area */}
             <div className={cn(
-              "space-y-4 sm:space-y-6 transition-all duration-500",
+              "space-y-2 sm:space-y-6 transition-all duration-500",
               isCinemaMode ? "lg:col-span-1 w-full" : "lg:col-span-9"
             )} ref={playerRef}>
               {/* Video Player Container */}
               <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-fox-orange/20 to-purple-600/20 rounded-2xl blur opacity-30 group-hover:opacity-60 transition duration-1000"></div>
-                <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
+                <div className="absolute -inset-1 bg-gradient-to-r from-fox-orange/20 to-purple-600/20 rounded-2xl blur opacity-30 group-hover:opacity-60 transition duration-1000 hidden sm:block"></div>
+                <div className="relative aspect-video bg-black rounded-none sm:rounded-xl overflow-hidden shadow-2xl sm:ring-1 ring-white/10">
                   {streamLoading ? (
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
                       <div className="flex flex-col items-center gap-4">
@@ -596,7 +596,7 @@ const Watch = () => {
 
               {/* Episode Navigation & Details - Compact in cinema mode */}
               <div className={cn(
-                "grid md:grid-cols-[1fr_auto] gap-3 items-center bg-card/30 backdrop-blur-md border border-white/5 p-3 md:p-4 rounded-xl transition-all duration-500",
+                "grid md:grid-cols-[1fr_auto] gap-2 sm:gap-3 items-center bg-card/30 backdrop-blur-md border-y sm:border border-white/5 p-3 md:p-4 sm:rounded-xl mx-0 sm:mx-0 transition-all duration-500",
                 isCinemaMode && "max-w-4xl mx-auto"
               )}>
                 <div className="min-w-0">
@@ -650,9 +650,9 @@ const Watch = () => {
                     size="lg"
                     onClick={handlePrevEpisode}
                     disabled={!hasPrev}
-                    className="gap-2 border-white/10 hover:bg-white/5 h-12 px-4 touch-manipulation"
+                    className="gap-1 sm:gap-2 border-white/10 hover:bg-white/5 h-10 sm:h-12 px-3 sm:px-4 touch-manipulation"
                   >
-                    <ChevronLeft className="w-6 h-6" />
+                    <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
                     <span className="hidden sm:inline">Prev</span>
                   </Button>
 
@@ -661,17 +661,17 @@ const Watch = () => {
                     size="lg"
                     onClick={handleNextEpisode}
                     disabled={!hasNext}
-                    className="gap-2 border-white/10 hover:bg-white/5 h-12 px-4 touch-manipulation"
+                    className="gap-1 sm:gap-2 border-white/10 hover:bg-white/5 h-10 sm:h-12 px-3 sm:px-4 touch-manipulation"
                   >
                     <span className="hidden sm:inline">Next</span>
-                    <ChevronRight className="w-6 h-6" />
+                    <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
                   </Button>
                 </div>
               </div>
 
               {/* Streaming Controls - Centered in cinema mode */}
               <div className={cn(
-                "transition-all duration-500",
+                "transition-all duration-500 px-3 sm:px-0",
                 isCinemaMode && "max-w-4xl mx-auto"
               )}>
                 <StreamingControls
@@ -699,7 +699,7 @@ const Watch = () => {
               </div>
 
               {/* Mobile Episode Drawer - Only visible on mobile */}
-              <div className="lg:hidden">
+              <div className="lg:hidden px-3 sm:px-0">
                 <MobileEpisodeDrawer
                   episodes={episodes || []}
                   selectedEpisodeId={selectedEpisode}
@@ -712,7 +712,7 @@ const Watch = () => {
 
               {/* Enhanced Anime Info Card - Centered in cinema mode */}
               <div className={cn(
-                "p-4 md:p-6 bg-card/30 backdrop-blur-md border border-white/5 rounded-xl space-y-4 md:space-y-6 shadow-xl transition-all duration-500",
+                "p-4 md:p-6 bg-card/30 backdrop-blur-md border-y sm:border border-white/5 sm:rounded-xl space-y-4 md:space-y-6 shadow-xl transition-all duration-500 mx-0 sm:mx-0",
                 isCinemaMode && "max-w-4xl mx-auto"
               )}>
                 <div className="flex flex-col sm:flex-row gap-4 md:gap-6">

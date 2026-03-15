@@ -158,6 +158,13 @@ export const VideoPlayer = ({
   const swipeStartValueRef = useRef<number>(0);
   const [showSwipeOverlay, setShowSwipeOverlay] = useState(false);
 
+  // Mobile settings panel state
+  const [showMobileSettings, setShowMobileSettings] = useState(false);
+  const [mobileSettingsTab, setMobileSettingsTab] = useState<'quality' | 'speed' | 'subtitles'>('quality');
+
+  // Auto-fullscreen on mobile: only trigger once per mount
+  const autoFullscreenFiredRef = useRef(false);
+
   // Helper to detect mobile device
   const isMobile = useCallback(() => {
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -655,6 +662,46 @@ export const VideoPlayer = ({
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
+  // Auto-fullscreen on mobile when video starts playing
+  useEffect(() => {
+    if (!isMobile() || autoFullscreenFiredRef.current || !isPlaying) return;
+    if (!containerRef.current || !videoRef.current) return;
+
+    autoFullscreenFiredRef.current = true;
+
+    const goFullscreen = async () => {
+      const container = containerRef.current;
+      const video = videoRef.current;
+      if (!container || !video) return;
+
+      try {
+        // iOS: use native video fullscreen for best experience
+        if ((video as any).webkitEnterFullscreen) {
+          try {
+            (video as any).webkitEnterFullscreen();
+            return;
+          } catch (e) { /* fall through */ }
+        }
+
+        // Android / other: use container fullscreen + landscape lock
+        if (container.requestFullscreen) {
+          await container.requestFullscreen();
+          if (screen.orientation && (screen.orientation as any).lock) {
+            try {
+              await (screen.orientation as any).lock('landscape');
+            } catch (e) { /* orientation lock not always supported */ }
+          }
+        }
+      } catch (e) {
+        // Fullscreen request may be blocked if not user-initiated; that's OK
+        console.log('[VideoPlayer] Auto-fullscreen blocked by browser policy');
+      }
+    };
+
+    // Trigger immediately for instant fullscreen
+    goFullscreen();
+  }, [isPlaying, isMobile]);
+
   // Next episode countdown timer
   useEffect(() => {
     if (showNextEpisodeCountdown && nextEpisodeCountdown > 0) {
@@ -704,14 +751,32 @@ export const VideoPlayer = ({
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
     }
-    // Faster auto-hide on mobile (2s vs 3s)
-    const hideDelay = isMobile() ? 2000 : 3000;
+    // Fast auto-hide: 1s on mobile, 1.5s on desktop
+    const hideDelay = isMobile() ? 1000 : 1500;
     controlsTimeoutRef.current = setTimeout(() => {
       if (isPlaying) {
         setShowControls(false);
       }
     }, hideDelay);
   }, [isPlaying, isMobile]);
+
+  // Mobile: clean tap toggle — tap once to show, tap again to hide
+  const toggleControlsVisibility = useCallback(() => {
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+      controlsTimeoutRef.current = null;
+    }
+    setShowControls(prev => {
+      const next = !prev;
+      // Auto-hide after delay if we just showed them and video is playing
+      if (next && isPlaying) {
+        controlsTimeoutRef.current = setTimeout(() => {
+          setShowControls(false);
+        }, 1000);
+      }
+      return next;
+    });
+  }, [isPlaying]);
 
   // Player controls
   const togglePlay = useCallback(() => {
@@ -839,14 +904,6 @@ export const VideoPlayer = ({
   }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (isControlsLocked) {
-      if (e.touches.length === 1) {
-        setTouchStartPos({ x: e.touches[0].clientX, y: e.touches[0].clientY });
-      }
-      showControlsTemporarily();
-      return;
-    }
-
     const now = Date.now();
     const touch = e.touches[0];
     const container = containerRef.current;
@@ -892,11 +949,17 @@ export const VideoPlayer = ({
     }
 
     lastTapRef.current = { time: now, x, y };
-    showControlsTemporarily();
-  }, [showControlsTemporarily, isControlsLocked]);
+
+    // Mobile: clean toggle; Desktop: show temporarily
+    if (isMobile()) {
+      toggleControlsVisibility();
+    } else {
+      showControlsTemporarily();
+    }
+  }, [showControlsTemporarily, toggleControlsVisibility, isMobile]);
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (isControlsLocked || !touchStartPos || !containerRef.current || !videoRef.current) return;
+    if (!touchStartPos || !containerRef.current || !videoRef.current) return;
 
     const touch = e.touches[0];
     setTouchCurrentPos({ x: touch.clientX, y: touch.clientY });
@@ -945,7 +1008,7 @@ export const VideoPlayer = ({
       setVolume(newVolume);
       setSwipeValue(newVolume);
     }
-  }, [isSwiping, swipeType, touchStartPos, duration, volume, isControlsLocked]);
+  }, [isSwiping, swipeType, touchStartPos, duration, volume]);
 
   const handleTouchEnd = useCallback(() => {
     if (isSwiping) {
@@ -956,13 +1019,6 @@ export const VideoPlayer = ({
     setTouchStartPos(null);
     setTouchCurrentPos(null);
   }, [isSwiping]);
-
-  const toggleControlsLock = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsControlsLocked(prev => !prev);
-    showControlsTemporarily();
-  }, [showControlsTemporarily]);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -1022,8 +1078,7 @@ export const VideoPlayer = ({
     <div
       ref={containerRef}
       className={cn(
-        "relative w-full h-full bg-black group overflow-hidden touch-none",
-        isControlsLocked && "cursor-none"
+        "relative w-full h-full bg-black group overflow-hidden touch-none"
       )}
       onMouseMove={showControlsTemporarily}
       onMouseLeave={() => isPlaying && setShowControls(false)}
@@ -1209,7 +1264,7 @@ export const VideoPlayer = ({
       <div
         className={cn(
           "absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 transition-opacity duration-300",
-          (showControls && !isControlsLocked) ? "opacity-100" : "opacity-0 pointer-events-none"
+          showControls ? "opacity-100" : "opacity-0 pointer-events-none"
         )}
       >
         {/* Top bar controls (Mobile only) */}
@@ -1340,9 +1395,24 @@ export const VideoPlayer = ({
               )}
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* Subtitles */}
-              {subtitles.length > 0 && (
+            <div className="flex items-center gap-1 md:gap-2">
+              {/* Mobile: single settings gear opens slide-up panel */}
+              {isMobile() && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowMobileSettings(prev => !prev);
+                  }}
+                  className="text-white hover:bg-white/20 h-11 w-11"
+                >
+                  <Settings className="w-6 h-6" />
+                </Button>
+              )}
+
+              {/* Desktop: Subtitles dropdown */}
+              {!isMobile() && subtitles.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -1350,11 +1420,10 @@ export const VideoPlayer = ({
                       size="icon"
                       className={cn(
                         "text-white hover:bg-white/20",
-                        subtitleEnabled && "text-fox-orange",
-                        isMobile() && "h-11 w-11"
+                        subtitleEnabled && "text-fox-orange"
                       )}
                     >
-                      <Subtitles className={cn(isMobile() ? "w-6 h-6" : "w-5 h-5")} />
+                      <Subtitles className="w-5 h-5" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -1377,10 +1446,9 @@ export const VideoPlayer = ({
                 </DropdownMenu>
               )}
 
-              {/* Picture-in-Picture & Settings - Desktop only */}
+              {/* Desktop: PiP & Settings */}
               {!isMobile() && (
                 <>
-                  {/* Picture-in-Picture */}
                   {document.pictureInPictureEnabled && (
                     <Button
                       variant="ghost"
@@ -1398,20 +1466,13 @@ export const VideoPlayer = ({
                       )}
                     </Button>
                   )}
-
-                  {/* Settings */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-white hover:bg-white/20"
-                      >
+                      <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
                         <Settings className="w-5 h-5" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                      {/* Quality Settings */}
                       {availableLevels.length > 0 && (
                         <>
                           <DropdownMenuLabel>Quality</DropdownMenuLabel>
@@ -1422,10 +1483,7 @@ export const VideoPlayer = ({
                           {[...availableLevels].reverse().map((level, index) => {
                             const levelIndex = availableLevels.length - 1 - index;
                             return (
-                              <DropdownMenuItem
-                                key={levelIndex}
-                                onClick={() => handleQualityChange(levelIndex)}
-                              >
+                              <DropdownMenuItem key={levelIndex} onClick={() => handleQualityChange(levelIndex)}>
                                 <span className="flex-1">{level.height}p</span>
                                 {currentLevel === levelIndex && <Check className="w-4 h-4 ml-2" />}
                               </DropdownMenuItem>
@@ -1434,14 +1492,9 @@ export const VideoPlayer = ({
                           <DropdownMenuSeparator />
                         </>
                       )}
-
-                      {/* Playback Speed */}
                       <DropdownMenuLabel>Playback Speed</DropdownMenuLabel>
                       {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                        <DropdownMenuItem
-                          key={speed}
-                          onClick={() => handlePlaybackSpeedChange(speed)}
-                        >
+                        <DropdownMenuItem key={speed} onClick={() => handlePlaybackSpeedChange(speed)}>
                           <span className="flex-1">{speed}x</span>
                           {playbackSpeed === speed && <Check className="w-4 h-4 ml-2" />}
                         </DropdownMenuItem>
@@ -1472,22 +1525,129 @@ export const VideoPlayer = ({
         </div>
       </div>
 
-      {/* Lock Button for Mobile */}
-      {isMobile() && (showControls || isControlsLocked) && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggleControlsLock}
-          className={cn(
-            "absolute top-1/2 -translate-y-1/2 right-2 md:right-4 z-50 transition-all duration-300 h-8 w-8 rounded-full",
-            isControlsLocked
-              ? "bg-fox-orange/20 text-white/40 backdrop-blur-[2px] scale-90 border border-white/5"
-              : "bg-black/40 text-white/70 border border-white/10",
-            !showControls && "opacity-0 pointer-events-none"
-          )}
+      {/* Mobile Settings Panel - slide up from bottom */}
+      {isMobile() && showMobileSettings && (
+        <div
+          className="absolute inset-0 z-50 flex flex-col justify-end"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowMobileSettings(false);
+          }}
         >
-          {isControlsLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-4 h-4" />}
-        </Button>
+          <div className="absolute inset-0 bg-black/60" />
+          <div
+            className="relative bg-zinc-900/95 backdrop-blur-xl rounded-t-2xl border-t border-white/10 p-4 pb-6 animate-in slide-in-from-bottom duration-300 max-h-[60%] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Handle bar */}
+            <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-4" />
+
+            {/* Tab buttons */}
+            <div className="flex gap-2 mb-4">
+              {[
+                { id: 'quality' as const, label: 'Quality', icon: <Sun className="w-4 h-4" /> },
+                { id: 'speed' as const, label: 'Speed', icon: <SkipForward className="w-4 h-4" /> },
+                ...(subtitles.length > 0 ? [{ id: 'subtitles' as const, label: 'Subs', icon: <Subtitles className="w-4 h-4" /> }] : [])
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setMobileSettingsTab(tab.id)}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all touch-manipulation",
+                    mobileSettingsTab === tab.id
+                      ? "bg-fox-orange text-white"
+                      : "bg-white/5 text-white/60 hover:bg-white/10"
+                  )}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Quality tab */}
+            {mobileSettingsTab === 'quality' && (
+              <div className="space-y-1.5">
+                <button
+                  onClick={() => { handleQualityChange(-1); setShowMobileSettings(false); }}
+                  className={cn(
+                    "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm transition-all touch-manipulation",
+                    currentLevel === -1 ? "bg-fox-orange/20 text-fox-orange" : "bg-white/5 text-white hover:bg-white/10"
+                  )}
+                >
+                  <span className="font-medium">Auto</span>
+                  {currentLevel === -1 && <Check className="w-4 h-4" />}
+                </button>
+                {[...availableLevels].reverse().map((level, index) => {
+                  const levelIndex = availableLevels.length - 1 - index;
+                  return (
+                    <button
+                      key={levelIndex}
+                      onClick={() => { handleQualityChange(levelIndex); setShowMobileSettings(false); }}
+                      className={cn(
+                        "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm transition-all touch-manipulation",
+                        currentLevel === levelIndex ? "bg-fox-orange/20 text-fox-orange" : "bg-white/5 text-white hover:bg-white/10"
+                      )}
+                    >
+                      <span className="font-medium">{level.height}p</span>
+                      {currentLevel === levelIndex && <Check className="w-4 h-4" />}
+                    </button>
+                  );
+                })}
+                {availableLevels.length === 0 && (
+                  <p className="text-white/40 text-sm text-center py-4">Quality options will appear once the stream loads</p>
+                )}
+              </div>
+            )}
+
+            {/* Speed tab */}
+            {mobileSettingsTab === 'speed' && (
+              <div className="grid grid-cols-3 gap-2">
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((speed) => (
+                  <button
+                    key={speed}
+                    onClick={() => { handlePlaybackSpeedChange(speed); setShowMobileSettings(false); }}
+                    className={cn(
+                      "flex items-center justify-center px-3 py-3 rounded-xl text-sm font-medium transition-all touch-manipulation",
+                      playbackSpeed === speed ? "bg-fox-orange text-white" : "bg-white/5 text-white hover:bg-white/10"
+                    )}
+                  >
+                    {speed}x
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Subtitles tab */}
+            {mobileSettingsTab === 'subtitles' && subtitles.length > 0 && (
+              <div className="space-y-1.5">
+                <button
+                  onClick={() => { handleSubtitleSelect(null); setShowMobileSettings(false); }}
+                  className={cn(
+                    "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm transition-all touch-manipulation",
+                    !selectedSubtitle ? "bg-fox-orange/20 text-fox-orange" : "bg-white/5 text-white hover:bg-white/10"
+                  )}
+                >
+                  <span className="font-medium">Off</span>
+                  {!selectedSubtitle && <Check className="w-4 h-4" />}
+                </button>
+                {subtitles.map((sub, i) => (
+                  <button
+                    key={i}
+                    onClick={() => { handleSubtitleSelect(sub.lang); setShowMobileSettings(false); }}
+                    className={cn(
+                      "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm transition-all touch-manipulation",
+                      selectedSubtitle === sub.lang ? "bg-fox-orange/20 text-fox-orange" : "bg-white/5 text-white hover:bg-white/10"
+                    )}
+                  >
+                    <span className="font-medium">{sub.label || sub.lang}</span>
+                    {selectedSubtitle === sub.lang && <Check className="w-4 h-4" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
