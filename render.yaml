@@ -3,8 +3,8 @@ services:
     name: anifoxwatch
     env: node
     region: ohio
-    buildCommand: npm install; cd server && npm install && npm run build
-    startCommand: npm run start:api
+    buildCommand: cd server && npm install && npm run postinstall
+    startCommand: cd server && npm run start:api
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
