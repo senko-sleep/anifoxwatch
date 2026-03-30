@@ -28,3 +28,27 @@ export function formatRating(rating: number | undefined | null): string | null {
   const n = normalizeRating(rating);
   return n !== null ? n.toFixed(1) : null;
 }
+
+/** Real calendar year only — avoids `year: 0` leaking as text from `{year && …}` */
+export function isValidAnimeYear(year: number | undefined | null): boolean {
+  if (year == null) return false;
+  const y = Number(year);
+  return Number.isFinite(y) && y >= 1900 && y <= 2100;
+}
+
+export function isValidEpisodeCount(n: number | undefined | null): boolean {
+  if (n == null) return false;
+  const v = Number(n);
+  return Number.isFinite(v) && v > 0;
+}
+
+/** Skip API placeholders like "00", "0 min" */
+export function isValidDurationLabel(s: string | undefined | null): boolean {
+  if (s == null || typeof s !== 'string') return false;
+  const t = s.trim();
+  if (!t) return false;
+  const one = t.replace(/\s+/g, ' ');
+  if (/^0+( min)?$/i.test(one)) return false;
+  if (/^0+(\.0+)?\s*(min|m|hr|h|ep)?$/i.test(one)) return false;
+  return true;
+}

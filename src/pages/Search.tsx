@@ -98,6 +98,9 @@ const ADULT_GENRES = [
 
 const MIXED_GENRES = [...SAFE_GENRES, ...ADULT_GENRES].sort();
 
+/** One-tap discovery on empty browse / no-results */
+const QUICK_EXPLORE_GENRES = ['Action', 'Romance', 'Isekai', 'Sci-Fi', 'Fantasy', 'Comedy'] as const;
+
 // Year ranges for date filter
 const currentYear = new Date().getFullYear();
 const YEAR_RANGES = [
@@ -445,6 +448,13 @@ const Search = () => {
     setMode('safe');
   };
 
+  const exploreGenre = (genre: string) => {
+    setQuery('');
+    setDebouncedQuery('');
+    setSelectedGenres([genre]);
+    setPage(1);
+  };
+
   const handleShuffle = () => {
     setBrowseSortBy('shuffle');
     setPage(1);
@@ -672,11 +682,11 @@ const Search = () => {
               <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
                 {/* Results info */}
                 <div className="flex items-center gap-2 min-w-0">
-                  <h1 className="text-sm font-bold text-white truncate">
+                  <h1 className="font-display text-base sm:text-lg font-bold text-white truncate tracking-tight">
                     {hasSearchQuery ? (
-                      <>Results for "<span className="text-fox-orange">{debouncedQuery}</span>"</>
+                      <>Results for “<span className="text-fox-orange">{debouncedQuery}</span>”</>
                     ) : (
-                      'Browse Anime'
+                      'Browse anime'
                     )}
                   </h1>
                   <span className="text-xs text-zinc-500 shrink-0">
@@ -774,15 +784,31 @@ const Search = () => {
                   ))}
                 </div>
               ) : processedData.results.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 text-center border-2 border-dashed border-white/5 rounded-2xl bg-secondary/5">
-                  <div className="bg-secondary/50 p-4 rounded-full mb-4">
-                    <SearchIcon className="w-8 h-8 text-muted-foreground" />
+                <div className="flex flex-col items-center justify-center py-16 sm:py-20 text-center border border-white/[0.06] rounded-2xl bg-gradient-to-b from-fox-surface/40 to-transparent px-4">
+                  <div className="bg-fox-orange/10 p-4 rounded-2xl mb-5 ring-1 ring-fox-orange/20">
+                    <SearchIcon className="w-9 h-9 text-fox-orange/90" />
                   </div>
-                  <h3 className="text-xl font-bold mb-2">No results found</h3>
-                  <p className="text-muted-foreground max-w-sm mb-6">
-                    We couldn't find any anime that matches your filters. Try adjusting your search query or filters.
+                  <h3 className="font-display text-xl sm:text-2xl font-bold mb-2 text-white">Nothing matched</h3>
+                  <p className="text-muted-foreground max-w-md mb-6 text-sm leading-relaxed">
+                    Try another search, loosen filters, or jump into a popular genre.
                   </p>
-                  <Button onClick={clearFilters}>Clear Filters</Button>
+                  <div className="flex flex-wrap justify-center gap-2 max-w-lg mb-8">
+                    {QUICK_EXPLORE_GENRES.map((g) => (
+                      <Button
+                        key={g}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full border-white/10 bg-white/[0.03] hover:bg-fox-orange/15 hover:border-fox-orange/40 hover:text-white"
+                        onClick={() => exploreGenre(g)}
+                      >
+                        {g}
+                      </Button>
+                    ))}
+                  </div>
+                  <Button onClick={clearFilters} className="bg-fox-orange hover:bg-fox-orange/90 text-white">
+                    Clear all filters
+                  </Button>
                 </div>
               ) : (
                 <>

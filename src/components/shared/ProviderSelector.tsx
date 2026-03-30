@@ -23,23 +23,23 @@ import {
   Zap
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getApiConfig } from '@/lib/api-config';
 
 // All available anime sources organized by priority/type
 export const ALL_PROVIDERS = {
   primary: [
-    { id: 'HiAnimeDirect', name: 'HiAnime', description: 'Primary source, best quality' },
-    { id: 'HiAnime', name: 'HiAnime API', description: 'Backup HiAnime' },
+    { id: 'Kaido', name: 'Kaido', description: 'Primary source (sub/dub, aniwatch-backed)' },
+    { id: '9Anime', name: '9Anime', description: 'Large catalog, HD' },
   ],
   highPriority: [
     { id: 'Zoro', name: 'Zoro/Aniwatch', description: 'High quality sub/dub' },
     { id: 'AnimePahe', name: 'AnimePahe', description: 'Low bandwidth, good quality' },
     { id: 'AnimeSuge', name: 'AnimeSuge', description: 'Fast servers' },
-    { id: 'Kaido', name: 'Kaido', description: 'Similar to Zoro' },
+    { id: 'Consumet', name: 'Consumet', description: 'Multi-provider API' },
     { id: 'Anix', name: 'Anix', description: 'Alternative source' },
   ],
   standard: [
     { id: 'Gogoanime', name: 'Gogoanime', description: 'Classic, reliable' },
-    { id: '9Anime', name: '9Anime', description: 'Large library' },
     { id: 'Aniwave', name: 'Aniwave', description: 'Good quality' },
     { id: 'KickassAnime', name: 'KickassAnime', description: 'Fast updates' },
     { id: 'YugenAnime', name: 'YugenAnime', description: 'Clean interface' },
@@ -62,7 +62,6 @@ export const ALL_PROVIDERS = {
     { id: 'AnimeFreak', name: 'AnimeFreak', description: 'Backup source' },
   ],
   aggregator: [
-    { id: 'Consumet', name: 'Consumet', description: 'Multi-provider API' },
   ],
   adult: [
     { id: 'WatchHentai', name: 'WatchHentai', description: 'Hentai streaming' },
@@ -110,7 +109,7 @@ export function ProviderSelector({
   const fetchHealthStatus = async () => {
     setIsLoadingHealth(true);
     try {
-      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      const apiBase = getApiConfig().baseUrl;
       const response = await fetch(`${apiBase}/api/sources/health`);
       const data = await response.json();
       const statusMap: Record<string, ProviderHealth> = {};
@@ -201,7 +200,7 @@ export function ProviderSelector({
               <div className="flex items-center gap-2">
                 {showHealthStatus && getStatusIcon(selectedProvider)}
                 <span>{selectedProviderInfo.name}</span>
-                {selectedProvider === 'HiAnimeDirect' && (
+                {selectedProvider === 'Kaido' && (
                   <Badge className="bg-fox-orange text-xs px-1 py-0">
                     <Zap className="w-2 h-2 mr-1" />
                     Primary

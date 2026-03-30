@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getApiConfig } from '@/lib/api-config';
 
 export interface ApiEndpoint {
     [key: string]: string;
@@ -21,16 +22,17 @@ export interface ApiHealth {
     uptime: number;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
 class DocsClient {
+    private base() {
+        return getApiConfig().baseUrl;
+    }
     private cacheKey = 'anifox_api_docs_cache';
     private healthKey = 'anifox_api_health_cache';
     private prefsKey = 'anifox_api_docs_prefs';
 
     async getDocs(): Promise<ApiDocs> {
         try {
-            const response = await axios.get(`${API_BASE}/api`);
+            const response = await axios.get(`${this.base()}/api`);
             const data = response.data;
             localStorage.setItem(this.cacheKey, JSON.stringify({
                 data,
@@ -47,7 +49,7 @@ class DocsClient {
 
     async getHealth(): Promise<ApiHealth> {
         try {
-            const response = await axios.get(`${API_BASE}/api/health`);
+            const response = await axios.get(`${this.base()}/api/health`);
             const data = response.data;
             localStorage.setItem(this.healthKey, JSON.stringify({
                 data,

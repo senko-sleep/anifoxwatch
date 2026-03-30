@@ -14,9 +14,6 @@ interface BrowseFilters {
     mode?: 'safe' | 'mixed' | 'adult';
 }
 
-// Use API configuration from api-config.ts
-const API_BASE_URL = getApiConfig().baseUrl;
-
 // Streaming types
 export interface VideoSource {
     url: string;
@@ -125,21 +122,24 @@ export interface SeasonalResponse {
 
 
 class AnimeApiClient {
-    private baseUrl: string;
     private cache: Map<string, CacheEntry<unknown>> = new Map();
     private inflight: Map<string, Promise<unknown>> = new Map();
-    private readonly MAX_RETRIES = 3;
-    private readonly TIMEOUT_MS = 30000;
+    private readonly MAX_RETRIES = 2;
+    private readonly TIMEOUT_MS = 25000;
     private _online = true;
     private _lastOnlineCheck = 0;
 
-    constructor(baseUrl: string = API_BASE_URL) {
-        this.baseUrl = baseUrl;
+    constructor() {
         if (typeof window !== 'undefined') {
             window.addEventListener('online', () => { this._online = true; });
             window.addEventListener('offline', () => { this._online = false; });
             this._online = navigator.onLine;
         }
+    }
+
+    /** Resolved on each call so dev server picks up env / getApiConfig() without stale base URL. */
+    private apiBase(): string {
+        return getApiConfig().baseUrl;
     }
 
     get isOnline(): boolean {
@@ -200,7 +200,7 @@ class AnimeApiClient {
             const timeoutId = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
 
             try {
-                const response = await fetch(`${this.baseUrl}${endpoint}`, {
+                const response = await fetch(`${this.apiBase()}${endpoint}`, {
                     ...options,
                     signal: controller.signal,
                     headers: {
@@ -450,8 +450,10 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         try {
-            const data = await this.fetch<StreamingData>(
-                `/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`
+            const data = await this.fetchWithRetry<StreamingData>(
+                `/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`,
+                undefined,
+                0
             );
 
             console.log(`[API] ✅ Stream received:`, {
@@ -470,7 +472,7 @@ class AnimeApiClient {
     }
 
     getProxyUrl(hlsUrl: string): string {
-        return `${this.baseUrl}/api/stream/proxy?url=${encodeURIComponent(hlsUrl)}`;
+        return `${this.apiBase()}/api/stream/proxy?url=${encodeURIComponent(hlsUrl)}`;
     }
 
     // ============ SOURCE ENDPOINTS ============
@@ -546,13 +548,13 @@ class AnimeApiClient {
     }
 
     async checkSourceHealth(): Promise<SourceHealth[]> {
-        const response = await fetch(`${this.baseUrl}/api/sources/check`, { method: 'POST' });
+        const response = await fetch(`${this.apiBase()}/api/sources/check`, { method: 'POST' });
         const data = await response.json();
         return data.sources || [];
     }
 
     async setPreferredSource(source: string): Promise<boolean> {
-        const response = await fetch(`${this.baseUrl}/api/sources/preferred`, {
+        const response = await fetch(`${this.apiBase()}/api/sources/preferred`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ source })

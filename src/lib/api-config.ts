@@ -28,46 +28,75 @@ export const API_DEPLOYMENTS = {
     custom: '' // Will be set from environment variable
 } as const;
 
+function configFromUrl(envApiUrl: string): ApiConfig {
+    let deployment: ApiDeployment = 'custom';
+
+    if (envApiUrl.includes('localhost') || envApiUrl.includes('127.0.0.1')) {
+        deployment = 'local';
+    } else if (envApiUrl.includes('workers.dev')) {
+        deployment = 'cloudflare';
+    } else if (envApiUrl.includes('render.com')) {
+        deployment = 'render';
+    } else if (envApiUrl === '/api') {
+        deployment = 'firebase';
+    }
+
+    return {
+        deployment,
+        baseUrl: envApiUrl.replace(/\/$/, ''),
+        timeout: 30000,
+        retries: 3
+    };
+}
+
 /**
- * Get the current API configuration
+ * Get the current API configuration.
+ *
+ * Development (`import.meta.env.DEV`):
+ * - **`VITE_USE_LOCAL_API=true` (default in `.env.development`):** `baseUrl` is empty so requests use
+ *   same-origin paths (`/api/...`). Vite proxies to `127.0.0.1:3001`. Use `npm run dev` (starts API + client).
+ * - **Remote only:** `VITE_USE_LOCAL_API=false` and set `VITE_API_URL` to a deployed API (for `vite` alone).
+ * - **`VITE_DEV_API_URL`:** absolute override (e.g. another port).
+ *
+ * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then Cloudflare default.
  */
 export function getApiConfig(): ApiConfig {
-    // Check environment variable first
-    const envApiUrl = import.meta.env.VITE_API_URL;
+    if (import.meta.env.DEV) {
+        if (import.meta.env.VITE_USE_LOCAL_API === 'true') {
+            // Empty baseUrl → same origin (Vite dev server). Requests go to `/api/*` and
+            // `vite.config.ts` proxies to the Express API — no CORS, works with `npm run dev`.
+            return {
+                deployment: 'local',
+                baseUrl: '',
+                timeout: 45000,
+                retries: 3
+            };
+        }
 
-    if (envApiUrl) {
-        // Determine deployment type from URL
-        let deployment: ApiDeployment = 'custom';
+        const devExplicit = import.meta.env.VITE_DEV_API_URL as string | undefined;
+        if (devExplicit && String(devExplicit).trim()) {
+            return configFromUrl(String(devExplicit).trim());
+        }
 
-        if (envApiUrl.includes('localhost') || envApiUrl.includes('127.0.0.1')) {
-            deployment = 'local';
-        } else if (envApiUrl.includes('workers.dev')) {
-            deployment = 'cloudflare';
-        } else if (envApiUrl.includes('render.com')) {
-            deployment = 'render';
-        } else if (envApiUrl === '/api') {
-            deployment = 'firebase';
+        const remote = import.meta.env.VITE_API_URL as string | undefined;
+        if (remote && String(remote).trim()) {
+            return configFromUrl(String(remote).trim());
         }
 
         return {
-            deployment,
-            baseUrl: envApiUrl,
+            deployment: 'cloudflare',
+            baseUrl: API_DEPLOYMENTS.cloudflare,
             timeout: 30000,
             retries: 3
         };
     }
 
-    // Auto-detect based on environment
-    if (import.meta.env.DEV) {
-        return {
-            deployment: 'local',
-            baseUrl: API_DEPLOYMENTS.local,
-            timeout: 30000,
-            retries: 3
-        };
+    // ─── Production / preview: respect VITE_API_URL from .env.production etc. ───
+    const envApiUrl = import.meta.env.VITE_API_URL as string | undefined;
+    if (envApiUrl && String(envApiUrl).trim()) {
+        return configFromUrl(String(envApiUrl).trim());
     }
 
-    // Check if we're on Firebase Hosting (detect firebaseapp.com or web.app)
     const isFirebaseHosting = typeof window !== 'undefined' && (
         window.location.hostname.includes('firebaseapp.com') ||
         window.location.hostname.includes('web.app')
@@ -82,7 +111,6 @@ export function getApiConfig(): ApiConfig {
         };
     }
 
-    // Production defaults to Cloudflare
     return {
         deployment: 'cloudflare',
         baseUrl: API_DEPLOYMENTS.cloudflare,

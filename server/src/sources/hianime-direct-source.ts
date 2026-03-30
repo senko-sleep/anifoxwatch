@@ -319,66 +319,53 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
 
         logger.info(`[${this.name}] Getting streaming links for ${episodeId} (server: ${server}, category: ${category})`);
 
-        // Try servers in priority order if the requested server fails
-        const serversToTry = [server, ...this.serverPriority.filter(s => s !== server)];
-        const maxRetries = 2;
+        if (options?.signal?.aborted) throw new Error('Aborted');
 
-        for (const currentServer of serversToTry) {
-            for (let retry = 0; retry <= maxRetries; retry++) {
-                if (options?.signal?.aborted) throw new Error('Aborted');
+        try {
+            const data = await this.executeWithSignal(
+                () => this.getScraper().getEpisodeSources(
+                    episodeId,
+                    server as HiAnime.AnimeServers,
+                    category
+                ),
+                options?.signal
+            );
 
-                try {
-                    if (retry > 0) {
-                        const delayMs = retry * 1000;
-                        await this.delayWithSignal(delayMs, options?.signal);
-                    }
+            if (data.sources && data.sources.length > 0) {
+                const rawData = data as any;
+                const streamData: StreamingData = {
+                    sources: data.sources.map((s: any): VideoSource => ({
+                        url: s.url,
+                        quality: this.normalizeQuality(s.quality || 'auto'),
+                        isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
+                        isDASH: s.url?.includes('.mpd')
+                    })),
+                    subtitles: (rawData.tracks || rawData.subtitles || [])
+                        .filter((t: any) => t.lang !== 'thumbnails')
+                        .map((sub: any) => ({
+                            url: sub.url,
+                            lang: sub.lang || sub.language || 'Unknown',
+                            label: sub.label || sub.lang || sub.language
+                        })),
+                    headers: rawData.headers || { 'Referer': 'https://megacloud.blog/' },
+                    intro: rawData.intro,
+                    outro: rawData.outro,
+                    source: this.name
+                };
 
-                    const data = await this.executeWithSignal(
-                        () => this.getScraper().getEpisodeSources(
-                            episodeId,
-                            currentServer as HiAnime.AnimeServers,
-                            category
-                        ),
-                        options?.signal
-                    );
-
-                    if (data.sources && data.sources.length > 0) {
-                        const rawData = data as any;
-                        const streamData: StreamingData = {
-                            sources: data.sources.map((s: any): VideoSource => ({
-                                url: s.url,
-                                quality: this.normalizeQuality(s.quality || 'auto'),
-                                isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-                                isDASH: s.url?.includes('.mpd')
-                            })),
-                            subtitles: (rawData.tracks || rawData.subtitles || [])
-                                .filter((t: any) => t.lang !== 'thumbnails')
-                                .map((sub: any) => ({
-                                    url: sub.url,
-                                    lang: sub.lang || sub.language || 'Unknown',
-                                    label: sub.label || sub.lang || sub.language
-                                })),
-                            headers: rawData.headers || { 'Referer': 'https://megacloud.blog/' },
-                            intro: rawData.intro,
-                            outro: rawData.outro,
-                            source: this.name
-                        };
-
-                        if (streamData.sources.length > 1) {
-                            streamData.sources.sort((a, b) => {
-                                const order: Record<string, number> = { '1080p': 0, '720p': 1, '480p': 2, '360p': 3, 'auto': 4, 'default': 5 };
-                                return (order[a.quality] || 5) - (order[b.quality] || 5);
-                            });
-                        }
-
-                        this.setCache(cacheKey, streamData, this.cacheTTL.stream);
-                        return streamData;
-                    }
-                } catch (error: any) {
-                    if (error.name === 'AbortError') throw error;
-                    logger.warn(`[${this.name}] Server ${currentServer} failed (attempt ${retry + 1}): ${error.message}`);
+                if (streamData.sources.length > 1) {
+                    streamData.sources.sort((a, b) => {
+                        const order: Record<string, number> = { '1080p': 0, '720p': 1, '480p': 2, '360p': 3, 'auto': 4, 'default': 5 };
+                        return (order[a.quality] || 5) - (order[b.quality] || 5);
+                    });
                 }
+
+                this.setCache(cacheKey, streamData, this.cacheTTL.stream);
+                return streamData;
             }
+        } catch (error: any) {
+            if (error.name === 'AbortError' || error.message === 'Aborted') throw error;
+            logger.warn(`[${this.name}] Server ${server} failed: ${error.message}`);
         }
 
         return { sources: [], subtitles: [] };

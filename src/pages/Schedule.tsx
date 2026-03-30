@@ -209,12 +209,15 @@ export const Schedule = () => {
             <main className="container mx-auto px-4 py-8">
                 {/* Header */}
                 <div className="mb-8">
-                    <h1 className="text-3xl font-bold mb-2 flex items-center gap-3">
-                        <Calendar className="w-8 h-8 text-fox-orange" />
-                        Airing Schedule
+                    <h1 className="font-display text-3xl md:text-4xl font-bold mb-2 flex flex-wrap items-center gap-3 tracking-tight">
+                        <Calendar className="w-8 h-8 md:w-10 md:h-10 text-fox-orange shrink-0" />
+                        Broadcast calendar
                     </h1>
-                    <p className="text-muted-foreground">
-                        Discover what anime is airing each day of the week
+                    <p className="text-muted-foreground max-w-2xl">
+                        Simulcast-style schedule — times in{' '}
+                        <span className="text-zinc-300 font-medium">
+                            {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                        </span>
                     </p>
                 </div>
 
@@ -233,20 +236,28 @@ export const Schedule = () => {
 
                         {/* Day Tabs */}
                         <div className="flex gap-1 overflow-x-auto pb-2 scrollbar-hide">
-                            {DAYS_OF_WEEK.map((day) => (
+                            {DAYS_OF_WEEK.map((day) => {
+                                const isToday = day.key === getCurrentDayKey();
+                                return (
                                 <button
                                     key={day.key}
                                     onClick={() => handleDayChange(day.key)}
                                     className={cn(
-                                        'px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap',
+                                        'px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap relative',
                                         selectedDay === day.key
                                             ? 'bg-fox-orange text-white shadow-lg'
-                                            : 'bg-fox-surface hover:bg-fox-surface/80 text-muted-foreground'
+                                            : 'bg-fox-surface hover:bg-fox-surface/80 text-muted-foreground',
+                                        isToday && selectedDay !== day.key && 'ring-1 ring-fox-orange/40'
                                     )}
                                 >
                                     {day.label}
+                                    {isToday && (
+                                        <span className="absolute -top-1 -right-1 text-[8px] font-bold uppercase tracking-wide text-fox-orange bg-fox-darker px-1 rounded border border-fox-orange/30">
+                                            Now
+                                        </span>
+                                    )}
                                 </button>
-                            ))}
+                            );})}
                         </div>
 
                         {/* Next Day Button */}

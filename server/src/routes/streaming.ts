@@ -170,10 +170,38 @@ const getProxyBaseUrl = (req: Request): string => {
 };
 
 /**
- * Convert a raw stream URL to a proxied URL
+ * Strip nested /api/stream/proxy?url=... wrappers so m3u8 rewrites never stack
+ * proxy-on-proxy (which caused 502 Bad Gateway and broken HLS).
+ */
+function unwrapProxyTarget(url: string): string {
+    let current = url.trim();
+    for (let i = 0; i < 12; i++) {
+        const marker = '/api/stream/proxy';
+        const mIdx = current.indexOf(marker);
+        if (mIdx === -1) break;
+        const qIdx = current.indexOf('?url=', mIdx);
+        if (qIdx === -1) break;
+        let param = current.slice(qIdx + 5);
+        const amp = param.indexOf('&');
+        if (amp !== -1) param = param.slice(0, amp);
+        let decoded: string;
+        try {
+            decoded = decodeURIComponent(param);
+        } catch {
+            break;
+        }
+        if (!decoded || decoded === current) break;
+        current = decoded;
+    }
+    return current;
+}
+
+/**
+ * Convert a raw stream URL to a proxied URL (single layer only)
  */
 const proxyUrl = (url: string, proxyBase: string, referer?: string): string => {
-    let proxyStr = `${proxyBase}?url=${encodeURIComponent(url)}`;
+    const target = unwrapProxyTarget(url);
+    let proxyStr = `${proxyBase}?url=${encodeURIComponent(target)}`;
     if (referer) {
         proxyStr += `&referer=${encodeURIComponent(referer)}`;
     }
@@ -293,35 +321,42 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     let lastError: string | null = null;
     let successServer: string | null = null;
 
-    for (const currentServer of serversToTry) {
+    if (server || !shouldTryAll) {
+        // Single server requested — just try it
+        const currentServer = serversToTry[0];
         try {
             logger.info(`[STREAM] Trying server: ${currentServer}`, { episodeId, requestId });
-
-            const data = await sourceManager.getStreamingLinks(
-                episodeId,
-                currentServer,
-                (category as 'sub' | 'dub') || 'sub'
-            );
-
+            const data = await sourceManager.getStreamingLinks(episodeId, currentServer, (category as 'sub' | 'dub') || 'sub');
             if (data.sources && data.sources.length > 0) {
                 streamData = data;
                 successServer = currentServer;
-                logger.info(`[STREAM] ✅ Got ${data.sources.length} sources from ${currentServer}`, {
-                    episodeId,
-                    server: currentServer,
-                    qualities: data.sources.map((s: any) => s.quality).join(', '),
-                    requestId
-                });
-                break;
-            } else {
-                logger.warn(`[STREAM] No sources from ${currentServer}`, { episodeId, requestId });
             }
         } catch (error: any) {
             lastError = error.message;
             logger.warn(`[STREAM] Server ${currentServer} failed: ${error.message}`, { episodeId, requestId });
+        }
+    } else {
+        // No specific server — race all servers in parallel, first success wins
+        logger.info(`[STREAM] Racing ${serversToTry.length} servers in parallel`, { episodeId, requestId });
 
-            if (!shouldTryAll) {
+        const results = await Promise.allSettled(
+            serversToTry.map(async (currentServer) => {
+                const data = await sourceManager.getStreamingLinks(episodeId, currentServer, (category as 'sub' | 'dub') || 'sub');
+                if (data.sources && data.sources.length > 0) {
+                    return { server: currentServer, data };
+                }
+                throw new Error(`No sources from ${currentServer}`);
+            })
+        );
+
+        for (const result of results) {
+            if (result.status === 'fulfilled') {
+                streamData = result.value.data;
+                successServer = result.value.server;
+                logger.info(`[STREAM] ✅ Got ${streamData.sources.length} sources from ${successServer}`, { episodeId, requestId });
                 break;
+            } else {
+                lastError = result.reason?.message || 'Unknown error';
             }
         }
     }
@@ -396,7 +431,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
  * @description Proxy HLS streams and videos to avoid CORS issues and blocked domains. Supports Range requests.
  */
 router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
-    const { url } = req.query;
+    let url = req.query.url as string | undefined;
     const requestId = (req as any).id;
     const proxyBase = getProxyBaseUrl(req);
 
@@ -408,9 +443,11 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         return;
     }
 
+    url = unwrapProxyTarget(url);
+
     // Basic validation: require http(s) URL
     if (!/^https?:\/\//i.test(url)) {
-        logger.warn(`[PROXY] Invalid URL format: ${url}`, { requestId });
+        logger.warn(`[PROXY] Invalid URL format after unwrap`, { requestId });
         res.status(400).json({ error: 'Invalid streaming URL' });
         return;
     }
@@ -441,6 +478,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'netmagcdn': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
             'biananset': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
             'anicdnstream': { referer: 'https://aniwatchtv.to/' },
+            'megaup': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+            'lab27core': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'gogocdn': { referer: 'https://gogoanime.run/' },
             'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'hstorage.xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
@@ -453,7 +492,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         // Priority: 1) explicit referer param from client, 2) CDN config match, 3) megacloud.blog default
         const config = matchedConfig ? matchedConfig[1] : cdnConfig.default;
         const referer = refererParam || config.referer;
-        const origin = config.origin || referer.replace(/\/$/, '');
+        // Critical: when client supplies an explicit referer, derive Origin from THAT URL.
+        // Mismatching Referer vs Origin (e.g. megaup.live referer + megacloud.blog origin) causes 403s.
+        let origin: string;
+        if (refererParam) {
+            try { origin = new URL(refererParam).origin; } catch { origin = config.origin || 'https://megacloud.blog'; }
+        } else {
+            origin = config.origin || referer.replace(/\/$/, '');
+        }
 
         // Check if domain is dead/unresolvable before making request
         if (isDeadDomain(url)) {
@@ -480,14 +526,17 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Prepare headers for upstream request
+        // Prepare headers for upstream request — mirror what a real browser HLS fetch looks like
         const headers: any = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': referer,
             'Origin': origin,
-            'Connection': 'keep-alive'
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'cross-site'
         };
 
         // Forward Range header if present (crucial for seeking in video players)

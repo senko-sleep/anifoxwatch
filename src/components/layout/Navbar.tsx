@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Search, Menu, X, Shuffle, Loader2, Wifi, Calendar, Home, Compass, Activity, Zap } from 'lucide-react';
+import { Search, Menu, X, Shuffle, Loader2, Wifi, Calendar, Home, Compass, Activity, ChevronDown, FileText, LayoutDashboard } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -144,6 +144,44 @@ export const Navbar = () => {
               <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-fox-orange rounded-full" />
             )}
           </Link>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200",
+                  ['/docs', '/status', '/monitoring'].includes(location.pathname)
+                    ? "text-fox-orange bg-fox-orange/10"
+                    : "text-zinc-400 hover:text-white hover:bg-white/5"
+                )}
+              >
+                More
+                <ChevronDown className="w-3.5 h-3.5 opacity-70" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52 bg-zinc-950/95 border-white/10">
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link to="/docs" className="flex items-center gap-2">
+                  <FileText className="w-4 h-4" />
+                  API docs
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link to="/status" className="flex items-center gap-2">
+                  <Activity className="w-4 h-4" />
+                  System status
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link to="/monitoring" className="flex items-center gap-2">
+                  <LayoutDashboard className="w-4 h-4" />
+                  Monitoring
+                </Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           <button
             onClick={handleRandomAnime}
             disabled={isLoadingRandom}
@@ -271,6 +309,34 @@ export const Navbar = () => {
                 )}
                 Random Anime
               </button>
+
+              <div className="pt-2 border-t border-border space-y-1">
+                <p className="px-4 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Resources</p>
+                <Link
+                  to="/docs"
+                  className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-zinc-400 hover:bg-fox-surface hover:text-white"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <FileText className="w-4 h-4" />
+                  API docs
+                </Link>
+                <Link
+                  to="/status"
+                  className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-zinc-400 hover:bg-fox-surface hover:text-white"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <Activity className="w-4 h-4" />
+                  System status
+                </Link>
+                <Link
+                  to="/monitoring"
+                  className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm text-zinc-400 hover:bg-fox-surface hover:text-white"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                >
+                  <LayoutDashboard className="w-4 h-4" />
+                  Monitoring
+                </Link>
+              </div>
               
               {/* Mobile Source Status */}
               {totalCount > 0 && (

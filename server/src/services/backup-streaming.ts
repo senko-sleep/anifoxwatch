@@ -269,7 +269,7 @@ export class BackupStreamingManager {
         priority += qualityBonus;
 
         // Base priority for known good sources
-        const knownGood = ['HiAnimeDirect', 'HiAnime', '9Anime', 'Aniwave', 'Zoro'];
+        const knownGood = ['Kaido', '9Anime', 'Consumet', 'AnimeFLV'];
         if (knownGood.includes(source)) {
             priority += 10;
         }
@@ -281,7 +281,7 @@ export class BackupStreamingManager {
      * Get quality rating for a source
      */
     private getSourceQuality(source: string): 'hd' | 'sd' | 'low' {
-        const hdSources = ['HiAnimeDirect', 'HiAnime', '9Anime', 'Zoro'];
+        const hdSources = ['Kaido', '9Anime', 'Consumet'];
         const sdSources = ['Aniwave', 'Aniwatch', 'Gogoanime', 'AnimePahe'];
 
         if (hdSources.includes(source)) return 'hd';

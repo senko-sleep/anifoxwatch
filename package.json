@@ -4,10 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently --names \"API,CLIENT\" -c \"blue,green\" \"npm run dev:api\" \"npm run dev:client\" --kill-others",
+    "dev": "concurrently --names \"API,WEB\" -c \"cyan,magenta\" --kill-others-on-fail \"npm run dev:api\" \"npm run dev:client\"",
     "dev:client": "vite",
     "dev:api": "npm run dev --prefix server",
-    "dev:all": "concurrently \"npm run dev:api\" \"npm run dev:client\"",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
@@ -110,6 +109,7 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^6.4.1",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wait-on": "^9.0.4"
   }
 }

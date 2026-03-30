@@ -11,7 +11,16 @@ export const Footer = () => {
           <div className="col-span-2 md:col-span-1">
             <Logo size="md" />
             <p className="mt-3 sm:mt-4 text-xs sm:text-sm text-muted-foreground">
-              Your ultimate destination for anime streaming with support for subs and dubs.
+              Watch in HD with multiple sources, sub & dub where available. Listings and metadata from{' '}
+              <a
+                href="https://anilist.co"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-zinc-400 hover:text-fox-orange transition-colors"
+              >
+                AniList
+              </a>
+              .
             </p>
             <div className="flex items-center gap-3 mt-4">
               <a
@@ -39,10 +48,10 @@ export const Footer = () => {
           <div>
             <h4 className="font-semibold mb-4">Browse</h4>
             <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><Link to="/browse" className="hover:text-fox-orange transition-colors">All Anime</Link></li>
-              <li><Link to="/genres" className="hover:text-fox-orange transition-colors">Genres</Link></li>
-              <li><Link to="/seasonal" className="hover:text-fox-orange transition-colors">Seasonal</Link></li>
-              <li><Link to="/popular" className="hover:text-fox-orange transition-colors">Popular</Link></li>
+              <li><Link to="/browse" className="hover:text-fox-orange transition-colors">All anime</Link></li>
+              <li><Link to="/browse?genres=Action" className="hover:text-fox-orange transition-colors">Browse by genre</Link></li>
+              <li><Link to="/browse?status=ongoing" className="hover:text-fox-orange transition-colors">This season</Link></li>
+              <li><Link to="/browse?sort=popularity" className="hover:text-fox-orange transition-colors">Popular</Link></li>
             </ul>
           </div>
 

@@ -11,6 +11,8 @@ interface SectionHeaderProps {
     link?: string;
     linkText?: string;
     className?: string;
+    /** Softer typography for secondary rails (e.g. browse rows below a hero). */
+    variant?: 'default' | 'quiet';
 }
 
 export const SectionHeader = ({
@@ -18,24 +20,37 @@ export const SectionHeader = ({
     subtitle,
     link,
     linkText = "See All",
-    className
+    className,
+    variant = 'default',
 }: SectionHeaderProps) => {
+    const quiet = variant === 'quiet';
     return (
-        <div className={cn("flex items-baseline justify-between mb-3 sm:mb-5", className)}>
-            <div>
-                <h2 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight text-white leading-none">{title}</h2>
+        <div className={cn("flex items-baseline justify-between gap-4 mb-3 sm:mb-4", className)}>
+            <div className="min-w-0">
+                <h2
+                    className={cn(
+                        "font-display tracking-tight leading-tight",
+                        quiet
+                            ? "text-[15px] sm:text-base font-semibold text-zinc-200"
+                            : "text-base sm:text-lg font-semibold text-white"
+                    )}
+                >
+                    {title}
+                </h2>
                 {subtitle && (
-                    <p className="text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1">{subtitle}</p>
+                    <p className={cn("mt-0.5 text-[11px] sm:text-xs text-zinc-500")}>
+                        {subtitle}
+                    </p>
                 )}
             </div>
 
             {link && (
                 <Link
                     to={link}
-                    className="text-xs sm:text-sm font-medium text-muted-foreground hover:text-fox-orange transition-colors flex items-center gap-1 shrink-0 touch-manipulation py-1"
+                    className="text-xs font-medium text-zinc-500 hover:text-fox-orange transition-colors flex items-center gap-0.5 shrink-0 touch-manipulation"
                 >
                     {linkText}
-                    <ChevronRight className="w-4 h-4" />
+                    <ChevronRight className="w-3.5 h-3.5" />
                 </Link>
             )}
         </div>

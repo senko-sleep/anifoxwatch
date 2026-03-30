@@ -36,6 +36,17 @@ import { toast } from 'sonner';
 type AudioType = 'sub' | 'dub';
 type QualityType = '1080p' | '720p' | '480p' | '360p' | 'auto';
 
+function plainDescription(raw: string | undefined): string {
+  if (!raw) return '';
+  const t = raw
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return t.length > 280 ? `${t.slice(0, 280)}…` : t;
+}
+
 const Watch = () => {
   const { animeId } = useParams<{ animeId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -114,14 +125,14 @@ const Watch = () => {
 
   // Data fetching
   const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId);
-  const { data: episodes, isLoading: episodesLoading } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId);
+  const { data: episodes, isLoading: episodesLoading, isFetching: episodesFetching } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId);
   const { data: servers, isLoading: serversLoading } = useEpisodeServers(selectedEpisode || '', !!selectedEpisode);
   const {
     data: streamData,
     isLoading: streamLoading,
     error: streamError,
     refetch: refetchStream
-  } = useStreamingLinks(selectedEpisode || '', selectedServer || undefined, audioType, !!selectedEpisode);
+  } = useStreamingLinks(selectedEpisode || '', selectedServer || undefined, audioType, !!selectedEpisode && !!selectedServer);
 
   // Dynamic page title
   useDocumentTitle(anime?.title ? `${anime.title} — EP ${selectedEpisodeNum}` : 'Watch');
@@ -184,7 +195,6 @@ const Watch = () => {
   useEffect(() => {
     setSelectedServer('');
     setServerRetryCount(0);
-    console.log(`[Watch] 🔊 Audio type changed to: ${audioType}`);
   }, [audioType, selectedEpisode]);
 
   // Auto-failover on stream error
@@ -403,7 +413,6 @@ const Watch = () => {
   }, [cleanAnimeId]);
 
 
-  // Loading state
   if (animeLoading) {
     return (
       <div className="min-h-screen flex flex-col bg-background">
@@ -424,7 +433,47 @@ const Watch = () => {
     );
   }
 
-  // Handle case with no episodes
+  if (animeError || !anime) {
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <Navbar />
+        <main className="flex-1 container py-8">
+          <div className="flex flex-col items-center justify-center py-20">
+            <AlertCircle className="w-16 h-16 text-red-500 mb-4" />
+            <h2 className="text-2xl font-bold mb-2">Anime Not Found</h2>
+            <p className="text-muted-foreground mb-6">
+              The anime you&apos;re looking for doesn&apos;t exist or couldn&apos;t be loaded.
+            </p>
+            <Button onClick={() => navigate('/')} variant="outline">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Home
+            </Button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (episodesLoading || (episodesFetching && episodes === undefined)) {
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <Navbar />
+        <main className="flex-1 container py-8">
+          <div className="grid lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-4">
+              <Skeleton className="aspect-video w-full rounded-xl" />
+              <Skeleton className="h-12 w-full" />
+            </div>
+            <div className="space-y-4">
+              <Skeleton className="h-64 w-full rounded-xl" />
+              <Skeleton className="h-96 w-full rounded-xl" />
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   if (!episodes || episodes.length === 0) {
     return (
       <div className="min-h-screen flex flex-col bg-background">
@@ -469,28 +518,6 @@ const Watch = () => {
                 Back to Home
               </Button>
             </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // Error state
-  if (animeError || !anime) {
-    return (
-      <div className="min-h-screen flex flex-col bg-background">
-        <Navbar />
-        <main className="flex-1 container py-8">
-          <div className="flex flex-col items-center justify-center py-20">
-            <AlertCircle className="w-16 h-16 text-red-500 mb-4" />
-            <h2 className="text-2xl font-bold mb-2">Anime Not Found</h2>
-            <p className="text-muted-foreground mb-6">
-              The anime you're looking for doesn't exist or couldn't be loaded.
-            </p>
-            <Button onClick={() => navigate('/')} variant="outline">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Home
-            </Button>
           </div>
         </main>
       </div>
@@ -993,81 +1020,80 @@ const Watch = () => {
               </div>
 
 
-              {/* Enhanced Anime Info Card */}
+              {/* Single about block below the player */}
               <div className={cn(
-                "p-6 bg-card/30 backdrop-blur-md border border-white/5 rounded-xl space-y-6 shadow-xl transition-all duration-500",
-                isCinemaMode && "max-w-4xl mx-auto"
+                'rounded-xl border border-white/5 bg-card/30 p-5 shadow-xl backdrop-blur-md transition-all duration-500 sm:p-6',
+                isCinemaMode && 'mx-auto max-w-4xl'
               )}>
-                <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
-                  <div className="relative group mx-auto sm:mx-0">
-                    <img
-                      src={anime.image}
-                      alt={anime.title}
-                      className="w-24 h-36 sm:w-32 sm:h-48 object-cover rounded-lg shadow-xl ring-1 ring-white/10 transition-transform duration-300 group-hover:scale-105"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-3 md:space-y-4 text-center sm:text-left">
-                    <div>
-                      <h1 className="text-xl md:text-2xl font-bold leading-tight bg-gradient-to-r from-white to-white/80 bg-clip-text text-transparent">{anime.title}</h1>
-                      {anime.titleJapanese && (
-                        <p className="text-xs md:text-sm text-muted-foreground mt-1 italic">{anime.titleJapanese}</p>
-                      )}
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
+                <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">About</h2>
+                <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
+                  <img
+                    src={anime.image}
+                    alt=""
+                    className="mx-auto h-40 w-28 shrink-0 rounded-lg object-cover ring-1 ring-white/10 sm:mx-0 sm:h-44 sm:w-32"
+                  />
+                  <div className="min-w-0 flex-1 text-center sm:text-left">
+                    <h3 className="font-display text-lg font-bold text-white sm:text-xl md:text-2xl">{anime.title}</h3>
+                    {anime.titleJapanese && (
+                      <p className="mt-1 text-sm italic text-muted-foreground">{anime.titleJapanese}</p>
+                    )}
+                    <div className="mt-3 flex flex-wrap items-center justify-center gap-2 sm:justify-start">
                       {formatRating(anime.rating) && (
-                        <Badge variant="secondary" className="gap-1 bg-yellow-500/10 text-yellow-500 border-yellow-500/20">
-                          <Star className="w-3 h-3 fill-current" />
+                        <Badge variant="secondary" className="gap-1 border-yellow-500/20 bg-yellow-500/10 text-yellow-500">
+                          <Star className="h-3 w-3 fill-current" />
                           {formatRating(anime.rating)}
                         </Badge>
                       )}
                       <Badge variant="outline" className="border-white/10">{anime.type}</Badge>
-                      <Badge variant="outline" className={
-                        anime.status === 'Ongoing' ? 'border-green-500/50 text-green-500 bg-green-500/10' :
-                          anime.status === 'Completed' ? 'border-blue-500/50 text-blue-500 bg-blue-500/10' :
-                            'border-yellow-500/50 text-yellow-500 bg-yellow-500/10'
-                      }>
-                        {anime.status}
-                      </Badge>
+                      {anime.status && (
+                        <Badge
+                          variant="outline"
+                          className={
+                            anime.status === 'Ongoing'
+                              ? 'border-green-500/50 bg-green-500/10 text-green-500'
+                              : anime.status === 'Completed'
+                                ? 'border-blue-500/50 bg-blue-500/10 text-blue-500'
+                                : 'border-yellow-500/50 bg-yellow-500/10 text-yellow-500'
+                          }
+                        >
+                          {anime.status}
+                        </Badge>
+                      )}
                     </div>
-
-                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground">
-                      {anime.year && (
-                        <span className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4" />
-                          {anime.year}
+                    <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm text-muted-foreground sm:justify-start">
+                      {(anime.season || anime.year != null) && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 opacity-80" />
+                          {[anime.season, anime.year].filter((v) => v != null && v !== '').join(' ')}
                         </span>
                       )}
                       {anime.duration && (
-                        <span className="flex items-center gap-2">
-                          <Clock className="w-4 h-4" />
+                        <span className="inline-flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5 opacity-80" />
                           {anime.duration}
                         </span>
                       )}
-                      <span className="flex items-center gap-2">
-                        <Tv className="w-4 h-4" />
-                        {anime.episodes || '?'} Episodes
+                      <span className="inline-flex items-center gap-1.5">
+                        <Tv className="h-3.5 w-3.5 opacity-80" />
+                        {anime.episodes || '?'} episodes
                       </span>
                     </div>
+                    {anime.genres?.length > 0 && (
+                      <div className="mt-3 flex flex-wrap justify-center gap-1.5 sm:justify-start">
+                        {anime.genres.map((genre) => (
+                          <Badge key={genre} variant="secondary" className="text-xs bg-white/5">
+                            {genre}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
+                    {plainDescription(anime.description) ? (
+                      <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+                        {plainDescription(anime.description)}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
-
-                {anime.genres?.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-4 border-t border-white/5">
-                    {anime.genres.map(genre => (
-                      <Badge key={genre} variant="secondary" className="text-xs bg-white/5 hover:bg-white/10 transition-colors hover:scale-105 transform">
-                        {genre}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-
-                {anime.description && (
-                  <p className="text-sm text-muted-foreground leading-relaxed line-clamp-3 hover:line-clamp-none transition-all duration-300">
-                    {anime.description}
-                  </p>
-                )}
               </div>
             </div>
 

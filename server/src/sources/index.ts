@@ -1,16 +1,12 @@
 export { BaseAnimeSource, type AnimeSource } from './base-source.js';
 
-// Primary source - HiAnimeDirect (uses aniwatch package directly for deep scraping)
-export { HiAnimeDirectSource } from './hianime-direct-source.js';
+// PRIMARY: Direct scrapers (no external API dependency)
+export { AnimePaheDirectSource } from './animepahe-direct-source.js';
+export { AnimeKaiSource } from './animekai-source.js';
 
 // Adult/Hentai Sources
 export { WatchHentaiSource } from './watchhentai-source.js';
 export { HanimeSource } from './hanime-source.js';
-
-// Secondary source - HiAnime (uses external APIs)
-export { HiAnimeSource } from './hianime-source.js';
-
-// Legacy sources (for fallback/backward compatibility)
 export { ConsumetSource } from './consumet-source.js';
 export { AniwatchSource } from './aniwatch-source.js';
 export { GogoanimeSource } from './gogoanime-source.js';

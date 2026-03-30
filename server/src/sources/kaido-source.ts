@@ -40,6 +40,11 @@ export class KaidoSource extends BaseAnimeSource {
         };
     }
 
+    /** kaido- and legacy hianime- prefixes share the same site slug */
+    private stripProviderPrefix(id: string): string {
+        return id.replace(/^kaido-/i, '').replace(/^hianime-/i, '');
+    }
+
     async search(query: string, page: number = 1, _filters?: Record<string, unknown>, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         try {
             const response = await axios.get(`${this.baseUrl}/search`, {
@@ -99,7 +104,7 @@ export class KaidoSource extends BaseAnimeSource {
 
     async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         try {
-            const animeId = id.replace('kaido-', '');
+            const animeId = this.stripProviderPrefix(id);
             const response = await axios.get(`${this.baseUrl}/${animeId}`, {
                 signal: options?.signal,
                 timeout: options?.timeout || 10000,
@@ -145,7 +150,7 @@ export class KaidoSource extends BaseAnimeSource {
 
     async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         try {
-            const id = animeId.replace('kaido-', '');
+            const id = this.stripProviderPrefix(animeId);
             const dataId = id.split('-').pop();
             const response = await axios.get(`${this.baseUrl}/ajax/episode/list/${dataId}`, {
                 signal: options?.signal,
@@ -188,7 +193,7 @@ export class KaidoSource extends BaseAnimeSource {
 
     async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         try {
-            const response = await axios.get(`${this.baseUrl}/ajax/episode/servers?episodeId=${episodeId}`, {
+            const response = await axios.get(`${this.baseUrl}/ajax/episode/servers?episodeId=${encodeURIComponent(episodeId)}`, {
                 signal: options?.signal,
                 timeout: options?.timeout || 10000,
                 headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
@@ -217,50 +222,50 @@ export class KaidoSource extends BaseAnimeSource {
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
-        try {
-            // Kaido shares the same backend as HiAnime (same episode IDs).
-            // Use the aniwatch scraper directly to decode rapid-cloud embeds.
-            logger.info(`Using aniwatch scraper for ${episodeId}`, undefined, this.name);
+        const serversToTry = server
+            ? [server]
+            : ['hd-1', 'hd-2', 'megacloud', 'streamsb'];
 
-            const serverPriority = [server || 'hd-2', 'hd-2', 'hd-1', 'hd-3'].filter((v, i, a) => a.indexOf(v) === i);
-            for (const srv of serverPriority) {
-                try {
-                    const data = await this.getScraper().getEpisodeSources(
+        for (const srv of serversToTry) {
+            try {
+                logger.info(`Getting streams for ${episodeId} (server: ${srv}, cat: ${category})`, undefined, this.name);
+
+                const data = await Promise.race([
+                    this.getScraper().getEpisodeSources(
                         episodeId,
                         srv as HiAnime.AnimeServers,
                         category
-                    );
-                    if (data.sources && data.sources.length > 0) {
-                        const rawData = data as Record<string, unknown>;
-                        const streamData: StreamingData = {
-                            sources: (data.sources as Array<{ url: string; quality?: string; isM3U8?: boolean }>).map((s): VideoSource => ({
-                                url: s.url,
-                                quality: 'auto',
-                                isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-                            })),
-                            subtitles: ((rawData.tracks || rawData.subtitles || []) as Array<{ url: string; lang?: string; language?: string; label?: string }>)
-                                .filter((t) => t.lang !== 'thumbnails')
-                                .map((sub) => ({
-                                    url: sub.url,
-                                    lang: sub.lang || sub.language || 'Unknown',
-                                    label: sub.label || sub.lang || sub.language
-                                })),
-                            headers: (rawData.headers as Record<string, string>) || { 'Referer': 'https://megacloud.blog/' },
-                            source: this.name
-                        };
-                        logger.info(`Scraper got ${streamData.sources.length} sources for ${episodeId} via ${srv}`, undefined, this.name);
-                        return streamData;
-                    }
-                } catch {
-                    // Try next server
-                }
-            }
+                    ),
+                    new Promise<never>((_, rej) => setTimeout(() => rej(new Error('scraper timeout')), 15000))
+                ]);
 
-            return { sources: [], subtitles: [] };
-        } catch (error) {
-            this.handleError(error, 'getStreamingLinks');
-            return { sources: [], subtitles: [] };
+                if (data.sources && data.sources.length > 0) {
+                    const rawData = data as Record<string, unknown>;
+                    const streamData: StreamingData = {
+                        sources: (data.sources as Array<{ url: string; quality?: string; isM3U8?: boolean }>).map((s): VideoSource => ({
+                            url: s.url,
+                            quality: 'auto',
+                            isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
+                        })),
+                        subtitles: ((rawData.tracks || rawData.subtitles || []) as Array<{ url: string; lang?: string; language?: string; label?: string }>)
+                            .filter((t) => t.lang !== 'thumbnails')
+                            .map((sub) => ({
+                                url: sub.url,
+                                lang: sub.lang || sub.language || 'Unknown',
+                                label: sub.label || sub.lang || sub.language
+                            })),
+                        headers: (rawData.headers as Record<string, string>) || { 'Referer': 'https://megacloud.blog/' },
+                        source: this.name
+                    };
+                    logger.info(`Got ${streamData.sources.length} sources for ${episodeId} via ${srv}`, undefined, this.name);
+                    return streamData;
+                }
+            } catch (error) {
+                logger.warn(`Server ${srv} failed for ${episodeId}: ${(error as Error).message?.substring(0, 80)}`, undefined, this.name);
+            }
         }
+
+        return { sources: [], subtitles: [] };
     }
 
     async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {

@@ -608,7 +608,7 @@ router.get('/types', async (req: Request, res: Response): Promise<void> => {
  */
 router.get('/genres', async (req: Request, res: Response): Promise<void> => {
     try {
-        // Comprehensive list of genres available on HiAnime
+        // Comprehensive list of anime genres
         const genres = [
             'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror', 'Mystery', 'Romance',
             'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller', 'Yuri', 'Yaoi',

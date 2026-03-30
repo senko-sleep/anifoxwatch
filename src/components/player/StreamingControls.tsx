@@ -80,7 +80,7 @@ export function StreamingControls({
   currentSource,
   hasDub = false,
   hasSub = true,
-  selectedProvider = 'HiAnimeDirect',
+  selectedProvider = 'Kaido',
   onProviderChange,
   showProviderSelector = true
 }: StreamingControlsProps) {

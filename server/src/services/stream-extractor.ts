@@ -82,11 +82,11 @@ class StreamExtractor {
     }
 
     /**
-     * Extract streams from 9animetv.to episode page
+     * Extract streams from a Zoro-style watch site (9anime, Kaido, etc.)
      */
-    async extractFrom9Anime(animeSlug: string, episodeId: string): Promise<ExtractionResult> {
-        const url = `https://9animetv.to/watch/${animeSlug}?ep=${episodeId}`;
-        logger.info(`[StreamExtractor] Extracting from 9anime: ${url}`);
+    async extractFrom9Anime(animeSlug: string, episodeId: string, watchBaseUrl: string = 'https://9animetv.to'): Promise<ExtractionResult> {
+        const url = `${watchBaseUrl.replace(/\/$/, '')}/watch/${animeSlug}?ep=${episodeId}`;
+        logger.info(`[StreamExtractor] Extracting from watch site (${watchBaseUrl}): ${url}`);
 
         const page = await this.createPage();
         const streams: ExtractedStream[] = [];
@@ -234,6 +234,11 @@ class StreamExtractor {
         } finally {
             await page.close();
         }
+    }
+
+    /** Same player layout as 9animetv; uses kaido.to watch URLs */
+    extractFromKaido(animeSlug: string, episodeId: string): Promise<ExtractionResult> {
+        return this.extractFrom9Anime(animeSlug, episodeId, 'https://kaido.to');
     }
 
     /**

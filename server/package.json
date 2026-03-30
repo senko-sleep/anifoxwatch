@@ -3,7 +3,7 @@
     "version": "1.0.0",
     "type": "module",
     "scripts": {
-        "dev": "tsx watch src/index.ts",
+        "dev": "tsx src/index.ts",
         "dev:optimized": "tsx watch src/index-optimized.ts",
         "build": "echo 'Build skipped - using tsx runtime'",
         "start": "tsx src/index.ts",

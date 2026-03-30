@@ -175,10 +175,10 @@ const startServer = (port: number) => {
 ║   Port: ${port} ${isProduction ? '(Production)' : '(Local)'}                 ║
 ║                                                                  ║
 ║   📡 Streaming Sources (Priority Order):                         ║
-║   • HiAnimeDirect - Primary, HD Sub/Dub (Most Reliable)          ║
-║   • HiAnime - Backup, HD Sub/Dub                                 ║
-║   • Gogoanime - Fallback, Sub/Dub                                ║
-║   • 9Anime - Fallback, HD Sub/Dub                                ║
+║   • Kaido - Primary (kaido.to + aniwatch scraper)                ║
+║   • 9Anime - HD Sub/Dub                                          ║
+║   • Consumet - Gogoanime API aggregator                          ║
+║   • AnimeFLV - Regional / fallback                               ║
 ║   • + 24 more backup sources for failover                        ║
 ║   • Consumet - Multi-provider aggregator                         ║
 ║                                                                  ║

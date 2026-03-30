@@ -5,9 +5,10 @@
  * Implements exponential backoff on consecutive failures to avoid wasting bandwidth.
  */
 
+import { getApiConfig } from '@/lib/api-config';
+
 const PING_INTERVAL = 8 * 60 * 1000; // 8 minutes (under Render's 15-min spin-down)
 const MAX_BACKOFF = 30 * 60 * 1000; // 30 minutes max between pings on failure
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 let pingInterval: NodeJS.Timeout | null = null;
 let consecutiveFailures = 0;
@@ -21,7 +22,8 @@ async function ping() {
   if (!isTabVisible) return;
 
   try {
-    await fetch(`${API_BASE_URL}/health`, { 
+    const base = getApiConfig().baseUrl;
+    await fetch(`${base}/health`, { 
       method: 'HEAD',
       cache: 'no-cache',
       signal: AbortSignal.timeout(10000)

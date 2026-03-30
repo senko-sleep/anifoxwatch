@@ -229,10 +229,9 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
         queryKey: queryKeys.stream(episodeId, server, category),
         queryFn: () => apiClient.getStreamingLinks(episodeId, server, category),
         enabled: enabled && episodeId.length > 0,
-        staleTime: 5 * 60 * 1000, // 5 minutes - streams expire quickly
+        staleTime: 5 * 60 * 1000,
         gcTime: 10 * 60 * 1000,
-        retry: 2,
-        retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
+        retry: 0,
         refetchOnWindowFocus: false,
     });
 }
