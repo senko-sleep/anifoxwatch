@@ -4,9 +4,8 @@ import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { VideoPlayer } from '../components/player/VideoPlayer';
 import { EpisodeList } from '../components/player/EpisodeList';
-import { MobileEpisodeDrawer } from '../components/player/MobileEpisodeDrawer';
 import { StreamingControls } from '../components/player/StreamingControls';
-import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers } from '@/hooks/useAnime';
+import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers, useDubStreamProbe } from '@/hooks/useAnime';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -25,9 +24,6 @@ import {
   RefreshCw,
   Maximize2,
   MonitorPlay,
-  Settings,
-  List,
-  X
 } from 'lucide-react';
 
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -95,7 +91,7 @@ const Watch = () => {
   // State
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(1);
-  const [audioType, setAudioType] = useState<AudioType>('sub');
+  const [audioType, setAudioType] = useState<AudioType>('dub');
   const [audioManuallySet, setAudioManuallySet] = useState(false);
   const [quality, setQuality] = useState<QualityType>('auto');
   const [selectedServer, setSelectedServer] = useState<string>('');
@@ -112,11 +108,7 @@ const Watch = () => {
   // Cinema mode state for layout adaptation
   const [isCinemaMode, setIsCinemaMode] = useState(false);
 
-  // Mobile fullscreen overlay state
-  const [showMobileOverlay, setShowMobileOverlay] = useState(false);
-  const [showMobileEpisodes, setShowMobileEpisodes] = useState(false);
-  const [showMobileSettings, setShowMobileSettings] = useState(false);
-  const [showExitScreen, setShowExitScreen] = useState(false);
+  // (Mobile overlay state removed — mobile now uses inline page layout)
 
   // Helper to detect mobile
   const isMobile = useCallback(() => {
@@ -127,12 +119,44 @@ const Watch = () => {
   const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId);
   const { data: episodes, isLoading: episodesLoading, isFetching: episodesFetching } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId);
   const { data: servers, isLoading: serversLoading } = useEpisodeServers(selectedEpisode || '', !!selectedEpisode);
+  const serversHaveDub = useMemo(
+    () => servers?.some((s) => s.type === 'dub') ?? false,
+    [servers]
+  );
   const {
     data: streamData,
     isLoading: streamLoading,
     error: streamError,
     refetch: refetchStream
-  } = useStreamingLinks(selectedEpisode || '', selectedServer || undefined, audioType, !!selectedEpisode && !!selectedServer);
+  } = useStreamingLinks(selectedEpisode || '', selectedServer || undefined, audioType, !!selectedEpisode);
+
+  /** Dub is available if: server list has dub, metadata says dub, active dub playback returned sources, or dub probe (while on SUB) succeeded. */
+  const metadataIndicatesDub = useMemo(
+    () => (anime?.dubCount ?? 0) > 0 || (episodes?.some((e) => e.hasDub) ?? false),
+    [anime, episodes]
+  );
+  const dubPlaybackWorks =
+    audioType === 'dub' && (streamData?.sources?.length ?? 0) > 0;
+  const skipDubProbe =
+    serversHaveDub ||
+    metadataIndicatesDub ||
+    dubPlaybackWorks ||
+    audioType !== 'sub';
+
+  const { data: dubProbeData } = useDubStreamProbe(
+    selectedEpisode || '',
+    servers,
+    skipDubProbe
+  );
+  const dubProbeHasSources = (dubProbeData?.sources?.length ?? 0) > 0;
+  const dubAvailable = useMemo(
+    () =>
+      serversHaveDub ||
+      metadataIndicatesDub ||
+      dubPlaybackWorks ||
+      dubProbeHasSources,
+    [serversHaveDub, metadataIndicatesDub, dubPlaybackWorks, dubProbeHasSources]
+  );
 
   // Dynamic page title
   useDocumentTitle(anime?.title ? `${anime.title} — EP ${selectedEpisodeNum}` : 'Watch');
@@ -159,43 +183,18 @@ const Watch = () => {
 
 
 
-  // Auto-switch to sub when dub is not available (only if user hasn't manually selected audio)
+  // Auto-select server when servers load, episode changes, or sub/dub toggles.
+  // Never leave selectedServer empty — that used to disable streaming and show stale video.
   useEffect(() => {
     if (!servers?.length) return;
 
-    const hasDubServers = servers.some(s => s.type === 'dub');
-    const hasSubServers = servers.some(s => s.type === 'sub');
-
-    // If user wants dub but no dub servers available, switch to sub
-    if (audioType === 'dub' && !hasDubServers && hasSubServers && !audioManuallySet) {
-      console.log('[Watch] 🔄 No dub servers available, auto-switching to sub');
-      setAudioType('sub');
+    const matchingServers = servers.filter(s => s.type === audioType);
+    if (matchingServers.length > 0) {
+      setSelectedServer(matchingServers[0].name);
+    } else if (!selectedServer || !servers.some(s => s.name === selectedServer)) {
+      setSelectedServer(servers[0].name);
     }
-    // If user wants sub but no sub servers available, switch to dub
-    if (audioType === 'sub' && !hasSubServers && hasDubServers && !audioManuallySet) {
-      console.log('[Watch] 🔄 No sub servers available, auto-switching to dub');
-      setAudioType('dub');
-    }
-  }, [servers, audioType, audioManuallySet]);
-
-  // Auto-select best server when servers load or audio type changes
-  useEffect(() => {
-    if (servers?.length) {
-      // Prefer servers matching audio type
-      const matchingServers = servers.filter(s => s.type === audioType);
-      if (matchingServers.length > 0) {
-        setSelectedServer(matchingServers[0].name);
-      } else if (!selectedServer) {
-        setSelectedServer(servers[0].name);
-      }
-    }
-  }, [servers, audioType]);
-
-  // Reset server and retry count when audio type changes
-  useEffect(() => {
-    setSelectedServer('');
-    setServerRetryCount(0);
-  }, [audioType, selectedEpisode]);
+  }, [servers, audioType, selectedEpisode]);
 
   // Auto-failover on stream error
   useEffect(() => {
@@ -279,10 +278,10 @@ const Watch = () => {
     }
   }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData]);
 
-  // Reset retry count when episode changes
+  // Reset retry count when episode or audio changes (new stream fetch)
   useEffect(() => {
     setServerRetryCount(0);
-  }, [selectedEpisode]);
+  }, [selectedEpisode, audioType]);
 
   // Reset source retries when stream changes
   useEffect(() => {
@@ -366,17 +365,21 @@ const Watch = () => {
   const hasPrev = episodes?.findIndex(e => e.id === selectedEpisode) > 0;
   const hasNext = episodes ? episodes.findIndex(e => e.id === selectedEpisode) < episodes.length - 1 : false;
 
-  // Default audio behavior (Dub first; fall back to Sub if Dub isn't available)
+  // Prefer dub when episode is dub-only (metadata) or dub is confirmed via servers/stream probe
   useEffect(() => {
     if (!currentEpisode) return;
     if (audioManuallySet) return;
+    const currentHasSub = currentEpisode.hasSub || !currentEpisode.hasDub;
+    const currentHasDub =
+      currentEpisode.hasDub ||
+      (anime?.dubCount != null && currentEpisode.number <= anime.dubCount) ||
+      serversHaveDub ||
+      dubProbeHasSources;
 
-    if (currentEpisode.hasDub) {
+    if (currentHasSub === false && currentHasDub) {
       setAudioType('dub');
-    } else if (currentEpisode.hasSub) {
-      setAudioType('sub');
     }
-  }, [currentEpisode, audioManuallySet]);
+  }, [currentEpisode, audioManuallySet, anime?.dubCount, serversHaveDub, dubProbeHasSources]);
 
   // Reset manual audio choice when switching episodes
   useEffect(() => {
@@ -526,164 +529,219 @@ const Watch = () => {
 
   const videoSource = getVideoSource();
 
-  // Mobile: Render clean player - NO overlays on top of VideoPlayer
+  // Mobile: Normal scrollable page layout (not forced fullscreen)
   if (isMobile()) {
     return (
-      <div className="fixed inset-0 bg-black z-50">
-        {/* VideoPlayer takes full screen - all controls are INSIDE it */}
-        <div className="w-full h-full">
-          {streamLoading ? (
-            <div className="w-full h-full flex items-center justify-center bg-black">
-              <div className="flex flex-col items-center gap-4">
-                <Loader2 className="w-12 h-12 animate-spin text-fox-orange" />
-                <p className="text-white/80 text-sm">Loading stream...</p>
-              </div>
+      <div className="min-h-screen flex flex-col bg-background">
+        <Navbar />
+
+        <main className="flex-1 relative z-10">
+          {/* Video Player */}
+          <div className="w-full bg-black" ref={playerRef}>
+            <div className="relative aspect-video">
+              {streamLoading ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black">
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="w-10 h-10 animate-spin text-fox-orange" />
+                    <p className="text-white/80 text-sm">Loading stream...</p>
+                  </div>
+                </div>
+              ) : videoSource ? (
+                <VideoPlayer
+                  src={videoSource?.url || ''}
+                  isM3U8={videoSource?.isM3U8}
+                  subtitles={streamData?.subtitles}
+                  intro={streamData?.intro}
+                  outro={streamData?.outro}
+                  onError={handlePlayerError}
+                  poster={anime?.image}
+                  onNextEpisode={handleNextEpisode}
+                  hasNextEpisode={hasNext}
+                  animeId={cleanAnimeId}
+                  selectedEpisodeNum={selectedEpisodeNum}
+                  animeTitle={anime?.title}
+                  animeImage={anime?.image}
+                  animeSeason={anime?.season}
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center bg-black">
+                  <div className="text-center p-6">
+                    <AlertCircle className="w-10 h-10 text-yellow-500 mx-auto mb-3" />
+                    <p className="text-white font-medium text-sm">No stream available</p>
+                    <Button
+                      size="sm"
+                      className="mt-3 bg-fox-orange"
+                      onClick={() => { setServerRetryCount(0); refetchStream(); }}
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
-          ) : videoSource ? (
-            <VideoPlayer
-              src={videoSource?.url || ''}
-              isM3U8={videoSource?.isM3U8}
-              subtitles={streamData?.subtitles}
-              intro={streamData?.intro}
-              outro={streamData?.outro}
-              onError={handlePlayerError}
-              poster={anime?.image}
-              onNextEpisode={handleNextEpisode}
-              hasNextEpisode={hasNext}
-              animeId={cleanAnimeId}
-              selectedEpisodeNum={selectedEpisodeNum}
-              animeTitle={anime?.title}
-              animeImage={anime?.image}
-              animeSeason={anime?.season}
-              onBack={() => setShowExitScreen(true)}
-              onEpisodes={() => setShowMobileEpisodes(true)}
-              onShowSettings={() => setShowMobileSettings(true)}
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center bg-black">
-              <div className="text-center p-6">
-                <AlertCircle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-                <p className="text-white font-medium">No stream available</p>
+          </div>
+
+          {/* Episode Nav + Title */}
+          <div className="px-4 pt-3 pb-2">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-base font-bold text-white truncate">
+                  EP {currentEpisode?.number || selectedEpisodeNum}
+                  {currentEpisode?.title && currentEpisode.title !== `Episode ${currentEpisode.number}` && (
+                    <span className="text-muted-foreground font-normal ml-1.5 text-sm">
+                      — {currentEpisode.title}
+                    </span>
+                  )}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">{anime?.title}</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
                 <Button
+                  variant="outline"
                   size="sm"
-                  className="mt-4 bg-fox-orange"
-                  onClick={() => { setServerRetryCount(0); refetchStream(); }}
+                  onClick={handlePrevEpisode}
+                  disabled={!hasPrev}
+                  className="border-white/10 hover:bg-white/5 h-8 w-8 p-0 touch-manipulation"
                 >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Retry
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleNextEpisode}
+                  disabled={!hasNext}
+                  className="border-white/10 hover:bg-white/5 h-8 w-8 p-0 touch-manipulation"
+                >
+                  <ChevronRight className="w-4 h-4" />
                 </Button>
               </div>
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* Exit bottom sheet - appears OVER player only when triggered */}
-        {showExitScreen && (
-          <div 
-            className="fixed inset-0 z-[70] bg-black/80 animate-in fade-in duration-150"
-            onClick={() => setShowExitScreen(false)}
-          >
-            <div 
-              className="absolute bottom-0 left-0 right-0 bg-zinc-900 rounded-t-2xl p-4 space-y-4 animate-in slide-in-from-bottom duration-200"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center gap-3">
-                <img src={anime?.image} alt="" className="w-12 h-16 rounded-lg object-cover" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-white font-medium text-sm truncate">{anime?.title}</p>
-                  <p className="text-white/50 text-xs">Episode {selectedEpisodeNum}</p>
+          {/* Streaming Controls */}
+          <div className="px-4 pb-3">
+            <StreamingControls
+              audioType={audioType}
+              onAudioTypeChange={(type) => {
+                setAudioManuallySet(true);
+                setAudioType(type);
+              }}
+              quality={quality}
+              onQualityChange={setQuality}
+              availableQualities={streamData?.sources?.map(s => s.quality) || []}
+              servers={servers || []}
+              selectedServer={selectedServer}
+              onServerChange={(server) => {
+                setSelectedServer(server);
+                setServerRetryCount(0);
+              }}
+              serversLoading={serversLoading}
+              autoPlay={autoPlay}
+              onAutoPlayChange={setAutoPlay}
+              currentSource={streamData?.source}
+              hasDub={dubAvailable}
+              hasSub={currentEpisode?.hasSub !== false}
+            />
+          </div>
+
+          {/* About Section */}
+          <div className="px-4 pb-4">
+            <div className="rounded-xl border border-white/5 bg-card/30 p-4 backdrop-blur-md">
+              <div className="flex gap-3">
+                <img
+                  src={anime?.image}
+                  alt=""
+                  className="h-28 w-20 shrink-0 rounded-lg object-cover ring-1 ring-white/10"
+                />
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-display text-sm font-bold text-white leading-tight">{anime?.title}</h3>
+                  {anime?.titleJapanese && (
+                    <p className="mt-0.5 text-xs italic text-muted-foreground truncate">{anime.titleJapanese}</p>
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {formatRating(anime?.rating) && (
+                      <Badge variant="secondary" className="gap-1 border-yellow-500/20 bg-yellow-500/10 text-yellow-500 text-[10px] px-1.5 py-0">
+                        <Star className="h-2.5 w-2.5 fill-current" />
+                        {formatRating(anime?.rating)}
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="border-white/10 text-[10px] px-1.5 py-0">{anime?.type}</Badge>
+                    {anime?.status && (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[10px] px-1.5 py-0",
+                          anime.status === 'Ongoing'
+                            ? 'border-green-500/50 bg-green-500/10 text-green-500'
+                            : anime.status === 'Completed'
+                              ? 'border-blue-500/50 bg-blue-500/10 text-blue-500'
+                              : 'border-yellow-500/50 bg-yellow-500/10 text-yellow-500'
+                        )}
+                      >
+                        {anime.status}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                    {(anime?.season || anime?.year != null) && (
+                      <span className="inline-flex items-center gap-1">
+                        <Calendar className="h-3 w-3 opacity-80" />
+                        {[anime.season, anime.year].filter((v) => v != null && v !== '').join(' ')}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1">
+                      <Tv className="h-3 w-3 opacity-80" />
+                      {anime?.episodes || '?'} eps
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowExitScreen(false)}
-                  className="flex-1 py-3 rounded-xl bg-fox-orange text-white font-medium text-sm active:scale-95 transition-transform"
-                >
-                  Resume
-                </button>
-                <button
-                  onClick={() => { setShowExitScreen(false); setShowMobileEpisodes(true); }}
-                  className="flex-1 py-3 rounded-xl bg-white/10 text-white font-medium text-sm active:scale-95 transition-transform"
-                >
-                  Episodes
-                </button>
-              </div>
-              <button
-                onClick={() => navigate(backUrl)}
-                className="w-full py-2.5 rounded-xl bg-red-500/20 text-red-400 text-sm font-medium active:scale-95 transition-transform"
-              >
-                Exit
-              </button>
+              {plainDescription(anime?.description) && (
+                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+                  {plainDescription(anime?.description)}
+                </p>
+              )}
             </div>
           </div>
-        )}
 
-        {/* Episodes panel - slides up OVER player only when triggered */}
-        {showMobileEpisodes && (
-          <div
-            className="fixed inset-0 z-[70] flex flex-col justify-end"
-            onClick={() => setShowMobileEpisodes(false)}
-          >
-            <div className="absolute inset-0 bg-black/70" />
-            <div
-              className="relative bg-zinc-900 rounded-t-2xl max-h-[75vh] flex flex-col animate-in slide-in-from-bottom duration-300"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-center pt-3 pb-1">
-                <div className="w-10 h-1 bg-white/20 rounded-full" />
-              </div>
-              <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
-                <h3 className="text-white font-semibold text-sm">
+          {/* Episode List */}
+          <div className="px-4 pb-6">
+            <div className="rounded-xl border border-white/5 bg-card/30 backdrop-blur-md overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
+                <h3 className="text-sm font-semibold text-white">
                   Episodes
-                  <span className="text-white/40 font-normal ml-2">{episodes?.length || 0} total</span>
+                  <span className="text-white/40 font-normal ml-2 text-xs">{episodes?.length || 0}</span>
                 </h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => { handlePrevEpisode(); setShowMobileEpisodes(false); }}
-                    disabled={!hasPrev}
-                    className={cn("w-8 h-8 rounded-full bg-white/10 flex items-center justify-center", !hasPrev && "opacity-30")}
-                  >
-                    <ChevronLeft className="w-4 h-4 text-white" />
-                  </button>
-                  <button
-                    onClick={() => { handleNextEpisode(); setShowMobileEpisodes(false); }}
-                    disabled={!hasNext}
-                    className={cn("w-8 h-8 rounded-full bg-white/10 flex items-center justify-center", !hasNext && "opacity-30")}
-                  >
-                    <ChevronRight className="w-4 h-4 text-white" />
-                  </button>
-                  <button
-                    onClick={() => setShowMobileEpisodes(false)}
-                    className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center ml-1"
-                  >
-                    <X className="w-4 h-4 text-white" />
-                  </button>
-                </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+              <div className="max-h-[50vh] overflow-y-auto p-2 space-y-1">
                 {episodes?.map((ep) => {
                   const progress = getEpisodeProgress(ep.number);
                   return (
                     <button
                       key={ep.id}
-                      onClick={() => { handleEpisodeSelect(ep.id, ep.number); setShowMobileEpisodes(false); }}
+                      onClick={() => handleEpisodeSelect(ep.id, ep.number)}
                       className={cn(
-                        "w-full rounded-xl text-left transition-colors relative overflow-hidden",
-                        selectedEpisode === ep.id ? "bg-fox-orange text-white" : "bg-white/5 text-white/80 active:bg-white/10"
+                        "w-full rounded-lg text-left transition-colors relative overflow-hidden touch-manipulation",
+                        selectedEpisode === ep.id ? "bg-fox-orange text-white" : "bg-white/[0.03] text-white/80 active:bg-white/10"
                       )}
                     >
-                      <div className="flex items-center gap-3 p-3 relative z-10">
+                      <div className="flex items-center gap-3 px-3 py-2.5 relative z-10">
                         <span className={cn(
-                          "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0",
+                          "w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0",
                           selectedEpisode === ep.id ? "bg-white/20" : "bg-white/10"
                         )}>
-                          {selectedEpisode === ep.id ? <Play className="w-3.5 h-3.5 fill-current" /> : ep.number}
+                          {selectedEpisode === ep.id ? <Play className="w-3 h-3 fill-current" /> : ep.number}
                         </span>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm truncate">{ep.title || `Episode ${ep.number}`}</p>
                           <div className="flex items-center gap-2 mt-0.5">
-                            {ep.hasSub && <span className="text-[10px] text-white/50">SUB</span>}
-                            {ep.hasDub && <span className="text-[10px] text-green-400/70">DUB</span>}
+                            {(ep.hasSub || !ep.hasDub) && <span className="text-[10px] text-white/50">SUB</span>}
+                            {(ep.hasDub ||
+                              (anime?.dubCount != null && ep.number <= anime.dubCount) ||
+                              dubAvailable) && (
+                              <span className="text-[10px] text-green-400/70">DUB</span>
+                            )}
                             {progress > 0 && progress < 0.9 && (
                               <span className="text-[10px] text-fox-orange">{Math.round(progress * 100)}%</span>
                             )}
@@ -707,72 +765,9 @@ const Watch = () => {
               </div>
             </div>
           </div>
-        )}
+        </main>
 
-        {/* Settings panel - slides up OVER player only when triggered */}
-        {showMobileSettings && (
-          <div
-            className="fixed inset-0 z-[70] flex flex-col justify-end"
-            onClick={() => setShowMobileSettings(false)}
-          >
-            <div className="absolute inset-0 bg-black/70" />
-            <div
-              className="relative bg-zinc-900 rounded-t-2xl max-h-[50vh] flex flex-col animate-in slide-in-from-bottom duration-300"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex justify-center pt-3 pb-1">
-                <div className="w-10 h-1 bg-white/20 rounded-full" />
-              </div>
-              <div className="flex items-center justify-between px-4 py-2 border-b border-white/10">
-                <h3 className="text-white font-semibold text-sm">Settings</h3>
-                <button
-                  onClick={() => setShowMobileSettings(false)}
-                  className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center"
-                >
-                  <X className="w-4 h-4 text-white" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 space-y-5">
-                <div>
-                  <p className="text-white/50 text-xs uppercase tracking-wider mb-2">Audio</p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => { setAudioManuallySet(true); setAudioType('sub'); }}
-                      className={cn(
-                        "flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors",
-                        audioType === 'sub' ? "bg-fox-orange text-white" : "bg-white/10 text-white/60"
-                      )}
-                    >Sub</button>
-                    <button
-                      onClick={() => { setAudioManuallySet(true); setAudioType('dub'); }}
-                      className={cn(
-                        "flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors",
-                        audioType === 'dub' ? "bg-fox-orange text-white" : "bg-white/10 text-white/60"
-                      )}
-                    >Dub</button>
-                  </div>
-                </div>
-                {servers && servers.length > 0 && (
-                  <div>
-                    <p className="text-white/50 text-xs uppercase tracking-wider mb-2">Server</p>
-                    <div className="flex flex-wrap gap-2">
-                      {servers.filter(s => s.type === audioType).map((server) => (
-                        <button
-                          key={server.name}
-                          onClick={() => { setSelectedServer(server.name); setServerRetryCount(0); }}
-                          className={cn(
-                            "px-4 py-2.5 rounded-xl text-sm transition-colors",
-                            selectedServer === server.name ? "bg-fox-orange text-white" : "bg-white/10 text-white/60"
-                          )}
-                        >{server.name}</button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        <Footer />
       </div>
     );
   }
@@ -1014,7 +1009,7 @@ const Watch = () => {
                   autoPlay={autoPlay}
                   onAutoPlayChange={setAutoPlay}
                   currentSource={streamData?.source}
-                  hasDub={currentEpisode?.hasDub || (anime?.dubCount != null && anime.dubCount > 0) || (episodes?.some(e => e.hasDub) ?? false)}
+                  hasDub={dubAvailable}
                   hasSub={currentEpisode?.hasSub !== false}
                 />
               </div>
@@ -1110,6 +1105,7 @@ const Watch = () => {
                     onEpisodeSelect={handleEpisodeSelect}
                     isLoading={episodesLoading}
                     anime={anime}
+                    serversHaveDub={dubAvailable}
                   />
                 </div>
               </div>

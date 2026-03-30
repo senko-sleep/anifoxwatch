@@ -29,6 +29,8 @@ interface EpisodeListProps {
   onEpisodeSelect: (episodeId: string, episodeNum: number) => void;
   isLoading?: boolean;
   anime?: Anime | null;
+  /** True when episode servers API returned dub streams (metadata may omit dubCount/hasDub) */
+  serversHaveDub?: boolean;
 }
 
 type SortOrder = 'asc' | 'desc';
@@ -38,7 +40,8 @@ export function EpisodeList({
   selectedEpisodeId,
   onEpisodeSelect,
   isLoading = false,
-  anime
+  anime,
+  serversHaveDub = false,
 }: EpisodeListProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
@@ -122,13 +125,13 @@ export function EpisodeList({
         </div>
 
         {/* Search */}
-        <div className="relative mb-2">
+        <div className="relative mb-2 mt-1 min-w-0">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
             placeholder="Search episodes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 bg-background/50 h-8 text-sm"
+            className="pl-8 bg-background/50 h-8 text-sm min-w-0 w-full"
           />
         </div>
 
@@ -223,13 +226,15 @@ export function EpisodeList({
                     </p>
 
                     <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                      {episode.hasSub && (
+                      {(episode.hasSub || !episode.hasDub) && (
                         <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
                           <Subtitles className="w-2 h-2 flex-shrink-0" />
                           SUB
                         </span>
                       )}
-                      {episode.hasDub && (
+                      {(episode.hasDub ||
+                        (anime?.dubCount != null && episode.number <= anime.dubCount) ||
+                        serversHaveDub) && (
                         <span className="flex items-center gap-0.5 text-[10px] text-green-500 whitespace-nowrap">
                           <Mic className="w-2 h-2 flex-shrink-0" />
                           DUB
@@ -259,8 +264,8 @@ export function EpisodeList({
           <span className="text-muted-foreground/40">•</span>
           {(() => {
             const dubEpCount = episodes.filter(e => e.hasDub).length;
-            const dubCount = dubEpCount || anime?.dubCount || 0;
-            const hasDub = dubCount > 0;
+            const metaDub = dubEpCount || (anime?.dubCount ?? 0);
+            const hasDub = metaDub > 0 || serversHaveDub;
             return (
               <div className={cn(
                 "flex items-center gap-1",
@@ -268,7 +273,11 @@ export function EpisodeList({
               )}>
                 <Mic className="w-3 h-3" />
                 {hasDub ? (
-                  <span>{dubCount} Dub</span>
+                  metaDub > 0 ? (
+                    <span>{metaDub} Dub</span>
+                  ) : (
+                    <span>Dub</span>
+                  )
                 ) : (
                   <span>No Dub</span>
                 )}

@@ -32,7 +32,7 @@ export const SectionHeader = ({
                         "font-display tracking-tight leading-tight",
                         quiet
                             ? "text-[15px] sm:text-base font-semibold text-zinc-200"
-                            : "text-base sm:text-lg font-semibold text-white"
+                            : "text-base sm:text-lg font-semibold bg-gradient-to-r from-amber-100 via-fox-orange to-amber-200 bg-clip-text text-transparent"
                     )}
                 >
                     {title}

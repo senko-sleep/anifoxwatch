@@ -8,6 +8,7 @@ import {
     ConsumetSource,
     KaidoSource,
     AnimeFLVSource,
+    MiruroSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -57,12 +58,12 @@ interface SourceMetadata {
  */
 export class SourceManager {
     private sources: Map<string, StreamingSource> = new Map();
-    private primarySource: string = 'Kaido';
+    private primarySource: string = 'AnimeKai';
     private healthStatus: Map<string, SourceHealth> = new Map();
     private sourceMetadata: Map<string, SourceMetadata> = new Map();
     
     private sourceOrder: string[] = [
-        'Kaido', 'AnimePahe', 'AnimeKai', '9Anime', 'Consumet', 'AnimeFLV',
+        'AnimeKai', 'Kaido', 'Miruro', 'AnimePahe', '9Anime', 'Consumet', 'AnimeFLV',
         'WatchHentai', 'Hanime'
     ];
 
@@ -76,6 +77,7 @@ export class SourceManager {
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
+        ['Miruro', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -106,14 +108,17 @@ export class SourceManager {
     private sourceSuccessRates: Map<string, { success: number; total: number }> = new Map();
 
     constructor() {
-        // PRIMARY: Kaido scrapes kaido.to + aniwatch scraper for search/browse/trending/streaming
+        // PRIMARY: AnimeKai — verified working HLS streams (sub + dub) via @consumet/extensions
+        this.registerSource(new AnimeKaiSource());
+
+        // BACKUP: Kaido scrapes kaido.to + aniwatch scraper for search/browse/trending
         this.registerSource(new KaidoSource());
 
-        // STREAMING: AnimePahe — @consumet/extensions, produces working m3u8 with multiple qualities
-        this.registerSource(new AnimePaheDirectSource());
+        // MIRURO: scrapes miruro.in + HiAnime scraper for sub + dub streams
+        this.registerSource(new MiruroSource());
 
-        // STREAMING BACKUP: AnimeKai — @consumet/extensions, alternative working streams
-        this.registerSource(new AnimeKaiSource());
+        // STREAMING BACKUP: AnimePahe — @consumet/extensions (owocdn has SSL issues)
+        this.registerSource(new AnimePaheDirectSource());
 
         // FALLBACK: External API-based sources
         this.registerSource(new NineAnimeSource());
@@ -128,9 +133,9 @@ export class SourceManager {
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
 
         // Configure rate limits for each source (requests per minute)
-        this.sourceRateLimits.set('Kaido', { limit: 120, resetTime: 60000 });
+        this.sourceRateLimits.set('AnimeKai', { limit: 120, resetTime: 60000 });
+        this.sourceRateLimits.set('Kaido', { limit: 100, resetTime: 60000 });
         this.sourceRateLimits.set('AnimePahe', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeKai', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('9Anime', { limit: 100, resetTime: 60000 });
         this.sourceRateLimits.set('AnimeFLV', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
@@ -1064,24 +1069,25 @@ export class SourceManager {
                 if (r.hasNextPage) hasNextPage = true;
             });
 
-            // Deduplicate
+            // Deduplicate, then sort by relevance to the query
             const uniqueResults = this.deduplicateResults(combinedResults);
+            const sortedResults = this.sortByRelevance(uniqueResults, query);
 
-            if (uniqueResults.length === 0) {
+            if (sortedResults.length === 0) {
                 console.log(`❌ [SourceManager] No results from ANY source for query: "${query}"`);
                 console.log(`   Tried sources: ${sourcesToTry.map(s => s.name).join(', ')}`);
                 logger.warn(`No results from any source`, { query, page, triedSources: sourcesToTry.map(s => s.name) }, 'SourceManager');
             } else {
-                console.log(`✅ [SourceManager] Found ${uniqueResults.length} results from: ${successfulSources.join(', ')}`);
+                console.log(`✅ [SourceManager] Found ${sortedResults.length} results from: ${successfulSources.join(', ')}`);
             }
 
             timer.end();
             return {
-                results: uniqueResults,
+                results: sortedResults,
                 totalPages: maxTotalPages,
                 currentPage: page,
                 hasNextPage: hasNextPage,
-                totalResults: uniqueResults.length,
+                totalResults: sortedResults.length,
                 source: successfulSources.join('+') || 'None'
             };
 
@@ -1092,68 +1098,111 @@ export class SourceManager {
     }
 
     /**
-     * Deduplicate anime results based on ID and title similarity
-     * UPDATED: Prioritizes data completeness over source order for better diversity
+     * Light normalization for search dedup — preserves season/part/cour info
+     * so "Spy x Family" and "Spy x Family Season 3" stay separate entries.
+     */
+    private normalizeForSearchDedup(title: string): string {
+        if (!title) return '';
+        return title.toLowerCase()
+            .replace(/[^\w\s]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    /**
+     * Deduplicate search results: only collapse entries that are truly the same
+     * anime from different sources (same title + season). Prefer AnimeKai IDs.
      */
     private deduplicateResults(results: AnimeBase[]): AnimeBase[] {
         const unique = new Map<string, AnimeBase>();
         const titleMap = new Map<string, AnimeBase>();
 
-        // Helper to calculate data completeness score - THIS IS NOW PRIMARY
-        const getCompletenessScore = (anime: AnimeBase): number => {
-            let score = 0;
-            if (anime.description && anime.description.length > 50) score += 3;
-            if (anime.genres && anime.genres.length > 0) score += 2;
-            if (anime.rating && anime.rating > 0) score += 2;
-            if (anime.episodes && anime.episodes > 0) score += 1;
-            if (anime.year && anime.year > 0) score += 1;
-            if (anime.studios && anime.studios.length > 0) score += 1;
-            if (anime.cover || anime.image) score += 1;
-            // Bonus for having a streaming-ready ID (not anilist-)
-            if (anime.id && !anime.id.startsWith('anilist-')) score += 2;
-            return score;
-        };
-
         for (const anime of results) {
-            // Check ID first
-            if (unique.has(anime.id)) {
+            if (unique.has(anime.id)) continue;
+
+            const key = this.normalizeForSearchDedup(anime.title);
+
+            if (titleMap.has(key)) {
+                const existing = titleMap.get(key)!;
+                // Always keep AnimeKai version for streaming reliability
+                const existingIsKai = existing.id?.startsWith('animekai-');
+                const incomingIsKai = anime.id?.startsWith('animekai-');
+                if (existingIsKai && !incomingIsKai) continue;
+                if (incomingIsKai && !existingIsKai) {
+                    unique.delete(existing.id);
+                    unique.set(anime.id, anime);
+                    titleMap.set(key, anime);
+                    continue;
+                }
+                // Same source or neither is primary — keep first
                 continue;
             }
 
-            const normalizedTitle = this.normalizeTitle(anime.title);
-
-            // Check if we already have this title
-            if (titleMap.has(normalizedTitle)) {
-                const existing = titleMap.get(normalizedTitle)!;
-                
-                // CHANGED: Only consider data completeness, NOT source priority
-                // This ensures we get diverse sources in results
-                const existingScore = getCompletenessScore(existing);
-                const currentScore = getCompletenessScore(anime);
-                
-                // Only replace if current has significantly better data (score diff > 2)
-                // This keeps the first occurrence unless the new one is much better
-                const shouldReplace = currentScore > existingScore + 2;
-                
-                if (shouldReplace) {
-                    // Replace with better data
-                    unique.delete(existing.id);
-                    unique.set(anime.id, anime);
-                    titleMap.set(normalizedTitle, anime);
-                }
-            } else {
-                // Add new entry
-                unique.set(anime.id, anime);
-                titleMap.set(normalizedTitle, anime);
-            }
+            unique.set(anime.id, anime);
+            titleMap.set(key, anime);
         }
 
-        logger.info(`Deduplicated ${results.length} results to ${unique.size} unique entries`, { 
-            originalCount: results.length, 
-            uniqueCount: unique.size 
-        }, 'SourceManager');
-
         return Array.from(unique.values());
+    }
+
+    /**
+     * Score + sort + filter search results by relevance.
+     * Drops garbage results that only match on short filler words.
+     * Boosts main series over specials/OVAs when the query doesn't ask for them.
+     */
+    private sortByRelevance(results: AnimeBase[], query: string): AnimeBase[] {
+        const q = query.toLowerCase().trim();
+        const STOP = new Set(['x', 'a', 'i', 'no', 'to', 'of', 'the', 'de', 'wa', 'ni', 'vs', 'and', '&']);
+        const qWords = q.split(/\s+/).filter(w => w.length >= 1);
+        const meaningfulWords = qWords.filter(w => !STOP.has(w) && w.length > 1);
+
+        const qNorm = q.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        // Does the query explicitly ask for specials/OVA?
+        const queryWantsSpecial = /\b(special|ova|ona|movie)\b/i.test(q);
+
+        const relevance = (anime: AnimeBase): number => {
+            const t = (anime.title || '').toLowerCase();
+            // Normalize: & → and, strip punctuation
+            const tNorm = t.replace(/&/g, 'and').replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+            let score = 0;
+
+            // Exact match
+            if (tNorm === qNorm || tNorm === qNorm.replace(/&/g, 'and')) { score = 1000; }
+            // Title starts with the query
+            else if (tNorm.startsWith(qNorm)) { score = 900; }
+            // Title contains the full query as a contiguous substring
+            else if (tNorm.includes(qNorm)) { score = 800; }
+            else {
+                // Count meaningful word matches
+                const meaningfulHits = meaningfulWords.filter(w => tNorm.includes(w)).length;
+                const meaningfulRatio = meaningfulWords.length > 0 ? meaningfulHits / meaningfulWords.length : 0;
+                if (meaningfulRatio === 1) { score = 700 + meaningfulHits; }
+                else if (meaningfulRatio >= 0.6) { score = 400 + meaningfulRatio * 100; }
+                else {
+                    const allHits = qWords.filter(w => tNorm.includes(w)).length;
+                    const allRatio = qWords.length > 0 ? allHits / qWords.length : 0;
+                    if (allRatio >= 0.5) { score = 50 + allRatio * 50; }
+                    else { return 0; }
+                }
+            }
+
+            // Penalize specials/OVA/ONA when the user didn't ask for them
+            if (!queryWantsSpecial) {
+                const isSpecial = /\b(special|specials|ova|ona)\b/i.test(t);
+                if (isSpecial) score -= 200;
+            }
+
+            // Shorter titles are more likely the main entry the user wants
+            score -= Math.floor(tNorm.length / 10);
+
+            return score;
+        };
+
+        const scored = results.map(r => ({ r, score: relevance(r) }));
+        const filtered = scored.filter(s => s.score >= 50);
+        filtered.sort((a, b) => b.score - a.score);
+        return filtered.map(s => s.r);
     }
 
     /**
@@ -1219,14 +1268,38 @@ export class SourceManager {
 
         // Regular streaming ID handling
         const source = this.getStreamingSource(id);
-        if (!source) return null;
+        const hasPrefix = this.hasKnownSourcePrefix(id);
 
-        try {
-            return await this.executeReliably(source.name, 'getAnime', (signal) => source.getAnime(id, { signal }));
-        } catch (error) {
-            console.error(`[SourceManager] getAnime failed:`, error);
-            return null;
+        if (source) {
+            try {
+                const result = await this.executeReliably(source.name, 'getAnime', (signal) => source.getAnime(id, { signal }));
+                if (result && result.title && result.title !== 'Unknown') return result;
+            } catch (error) {
+                console.log(`[SourceManager] getAnime failed for ${source.name}:`, (error as Error).message);
+            }
         }
+
+        // If no prefix or source failed, try title-based resolution
+        if (!hasPrefix) {
+            const titleFromSlug = id.replace(/-\d+$/, '').replace(/-/g, ' ').trim();
+            if (titleFromSlug.length >= 3) {
+                console.log(`[SourceManager] getAnime: Fallback title search for "${titleFromSlug}"`);
+                try {
+                    const searchResult = await this.search(titleFromSlug, 1);
+                    if (searchResult.results?.length) {
+                        const best = searchResult.results[0];
+                        if (best.id && this.hasKnownSourcePrefix(best.id) && best.id !== id) {
+                            console.log(`[SourceManager] getAnime: Resolved "${titleFromSlug}" → ${best.id}`);
+                            return this.getAnime(best.id);
+                        }
+                    }
+                } catch (err) {
+                    console.log(`[SourceManager] getAnime: Title fallback failed:`, (err as Error).message);
+                }
+            }
+        }
+
+        return null;
     }
 
     async getEpisodes(animeId: string): Promise<Episode[]> {
@@ -1309,32 +1382,72 @@ export class SourceManager {
                               animeId.toLowerCase().startsWith('hanime-') ||
                               animeId.toLowerCase().startsWith('watchhentai-');
 
-        // If no known prefix, ONLY use primary source - don't fabricate IDs for other sources
+        // If no known prefix, resolve to an AnimeKai ID via title search first.
+        // Kaido streaming is unreliable (404s) so we prefer AnimeKai episode IDs.
         if (!hasSourcePrefix) {
-            if (!primarySource?.isAvailable) {
-                console.log(`   ❌ No primary source available and no known prefix`);
-                timer.end();
-                return [];
-            }
-            
-            // Just try the primary source with the original ID
-            console.log(`   ⏳ Trying primary source ${primarySource.name} with original ID`);
-            try {
-                const episodes = await this.executeReliably(primarySource.name, 'getEpisodes',
-                    (signal) => primarySource.getEpisodes(animeId, { signal }),
-                    { timeout: 15000 }
-                );
-                if (episodes && episodes.length > 0) {
-                    const duration = Date.now() - startTime;
-                    console.log(`   ✅ Got ${episodes.length} episodes from ${primarySource.name} in ${duration}ms`);
-                    logger.episodeFetch(animeId, episodes.length, primarySource.name, duration);
-                    timer.end();
-                    return episodes;
+            // Step 1: Try primary source with original ID directly
+            if (primarySource?.isAvailable) {
+                console.log(`   ⏳ Trying primary source ${primarySource.name} with original ID`);
+                try {
+                    const episodes = await this.executeReliably(primarySource.name, 'getEpisodes',
+                        (signal) => primarySource.getEpisodes(animeId, { signal }),
+                        { timeout: 15000 }
+                    );
+                    if (episodes && episodes.length > 0) {
+                        const duration = Date.now() - startTime;
+                        console.log(`   ✅ Got ${episodes.length} episodes from ${primarySource.name} in ${duration}ms`);
+                        logger.episodeFetch(animeId, episodes.length, primarySource.name, duration);
+                        timer.end();
+                        return episodes;
+                    }
+                } catch (err) {
+                    console.log(`   ❌ Primary source failed: ${(err as Error).message}`);
                 }
-            } catch (err) {
-                console.log(`   ❌ Primary source failed: ${(err as Error).message}`);
             }
-            
+
+            // Step 2: Title search — find the anime on AnimeKai by title and use those episode IDs
+            const titleFromSlug = animeId.replace(/-\d+$/, '').replace(/-/g, ' ').trim();
+            if (titleFromSlug.length >= 3) {
+                console.log(`   🔍 Title search for AnimeKai episodes: "${titleFromSlug}"`);
+                try {
+                    const searchResult = await this.search(titleFromSlug, 1);
+                    if (searchResult.results?.length) {
+                        const best = searchResult.results[0];
+                        if (best.id && this.hasKnownSourcePrefix(best.id) && best.id !== animeId) {
+                            console.log(`   🔄 Resolved to: ${best.id} ("${best.title}")`);
+                            const episodes = await this.getEpisodes(best.id);
+                            if (episodes && episodes.length > 0) {
+                                timer.end();
+                                return episodes;
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.log(`   ❌ Title search failed: ${(err as Error).message}`);
+                }
+            }
+
+            // Step 3: Last resort — Kaido with original ID (streaming may fail but at least shows episode list)
+            const kaidoSource = this.sources.get('Kaido');
+            if (kaidoSource?.isAvailable && primarySource?.name !== 'Kaido') {
+                console.log(`   ⏳ Last resort: Kaido with original ID`);
+                try {
+                    const episodes = await this.executeReliably('Kaido', 'getEpisodes',
+                        (signal) => kaidoSource.getEpisodes(animeId, { signal }),
+                        { timeout: 12000 }
+                    );
+                    if (episodes && episodes.length > 0) {
+                        const duration = Date.now() - startTime;
+                        console.log(`   ✅ Got ${episodes.length} episodes from Kaido in ${duration}ms`);
+                        logger.episodeFetch(animeId, episodes.length, 'Kaido', duration);
+                        timer.end();
+                        return episodes;
+                    }
+                } catch (err) {
+                    console.log(`   ❌ Kaido failed: ${(err as Error).message}`);
+                }
+            }
+
             timer.end();
             return [];
         }
@@ -1367,9 +1480,11 @@ export class SourceManager {
             console.log(`   🔄 Attempting cross-reference with Kaido for sub/dub enrichment...`);
             try {
                 const rawId = this.extractRawId(animeId);
-                const searchQuery = rawId.replace(/-/g, ' ').replace(/\d+$/, '').trim();
+                // Strip AnimeKai hash suffix (3-5 char alphanumeric codes like "1yqp", "v2q8")
+                const cleanSlug = rawId.replace(/-(?=[a-z]*\d)[a-z\d]{3,5}$/i, '');
+                const searchQuery = cleanSlug.replace(/-/g, ' ').replace(/\d+$/, '').trim();
                 
-                const seasonMatch = rawId.match(/(\d+)(?:st|nd|rd|th)[\s-]*season/i) || rawId.match(/season[\s-]*(\d+)/i);
+                const seasonMatch = cleanSlug.match(/(\d+)(?:st|nd|rd|th)[\s-]*season/i) || cleanSlug.match(/season[\s-]*(\d+)/i);
                 const querySeason = seasonMatch ? parseInt(seasonMatch[1]) : 0;
                 
                 const kaidoSource = this.sources.get('Kaido') as StreamingSource;
@@ -1380,19 +1495,18 @@ export class SourceManager {
                     ]);
                     
                     if (searchResult && searchResult.results?.length > 0) {
-                        const normalizedQuery = this.normalizeTitle(searchQuery);
                         let bestMatch: typeof searchResult.results[0] | null = null;
+                        let bestScore = -1;
+                        const qWords = searchQuery.toLowerCase().split(/\s+/).filter(w => w.length > 1);
                         
                         for (const result of searchResult.results) {
-                            const normalizedResult = this.normalizeTitle(result.title);
-                            const normalizedJp = result.titleJapanese ? this.normalizeTitle(result.titleJapanese) : '';
+                            const rLow = result.title.toLowerCase();
+                            const jpLow = (result.titleJapanese || '').toLowerCase();
                             const combinedText = `${result.title} ${result.titleJapanese || ''}`.toLowerCase();
                             
-                            const baseQuery = normalizedQuery.replace(/\d+(st|nd|rd|th)\s*season/i, '').replace(/season\s*\d+/i, '').trim();
-                            const titleMatches = normalizedResult.includes(baseQuery) || baseQuery.includes(normalizedResult) ||
-                                normalizedJp.includes(baseQuery) || baseQuery.includes(normalizedJp);
-                            
-                            if (!titleMatches) continue;
+                            const matchesEn = qWords.every(w => rLow.includes(w));
+                            const matchesJp = qWords.every(w => jpLow.includes(w));
+                            if (!matchesEn && !matchesJp) continue;
                             
                             if (querySeason > 1) {
                                 const resultSeasonMatch = combinedText.match(/(\d+)(?:st|nd|rd|th)[\s-]*season/i) || 
@@ -1406,8 +1520,18 @@ export class SourceManager {
                                 }
                             }
                             
-                            bestMatch = result;
-                            break;
+                            // Score: prefer shortest matching title (closest to query)
+                            // Exact match gets highest score
+                            const rNorm = rLow.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+                            const qNorm = searchQuery.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+                            let score = 100 - Math.abs(rNorm.length - qNorm.length);
+                            if (rNorm === qNorm) score += 200;
+                            if (querySeason === 0 && /\b(season|final|2nd|3rd|\d+th)\b/i.test(rLow)) score -= 50;
+                            
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestMatch = result;
+                            }
                         }
                         
                         if (bestMatch) {
@@ -1421,14 +1545,36 @@ export class SourceManager {
                                 new Promise<Episode[]>((resolve) => setTimeout(() => resolve([]), 10000))
                             ]);
                             
-                            if (kaidoEpisodes && kaidoEpisodes.length > 0 && kaidoEpisodes.length >= episodes.length) {
-                                console.log(`   ✅ Enriched with ${kaidoEpisodes.length} Kaido episodes (sub/dub data)`);
-                                const duration = Date.now() - startTime;
-                                logger.episodeFetch(animeId, kaidoEpisodes.length, 'Kaido (enriched)', duration);
-                                timer.end();
-                                return kaidoEpisodes;
+                            // Use anime-level dubCount from search results when episode-level hasDub is unreliable
+                            const animeDubCount: number = (bestMatch as any).dubCount ?? 0;
+                            const animeSubCount: number = (bestMatch as any).subCount ?? 0;
+                            
+                            if (kaidoEpisodes && kaidoEpisodes.length > 0) {
+                                const kaidoByNum = new Map(kaidoEpisodes.map(e => [e.number, e]));
+                                let enriched = 0;
+                                for (const ep of episodes) {
+                                    const kep = kaidoByNum.get(ep.number);
+                                    if (kep) {
+                                        if (kep.hasSub != null) ep.hasSub = kep.hasSub;
+                                        // Prefer anime-level dubCount over broken episode-level hasDub
+                                        if (animeDubCount > 0) {
+                                            ep.hasDub = ep.number <= animeDubCount;
+                                        } else if (kep.hasDub != null) {
+                                            ep.hasDub = kep.hasDub;
+                                        }
+                                        if (!ep.title || ep.title === `Episode ${ep.number}`) ep.title = kep.title;
+                                        enriched++;
+                                    }
+                                }
+                                console.log(`   ✅ Enriched ${enriched}/${episodes.length} episodes (animeDubCount: ${animeDubCount})`);
+                            } else if (animeDubCount > 0) {
+                                // No Kaido episodes, but search told us dub exists
+                                for (const ep of episodes) {
+                                    ep.hasDub = ep.number <= animeDubCount;
+                                }
+                                console.log(`   ✅ Applied dubCount=${animeDubCount} from search (no Kaido eps)`);
                             } else {
-                                console.log(`   ⚠️ Kaido returned ${kaidoEpisodes?.length || 0} eps vs ${episodes.length} from primary, skipping enrichment`);
+                                console.log(`   ⚠️ Kaido returned ${kaidoEpisodes?.length || 0} eps, skipping enrichment`);
                             }
                         } else {
                             console.log(`   ℹ️ No season-matching Kaido result found`);
@@ -1451,28 +1597,44 @@ export class SourceManager {
 
         // Primary source returned no episodes — try backup sources with converted IDs
         const rawId = this.extractRawId(animeId);
-        const backupSourceNames = ['Kaido', '9Anime', 'Consumet'].filter(
+        const backupSourceNames = ['AnimeKai', 'Kaido', '9Anime', 'Consumet'].filter(
             name => name !== primarySource.name
         );
+        
+        const strippedTitle = rawId.replace(/-\d+$/, '').replace(/[-_]/g, ' ').trim();
+        console.log(`   🔄 Doing cross-source episode search for title: "${strippedTitle}"`);
         
         for (const name of backupSourceNames) {
             if (isAdultContent) continue;
             const source = this.sources.get(name) as StreamingSource;
             if (!source?.isAvailable) continue;
             
-            const backupId = this.buildSourceId(rawId, name);
-            console.log(`   ⏳ Trying backup ${name} with ID: ${backupId}`);
+            console.log(`   ⏳ Trying backup ${name} via title search: "${strippedTitle}"`);
             try {
-                const backupEpisodes = await this.executeReliably(name, 'getEpisodes',
-                    (signal) => source.getEpisodes(backupId, { signal }),
-                    { timeout: 12000 }
+                // 1. Search by title instead of guessing ID format
+                const searchResult = await this.executeReliably(name, 'search',
+                    (signal) => source.search(strippedTitle, 1, { signal }),
+                    { timeout: 8000 }
                 );
-                if (backupEpisodes && backupEpisodes.length > 0) {
-                    const duration = Date.now() - startTime;
-                    console.log(`   ✅ Got ${backupEpisodes.length} episodes from backup ${name} in ${duration}ms`);
-                    logger.episodeFetch(backupId, backupEpisodes.length, name, duration);
-                    timer.end();
-                    return backupEpisodes;
+                
+                if (searchResult && searchResult.results?.length > 0) {
+                    // Match the first result loosely
+                    const bestMatchId = searchResult.results[0].id;
+                    console.log(`   ✅ Found title on ${name}: ${bestMatchId}`);
+                    
+                    // 2. Get episodes using the native ID
+                    const backupEpisodes = await this.executeReliably(name, 'getEpisodes',
+                        (signal) => source.getEpisodes(bestMatchId, { signal }),
+                        { timeout: 12000 }
+                    );
+                    
+                    if (backupEpisodes && backupEpisodes.length > 0) {
+                        const duration = Date.now() - startTime;
+                        console.log(`   ✅ Got ${backupEpisodes.length} episodes from backup ${name} in ${duration}ms`);
+                        logger.episodeFetch(bestMatchId, backupEpisodes.length, name, duration);
+                        timer.end();
+                        return backupEpisodes;
+                    }
                 }
             } catch (err) {
                 console.log(`   ❌ Backup ${name} failed: ${(err as Error).message}`);
@@ -2313,7 +2475,7 @@ export class SourceManager {
         }
 
         // Add limited backup sources
-        const backupNames = ['Kaido', '9Anime', 'Consumet'].filter(n => n !== primarySource?.name);
+        const backupNames = ['AnimeKai', 'Kaido', 'Miruro', '9Anime', 'Consumet'].filter(n => n !== primarySource?.name);
         for (const name of backupNames) {
             const source = this.sources.get(name) as StreamingSource;
             if (source?.isAvailable && source.getEpisodeServers) {
@@ -2383,8 +2545,8 @@ export class SourceManager {
 
         // Backup sources: when prefix present (convert ID) OR when raw slug (one-piece-100?ep=2) try all slug-capable sources
         const backupNames = hasSourcePrefix
-            ? ['AnimePahe', 'AnimeKai', 'Kaido', '9Anime', 'Consumet'].filter(n => n !== primarySource?.name)
-            : ['AnimePahe', 'AnimeKai', 'Kaido', '9Anime', 'Consumet'];
+            ? ['AnimeKai', 'Kaido', 'Miruro', 'AnimePahe', '9Anime', 'Consumet'].filter(n => n !== primarySource?.name)
+            : ['AnimeKai', 'Kaido', 'Miruro', 'AnimePahe', '9Anime', 'Consumet'];
         for (const name of backupNames) {
             if (isAdultContent && name !== 'WatchHentai') continue;
             if (!isAdultContent && name === 'WatchHentai') continue;
@@ -2394,86 +2556,129 @@ export class SourceManager {
             }
         }
 
-        console.log(`   📋 Sources to try: ${sourcesToTry.map(s => s.name).join(', ')}`);
+        // AnimeKai verified best: stable HLS sub+dub, fast response, no SSL issues.
+        // AnimePahe owocdn has SSL errors; Kaido megacloud gets 404s — deprioritised.
+        const STREAM_PRIORITY = ['AnimeKai', 'Kaido', 'Miruro', 'AnimePahe', '9Anime', 'Consumet'];
+        const ordered: StreamingSource[] = [];
+        for (const name of STREAM_PRIORITY) {
+            const s = sourcesToTry.find(x => x.name === name);
+            if (s && !ordered.includes(s)) ordered.push(s);
+        }
+        for (const s of sourcesToTry) {
+            if (!ordered.includes(s)) ordered.push(s);
+        }
+        const finalSources = ordered;
 
-        if (sourcesToTry.length === 0) {
+        console.log(`   📋 Sources to try (priority-ordered): ${finalSources.map(s => s.name).join(', ')}`);
+
+        if (finalSources.length === 0) {
             console.log(`   ❌ No available sources for streaming`);
             logger.warn(`No available sources for streaming: ${episodeId}`, { episodeId }, 'SourceManager');
             timer.end();
             return { sources: [], subtitles: [] };
         }
 
-        // Race ALL approaches in parallel -- first successful result wins
+        // Fast-path: race all sources in parallel, return as soon as a high-priority
+        // source succeeds instead of waiting for every source to finish/timeout.
         type RaceResult = { source: string; data: StreamingData; success: boolean };
-        const racePromises: Promise<RaceResult>[] = [];
 
-        // Direct ID attempts (primary + backups)
-        for (const source of sourcesToTry) {
-            const idToUse = (source === primarySource || !hasSourcePrefix) ? episodeId : this.buildSourceId(rawId, source.name);
-            console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
+        const pickOrder = [...STREAM_PRIORITY, 'cross-source'];
+        const allResults: RaceResult[] = [];
+        let resolved = false;
 
-            racePromises.push(
+        const result = await new Promise<StreamingData>((resolveStream) => {
+            let pending = 0;
+
+            const tryResolve = () => {
+                if (resolved) return;
+                const ok = allResults.filter(r => r.success);
+                if (ok.length === 0) return;
+                // Pick the highest-priority successful source
+                for (const name of pickOrder) {
+                    const match = ok.find(r => r.source === name);
+                    if (match) {
+                        resolved = true;
+                        const duration = Date.now() - startTime;
+                        logger.streamingSuccess('unknown', episodeId, match.source,
+                            match.data.sources[0]?.quality || 'unknown', duration);
+                        timer.end();
+                        console.log(`   ✅ Picked stream source: ${match.source} (${match.data.sources.length} URLs, ${duration}ms)`);
+                        resolveStream(match.data);
+                        return;
+                    }
+                }
+                // If top priority hasn't resolved yet but we have *some* result, wait briefly
+                // for higher priority to maybe arrive
+            };
+
+            const onDone = () => {
+                pending--;
+                tryResolve();
+                if (pending <= 0 && !resolved) {
+                    // All sources done, pick whatever we have
+                    const ok = allResults.filter(r => r.success);
+                    resolved = true;
+                    if (ok.length > 0) {
+                        const best = ok[0];
+                        const duration = Date.now() - startTime;
+                        logger.streamingSuccess('unknown', episodeId, best.source,
+                            best.data.sources[0]?.quality || 'unknown', duration);
+                        timer.end();
+                        console.log(`   ✅ Picked stream source: ${best.source} (${best.data.sources.length} URLs, ${duration}ms)`);
+                        resolveStream(best.data);
+                    } else {
+                        timer.end();
+                        console.log(`   ❌ No sources found after trying all available sources`);
+                        logger.streamingFailed('unknown', episodeId, 'all-sources', 'No sources returned streaming URLs');
+                        resolveStream({ sources: [], subtitles: [] });
+                    }
+                }
+            };
+
+            for (const source of finalSources) {
+                pending++;
+                const idToUse = (source === primarySource || !hasSourcePrefix) ? episodeId : this.buildSourceId(rawId, source.name);
+                console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
+
                 this.executeReliably(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal }),
-                    { timeout: 20000 }
+                    { timeout: 12000 }
                 )
                 .then(data => {
                     if (data.sources.length > 0) {
                         console.log(`   ✅ ${source.name} returned ${data.sources.length} sources`);
-                        return { source: source.name, data, success: true };
+                        allResults.push({ source: source.name, data, success: true });
+                    } else {
+                        allResults.push({ source: source.name, data, success: false });
                     }
-                    return { source: source.name, data, success: false };
                 })
                 .catch(err => {
                     console.log(`   ❌ ${source.name} failed: ${(err as Error).message?.substring(0, 80)}`);
-                    return { source: source.name, data: { sources: [], subtitles: [] } as StreamingData, success: false };
+                    allResults.push({ source: source.name, data: { sources: [], subtitles: [] } as StreamingData, success: false });
                 })
-            );
-        }
+                .finally(onDone);
+            }
 
-        // Cross-source title-based fallback (runs in parallel with direct attempts)
-        racePromises.push(
+            // Cross-source title-based fallback (lower priority, runs in parallel)
+            pending++;
             this.crossSourceStreamingFallback(episodeId, server, category)
                 .then(data => {
                     if (data && data.sources.length > 0) {
                         console.log(`   ✅ Cross-source fallback got ${data.sources.length} sources`);
-                        return { source: 'cross-source', data, success: true };
+                        allResults.push({ source: 'cross-source', data, success: true });
+                    } else {
+                        allResults.push({ source: 'cross-source', data: { sources: [], subtitles: [] } as StreamingData, success: false });
                     }
-                    return { source: 'cross-source', data: { sources: [], subtitles: [] } as StreamingData, success: false };
                 })
                 .catch(err => {
                     console.log(`   ❌ Cross-source fallback failed: ${(err as Error).message?.substring(0, 80)}`);
-                    return { source: 'cross-source', data: { sources: [], subtitles: [] } as StreamingData, success: false };
+                    allResults.push({ source: 'cross-source', data: { sources: [], subtitles: [] } as StreamingData, success: false });
                 })
-        );
+                .finally(onDone);
 
-        // First-success-wins: resolve as soon as any promise returns success
-        const firstSuccess = await new Promise<RaceResult | null>((resolve) => {
-            let settled = 0;
-            const total = racePromises.length;
-            for (const p of racePromises) {
-                p.then(result => {
-                    if (result.success) resolve(result);
-                    if (++settled >= total) resolve(null);
-                }).catch(() => {
-                    if (++settled >= total) resolve(null);
-                });
-            }
         });
 
-        if (firstSuccess) {
-            const duration = Date.now() - startTime;
-            logger.streamingSuccess('unknown', episodeId, firstSuccess.source,
-                firstSuccess.data.sources[0]?.quality || 'unknown', duration);
-            timer.end();
-            return firstSuccess.data;
-        }
-
-        timer.end();
-        console.log(`   ❌ No sources found after trying all available sources`);
-        logger.streamingFailed('unknown', episodeId, 'all-sources', 'No sources returned streaming URLs');
-
-        return { sources: [], subtitles: [] };
+        return result;
     }
 
     /**
@@ -2485,45 +2690,66 @@ export class SourceManager {
         server?: string,
         category: 'sub' | 'dub' = 'sub'
     ): Promise<StreamingData | null> {
-        const slug = episodeId.split('?')[0];
-        const title = slug.replace(/[-_]/g, ' ').replace(/\s*\d+$/, '').trim();
+        let slug = episodeId.split('?')[0];
+        slug = this.extractRawId(slug);
+
+        const rawSlug = slug.replace(/-\d+$/, '');
+        const title = rawSlug.replace(/[-_]/g, ' ').trim();
         if (!title) return null;
 
-        console.log(`   🔄 Cross-source fallback: searching "${title}" on AnimePahe/AnimeKai`);
+        console.log(`   🔄 Cross-source fallback: searching "${title}" on fallback sources`);
 
-        // Figure out which episode number this is by asking the primary source (Kaido)
+        // Determine target episode number
         let targetEpNum: number | null = null;
-        const kaido = this.sources.get('Kaido') as StreamingSource;
-        if (kaido?.isAvailable) {
+
+        // Method 1: find the episode in the Kaido episode list (likely cached)
+        const animeSlug = episodeId.split('?')[0];
+        const kaidoSource = this.sources.get('Kaido') as StreamingSource;
+        if (kaidoSource?.isAvailable) {
             try {
-                const rawAnimeId = slug;
+                const kaidoId = animeSlug.includes('kaido-') ? animeSlug : `kaido-${animeSlug}`;
                 const eps = await Promise.race([
-                    kaido.getEpisodes!(`kaido-${rawAnimeId}`, { timeout: 12000 }),
-                    new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 12000))
+                    kaidoSource.getEpisodes!(kaidoId, { timeout: 8000 }),
+                    new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
                 ]);
                 const match = eps.find(e => e.id === episodeId);
                 if (match) targetEpNum = match.number;
             } catch { /* ignore */ }
         }
 
+        // Method 2: try to infer from the episode's position (ep param is internal, not the episode number)
         if (!targetEpNum) {
-            const epParam = episodeId.match(/[?&]ep=(\d+)/)?.[1];
-            if (epParam) targetEpNum = 1; // If we can't resolve, try episode 1 as a test
-            else return null;
+            // Some slugs have $ep=N format (AnimeKai) where N IS the episode number
+            const dollarEp = episodeId.match(/\$ep=(\d+)/)?.[1];
+            if (dollarEp) {
+                targetEpNum = parseInt(dollarEp, 10);
+            }
+        }
+
+        // Method 3: if all else fails, default to 1
+        if (!targetEpNum) {
+            targetEpNum = 1;
+            console.log(`   ⚠️ Could not determine episode number, defaulting to 1`);
         }
 
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
-        // Try AnimePahe and AnimeKai in parallel
-        const consumetSources = ['AnimePahe', 'AnimeKai']
+        // Try AnimePahe, AnimeKai, and Consumet in parallel to maximize finding sub & dub streams
+        const consumetSources = ['AnimePahe', 'AnimeKai', 'Consumet']
             .map(n => ({ name: n, src: this.sources.get(n) as StreamingSource }))
             .filter(({ src }) => src?.isAvailable && src.getStreamingLinks);
 
         const crossResults = await Promise.allSettled(
             consumetSources.map(async ({ name: srcName, src }) => {
-                console.log(`   📡 ${srcName} title-search for "${title}"`);
+                // Consumet (Gogoanime) splits sub and dub into separate entities.
+                let searchTitle = title;
+                if (category === 'dub' && srcName === 'Consumet') {
+                    searchTitle = `${title} dub`;
+                }
+
+                console.log(`   📡 ${srcName} title-search for "${searchTitle}"`);
                 const searchResult = await Promise.race([
-                    src.search(title, 1),
+                    src.search(searchTitle, 1),
                     new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 12000))
                 ]);
                 if (!searchResult.results?.length) throw new Error('no results');

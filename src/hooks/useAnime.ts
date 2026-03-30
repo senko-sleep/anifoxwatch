@@ -69,8 +69,9 @@ export function useSearch(query: string, page: number = 1, source?: string, enab
                 };
             }
         },
-        enabled: enabled && query.length > 0,
-        staleTime: 2 * 60 * 1000,
+        enabled: enabled && query.trim().length >= 2,
+        staleTime: 0,
+        gcTime: 5 * 60 * 1000,
         retry: 1,
         retryDelay: 1000,
     });
@@ -229,6 +230,27 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
         queryKey: queryKeys.stream(episodeId, server, category),
         queryFn: () => apiClient.getStreamingLinks(episodeId, server, category),
         enabled: enabled && episodeId.length > 0,
+        staleTime: 0,
+        gcTime: 3 * 60 * 1000,
+        retry: 0,
+        refetchOnWindowFocus: false,
+    });
+}
+
+/**
+ * Fetches a dub-category stream once (when user is on SUB) to detect dub availability
+ * when server lists omit type:dub. Skipped when dub is already implied by servers/metadata/active dub playback.
+ */
+export function useDubStreamProbe(
+    episodeId: string,
+    servers: EpisodeServer[] | undefined,
+    skip: boolean
+) {
+    const firstServer = servers?.[0]?.name;
+    return useQuery<StreamingData, Error>({
+        queryKey: ['dubStreamProbe', episodeId, firstServer],
+        queryFn: () => apiClient.getStreamingLinks(episodeId, firstServer, 'dub'),
+        enabled: !skip && !!episodeId && !!firstServer,
         staleTime: 5 * 60 * 1000,
         gcTime: 10 * 60 * 1000,
         retry: 0,

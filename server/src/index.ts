@@ -83,6 +83,27 @@ app.get('/health', (_req: Request, res: Response) => {
 // API health check endpoint
 app.get('/api/health', healthCheckMiddleware);
 
+// Lightweight image proxy — used as a fallback when direct image loads fail (CORS / referrer blocks)
+app.get('/api/image-proxy', async (req: Request, res: Response) => {
+    const url = req.query.url as string;
+    if (!url) { res.status(400).json({ error: 'url param required' }); return; }
+    try {
+        const { default: axios } = await import('axios');
+        const resp = await axios.get(url, {
+            responseType: 'arraybuffer',
+            timeout: 10000,
+            headers: { 'Referer': new URL(url).origin, 'User-Agent': 'Mozilla/5.0' },
+        });
+        const ct = resp.headers['content-type'] || 'image/jpeg';
+        res.set('Content-Type', ct);
+        res.set('Cache-Control', 'public, max-age=86400');
+        res.set('Access-Control-Allow-Origin', '*');
+        res.send(resp.data);
+    } catch {
+        res.status(502).json({ error: 'Image proxy failed' });
+    }
+});
+
 // API routes
 app.use('/api/anime', animeRoutes);
 app.use('/api/sources', sourcesRoutes);

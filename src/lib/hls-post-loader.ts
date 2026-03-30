@@ -25,7 +25,7 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
     config: Hls.LoaderConfiguration,
     callbacks: Hls.LoaderCallbacks<Hls.LoaderContext>
   ): void {
-    const url = context.url;
+    let url = context.url;
 
     // Check if this is a proxied URL
     const isProxied = url.includes('/api/stream/proxy?url=');
@@ -46,9 +46,18 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
           return;
         }
       }
+    } else if (url.includes('.key')) {
+      // Automatic proxy for cross-origin key files to avoid CORS blocks
+      const proxyBase = '/api/stream/proxy';
+      context.url = `${proxyBase}?url=${encodeURIComponent(url)}`;
+      // Continue to super.load with the rewritten proxied URL
+      super.load(context, config, callbacks);
+      return;
     }
 
-    // Fall back to default loader for non-proxied or short URLs
+    // Fall back to default loader for non-proxied or short proxied URLs.
+    // Raw third-party HLS URLs (when API returns them) load directly; vault/owocdn
+    // should always be proxied by the API — browser direct HTTPS often fails (SSL).
     super.load(context, config, callbacks);
   }
 

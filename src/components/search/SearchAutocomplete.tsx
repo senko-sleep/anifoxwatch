@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Search, X, Play, Star, Clock, TrendingUp, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { apiClient } from '@/lib/api-client';
-import { cn, normalizeRating } from '@/lib/utils';
+import { cn, normalizeRating, stripSourcePrefix } from '@/lib/utils';
 
 interface SearchResult {
   id: string;
@@ -125,8 +125,8 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
   };
 
   return (
-    <div ref={containerRef} className={cn("relative", className)}>
-      <form onSubmit={handleSubmit} className="relative">
+    <div ref={containerRef} className={cn("relative min-w-0 w-full", className)}>
+      <form onSubmit={handleSubmit} className="relative min-w-0">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input
           ref={effectiveInputRef as React.RefObject<HTMLInputElement>}
@@ -139,7 +139,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
           }}
           onFocus={() => query.length > 0 && setShowDropdown(true)}
           onKeyDown={handleKeyDown}
-          className="pl-10 pr-10 bg-fox-surface border-border focus:border-fox-orange focus:ring-fox-orange/20"
+          className="w-full min-w-0 pl-10 pr-10 bg-fox-surface border-border focus:border-fox-orange focus:ring-fox-orange/20"
           autoFocus
         />
         {query && (

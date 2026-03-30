@@ -5,7 +5,7 @@ import { Logo } from '@/components/ui/Logo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { apiClient } from '@/lib/api-client';
-import { cn } from '@/lib/utils';
+import { cn, stripSourcePrefix } from '@/lib/utils';
 import { useSourceHealth } from '@/hooks/useAnime';
 import { SearchAutocomplete } from '@/components/search/SearchAutocomplete';
 import {
@@ -90,15 +90,15 @@ export const Navbar = () => {
   };
 
   return (
-    <nav className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/80 backdrop-blur-xl">
-      <div className="container flex h-14 sm:h-16 items-center justify-between gap-3 sm:gap-4">
+    <nav className="sticky top-0 z-50 w-full border-b border-white/[0.06] bg-background/55 backdrop-blur-2xl supports-[backdrop-filter]:bg-background/45">
+      <div className="container flex h-14 sm:h-16 items-center gap-2 sm:gap-4 min-w-0">
         {/* Logo */}
         <Link to="/" className="flex-shrink-0">
           <Logo size="md" />
         </Link>
 
-        {/* Desktop Navigation */}
-        <div className="hidden md:flex items-center gap-0.5">
+        {/* Desktop Navigation — scroll if needed so search never clips */}
+        <div className="hidden md:flex flex-1 min-w-0 items-center gap-0.5 justify-end lg:justify-center overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <Link
             to="/"
             className={cn(
@@ -210,11 +210,11 @@ export const Navbar = () => {
         </div>
 
         {/* Search & Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-shrink-0 items-center gap-3">
           {/* Desktop Search */}
           <div className={cn(
-            "hidden md:flex items-center transition-all duration-300",
-            isSearchOpen ? "w-72" : "w-10"
+            "hidden md:flex items-center flex-shrink-0 transition-all duration-300",
+            isSearchOpen ? "w-72 min-w-[18rem]" : "w-10 min-w-[2.5rem]"
           )}>
             {isSearchOpen ? (
               <SearchAutocomplete

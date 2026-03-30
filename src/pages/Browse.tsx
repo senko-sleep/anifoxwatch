@@ -45,7 +45,7 @@ import {
   ChevronUp,
   Layers,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, dedupeSearchResultsForGrid } from '@/lib/utils';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 const SCROLL_POSITIONS_KEY = 'anistream_scroll_positions';
@@ -333,7 +333,8 @@ const Browse = () => {
   const isFetching = hasSearchQuery ? searchFetching : browseFetching;
   const error = hasSearchQuery ? searchError : browseError;
 
-  const normalizeTitle = (title: string): string => {
+  /** Browse-only dedup: merge near-duplicate titles for grids (not used for text search — that matched header poorly). */
+  const normalizeBrowseTitle = (title: string): string => {
     return title.toLowerCase().replace(/[^a-z0-9]/g, '').replace(/season\d+/g, '').replace(/part\d+/g, '').trim();
   };
 
@@ -342,19 +343,25 @@ const Browse = () => {
     if (!rawData) return { results: [], totalPages: 0, totalResults: 0, hasNextPage: false };
 
     let results = [...(rawData.results || [])];
-    const seen = new Map<string, typeof results[0]>();
-    for (const anime of results) {
-      const key = normalizeTitle(anime.title || '');
-      const existing = seen.get(key);
-      if (!existing) {
-        seen.set(key, anime);
-      } else {
-        const existingScore = (existing.rating || 0) + (existing.episodes || 0) + (existing.image ? 10 : 0);
-        const newScore = (anime.rating || 0) + (anime.episodes || 0) + (anime.image ? 10 : 0);
-        if (newScore > existingScore) seen.set(key, anime);
+
+    if (hasSearchQuery) {
+      // Same strategy as /search page + header: light dedup, prefer animekai IDs — do not strip spaces (drops many hits).
+      results = dedupeSearchResultsForGrid(results);
+    } else {
+      const seen = new Map<string, (typeof results)[0]>();
+      for (const anime of results) {
+        const key = normalizeBrowseTitle(anime.title || '');
+        const existing = seen.get(key);
+        if (!existing) {
+          seen.set(key, anime);
+        } else {
+          const existingScore = (existing.rating || 0) + (existing.episodes || 0) + (existing.image ? 10 : 0);
+          const newScore = (anime.rating || 0) + (anime.episodes || 0) + (anime.image ? 10 : 0);
+          if (newScore > existingScore) seen.set(key, anime);
+        }
       }
+      results = Array.from(seen.values());
     }
-    results = Array.from(seen.values());
 
     if (hasSearchQuery) {
       switch (searchSortBy) {

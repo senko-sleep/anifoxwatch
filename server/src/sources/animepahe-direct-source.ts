@@ -180,8 +180,13 @@ export class AnimePaheDirectSource extends BaseAnimeSource {
     async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         return [
             { name: 'default', url: '', type: 'sub' },
-            { name: 'backup', url: '', type: 'sub' }
+            { name: 'default', url: '', type: 'dub' },
         ];
+    }
+
+    private isEngDub(qualityName: string): boolean {
+        const q = (qualityName || '').toLowerCase();
+        return q.includes(' eng') || q.includes('english') || q.endsWith('eng');
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
@@ -191,7 +196,7 @@ export class AnimePaheDirectSource extends BaseAnimeSource {
 
         try {
             const p = await this.getProvider();
-            logger.info(`Fetching stream from AnimePahe for ${episodeId}`, undefined, this.name);
+            logger.info(`Fetching ${category} stream from AnimePahe for ${episodeId}`, undefined, this.name);
 
             const data = await Promise.race([
                 p.fetchEpisodeSources(episodeId),
@@ -202,7 +207,19 @@ export class AnimePaheDirectSource extends BaseAnimeSource {
                 return { sources: [], subtitles: [] };
             }
 
-            const sources: VideoSource[] = data.sources.map((s: any) => ({
+            // AnimePahe returns both sub and dub in one response
+            // Dub sources have "eng" in their quality name (e.g. "720p BD eng")
+            const allSources = data.sources as Array<{ url: string; quality?: string; isM3U8?: boolean }>;
+            const wantDub = category === 'dub';
+            let filtered = allSources.filter(s => this.isEngDub(s.quality || '') === wantDub);
+
+            // If no dub sources found, fall back to all sources
+            if (filtered.length === 0) {
+                filtered = allSources;
+                logger.info(`AnimePahe: no ${category}-specific sources, using all ${allSources.length}`, undefined, this.name);
+            }
+
+            const sources: VideoSource[] = filtered.map((s) => ({
                 url: s.url,
                 quality: this.normalizeQuality(s.quality),
                 isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
@@ -225,7 +242,7 @@ export class AnimePaheDirectSource extends BaseAnimeSource {
                 source: this.name
             };
 
-            logger.info(`AnimePahe: ${sources.length} quality options for ${episodeId}`, undefined, this.name);
+            logger.info(`AnimePahe: ${sources.length} ${category} sources for ${episodeId} (from ${allSources.length} total)`, undefined, this.name);
             this.setCache(cacheKey, streamData, 2 * 60 * 60 * 1000);
             return streamData;
         } catch (error) {

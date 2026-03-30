@@ -109,21 +109,21 @@ const Index = () => {
   const SkeletonRow = () => (
     <div className="flex gap-3 overflow-hidden">
       {[...Array(8)].map((_, i) => (
-        <div key={i} className="w-32 sm:w-40 shrink-0 aspect-[2/3] rounded-xl bg-white/[0.04] animate-pulse" />
+        <div key={i} className="w-[9.5rem] sm:w-44 shrink-0 aspect-[2/3] rounded-xl bg-white/[0.04] animate-pulse" />
       ))}
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-background text-foreground font-sans">
+    <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-background to-background text-foreground font-sans">
       <Navbar />
 
       {/* ── Hero ─────────────────────────────────────────────────────── */}
       {heroAnime.length > 0 ? (
         <HeroSection heroAnime={heroAnime} />
       ) : isLoading ? (
-        <section className="relative w-full px-4 pt-4 pb-2 sm:px-6 lg:px-8">
-          <div className="mx-auto h-[420px] sm:h-[500px] w-full max-w-7xl animate-pulse rounded-2xl bg-zinc-900/80" />
+        <section className="relative w-full sm:px-6 lg:px-8">
+          <div className="mx-auto h-[340px] sm:h-[500px] w-full max-w-7xl animate-pulse sm:rounded-2xl bg-zinc-900/80" />
           <div className="mt-3 flex justify-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin text-fox-orange/70" />
             <span className="text-[11px] text-muted-foreground">Loading spotlight…</span>
@@ -149,7 +149,7 @@ const Index = () => {
       )}
 
       {/* ── Main content ──────────────────────────────────────────────── */}
-      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20 space-y-10 pt-8">
+      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12 sm:pb-20 space-y-6 sm:space-y-10 pt-4 sm:pt-8">
 
         {/* Continue Watching */}
         {history.length > 0 && (

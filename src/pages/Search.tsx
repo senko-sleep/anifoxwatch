@@ -42,7 +42,7 @@ import {
   Calendar,
   AlertCircle
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, dedupeSearchResultsForGrid } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -357,41 +357,14 @@ const Search = () => {
   const isFetching = hasSearchQuery ? searchFetching : browseFetching;
   const error = hasSearchQuery ? searchError : browseError;
 
-  // Deduplicate results by normalizing titles
-  const normalizeTitle = (title: string): string => {
-    return title
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '')
-      .replace(/season\d+/g, '')
-      .replace(/part\d+/g, '')
-      .trim();
-  };
-
   // Process data with deduplication
   const processedData = useMemo(() => {
     const rawData = hasSearchQuery ? searchData : browseData;
     if (!rawData) return { results: [], totalPages: 0, totalResults: 0, hasNextPage: false };
 
-    let results = [...(rawData.results || [])];
-
-    // Deduplicate by normalized title - keep the one with more info (higher rating, more episodes)
-    const seen = new Map<string, typeof results[0]>();
-    for (const anime of results) {
-      const key = normalizeTitle(anime.title || '');
-      const existing = seen.get(key);
-      
-      if (!existing) {
-        seen.set(key, anime);
-      } else {
-        // Keep the one with better data
-        const existingScore = (existing.rating || 0) + (existing.episodes || 0) + (existing.image ? 10 : 0);
-        const newScore = (anime.rating || 0) + (anime.episodes || 0) + (anime.image ? 10 : 0);
-        if (newScore > existingScore) {
-          seen.set(key, anime);
-        }
-      }
-    }
-    results = Array.from(seen.values());
+    let results = hasSearchQuery
+      ? dedupeSearchResultsForGrid([...(rawData.results || [])])
+      : [...(rawData.results || [])];
 
     // Client-side sort for search results only
     if (hasSearchQuery) {

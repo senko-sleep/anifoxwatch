@@ -20,6 +20,7 @@ export interface VideoSource {
     quality: '360p' | '480p' | '720p' | '1080p' | 'auto' | 'default';
     isM3U8: boolean;
     isDASH?: boolean;
+    isDirect?: boolean;
 }
 
 export interface VideoSubtitle {
@@ -283,6 +284,8 @@ class AnimeApiClient {
      */
     private getCacheTTL(endpoint: string): number {
         if (endpoint.includes('/stream/')) return 3 * 60 * 1000; // 3 min for streams
+        // Search must stay fresh — long TTL made browse/search grids feel stale vs. header autocomplete
+        if (endpoint.includes('/anime/search?')) return 20 * 1000; // 20s
         if (endpoint.includes('/trending') || endpoint.includes('/latest')) return 5 * 60 * 1000; // 5 min
         if (endpoint.includes('/top-rated') || endpoint.includes('/seasonal')) return 15 * 60 * 1000; // 15 min
         if (endpoint.includes('/schedule')) return 5 * 60 * 1000; // 5 min
@@ -450,11 +453,26 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         try {
-            const data = await this.fetchWithRetry<StreamingData>(
-                `/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`,
-                undefined,
-                0
-            );
+            // Streaming requests can take longer due to cross-source fallbacks (up to 20-30s)
+            // Use custom fetch rather than the default timeout-constrained fetchWithRetry
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 45000);
+            
+            const response = await fetch(`${this.apiBase()}/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`, {
+                signal: controller.signal,
+                headers: { 'Accept': 'application/json' }
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+                try { errorMessage = JSON.parse(errorText).error || errorMessage; } catch {}
+                throw Object.assign(new Error(errorMessage), { status: response.status });
+            }
+            
+            const data = await response.json();
 
             console.log(`[API] ✅ Stream received:`, {
                 sources: data.sources?.length || 0,

@@ -57,6 +57,21 @@ export class AnimeKaiSource extends BaseAnimeSource {
         }
     }
 
+    private cleanDescription(raw?: string): string {
+        if (!raw) return 'No description available.';
+        let desc = raw.replace(/<[^>]*>/g, '');
+        // Strip metadata that leaks into AnimeKai descriptions
+        desc = desc.replace(/Country:\s*.*/i, '').trim();
+        desc = desc.replace(/Genres?:\s*.*/i, '').trim();
+        desc = desc.replace(/Premiered:\s*.*/i, '').trim();
+        desc = desc.replace(/Date aired:\s*.*/i, '').trim();
+        desc = desc.replace(/Broadcast:\s*.*/i, '').trim();
+        desc = desc.replace(/Episodes:\s*\d+.*/i, '').trim();
+        desc = desc.replace(/Duration:\s*.*/i, '').trim();
+        desc = desc.replace(/\s{2,}/g, ' ').trim();
+        return desc || 'No description available.';
+    }
+
     private mapAnime(data: any): AnimeBase {
         return {
             id: `animekai-${data.id}`,
@@ -64,7 +79,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
             titleJapanese: data.japaneseTitle,
             image: data.image || '',
             cover: data.cover || data.image,
-            description: data.description?.replace(/<[^>]*>/g, '') || 'No description available.',
+            description: this.cleanDescription(data.description),
             type: this.mapType(data.type),
             status: this.mapStatus(data.status),
             rating: data.rating ? parseFloat(data.rating) / 10 : undefined,
@@ -171,46 +186,70 @@ export class AnimeKaiSource extends BaseAnimeSource {
     }
 
     async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
-        return [{ name: 'default', url: '', type: 'sub' }];
+        return [
+            { name: 'default', url: '', type: 'sub' },
+            { name: 'default', url: '', type: 'dub' }
+        ];
+    }
+
+    private isBrokenCdn(url: string): boolean {
+        try {
+            const h = new URL(url).hostname;
+            return ['hub26link', 'net22lab'].some(bad => h.includes(bad));
+        } catch { return false; }
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         const cacheKey = `kai:stream:${episodeId}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
-        if (cached) return cached;
+        if (cached && !cached.sources.some(s => this.isBrokenCdn(s.url))) return cached;
 
         try {
             const p = await this.getProvider();
-            logger.info(`Fetching stream from AnimeKai for ${episodeId}`, undefined, this.name);
+            const mod = await import('@consumet/extensions');
+            const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
+            logger.info(`Fetching ${category} stream from AnimeKai for ${episodeId}`, undefined, this.name);
 
-            const data = await Promise.race([
-                p.fetchEpisodeSources(episodeId),
-                new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 20000))
-            ]);
+            // Try up to 3 times — CDN assignment is load-balanced, retries often get a working domain
+            for (let attempt = 0; attempt < 3; attempt++) {
+                const data = await Promise.race([
+                    p.fetchEpisodeSources(episodeId, undefined, subOrDub),
+                    new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
+                ]);
 
-            if (!data.sources?.length) {
-                return { sources: [], subtitles: [] };
+                if (!data.sources?.length) {
+                    return { sources: [], subtitles: [] };
+                }
+
+                const hasBrokenUrl = data.sources.some((s: any) => this.isBrokenCdn(s.url));
+                if (hasBrokenUrl && attempt < 2) {
+                    logger.warn(`AnimeKai: Got broken CDN domain on attempt ${attempt + 1}, retrying...`, undefined, this.name);
+                    await new Promise(r => setTimeout(r, 500));
+                    continue;
+                }
+
+                const streamData: StreamingData = {
+                    sources: data.sources.map((s: any): VideoSource => ({
+                        url: s.url,
+                        quality: s.quality?.includes('1080') ? '1080p' : s.quality?.includes('720') ? '720p' : 'auto',
+                        isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
+                        isDASH: s.url?.includes('.mpd')
+                    })),
+                    subtitles: (data.subtitles || []).map((sub: any) => ({
+                        url: sub.url,
+                        lang: sub.lang || 'Unknown',
+                        label: sub.label || sub.lang
+                    })),
+                    headers: data.headers,
+                    source: this.name
+                };
+
+                logger.info(`AnimeKai: ${streamData.sources.length} sources for ${episodeId}`, undefined, this.name);
+                this.setCache(cacheKey, streamData, 2 * 60 * 60 * 1000);
+                return streamData;
             }
 
-            const streamData: StreamingData = {
-                sources: data.sources.map((s: any): VideoSource => ({
-                    url: s.url,
-                    quality: s.quality?.includes('1080') ? '1080p' : s.quality?.includes('720') ? '720p' : 'auto',
-                    isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-                    isDASH: s.url?.includes('.mpd')
-                })),
-                subtitles: (data.subtitles || []).map((sub: any) => ({
-                    url: sub.url,
-                    lang: sub.lang || 'Unknown',
-                    label: sub.label || sub.lang
-                })),
-                headers: data.headers,
-                source: this.name
-            };
-
-            logger.info(`AnimeKai: ${streamData.sources.length} sources for ${episodeId}`, undefined, this.name);
-            this.setCache(cacheKey, streamData, 2 * 60 * 60 * 1000);
-            return streamData;
+            return { sources: [], subtitles: [] };
         } catch (error) {
             this.handleError(error, 'getStreamingLinks');
             return { sources: [], subtitles: [] };

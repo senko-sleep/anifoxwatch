@@ -218,27 +218,24 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
     return lines.map(line => {
         const trimmedLine = line.trim();
 
-        // Skip empty lines and comments (except URI in comments)
-        if (!trimmedLine || (trimmedLine.startsWith('#') && !trimmedLine.includes('URI='))) {
-            // Handle URI in EXT-X-KEY or EXT-X-MAP tags
-            if (trimmedLine.includes('URI="')) {
-                return trimmedLine.replace(/URI="([^"]+)"/g, (match, uri) => {
-                    const absoluteUri = uri.startsWith('http') ? uri : `${baseUrl}${uri}`;
-                    return `URI="${proxyUrl(absoluteUri, proxyBase, referer)}"`;
-                });
-            }
+        // Handle URI in EXT-X-KEY or EXT-X-MAP tags (they start with # but have URI=)
+        if (trimmedLine.startsWith('#') && trimmedLine.includes('URI="')) {
+            return line.replace(/URI="([^"]+)"/g, (match, uri) => {
+                const absoluteUri = uri.startsWith('http') ? uri : `${baseUrl}${uri}`;
+                return `URI="${proxyUrl(absoluteUri, proxyBase, referer)}"`;
+            });
+        }
+
+        // Skip other comments and empty lines
+        if (!trimmedLine || trimmedLine.startsWith('#')) {
             return line;
         }
 
-        // Handle segment URLs
-        if (!trimmedLine.startsWith('#')) {
-            const absoluteUrl = trimmedLine.startsWith('http')
-                ? trimmedLine
-                : `${baseUrl}${trimmedLine}`;
-            return proxyUrl(absoluteUrl, proxyBase, referer);
-        }
-
-        return line;
+        // Handle segment URLs (lines not starting with #)
+        const absoluteUrl = trimmedLine.startsWith('http')
+            ? trimmedLine
+            : `${baseUrl}${trimmedLine}`;
+        return proxyUrl(absoluteUrl, proxyBase, referer);
     }).join('\n');
 };
 
@@ -392,26 +389,39 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 
     // Proxy the stream URLs if requested
     if (shouldProxy) {
-        // Extract referer from stream headers for proxy passthrough
         const streamReferer = streamData.headers?.Referer || streamData.headers?.referer || 'https://megacloud.blog/';
 
-        streamData.sources = streamData.sources.map((source: any) => ({
-            ...source,
-            url: proxyUrl(source.url, proxyBase, streamReferer),
-            originalUrl: source.url // Keep original for debugging
-        }));
+        // Some kwik hosts work better as direct browser fetches; vault-*.owocdn.top must NOT
+        // be direct — browsers often hit ERR_SSL_PROTOCOL_ERROR on raw HTTPS to owocdn.
+        // Always proxy owocdn/vault through this API so HLS loads same-origin.
+        const DIRECT_PLAY_DOMAINS = ['kwik.si', 'kwik.cx'];
+        const isDirect = (url: string) => {
+            try {
+                const h = new URL(url).hostname.toLowerCase();
+                return DIRECT_PLAY_DOMAINS.some((d) => h.includes(d));
+            } catch { return false; }
+        };
 
-        // Also proxy subtitle URLs
+        streamData.sources = streamData.sources.map((source: any) => {
+            if (isDirect(source.url)) {
+                return { ...source, isDirect: true, originalUrl: source.url };
+            }
+            return {
+                ...source,
+                url: proxyUrl(source.url, proxyBase, streamReferer),
+                originalUrl: source.url
+            };
+        });
+
         if (streamData.subtitles) {
             streamData.subtitles = streamData.subtitles.map((sub: any) => ({
                 ...sub,
-                url: proxyUrl(sub.url, proxyBase, streamReferer)
+                url: isDirect(sub.url) ? sub.url : proxyUrl(sub.url, proxyBase, streamReferer)
             }));
         }
 
-        logger.info(`[STREAM] Proxied ${streamData.sources.length} sources`, {
+        logger.info(`[STREAM] Processed ${streamData.sources.length} sources (direct: ${streamData.sources.filter((s: any) => s.isDirect).length})`, {
             episodeId,
-            proxiedUrls: streamData.sources.map((s: any) => s.url?.substring(0, 80)),
             requestId
         });
     }
@@ -466,7 +476,6 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     });
 
     try {
-        // Determine best referer based on URL domain
         const cdnConfig: Record<string, { referer: string; origin?: string }> = {
             'sunshinerays': { referer: 'https://rapid-cloud.co/' },
             'sunburst': { referer: 'https://rapid-cloud.co/' },
@@ -485,23 +494,67 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'hstorage.xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'googlevideo': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
+            'pro25zone': { referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' },
+            'code29wave': { referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' },
+            'owocdn': { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
+            'vault': { referer: 'https://kwik.cx/', origin: 'https://kwik.cx' },
+            'kwik': { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
+            'animepahe': { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
+            'pahe': { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
+            'nextcdn': { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
             'default': { referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' }
         };
 
         const matchedConfig = Object.entries(cdnConfig).find(([key]) => key !== 'default' && domain.includes(key));
-        // Priority: 1) explicit referer param from client, 2) CDN config match, 3) megacloud.blog default
         const config = matchedConfig ? matchedConfig[1] : cdnConfig.default;
-        const referer = refererParam || config.referer;
-        // Critical: when client supplies an explicit referer, derive Origin from THAT URL.
-        // Mismatching Referer vs Origin (e.g. megaup.live referer + megacloud.blog origin) causes 403s.
-        let origin: string;
-        if (refererParam) {
-            try { origin = new URL(refererParam).origin; } catch { origin = config.origin || 'https://megacloud.blog'; }
+
+        // For known CDN domains, ALWAYS use the CDN config referer first
+        // (client-supplied referer is often stale, e.g. kwik.cx vs kwik.si)
+        const refererCombos: Array<{ referer: string; origin: string }> = [];
+
+        if (matchedConfig) {
+            refererCombos.push({
+                referer: config.referer,
+                origin: config.origin || config.referer.replace(/\/$/, '')
+            });
+            if (refererParam && refererParam !== config.referer) {
+                let paramOrigin: string;
+                try { paramOrigin = new URL(refererParam).origin; } catch { paramOrigin = config.origin || 'https://megacloud.blog'; }
+                refererCombos.push({ referer: refererParam, origin: paramOrigin });
+            }
+        } else if (refererParam) {
+            let paramOrigin: string;
+            try { paramOrigin = new URL(refererParam).origin; } catch { paramOrigin = 'https://megacloud.blog'; }
+            refererCombos.push({ referer: refererParam, origin: paramOrigin });
+            refererCombos.push({
+                referer: config.referer,
+                origin: config.origin || config.referer.replace(/\/$/, '')
+            });
         } else {
-            origin = config.origin || referer.replace(/\/$/, '');
+            refererCombos.push({
+                referer: config.referer,
+                origin: config.origin || config.referer.replace(/\/$/, '')
+            });
         }
 
-        // Check if domain is dead/unresolvable before making request
+        if (!refererCombos.some(c => c.referer.includes('aniwatchtv.to'))) {
+            refererCombos.push({ referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' });
+        }
+
+        if (domain.includes('owocdn')) {
+            const extras: Array<{ referer: string; origin: string }> = [
+                { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
+                { referer: 'https://kwik.cx/', origin: 'https://kwik.cx' },
+                { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
+                { referer: 'https://hianime.nz/', origin: 'https://hianime.nz' },
+            ];
+            for (const e of extras) {
+                if (!refererCombos.some((c) => c.referer === e.referer)) {
+                    refererCombos.push(e);
+                }
+            }
+        }
+
         if (isDeadDomain(url)) {
             logger.warn(`[PROXY] Skipping dead domain: ${domain}`, { domain, requestId });
             res.status(502).json({
@@ -513,7 +566,6 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Quick DNS check
         const isResolvable = await isDomainResolvable(domain);
         if (!isResolvable) {
             logger.warn(`[PROXY] Domain not resolvable: ${domain}`, { domain, requestId });
@@ -526,44 +578,65 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        // Prepare headers for upstream request — mirror what a real browser HLS fetch looks like
-        const headers: any = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Referer': referer,
-            'Origin': origin,
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'cross-site'
-        };
+        // Try each referer combo until one succeeds
+        let response: any = null;
+        let lastProxyError: any = null;
 
-        // Forward Range header if present (crucial for seeking in video players)
-        if (req.headers.range) {
-            headers['Range'] = req.headers.range;
-            logger.debug(`[PROXY] Forwarding Range header: ${req.headers.range}`, { requestId });
+        for (let attempt = 0; attempt < refererCombos.length; attempt++) {
+            const combo = refererCombos[attempt];
+            const headers: any = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': combo.referer,
+                'Origin': combo.origin,
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'cross-site'
+            };
+
+            if (req.headers.range) {
+                headers['Range'] = req.headers.range;
+            }
+
+            try {
+                response = await axios({
+                    method: 'get',
+                    url: url,
+                    responseType: 'stream',
+                    headers,
+                    timeout: 22000,
+                    maxRedirects: 5,
+                    validateStatus: (status) => status < 400
+                });
+
+                logger.info(`[PROXY] Success on attempt ${attempt + 1} with referer ${combo.referer}`, { domain, requestId });
+                break;
+            } catch (err: any) {
+                lastProxyError = err;
+                const isEproto = err.message?.includes('EPROTO') || err.code === 'EPROTO';
+                if (isEproto) {
+                    logger.warn(`[PROXY] TLS/EPROTO failure for ${domain} — skipping retries (broken TLS)`, { requestId });
+                    break;
+                }
+                logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed for ${domain} (referer: ${combo.referer}): ${err.message}`, { requestId });
+                if (attempt < refererCombos.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+            }
         }
 
-        // Use stream response type to avoid memory issues with large files
-        const response = await axios({
-            method: 'get',
-            url: url,
-            responseType: 'stream',
-            headers: headers,
-            timeout: 30000,
-            maxRedirects: 5,
-            validateStatus: (status) => status < 500 // Allow 4xx for error handling
-        });
+        if (!response) {
+            throw lastProxyError || new Error('All proxy attempts failed');
+        }
 
-        // Log response status
         if (response.status >= 400) {
             logger.warn(`[PROXY] Upstream returned ${response.status} for ${domain}`, {
                 status: response.status,
                 domain,
                 requestId
             });
-            // Consume the stream to avoid hanging
             if (response.data && typeof response.data.resume === 'function') {
                 response.data.resume();
             }
@@ -583,7 +656,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         if (isUpstreamM3u8) {
             try {
                 const content = await streamToString(response.data);
-                const rewrittenContent = rewriteM3u8Content(content, url, proxyBase, referer);
+                const rewrittenContent = rewriteM3u8Content(
+                    content,
+                    url,
+                    proxyBase,
+                    refererParam || refererCombos[0]?.referer
+                );
 
                 res.set('Content-Type', 'application/vnd.apple.mpegurl');
                 res.set('Cache-Control', 'private, max-age=5');
@@ -605,8 +683,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
         // Handle Video/Binary content (Stream/Pipe)
 
-        // Forward content headers
-        if (response.headers['content-length']) res.set('Content-Length', response.headers['content-length']);
+        // Forward content headers, but skip if the response was compressed 
+        // because Axios automatically decompressed the stream, meaning the original 
+        // Content-Length and Content-Encoding are no longer accurate for the piped uncompressed bytes.
+        if (response.headers['content-length'] && !response.headers['content-encoding']) {
+            res.set('Content-Length', response.headers['content-length']);
+        }
         if (response.headers['content-range']) res.set('Content-Range', response.headers['content-range']);
         if (response.headers['accept-ranges']) res.set('Accept-Ranges', response.headers['accept-ranges']);
 
@@ -652,6 +734,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         const errorMessage = error.message || 'Unknown error';
         const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
         const isBlocked = errorMessage.includes('blocked') || errorMessage.includes('forbidden');
+        const isEproto = errorMessage.includes('EPROTO') || error.code === 'EPROTO';
 
         logger.error(`[PROXY] Failed to proxy from ${domain}`, error, {
             domain,
@@ -664,7 +747,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         if (!res.headersSent) {
             res.status(502).json({
                 error: 'Failed to proxy stream',
-                reason: isTimeout ? 'timeout' : isBlocked ? 'blocked' : 'connection_error',
+                reason: isEproto ? 'tls_error' : isTimeout ? 'timeout' : isBlocked ? 'blocked' : 'connection_error',
+                retryable: isEproto,
                 domain,
                 message: process.env.NODE_ENV === 'development' ? errorMessage : undefined
             });

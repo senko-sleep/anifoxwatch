@@ -1,0 +1,63 @@
+Here is your updated list. I have completely removed all general video sites (like YouTube, Internet Archive, Dailymotion), legal sites, and backend file hosts. 
+
+Every single site on this list is a **100% dedicated, free, unofficial anime streaming portal**. They are specifically chosen because their HTML DOM or Network APIs are easy to scrape for direct video iframes and MP4s. (HiAnime has been excluded).
+
+### 🟢 Highly Reliable & Easiest to Scrape (Simple HTML/JSON)
+1. **Gogoanime (anitaku.to)** - The golden standard for scraping. Very simple `<div class="anime_video_body">` DOM structure.
+2. **YugenAnime (yugenanime.tv)** - Incredibly straightforward HTML. One quick Cheerio query gets the iframe.
+3. **AllAnime (allanime.to)** - Has a fully open, unauthenticated GraphQL API. No DOM parsing required.
+4. **Chia-Anime (chia-anime.su)** - Uses a highly outdated 2010s HTML template. Zero JavaScript obfuscation.
+5. **AnimeHeaven (animeheaven.me)** - Very basic HTML layout with video links directly in the source page.
+6. **GenoAnime (genoanime.com)** - Minimalistic site, extremely fast to scrape.
+7. **AnimeSeries (animeseries.so)** - Basic PHP/HTML scraping target.
+8. **WatchAnime (watchanime.cc)** - Simple iframe-wrapper site, easy to pull the embed link.
+9. **GoGoPlay (gogoplay.io)** - An alternative frontend for Gogoanime's database, similar simple HTML.
+10. **AnimeHub (animehub.ac)** - Very fast page load times and standard semantic HTML tags.
+
+### 🟡 Modern / Popular Sites (Easy API / Network Interception)
+11. **Miruro (miruro.tv)** - Modern UI, but pulls from completely open Consumet APIs under the hood. You can literally copy their fetch logic.
+12. **Marin.moe** - The network tab reveals simple JSON POST endpoints that respond directly with the video URL.
+13. **Aniwatch Clones (aniwatchtv.to)** - Their episode fetching is completely AJAX/JSON-based. Easy to spoof the GET request.
+14. **9Anime Clones (9animetv.to)** - Still uses standard AJAX requests to load the video element.
+15. **Zorox (zoroxtv.to)** - Another Zoro template clone that relies on easy-to-spoof API calls for the video player.
+16. **Kaido (kaido.to)** - Similar to Zoro, heavily focused purely on anime with scrapable network endpoints.
+17. **AniWave Clones (aniwave.tv proxies)** - Some proxy endpoints remain active and return clean JSON video configs.
+18. **Tenshi.moe (tenshi.moe)** - Highly semantic HTML page structure.
+19. **KickAssAnime (kickassanime.am)** - The video configuration is cleanly passed as a JSON object directly inside a `<script>` tag. 
+20. **Kurotube (kurotube.com)** - Utilizes well-structured JSON APIs for returning video player info.
+
+### 🟠 Proxy / Clone Templates (Sites using older, highly-scrapable templates)
+21. **AnimeKisa Clones (animekisa.tv proxies)** - The old Kisa UI template is kept alive by proxy sites. Very fast HTML parsing.
+22. **AnimeDao Clones (animedao.to proxies)** - The HTML response contains direct iframe links no extra clicks required.
+23. **KissAnime Clones (kissanime.com.ru)** - While the original is dead, these clones use basic boilerplate HTML that is trivially easy to scrape.
+24. **4Anime Clones (4anime.gg proxy)** - Uses a simplified frontend which lacks modern bot protection.
+25. **AniMixPlay Clones (animixplay.to clones)** - Simple wrapper sites that index iframe servers.
+26. **AnimeFlix Clones (animeflix.live)** - Clone of the old Flix UI; straightforward document structure.
+27. **AnimeUltima Clones (animeultima.tv proxies)** - Basic HTML site maps.
+28. **MasterAnime Clones (masterani.me proxies)** - Simple JS network requests.
+29. **AnimeFreak Clones (animefreak.tv)** - Uses older layout logic; links are easy to identify.
+30. **AnimeSuge Clones (animesuge.to proxies)** - Standard AJAX based player loading.
+
+### 🔵 Specialized / Niche Anime Freetubes (Very simple layouts)
+31. **AnimePahe (animepahe.ru)** - Famous for Kwilk servers. While protected, the scraping script for their Kwik servers is completely open-source and standard.
+32. **Gojo.Live** - Direct HTML structure with zero aggressive Cloudflare loops.
+33. **AnimeSurge (animesurge.cc)** - Standard anime aggregation template.
+34. **DarkAnime (darkanime.stream)** - Simple DOM, heavily focused on mature/darker anime series.
+35. **RyuAnime (ryuanime.com)** - Very old-school site architecture, perfect for simple regex or DOM scrapes.
+36. **AnimeShow (animeshow.tv)** - Reliable fallback site with basic `<a>` tag structures.
+37. **DubbedAnime (dubbedanime.biz)** - Specialized for english dubs, easy to scrape the direct server host.
+38. **WCOAnime (wcoanime.tv)** - The pure-anime offshoot of WCOStream; has its iframe links base64 encoded right in the HTML.
+39. **AniCrush (anicrush.to)** - Easy to extract the raw server links from the page source.
+40. **Yomi Anime (yomi.enjien.com)** - An open-source style anime frontend; you can often hit its backend directly.
+
+### 🟣 Classic / Alt Stream Layouts
+41. **AnimeFox (animefox.tv)** - Standard bootstrap-style UI with predictable CSS classes.
+42. **AnimeRush (animerush.tv)** - Predictable URL slug routing (e.g., `url.com/anime-name-episode-1`), making automated link generation easy.
+43. **123Anime (123anime.info)** - Standard HTML form navigation.
+44. **AnimeFrenzy (animefrenzy.org)** - Fast loading and simple iframe hosting.
+45. **AniLinkz Clones (anilinkz.to proxies)** - Classic directory format.
+46. **AnimeToon (animetoon.tv)** - Has an extensive dub catalog with simple markup.
+47. **AnimeJoy (animejoy.tv)** - Reliable server links in plain text hidden directly in the DOM.
+48. **JustDub (justdub.co)** - Another easy-to-parse site focusing on dubbed content.
+49. **Shiro (shiro.is clones)** - Open source frontend logic; you can intercept their unauthenticated API.
+50. **OtakuStream Clones (otakustream.tv proxies)** - Uses simple semantic markup.
