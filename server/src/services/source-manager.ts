@@ -751,11 +751,21 @@ export class SourceManager {
     ];
 
     /**
+     * Consumet AnimeKai episode IDs (fetchAnimeInfo): "show-slug-suffix$ep=N$token=..."
+     * Not the same as 9anime "slug?ep=NUM" watch URLs.
+     */
+    private isAnimeKaiConsumetEpisodeId(id: string): boolean {
+        if (id.includes('?ep=')) return false;
+        return /\$ep=\d+/.test(id);
+    }
+
+    /**
      * Check if an ID has a known source prefix
      */
     private hasKnownSourcePrefix(id: string): boolean {
         const lowerId = id.toLowerCase();
-        return this.knownPrefixes.some(prefix => lowerId.startsWith(prefix));
+        if (this.knownPrefixes.some(prefix => lowerId.startsWith(prefix))) return true;
+        return this.isAnimeKaiConsumetEpisodeId(id);
     }
 
     /**
@@ -770,6 +780,19 @@ export class SourceManager {
             }
         }
         return id;
+    }
+
+    /**
+     * Human-ish title for cross-source stream fallback (strips watch params, AnimeKai $ep$token tails, hash suffix).
+     */
+    private episodeIdToFallbackSearchTitle(episodeId: string): string {
+        let slug = episodeId.split('?')[0];
+        const dollar = slug.indexOf('$');
+        if (dollar !== -1) slug = slug.slice(0, dollar);
+        slug = this.extractRawId(slug);
+        slug = slug.replace(/-(?=[a-z]*\d)[a-z\d]{3,5}$/i, '');
+        const rawSlug = slug.replace(/-\d+$/, '');
+        return rawSlug.replace(/[-_]/g, ' ').trim();
     }
 
     /**
@@ -854,6 +877,12 @@ export class SourceManager {
                     return preferredSource;
                 }
             }
+        }
+
+        // Raw Consumet AnimeKai episode IDs have no "animekai-" prefix (see mapAnime vs episode id: ep.id).
+        if (this.isAnimeKaiConsumetEpisodeId(id)) {
+            const kai = this.sources.get('AnimeKai');
+            if (kai?.isAvailable) return kai;
         }
 
         // NineAnimeSource episode IDs omit the `9anime-` prefix: "{animeSlug}?ep={numericEpisodeKey}"
@@ -2636,11 +2665,15 @@ export class SourceManager {
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
 
                 const usesPuppeteerStream = source.name === '9Anime' || source.name === 'Kaido';
+                const usesSlowConsumetStream = source.name === 'AnimeKai';
+                const streamReliabilityOpts = usesPuppeteerStream
+                    ? { timeout: 45_000, maxAttempts: 1 }
+                    : usesSlowConsumetStream
+                        ? { timeout: 30_000, maxAttempts: 1 }
+                        : { timeout: 12_000 };
                 this.executeReliably(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal }),
-                    usesPuppeteerStream
-                        ? { timeout: 45_000, maxAttempts: 1 }
-                        : { timeout: 12_000 }
+                    streamReliabilityOpts
                 )
                 .then(data => {
                     if (data.sources.length > 0) {
@@ -2688,11 +2721,7 @@ export class SourceManager {
         server?: string,
         category: 'sub' | 'dub' = 'sub'
     ): Promise<StreamingData | null> {
-        let slug = episodeId.split('?')[0];
-        slug = this.extractRawId(slug);
-
-        const rawSlug = slug.replace(/-\d+$/, '');
-        const title = rawSlug.replace(/[-_]/g, ' ').trim();
+        const title = this.episodeIdToFallbackSearchTitle(episodeId);
         if (!title) return null;
 
         console.log(`   🔄 Cross-source fallback: searching "${title}" on fallback sources`);
@@ -2701,7 +2730,9 @@ export class SourceManager {
         let targetEpNum: number | null = null;
 
         // Method 1: find the episode in the Kaido episode list (likely cached)
-        const animeSlug = episodeId.split('?')[0];
+        let animeSlug = episodeId.split('?')[0];
+        const dollar = animeSlug.indexOf('$');
+        if (dollar !== -1) animeSlug = animeSlug.slice(0, dollar);
         const kaidoSource = this.sources.get('Kaido') as StreamingSource;
         if (kaidoSource?.isAvailable) {
             try {
