@@ -4,10 +4,10 @@
  */
 
 import axios from 'axios';
-import { AnimeBase, AnimeSearchResult, Episode } from '../types/anime';
-import { StreamingData, VideoSource } from '../types/streaming';
-import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source';
-import { logger } from '../utils/logger';
+import { AnimeBase, AnimeSearchResult, Episode } from '../types/anime.js';
+import { StreamingData, VideoSource } from '../types/streaming.js';
+import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source.js';
+import { logger } from '../utils/logger.js';
 
 interface HanimeVideo {
     id: number;

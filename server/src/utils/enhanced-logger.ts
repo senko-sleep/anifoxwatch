@@ -33,6 +33,9 @@ export interface LogContext {
         activeRequests?: number;
         queuedRequests?: number;
         cacheHitRate?: number;
+        requests?: { total: number; successful: number; failed: number; slow: number };
+        performance?: { avgResponseTime: string; errorRate: string };
+        system?: { memory: string; uptime: string };
     };
     [key: string]: unknown;
 }

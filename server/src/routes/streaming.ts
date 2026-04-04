@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
 import { logger } from '../utils/logger.js';
-import axios from 'axios';
+import axios, { type AxiosResponse } from 'axios';
 import { lookup } from 'dns/promises';
 
 const router = Router();
@@ -103,7 +103,7 @@ async function retryProxyRequest(
     configs: Array<{ referer: string; origin?: string; userAgent?: string }>,
     maxRetries: number = 2,
     rangeHeader?: string
-): Promise<axios.AxiosResponse> {
+): Promise<AxiosResponse> {
     let lastError: Error | null = null;
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {

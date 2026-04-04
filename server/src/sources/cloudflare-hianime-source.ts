@@ -4,8 +4,8 @@
  * No Node.js dependencies (puppeteer/axios) required
  */
 
-import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source.js';
-import { AnimeBase, AnimeSearchResult, Episode } from '../types/anime.js';
+import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
+import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
 
@@ -120,7 +120,7 @@ export class CloudflareHiAnimeSource extends BaseAnimeSource implements GenreAwa
 
     // ============ API METHODS ============
 
-    async healthCheck(): Promise<boolean> {
+    async healthCheck(_options?: SourceRequestOptions): Promise<boolean> {
         try {
             const response = await this.fetchWithRetry(this.baseUrl);
             return response.ok;
@@ -524,6 +524,14 @@ export class CloudflareHiAnimeSource extends BaseAnimeSource implements GenreAwa
         } catch {
             return [];
         }
+    }
+
+    async getTopRated(page: number = 1, limit: number = 25, options?: SourceRequestOptions): Promise<TopAnime[]> {
+        const trending = await this.getTrending(page, options);
+        return trending.slice(0, limit).map((anime, i) => ({
+            rank: (page - 1) * limit + i + 1,
+            anime,
+        }));
     }
 
     private parseLatest(html: string): AnimeBase[] {

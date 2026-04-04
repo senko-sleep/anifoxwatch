@@ -35,4 +35,4 @@ services:
       # After the API service is first deployed, copy its URL here:
       # Must match the Docker web service URL above (same host as API).
       - key: VITE_API_URL
-        value: https://anifoxwatch-w2xk.onrender.com
+        value: https://anifoxwatch-sm7s.onrender.com

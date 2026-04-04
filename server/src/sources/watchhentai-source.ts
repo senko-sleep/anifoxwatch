@@ -5,10 +5,10 @@
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime';
-import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming';
-import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source';
-import { logger } from '../utils/logger';
+import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
+import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
+import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source.js';
+import { logger } from '../utils/logger.js';
 
 export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSource {
     name = 'WatchHentai';

@@ -547,6 +547,15 @@ export class SourceManager {
     }
 
     /**
+     * Run health check for a registered source by name.
+     */
+    async healthCheck(sourceName: string, options?: SourceRequestOptions): Promise<boolean> {
+        const source = this.sources.get(sourceName);
+        if (!source) return false;
+        return source.healthCheck(options);
+    }
+
+    /**
      * Get best available source based on requirements and performance
      * Uses intelligent selection considering:
      * - Source capabilities (dub/sub support, quality)
@@ -810,9 +819,7 @@ export class SourceManager {
             'Gogoanime': 'gogoanime-',
             'Consumet': 'consumet-',
             'Zoro': 'zoro-',
-            'AnimePahe': 'animepahe-',
             'AnimeSuge': 'animesuge-',
-            'Kaido': 'kaido-',
             'Anix': 'anix-',
             'KickassAnime': 'kickassanime-',
             'YugenAnime': 'yugenanime-',

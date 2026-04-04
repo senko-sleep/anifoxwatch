@@ -5,7 +5,7 @@
  */
 
 import { SourceManager } from './source-manager.js';
-import { Episode, StreamingData, VideoSource, EpisodeServer } from '../types/anime.js';
+import { StreamingData, VideoSource } from '../types/streaming.js';
 import { logger, PerformanceTimer } from '../utils/logger.js';
 
 interface BackupStreamSource {
@@ -118,7 +118,7 @@ export class BackupStreamingManager {
                         selectedServer: preferServer,
                         streamData,
                         alternatives: backupSources.filter(s => s.source !== backupSource.source),
-                        totalSourcesAttempted,
+                        totalSourcesAttempted: totalAttempted,
                         failedSources
                     };
                 }
@@ -128,7 +128,9 @@ export class BackupStreamingManager {
                 this.updateSourceHealth(backupSource.source, false, this.TIMEOUT_MS);
 
             } catch (error) {
-                logger.warn(`Source ${backupSource.source} failed:`, error);
+                logger.warn(`Source ${backupSource.source} failed:`, {
+                    err: error instanceof Error ? error.message : String(error),
+                });
                 failedSources.push(backupSource.source);
                 this.updateSourceHealth(backupSource.source, false, this.TIMEOUT_MS);
             }
@@ -136,13 +138,17 @@ export class BackupStreamingManager {
 
         // All sources failed
         timer.end();
-        logger.error(`All sources failed for episode: ${episodeId}`, { episodeId, totalAttempted, failedSources });
+        logger.error(
+            `All sources failed for episode: ${episodeId}`,
+            undefined,
+            { episodeId, totalAttempted, failedSources }
+        );
 
         return {
             selectedSource: '',
             streamData: { sources: [], subtitles: [], source: 'none' },
             alternatives: [],
-            totalSourcesAttempted,
+            totalSourcesAttempted: totalAttempted,
             failedSources
         };
     }
@@ -172,7 +178,9 @@ export class BackupStreamingManager {
                     streams.push(streamData);
                 }
             } catch (error) {
-                logger.debug(`Source ${source} failed for multi-stream:`, error);
+                logger.debug(`Source ${source} failed for multi-stream:`, {
+                    err: error instanceof Error ? error.message : String(error),
+                });
             }
         }
 
