@@ -1,7 +1,6 @@
 import {
     AnimeSource,
-    HiAnimeDirectSource,
-    HiAnimeSource,
+    AnimeKaiSource,
     AniwatchSource,
     GogoanimeSource,
     ConsumetSource,
@@ -28,9 +27,9 @@ interface StreamingSource extends AnimeSource {
  */
 export class SourceManager {
     private sources: Map<string, StreamingSource> = new Map();
-    private primarySource: string = 'HiAnimeDirect';
+    private primarySource: string = 'AnimeKai';
     private healthStatus: Map<string, SourceHealth> = new Map();
-    private sourceOrder: string[] = ['HiAnimeDirect', 'HiAnime', 'Gogoanime', '9Anime', 'Aniwave', 'Aniwatch', 'Consumet'];
+    private sourceOrder: string[] = ['AnimeKai', 'Gogoanime', '9Anime', 'Aniwave', 'Aniwatch', 'Consumet'];
 
     // Concurrency control for API requests
     private globalActiveRequests = 0;
@@ -43,10 +42,8 @@ export class SourceManager {
 
     constructor() {
         // Register streaming sources in priority order
-        // HiAnimeDirect is primary (uses aniwatch package directly for deep scraping)
-        this.registerSource(new HiAnimeDirectSource());
-        // HiAnime as secondary (uses external APIs)
-        this.registerSource(new HiAnimeSource());
+        // AnimeKai is primary — verified working HLS streams (sub + dub) via @consumet/extensions
+        this.registerSource(new AnimeKaiSource());
         // Gogoanime as fallback (direct scraping)
         this.registerSource(new GogoanimeSource());
         // Other fallbacks (may not work without self-hosted API)
@@ -155,9 +152,8 @@ export class SourceManager {
 
     private getStreamingSource(id: string): StreamingSource | null {
         // Determine source from ID prefix
-        // HiAnimeDirect is preferred for hianime- prefixed IDs (deep scraping)
         const prefixes = [
-            { prefix: 'hianime-', source: 'HiAnimeDirect' },
+            { prefix: 'animekai-', source: 'AnimeKai' },
             { prefix: '9anime-', source: '9Anime' },
             { prefix: 'aniwave-', source: 'Aniwave' },
             { prefix: 'aniwatch-', source: 'Aniwatch' },
@@ -170,11 +166,6 @@ export class SourceManager {
                 const preferredSource = this.sources.get(source);
                 if (preferredSource?.isAvailable) {
                     return preferredSource;
-                }
-                // Fallback to HiAnime API if HiAnimeDirect is not available
-                if (source === 'HiAnimeDirect') {
-                    const fallback = this.sources.get('HiAnime');
-                    if (fallback?.isAvailable) return fallback;
                 }
             }
         }
