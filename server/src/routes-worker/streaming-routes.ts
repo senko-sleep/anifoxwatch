@@ -79,10 +79,13 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
     }).join('\n');
 };
 
-/**
- * Server priority order - hd-2 works best based on testing
- */
-const SERVER_PRIORITY = ['hd-2', 'hd-1', 'hd-3'];
+function normalizeStreamServerQuery(raw: string | string[] | undefined): string | undefined {
+    const v = Array.isArray(raw) ? raw[0] : raw;
+    if (typeof v !== 'string') return undefined;
+    const s = v.trim();
+    if (!s || s.toLowerCase() === 'default') return undefined;
+    return s;
+}
 
 export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
     const app = new Hono();
@@ -105,49 +108,36 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
     // Get streaming links
     app.get('/watch/:episodeId', async (c) => {
         const episodeId = decodeURIComponent(c.req.param('episodeId'));
-        const server = c.req.query('server');
+        const explicitServer = normalizeStreamServerQuery(c.req.query('server'));
         const category = c.req.query('category') as 'sub' | 'dub' | undefined;
-        const tryAll = c.req.query('tryAll') !== 'false';
         const useProxy = c.req.query('proxy') !== 'false';
         const proxyBase = getProxyBaseUrl(c);
-        const shouldTryAll = tryAll && !server;
 
-        // Determine servers to try
-        const serversToTry = server ? [server as string] : SERVER_PRIORITY;
         let streamData: any = { sources: [], subtitles: [] };
         let lastError: string | null = null;
-        let successServer: string | null = null;
 
-        for (const currentServer of serversToTry) {
-            try {
-                if (typeof sourceManager.getStreamingLinks === 'function') {
-                    const data = await sourceManager.getStreamingLinks(
-                        episodeId,
-                        currentServer,
-                        category || 'sub'
-                    );
-
-                    if (data.sources && data.sources.length > 0) {
-                        streamData = data;
-                        successServer = currentServer;
-                        break;
-                    }
-                }
-            } catch (error: any) {
-                lastError = error.message;
-                if (!shouldTryAll) {
-                    break;
-                }
+        try {
+            if (typeof sourceManager.getStreamingLinks === 'function') {
+                streamData = await sourceManager.getStreamingLinks(
+                    episodeId,
+                    explicitServer,
+                    category || 'sub'
+                );
             }
+        } catch (error: any) {
+            lastError = error.message;
         }
 
-        if (streamData.sources.length === 0) {
+        const winningSource = typeof streamData?.source === 'string' ? streamData.source : undefined;
+        const successServer = explicitServer || winningSource || 'auto';
+
+        if (!streamData.sources || streamData.sources.length === 0) {
             return c.json({
                 error: 'No streaming sources found',
                 episodeId,
-                triedServers: serversToTry,
+                triedServers: explicitServer ? [explicitServer] : ['auto'],
                 lastError,
-                suggestion: 'All servers failed. Please try again later.',
+                suggestion: 'All streaming sources failed. Please try again later.',
                 sources: [],
                 subtitles: []
             }, 404);
@@ -171,7 +161,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
 
         // Add server info to response
         streamData.server = successServer;
-        streamData.triedServers = serversToTry;
+        streamData.triedServers = explicitServer ? [explicitServer] : ['auto'];
 
         // Short cache - streams expire quickly
         c.header('Cache-Control', 'private, max-age=300');

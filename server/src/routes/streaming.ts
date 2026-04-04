@@ -302,16 +302,10 @@ router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<v
 });
 
 /**
- * Server priority order - hd-2 works best based on testing
- */
-const SERVER_PRIORITY = ['hd-2', 'hd-1', 'hd-3'];
-
-/**
  * @route GET /api/stream/watch/:episodeId
- * @query server - Server name (optional, will try multiple if not specified)
+ * @query server - Optional embed/server name from the episode UI (e.g. Vidstreaming). Omit to let SourceManager choose.
  * @query category - sub/dub
  * @query proxy - If true, automatically proxy all stream URLs (default: true)
- * @query tryAll - If true, try all servers until one works (default: true)
  * @description Get streaming URLs for an episode
  */
 router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<void> => {
@@ -324,72 +318,43 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         episodeId = `${episodeId}?ep=${req.query.ep}`;
     }
 
-    const { category, proxy: useProxy = 'true', tryAll = 'true' } = req.query;
-    const server = normalizeStreamServerQuery(req.query.server);
+    const { category, proxy: useProxy = 'true' } = req.query;
+    const explicitServer = normalizeStreamServerQuery(req.query.server);
     const requestId = (req as any).id;
     const shouldProxy = useProxy !== 'false';
-    const shouldTryAll = tryAll !== 'false' && !server; // Only try all if no specific server requested
     const proxyBase = getProxyBaseUrl(req);
+
+    const triedLabel = explicitServer ?? 'auto';
 
     logger.info(`[STREAM] Fetching stream for episode: ${episodeId}`, {
         episodeId,
-        server,
+        server: triedLabel,
         category,
         shouldProxy,
-        shouldTryAll,
         requestId
     });
 
-    // Determine servers to try
-    const serversToTry = server ? [server as string] : SERVER_PRIORITY;
     let streamData: any = { sources: [], subtitles: [] };
     let lastError: string | null = null;
-    let successServer: string | null = null;
 
-    if (server || !shouldTryAll) {
-        // Single server requested — just try it
-        const currentServer = serversToTry[0];
-        try {
-            logger.info(`[STREAM] Trying server: ${currentServer}`, { episodeId, requestId });
-            const data = await sourceManager.getStreamingLinks(episodeId, currentServer, (category as 'sub' | 'dub') || 'sub');
-            if (data.sources && data.sources.length > 0) {
-                streamData = data;
-                successServer = currentServer;
-            }
-        } catch (error: any) {
-            lastError = error.message;
-            logger.warn(`[STREAM] Server ${currentServer} failed: ${error.message}`, { episodeId, requestId });
-        }
-    } else {
-        // No specific server — race all servers in parallel, first success wins
-        logger.info(`[STREAM] Racing ${serversToTry.length} servers in parallel`, { episodeId, requestId });
-
-        const results = await Promise.allSettled(
-            serversToTry.map(async (currentServer) => {
-                const data = await sourceManager.getStreamingLinks(episodeId, currentServer, (category as 'sub' | 'dub') || 'sub');
-                if (data.sources && data.sources.length > 0) {
-                    return { server: currentServer, data };
-                }
-                throw new Error(`No sources from ${currentServer}`);
-            })
+    try {
+        streamData = await sourceManager.getStreamingLinks(
+            episodeId,
+            explicitServer,
+            (category as 'sub' | 'dub') || 'sub'
         );
-
-        for (const result of results) {
-            if (result.status === 'fulfilled') {
-                streamData = result.value.data;
-                successServer = result.value.server;
-                logger.info(`[STREAM] ✅ Got ${streamData.sources.length} sources from ${successServer}`, { episodeId, requestId });
-                break;
-            } else {
-                lastError = result.reason?.message || 'Unknown error';
-            }
-        }
+    } catch (error: any) {
+        lastError = error.message;
+        logger.warn(`[STREAM] getStreamingLinks failed: ${error.message}`, { episodeId, requestId });
     }
 
-    if (streamData.sources.length === 0) {
-        logger.error(`[STREAM] No sources found after trying all servers for episode: ${episodeId}`, undefined, {
+    const winningSource = typeof streamData?.source === 'string' ? streamData.source : undefined;
+    const successServer = explicitServer || winningSource || triedLabel;
+
+    if (!streamData.sources || streamData.sources.length === 0) {
+        logger.error(`[STREAM] No sources found for episode: ${episodeId}`, undefined, {
             episodeId,
-            triedServers: serversToTry.join(', '),
+            triedServers: triedLabel,
             category: category as string,
             lastError,
             requestId
@@ -398,15 +363,15 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         res.status(404).json({
             error: 'No streaming sources found',
             episodeId,
-            triedServers: serversToTry,
+            triedServers: explicitServer ? [explicitServer] : ['auto'],
             lastError,
-            suggestion: 'All servers failed. Please try again later.'
+            suggestion: 'All streaming sources failed. Please try again later.'
         });
         return;
     }
 
     // Log successful extraction
-    logger.info(`[STREAM] Found ${streamData.sources.length} sources from ${successServer}`, {
+    logger.info(`[STREAM] Found ${streamData.sources.length} sources (${winningSource || explicitServer || 'auto'})`, {
         episodeId,
         server: successServer,
         sourceCount: streamData.sources.length,
@@ -456,7 +421,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 
     // Add server info to response
     streamData.server = successServer;
-    streamData.triedServers = serversToTry;
+    streamData.triedServers = explicitServer ? [explicitServer] : ['auto'];
 
     // Short cache - streams expire quickly
     res.set('Cache-Control', 'private, max-age=300'); // 5 minutes
