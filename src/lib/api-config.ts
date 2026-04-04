@@ -61,6 +61,18 @@ function configFromUrl(envApiUrl: string): ApiConfig {
  * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then Render default
  * (`anifoxwatch.web.app` + other prod builds expect the Render API unless overridden).
  */
+/**
+ * Build the URL for an API path. When `baseUrl` is empty (local dev + Vite proxy),
+ * returns the path as-is so the browser hits the dev server and `/api` is proxied.
+ * When `baseUrl` is set (production), returns an absolute URL to the Render/API host
+ * so requests do not go to static hosting or Firebase rewrites.
+ */
+export function apiUrl(path: string): string {
+    const normalized = path.startsWith('/') ? path : `/${path}`;
+    const base = getApiConfig().baseUrl.replace(/\/$/, '');
+    return base ? `${base}${normalized}` : normalized;
+}
+
 export function getApiConfig(): ApiConfig {
     if (import.meta.env.DEV) {
         if (import.meta.env.VITE_USE_LOCAL_API === 'true') {

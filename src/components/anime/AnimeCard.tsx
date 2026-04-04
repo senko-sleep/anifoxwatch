@@ -18,6 +18,7 @@ import {
 import { WatchHistory } from '@/lib/watch-history';
 import { queryKeys } from '@/hooks/useAnime';
 import { apiClient } from '@/lib/api-client';
+import { apiUrl } from '@/lib/api-config';
 
 interface AnimeCardProps {
   anime: Anime;
@@ -147,7 +148,7 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
             )}
 
             <img
-              src={useProxy ? `/api/image-proxy?url=${encodeURIComponent(posterSrc)}` : posterSrc}
+              src={useProxy ? `${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(posterSrc)}` : posterSrc}
               alt={anime.title}
               className={cn(
                 'w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-105',

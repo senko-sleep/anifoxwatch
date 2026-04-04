@@ -9,6 +9,7 @@ import {
     Server, AlertTriangle, CheckCircle, RefreshCw, Download
 } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { apiUrl } from '@/lib/api-config';
 import { cn } from '@/lib/utils';
 
 interface StreamHealthData {
@@ -148,7 +149,7 @@ export const MonitoringDashboard = () => {
     const runVerification = async () => {
         setIsVerifying(true);
         try {
-            const response = await fetch('/api/monitoring/verify', { method: 'POST' });
+            const response = await fetch(apiUrl('/api/monitoring/verify'), { method: 'POST' });
             if (response.ok) {
                 const results = await response.json();
                 setVerificationResults(results);

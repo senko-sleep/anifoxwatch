@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Play, Star, Clock, Captions, Mic, Sparkles, BookmarkPlus, ChevronRight, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeAnimeGenresForDisplay, isPlaceholderAnimeDescription } from '@/lib/utils';
+import { apiUrl } from '@/lib/api-config';
 import {
   HeroAnime,
   getHeroTitle,
@@ -415,8 +416,8 @@ function HeroSlideBg({
     const out: string[] = [];
     if (b) out.push(b);
     if (c && c !== b) out.push(c);
-    if (b) out.push(`/api/image-proxy?url=${encodeURIComponent(b)}`);
-    if (c) out.push(`/api/image-proxy?url=${encodeURIComponent(c)}`);
+    if (b) out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(b)}`);
+    if (c) out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(c)}`);
     return [...new Set(out.filter(Boolean))];
   }, [anime.bannerImage, anime.coverImage?.extraLarge, anime.coverImage?.large]);
 

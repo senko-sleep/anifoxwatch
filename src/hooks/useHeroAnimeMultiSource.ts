@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getApiConfig } from '@/lib/api-config';
+import { apiUrl } from '@/lib/api-config';
 import { isPlaceholderAnimeDescription } from '@/lib/utils';
 
 /**
@@ -202,9 +202,7 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
 }
 
 async function fetchFromHeroSpotlightAPI(): Promise<HeroAnime[]> {
-  const { baseUrl } = getApiConfig();
-  const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/api/anime/hero-spotlight` : '/api/anime/hero-spotlight';
-  const response = await fetch(url);
+  const response = await fetch(apiUrl('/api/anime/hero-spotlight'));
   if (!response.ok) {
     throw new Error(`hero-spotlight HTTP ${response.status}`);
   }
@@ -222,9 +220,7 @@ async function fetchFromHeroSpotlightAPI(): Promise<HeroAnime[]> {
 // ─── Local API fallback ─────────────────────────────────────────────────────
 
 async function fetchFromLocalAPI(): Promise<HeroAnime[]> {
-  const baseUrl = getApiConfig().baseUrl;
-  const prefix = baseUrl ? `${baseUrl.replace(/\/$/, '')}` : '';
-  const response = await fetch(`${prefix}/api/anime/trending?limit=25`);
+  const response = await fetch(apiUrl('/api/anime/trending?limit=25'));
   if (!response.ok) throw new Error(`Local API ${response.status}`);
   const data = await response.json();
   const list: Record<string, unknown>[] = data.results || data || [];

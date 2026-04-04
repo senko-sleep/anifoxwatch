@@ -1,4 +1,5 @@
 import Hls from 'hls.js';
+import { apiUrl } from './api-config';
 
 interface LoadStats {
   trequest: number;
@@ -47,8 +48,9 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
         }
       }
     } else if (url.includes('.key')) {
-      // Automatic proxy for cross-origin key files to avoid CORS blocks
-      const proxyBase = '/api/stream/proxy';
+      // Automatic proxy for cross-origin key files to avoid CORS blocks.
+      // Must use apiUrl() so production hits the same API host as npm run dev (Vite proxy), not static / Firebase.
+      const proxyBase = apiUrl('/api/stream/proxy');
       context.url = `${proxyBase}?url=${encodeURIComponent(url)}`;
       // Continue to super.load with the rewritten proxied URL
       super.load(context, config, callbacks);
