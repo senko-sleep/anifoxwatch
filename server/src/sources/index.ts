@@ -46,3 +46,6 @@ export { AnimeFreakSource } from './animefreak-source.js';
 // Miruro: miruro.in metadata + Consumet Zoro (aniwatchtv.to) for streams
 export { MiruroSource } from './miruro-source.js';
 
+// AllAnime: allanime.day GraphQL API + fast4speed.rsvp CDN (cloud-IP accessible)
+export { AllAnimeSource } from './allanime-source.js';
+

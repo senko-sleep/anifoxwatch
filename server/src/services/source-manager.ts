@@ -8,6 +8,7 @@ import {
     ConsumetSource,
     AnimeFLVSource,
     GogoanimeSource,
+    AllAnimeSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -73,6 +74,7 @@ export class SourceManager {
         ['9Anime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['AnimeFLV', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['Gogoanime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['AllAnime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
@@ -120,6 +122,9 @@ export class SourceManager {
         // PRODUCTION FALLBACK: Gogoanime (anitaku.pe) — direct HTTP scraper, not Cloudflare-blocked
         this.registerSource(new GogoanimeSource());
 
+        // PRODUCTION: AllAnime — GraphQL API + fast4speed.rsvp CDN (accessible from cloud IPs)
+        this.registerSource(new AllAnimeSource());
+
         // Adult sources
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
@@ -133,6 +138,7 @@ export class SourceManager {
         this.sourceRateLimits.set('9Anime', { limit: 100, resetTime: 60000 });
         this.sourceRateLimits.set('AnimeFLV', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('Gogoanime', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('AllAnime', { limit: 120, resetTime: 60000 });
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
         this.sourceRateLimits.set('Consumet', { limit: 60, resetTime: 60000 });
@@ -763,7 +769,7 @@ export class SourceManager {
         'animekai-', 'animepahe-',
         '9anime-', 'gogoanime-', 'consumet-',
         'animeflv-', 'anilist-', 'watchhentai-', 'hanime-',
-        'aniwave-', 'aniwatch-'
+        'aniwave-', 'aniwatch-', 'allanime-'
     ];
 
     /**
@@ -894,6 +900,7 @@ export class SourceManager {
             { prefix: 'animekai-', source: 'AnimeKai' },
             { prefix: '9anime-', source: '9Anime' },
             { prefix: 'gogoanime-', source: 'Gogoanime' },
+            { prefix: 'allanime-', source: 'AllAnime' },
             { prefix: 'consumet-', source: 'Consumet' },
             { prefix: 'hanime-', source: 'WatchHentai' },
             { prefix: 'hh-', source: 'WatchHentai' },
@@ -2860,8 +2867,8 @@ export class SourceManager {
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
         // Registered sources to try for cross-source fallback (by title search).
-        // Gogoanime is placed first as a reliable production fallback (direct HTTP, not Cloudflare-blocked).
-        const consumetSources = ['Gogoanime', 'AnimeKai', 'AnimePahe', 'Consumet']
+        // AllAnime is first: GraphQL API + fast4speed.rsvp CDN accessible from cloud IPs.
+        const consumetSources = ['AllAnime', 'Gogoanime', 'AnimeKai', 'AnimePahe', 'Consumet']
             .map(n => ({ name: n, src: this.sources.get(n) as StreamingSource }))
             .filter(({ src }) => src?.isAvailable && src.getStreamingLinks);
 

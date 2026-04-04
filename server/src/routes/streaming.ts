@@ -479,6 +479,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'megaup': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'lab27core': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'gogocdn': { referer: 'https://gogoanime.run/' },
+            'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
             'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'hstorage.xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
@@ -681,8 +682,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         if (response.headers['content-range']) res.set('Content-Range', response.headers['content-range']);
         if (response.headers['accept-ranges']) res.set('Accept-Ranges', response.headers['accept-ranges']);
 
-        // Set Content-Type
-        if (upstreamContentType) {
+        // Set Content-Type — override application/octet-stream for known video CDNs
+        const isOctetStream = upstreamContentType === 'application/octet-stream' || upstreamContentType === '';
+        const isKnownVideoCdn = domain.includes('fast4speed') || domain.includes('hstorage');
+        if (isOctetStream && isKnownVideoCdn) {
+            res.set('Content-Type', 'video/mp4');
+        } else if (upstreamContentType) {
             res.set('Content-Type', upstreamContentType);
         } else if (url.includes('.ts')) {
             res.set('Content-Type', 'video/MP2T');

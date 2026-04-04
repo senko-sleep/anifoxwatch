@@ -11,6 +11,7 @@ export const REGISTERED_SOURCE_NAMES: readonly string[] = [
     'Consumet',
     'AnimeFLV',
     'Gogoanime',
+    'AllAnime',
     'WatchHentai',
     'Hanime',
 ];
