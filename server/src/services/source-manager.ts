@@ -856,6 +856,16 @@ export class SourceManager {
             }
         }
 
+        // NineAnimeSource episode IDs omit the `9anime-` prefix: "{animeSlug}?ep={numericEpisodeKey}"
+        // (same watch URL shape as kaido.to). Without this, getStreamingSource() picks AnimeKai first,
+        // and executeReliably's default stream timeout is shorter than Puppeteer extraction.
+        if (/^[^?]+\?ep=\d+$/i.test(id)) {
+            const nine = this.sources.get('9Anime');
+            if (nine?.isAvailable) return nine;
+            const kaido = this.sources.get('Kaido');
+            if (kaido?.isAvailable) return kaido;
+        }
+
         return this.getAvailableSource();
     }
 
@@ -2625,9 +2635,12 @@ export class SourceManager {
                 const idToUse = (source === primarySource || !hasSourcePrefix) ? episodeId : this.buildSourceId(rawId, source.name);
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
 
+                const usesPuppeteerStream = source.name === '9Anime' || source.name === 'Kaido';
                 this.executeReliably(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal }),
-                    { timeout: 12000 }
+                    usesPuppeteerStream
+                        ? { timeout: 45_000, maxAttempts: 1 }
+                        : { timeout: 12_000 }
                 )
                 .then(data => {
                     if (data.sources.length > 0) {

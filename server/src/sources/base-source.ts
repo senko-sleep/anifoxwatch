@@ -10,6 +10,8 @@ export interface SourceRequestOptions {
     signal?: AbortSignal;
     timeout?: number;
     priority?: 'high' | 'normal' | 'low';
+    /** When set, passed to reliability layer (e.g. skip retries for expensive Puppeteer streams). */
+    maxAttempts?: number;
 }
 
 /**

@@ -69,6 +69,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     next();
 });
 
+// Root — Render and other platforms often probe `/` (HEAD/GET); avoid noisy 404s in logs.
+app.get('/', (_req: Request, res: Response) => {
+    res.set('Cache-Control', 'no-cache');
+    res.json({ ok: true, service: 'anistream-hub-api', docs: '/api', health: '/health' });
+});
+app.head('/', (_req: Request, res: Response) => {
+    res.status(200).end();
+});
+
 // Health check endpoint (fast response)
 app.get('/health', (_req: Request, res: Response) => {
     res.set('Cache-Control', 'no-cache');
