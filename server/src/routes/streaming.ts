@@ -256,7 +256,14 @@ async function streamToString(stream: any): Promise<string> {
  */
 router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<void> => {
     // Decode the episodeId - Express doesn't automatically decode URL-encoded params
-    const episodeId = decodeURIComponent(req.params.episodeId as string);
+    let episodeId = decodeURIComponent(req.params.episodeId as string);
+
+    // Render/nginx may decode %3F→? in paths, splitting "anime-slug?ep=3303" into
+    // episodeId="anime-slug" and req.query.ep="3303". Reconstruct the full ID.
+    if (req.query.ep && !episodeId.includes('?ep=')) {
+        episodeId = `${episodeId}?ep=${req.query.ep}`;
+    }
+
     const requestId = (req as any).id;
 
     logger.info(`[STREAM] Getting servers for episode: ${episodeId}`, { episodeId, requestId });
@@ -296,7 +303,14 @@ const SERVER_PRIORITY = ['hd-2', 'hd-1', 'hd-3'];
  */
 router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<void> => {
     // Decode the episodeId - Express doesn't automatically decode URL-encoded params
-    const episodeId = decodeURIComponent(req.params.episodeId as string);
+    let episodeId = decodeURIComponent(req.params.episodeId as string);
+
+    // Render/nginx may decode %3F→? in paths, splitting "anime-slug?ep=3303" into
+    // episodeId="anime-slug" and req.query.ep="3303". Reconstruct the full ID.
+    if (req.query.ep && !episodeId.includes('?ep=')) {
+        episodeId = `${episodeId}?ep=${req.query.ep}`;
+    }
+
     const { server, category, proxy: useProxy = 'true', tryAll = 'true' } = req.query;
     const requestId = (req as any).id;
     const shouldProxy = useProxy !== 'false';
