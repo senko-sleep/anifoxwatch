@@ -1,33 +1,34 @@
 services:
+  # ── Backend API (Docker — required for Chromium/Puppeteer) ────────────────
   - type: web
-    name: anifoxwatch
-    env: node
-    region: ohio
-    buildCommand: cd server && npm install && npm run postinstall
-    startCommand: cd server && npm run start:api
-    healthCheckPath: /api/health
+    name: anistream-api
+    env: docker
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: ./server
+    region: oregon
+    plan: free
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 3001
+        value: 8080
       - key: CORS_ORIGIN
-        value: https://anifoxwatch-api.anifoxwatch.workers.dev
+        value: "*"
+      # Optional — enriches hero section banners/synopsis:
+      # - key: MAL_CLIENT_ID
+      #   value: your_mal_client_id_here
 
+  # ── Frontend (Static site) ─────────────────────────────────────────────────
   - type: static_site
-    name: anifoxwatch-frontend
-    env: static
-    region: ohio
-    buildCommand: npm install; npm run build
+    name: anistream-frontend
+    buildCommand: npm install && npm run build
     publishPath: ./dist
+    region: oregon
     envVars:
       - key: NODE_ENV
         value: production
+      # After the API service is first deployed, copy its URL here:
+      # e.g. https://anistream-api.onrender.com
       - key: VITE_API_URL
-        value: https://anifoxwatch-api.anifoxwatch.workers.dev/api
-
-databases:
-  - name: anifoxwatch-cache
-    engine: redis
-    plan: starter
-    maxmemoryPolicy: allkeys-lru
+        value: https://anifoxwatch-w2xk.onrender.com

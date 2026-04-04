@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsx:*)",
+      "Bash(API_URL=http://localhost:3001 npx tsx testing/test-cloudrun.ts)",
+      "Bash(curl -s http://localhost:3001/api/health)",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); console.log\\(d\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(git push:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(npx firebase:*)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(node -e ':*)"
+    ]
+  }
+}

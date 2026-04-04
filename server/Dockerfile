@@ -1,7 +1,18 @@
-# Use Node.js LTS (slim for smaller size)
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+FROM node:20-slim AS builder
+
+WORKDIR /app
+
+COPY package*.json tsconfig.json ./
+RUN npm ci
+
+COPY src ./src
+RUN npx tsc --project tsconfig.json
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM node:20-slim
 
-# Install system dependencies for Puppeteer/Chrome
+# Chromium for Puppeteer
 RUN apt-get update && apt-get install -y \
     chromium \
     fonts-ipafont-gothic \
@@ -14,38 +25,21 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# Set environment variables for Puppeteer
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
-
-# Production environment
 ENV NODE_ENV=production
 
-# Create app directory
 WORKDIR /app
 
-# Copy package files
 COPY package*.json ./
-COPY tsconfig.json ./
+RUN npm ci --only=production
 
-# Install dependencies (production only for smaller image)
-RUN npm ci --only=production && \
-    npm install typescript --save-dev
+# Copy compiled JS from builder
+COPY --from=builder /app/dist ./dist
 
-# Copy source code
-COPY src ./src
+# Cloud Run injects PORT; default to 8080 if not set
+ENV PORT=8080
+EXPOSE 8080
 
-# Build the project
-RUN npm run build
-
-# Remove dev dependencies after build
-RUN npm prune --production
-
-# Expose port (Koyeb uses PORT env var, defaults to 8000)
-EXPOSE 8000
-
-# Use dumb-init for proper signal handling
 ENTRYPOINT ["dumb-init", "--"]
-
-# Start the application
 CMD ["node", "dist/index.js"]

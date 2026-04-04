@@ -15,7 +15,10 @@ interface AnimeItem {
   episodes?: number;
   duration?: string;
   year?: number;
+  season?: string;
   description?: string;
+  genres?: string[];
+  studios?: string[];
   subCount?: number;
   dubCount?: number;
 }
@@ -195,49 +198,80 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
                 )}
 
                 {/* ── Hover reveal panel ───────────────────────────────── */}
-                <div className="absolute inset-x-0 bottom-0 z-20 pointer-events-none translate-y-1 opacity-0 group-hover/card:translate-y-0 group-hover/card:opacity-100 transition-all duration-300 ease-out">
-                  {/* Gradient base */}
-                  <div className="absolute inset-x-0 bottom-0 h-[75%] bg-gradient-to-t from-zinc-950 via-zinc-950/90 to-transparent" />
+                <div className="absolute inset-0 z-20 pointer-events-none opacity-0 translate-y-1 group-hover/card:opacity-100 group-hover/card:translate-y-0 transition-all duration-300 ease-out">
+                  <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/95 to-zinc-950/35" />
 
-                  {/* Content */}
-                  <div className="relative flex flex-col gap-1.5 px-2.5 pb-3 pt-10">
-                    {/* Play button */}
-                    <div className="flex justify-center mb-1">
-                      <div className="w-9 h-9 rounded-full bg-fox-orange flex items-center justify-center pl-0.5 shadow-lg shadow-fox-orange/40 ring-2 ring-fox-orange/30">
-                        <Play className="w-4 h-4 fill-white text-white" />
-                      </div>
+                  <div className="absolute inset-x-0 bottom-0 flex flex-col justify-end px-2.5 pb-2.5 pt-8 gap-1.5 max-h-[92%] overflow-hidden">
+                    {/* Title */}
+                    <p className="text-[11px] font-bold text-white leading-tight line-clamp-2 drop-shadow-sm">
+                      {item.title}
+                    </p>
+
+                    {/* Rating + year + episodes + duration */}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {rating !== null && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-amber-200 bg-black/50 px-1.5 py-0.5 rounded border border-amber-500/20">
+                          <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400 shrink-0" />
+                          {rating.toFixed(1)}
+                        </span>
+                      )}
+                      {isValidAnimeYear(item.year) && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] text-zinc-300 bg-black/40 px-1.5 py-0.5 rounded border border-white/10">
+                          <CalendarDays className="w-2.5 h-2.5 shrink-0 opacity-80" />
+                          {item.year}
+                        </span>
+                      )}
+                      {isValidEpisodeCount(item.episodes) && (
+                        <span className="text-[9px] text-zinc-200 bg-white/5 px-1.5 py-0.5 rounded border border-white/10">
+                          {item.episodes} eps
+                        </span>
+                      )}
+                      {item.duration && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] text-zinc-400">
+                          <Clock className="w-2 h-2 shrink-0" />
+                          {item.duration}
+                        </span>
+                      )}
                     </div>
 
-                    {/* Continue watching label */}
-                    {historyItem && (
-                      <span className="text-[9.5px] font-bold text-fox-orange text-center leading-none drop-shadow">
-                        Continue · Ep {historyItem.episodeNumber}
-                      </span>
-                    )}
-
-                    {/* Description snippet */}
-                    {item.description && (
-                      <p className="text-[9px] text-zinc-400 line-clamp-2 leading-snug text-center">
-                        {item.description.replace(/<[^>]*>/g, '').slice(0, 80)}
-                      </p>
-                    )}
-
                     {/* Genre chips */}
-                    {item.type && (
-                      <div className="flex flex-wrap justify-center gap-1">
-                        {item.type && (
-                          <span className={cn('text-[8.5px] font-semibold px-1.5 py-[2px] rounded border', typeStyle.bg, typeStyle.text, typeStyle.border)}>
-                            {item.type}
+                    {item.genres && item.genres.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {item.genres.slice(0, 4).map((g) => (
+                          <span
+                            key={g}
+                            className="text-[8px] font-medium text-zinc-200 bg-white/10 px-1.5 py-0.5 rounded-md border border-white/5"
+                          >
+                            {g}
                           </span>
-                        )}
-                        {isValidAnimeYear(item.year) && (
-                          <span className="inline-flex items-center gap-0.5 text-[8.5px] font-medium text-zinc-400 bg-white/[0.06] border border-white/[0.07] px-1.5 py-[2px] rounded">
-                            <CalendarDays className="w-2 h-2" />
-                            {item.year}
-                          </span>
+                        ))}
+                        {item.genres.length > 4 && (
+                          <span className="text-[8px] text-zinc-500">+{item.genres.length - 4}</span>
                         )}
                       </div>
                     )}
+
+                    {/* Sub / Dub + Watch CTA */}
+                    <div className="flex items-center justify-between gap-1 pt-0.5 border-t border-white/10 mt-0.5">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold text-white">
+                        <Play className="w-3 h-3 fill-fox-orange text-fox-orange shrink-0" />
+                        {historyItem ? `Continue Ep ${historyItem.episodeNumber}` : 'Watch now'}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {hasSub && (
+                          <span className="inline-flex items-center gap-0.5 text-[8px] font-bold text-sky-300 bg-sky-950/80 px-1 py-0.5 rounded border border-sky-500/20">
+                            <Subtitles className="w-2 h-2" />
+                            Sub
+                          </span>
+                        )}
+                        {hasDub && (
+                          <span className="inline-flex items-center gap-0.5 text-[8px] font-bold text-green-300 bg-green-950/80 px-1 py-0.5 rounded border border-green-500/20">
+                            <Mic className="w-2 h-2" />
+                            Dub
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 

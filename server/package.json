@@ -5,8 +5,9 @@
     "scripts": {
         "dev": "tsx src/index.ts",
         "dev:optimized": "tsx watch src/index-optimized.ts",
-        "build": "echo 'Build skipped - using tsx runtime'",
+        "build": "tsc --project tsconfig.json",
         "start": "tsx src/index.ts",
+        "start:prod": "node dist/index.js",
         "start:optimized": "node dist/index-optimized.js",
         "start:api": "tsx src/index.ts",
         "deploy:cloudflare": "wrangler deploy",
@@ -14,6 +15,7 @@
         "test": "vitest",
         "test:hianime-city": "tsx testing/test-hianime-city.ts",
         "test:hero": "tsx testing/test-hero-spotlight.ts",
+        "test:cloudrun": "tsx testing/test-cloudrun.ts",
         "test:stream": "node testing/test-100-sources.js",
         "postinstall": "patch-package"
     },

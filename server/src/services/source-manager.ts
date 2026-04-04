@@ -6,11 +6,8 @@ import {
     WatchHentaiSource,
     HanimeSource,
     ConsumetSource,
-    KaidoSource,
     AnimeFLVSource,
-    MiruroSource,
 } from '../sources/index.js';
-import { CloudflareHiAnimeAPISource } from '../sources/cloudflare-hianime-api-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
@@ -64,22 +61,19 @@ export class SourceManager {
     private sourceMetadata: Map<string, SourceMetadata> = new Map();
     
     private sourceOrder: string[] = [
-        'CloudflareHiAnimeAPI', 'AnimeKai', 'Kaido', 'Miruro', 'AnimePahe', '9Anime', 'Consumet', 'AnimeFLV',
+        'AnimeKai', 'AnimePahe', '9Anime', 'Consumet', 'AnimeFLV',
         'WatchHentai', 'Hanime'
     ];
 
     // Source capabilities mapping
     private sourceCapabilities: Map<string, SourceCapabilities> = new Map([
-        ['CloudflareHiAnimeAPI', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['Kaido', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['AnimePahe', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['AnimeKai', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
+        ['AnimePahe', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['9Anime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['AnimeFLV', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['Miruro', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -110,21 +104,10 @@ export class SourceManager {
     private sourceSuccessRates: Map<string, { success: number; total: number }> = new Map();
 
     constructor() {
-        // TOP PRIORITY: CloudflareHiAnimeAPI — calls external aniwatch-API instances (Cloudflare Workers,
-        // Vercel, Render replicas). Works from any cloud IP since it hits HTTP APIs, not scraping directly.
-        // Handles native HiAnime episode IDs (e.g. "attack-on-titan-112?ep=3303") without IP-blocking.
-        this.registerSource(new CloudflareHiAnimeAPISource());
-
         // PRIMARY: AnimeKai — verified working HLS streams (sub + dub) via @consumet/extensions
         this.registerSource(new AnimeKaiSource());
 
-        // BACKUP: Kaido scrapes kaido.to + aniwatch scraper for search/browse/trending
-        this.registerSource(new KaidoSource());
-
-        // MIRURO: scrapes miruro.in + HiAnime scraper for sub + dub streams
-        this.registerSource(new MiruroSource());
-
-        // STREAMING BACKUP: AnimePahe — @consumet/extensions (owocdn has SSL issues)
+        // BACKUP: AnimePahe — @consumet/extensions
         this.registerSource(new AnimePaheDirectSource());
 
         // FALLBACK: External API-based sources
@@ -140,9 +123,7 @@ export class SourceManager {
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
 
         // Configure rate limits for each source (requests per minute)
-        this.sourceRateLimits.set('CloudflareHiAnimeAPI', { limit: 200, resetTime: 60000 });
         this.sourceRateLimits.set('AnimeKai', { limit: 120, resetTime: 60000 });
-        this.sourceRateLimits.set('Kaido', { limit: 100, resetTime: 60000 });
         this.sourceRateLimits.set('AnimePahe', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('9Anime', { limit: 100, resetTime: 60000 });
         this.sourceRateLimits.set('AnimeFLV', { limit: 80, resetTime: 60000 });
@@ -291,7 +272,7 @@ export class SourceManager {
         console.log('⏳ [SourceManager] Initializing sources (optimistic availability)...');
         
         // Priority sources that we actively verify
-        const prioritySources = ['Kaido', 'AnimePahe', 'AnimeKai'];
+        const prioritySources = ['AnimeKai', 'AnimePahe'];
         
         // Mark ALL sources as available by default - they'll be marked offline only if they fail during actual use
         for (const [name, source] of this.sources.entries()) {
@@ -764,13 +745,9 @@ export class SourceManager {
      * Known source prefixes for ID detection
      */
     private readonly knownPrefixes = [
-        'hianime-', 'animepahe-', 'animekai-',
-        '9anime-', 'aniwave-', 'aniwatch-', 
-        'gogoanime-', 'consumet-', 'zoro-', 'animesuge-',
-        'kaido-', 'anix-', 'kickassanime-', 'yugenanime-', 'animixplay-',
-        'animefox-', 'animedao-', 'animeflv-', 'animesaturn-', 'crunchyroll-',
-        'animeonsen-', 'marin-', 'animeheaven-', 'animekisa-', 'animeowl-',
-        'animeland-', 'animefreak-', 'anilist-', 'watchhentai-', 'hanime-'
+        'animekai-', 'animepahe-',
+        '9anime-', 'gogoanime-', 'consumet-',
+        'animeflv-', 'anilist-', 'watchhentai-', 'hanime-'
     ];
 
     /**

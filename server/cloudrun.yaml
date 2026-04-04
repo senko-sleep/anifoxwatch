@@ -1,0 +1,45 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: anistream-api
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: '0'
+        autoscaling.knative.dev/maxScale: '10'
+        run.googleapis.com/cpu-throttling: 'false'
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 60
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/anistream-hub/anistream-api:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: '2'
+              memory: 2Gi
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: '8080'
+            - name: CORS_ORIGIN
+              value: '*'
+            # Uncomment and set your MAL client ID for richer hero banners:
+            # - name: MAL_CLIENT_ID
+            #   value: YOUR_MAL_CLIENT_ID
+          livenessProbe:
+            httpGet:
+              path: /health
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          startupProbe:
+            httpGet:
+              path: /health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
