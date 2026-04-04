@@ -149,18 +149,27 @@ export class CloudflareHiAnimeAPISource extends BaseAnimeSource implements Genre
         servers: 60 * 60 * 1000,    // 1 hour
     };
 
-    // List of API instances to try (in order of preference)
-    private apiInstances = [
-        'https://anifoxwatch-api.anifoxwatch.workers.dev',
+    // List of API instances to try (in order of preference).
+    // Vercel/Render first: from cloud backends (e.g. Render) the Workers URL is often slower or cold.
+    private static readonly defaultApiInstances: readonly string[] = [
+        'https://hianime-api-chi.vercel.app',
         'https://api-aniwatch.onrender.com',
         'https://aniwatch-api.onrender.com',
-        'https://hianime-api-chi.vercel.app',
+        'https://anifoxwatch-api.anifoxwatch.workers.dev',
     ];
+    private apiInstances: string[];
     private currentApiIndex = 0;
 
     constructor(apiUrl?: string) {
         super();
-        this.baseUrl = apiUrl || this.apiInstances[0];
+        const trimmed = apiUrl?.trim().replace(/\/$/, '');
+        if (trimmed) {
+            const rest = CloudflareHiAnimeAPISource.defaultApiInstances.filter((u) => u !== trimmed);
+            this.apiInstances = [trimmed, ...rest];
+        } else {
+            this.apiInstances = [...CloudflareHiAnimeAPISource.defaultApiInstances];
+        }
+        this.baseUrl = this.apiInstances[0];
     }
 
     // ============ CACHING ============
@@ -185,6 +194,7 @@ export class CloudflareHiAnimeAPISource extends BaseAnimeSource implements Genre
         if (options?.signal?.aborted) throw new Error('Aborted');
 
         for (let i = 0; i < this.apiInstances.length; i++) {
+            if (options?.signal?.aborted) throw new Error('Aborted');
             const apiIndex = (this.currentApiIndex + i) % this.apiInstances.length;
             const apiUrl = this.apiInstances[apiIndex];
 
@@ -200,7 +210,9 @@ export class CloudflareHiAnimeAPISource extends BaseAnimeSource implements Genre
                 }
 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), options?.timeout || 15000);
+                // Cap each host attempt so we can rotate through all apiInstances before the outer ~42s stream budget.
+                const perHostMs = Math.min(options?.timeout ?? 9500, 10000);
+                const timeoutId = setTimeout(() => controller.abort(), perHostMs);
 
                 // Combine signals if provided
                 if (options?.signal) {

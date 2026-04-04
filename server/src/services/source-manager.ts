@@ -8,13 +8,15 @@ import {
     ConsumetSource,
     AnimeFLVSource,
 } from '../sources/index.js';
-import { CloudflareHiAnimeAPISource } from '../sources/cloudflare-hianime-api-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
 import { logger, PerformanceTimer, createRequestContext } from '../utils/logger.js';
 import { anilistService } from './anilist-service.js';
 import { reliableRequest, retry, withTimeout } from '../middleware/reliability.js';
+import { REGISTERED_SOURCE_NAMES } from '../registered-sources.js';
+
+export { REGISTERED_SOURCE_NAMES };
 
 interface StreamingSource extends AnimeSource {
     getStreamingLinks?(episodeId: string, server?: string, category?: 'sub' | 'dub', options?: SourceRequestOptions): Promise<StreamingData>;
@@ -61,10 +63,7 @@ export class SourceManager {
     private healthStatus: Map<string, SourceHealth> = new Map();
     private sourceMetadata: Map<string, SourceMetadata> = new Map();
     
-    private sourceOrder: string[] = [
-        'AnimeKai', 'CloudflareHiAnimeAPI', 'AnimePahe', '9Anime', 'Consumet', 'AnimeFLV',
-        'WatchHentai', 'Hanime'
-    ];
+    private sourceOrder: string[] = [...REGISTERED_SOURCE_NAMES];
 
     // Source capabilities mapping
     private sourceCapabilities: Map<string, SourceCapabilities> = new Map([
@@ -75,7 +74,6 @@ export class SourceManager {
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['CloudflareHiAnimeAPI', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'high' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -109,9 +107,6 @@ export class SourceManager {
         // PRIMARY: AnimeKai — verified working HLS streams (sub + dub) via @consumet/extensions
         this.registerSource(new AnimeKaiSource());
 
-        // HTTP HiAnime proxies (Workers/Render) — works when Puppeteer/consumet fail on datacenter IPs
-        this.registerSource(new CloudflareHiAnimeAPISource(process.env.HIANIME_API_URL));
-
         // BACKUP: AnimePahe — @consumet/extensions
         this.registerSource(new AnimePaheDirectSource());
 
@@ -135,7 +130,6 @@ export class SourceManager {
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
         this.sourceRateLimits.set('Consumet', { limit: 60, resetTime: 60000 });
-        this.sourceRateLimits.set('CloudflareHiAnimeAPI', { limit: 100, resetTime: 60000 });
 
         // Start health monitoring and perform initial health check
         this.startHealthMonitor();
@@ -753,7 +747,8 @@ export class SourceManager {
     private readonly knownPrefixes = [
         'animekai-', 'animepahe-',
         '9anime-', 'gogoanime-', 'consumet-',
-        'animeflv-', 'anilist-', 'watchhentai-', 'hanime-'
+        'animeflv-', 'anilist-', 'watchhentai-', 'hanime-',
+        'hianime-', 'aniwave-', 'aniwatch-'
     ];
 
     /**
@@ -810,7 +805,6 @@ export class SourceManager {
             'AnimePahe': 'animepahe-',
             'AnimeKai': 'animekai-',
             '9Anime': '9anime-',
-            'CloudflareHiAnimeAPI': 'hianime-',
             'Aniwave': 'aniwave-',
             'Aniwatch': 'aniwatch-',
             'Gogoanime': 'gogoanime-',
@@ -843,6 +837,26 @@ export class SourceManager {
         return prefix + rawId;
     }
 
+    /**
+     * Map hianime-/aniwatch-/aniwave- IDs to 9anime- watch shape for {@link NineAnimeSource} (Puppeteer path — same as npm run dev).
+     */
+    private resolveStreamingEpisodeId(
+        episodeId: string,
+        source: StreamingSource,
+        primarySource: StreamingSource | null,
+        hasSourcePrefix: boolean,
+        rawId: string
+    ): string {
+        if (source.name === '9Anime') {
+            const slug = episodeId.split('?')[0].toLowerCase();
+            if (slug.startsWith('hianime-') || slug.startsWith('aniwave-') || slug.startsWith('aniwatch-')) {
+                return this.buildSourceId(rawId, '9Anime');
+            }
+        }
+        if (source === primarySource || !hasSourcePrefix) return episodeId;
+        return this.buildSourceId(rawId, source.name);
+    }
+
     private getStreamingSource(id: string): StreamingSource | null {
         const lowerId = id.toLowerCase();
 
@@ -861,9 +875,9 @@ export class SourceManager {
 
         const prefixes = [
             { prefix: 'kaido-', source: 'Kaido' },
-            { prefix: 'hianime-', source: 'CloudflareHiAnimeAPI' },
-            { prefix: 'aniwave-', source: 'CloudflareHiAnimeAPI' },
-            { prefix: 'aniwatch-', source: 'CloudflareHiAnimeAPI' },
+            { prefix: 'hianime-', source: '9Anime' },
+            { prefix: 'aniwave-', source: '9Anime' },
+            { prefix: 'aniwatch-', source: '9Anime' },
             { prefix: 'animepahe-', source: 'AnimePahe' },
             { prefix: 'animekai-', source: 'AnimeKai' },
             { prefix: '9anime-', source: '9Anime' },
@@ -1628,8 +1642,8 @@ export class SourceManager {
 
         // Primary source returned no episodes — try backup sources with converted IDs
         const rawId = this.extractRawId(animeId);
-        const backupSourceNames = ['AnimeKai', 'Kaido', '9Anime', 'Consumet'].filter(
-            name => name !== primarySource.name
+        const backupSourceNames = REGISTERED_SOURCE_NAMES.filter(
+            (name) => name !== primarySource.name && name !== 'WatchHentai' && name !== 'Hanime'
         );
         
         const strippedTitle = rawId.replace(/-\d+$/, '').replace(/[-_]/g, ' ').trim();
@@ -2256,9 +2270,9 @@ export class SourceManager {
                 // Get backup sources to aggregate from - prioritize reliable streaming sources
                 // Skip backup sources for adult sources since they don't have adult content
                 const isAdultSource = ['WatchHentai', 'Hanime'].includes(source.name);
-                const backupSourceNames = isAdultSource ? [] : [
-                    'Kaido', '9Anime', 'Consumet', 'AnimeFLV'
-                ].filter(n => n !== source.name);
+                const backupSourceNames = isAdultSource ? [] : REGISTERED_SOURCE_NAMES.filter(
+                    (n) => n !== source.name && n !== 'WatchHentai' && n !== 'Hanime'
+                );
                 const backupSources = backupSourceNames
                     .map(n => this.sources.get(n))
                     .filter(s => s?.isAvailable) as StreamingSource[];
@@ -2472,7 +2486,7 @@ export class SourceManager {
 
         // No prefix = universal slug (one-piece-100?ep=2): try any source that supports slug?ep=
         if (!hasSourcePrefix) {
-            const slugSources = ['Kaido', '9Anime'] as const;
+            const slugSources = ['AnimeKai', '9Anime'] as const;
             const toTry = slugSources
                 .map(n => this.sources.get(n) as StreamingSource)
                 .filter((s): s is StreamingSource => !!s?.isAvailable && !!s.getEpisodeServers);
@@ -2506,7 +2520,7 @@ export class SourceManager {
         }
 
         // Add limited backup sources
-        const backupNames = ['AnimeKai', 'Kaido', 'Miruro', '9Anime', 'Consumet'].filter(n => n !== primarySource?.name);
+        const backupNames = REGISTERED_SOURCE_NAMES.filter((n) => n !== primarySource?.name);
         for (const name of backupNames) {
             const source = this.sources.get(name) as StreamingSource;
             if (source?.isAvailable && source.getEpisodeServers) {
@@ -2516,7 +2530,7 @@ export class SourceManager {
 
         // Try sources sequentially (servers are fast, no need for parallel)
         for (const source of sourcesToTry) {
-            const idToUse = source === primarySource ? episodeId : this.buildSourceId(rawId, source.name);
+            const idToUse = this.resolveStreamingEpisodeId(episodeId, source, primarySource, hasSourcePrefix, rawId);
             try {
                 const servers = await this.executeReliably(source.name, 'getEpisodeServers',
                     (signal) => source.getEpisodeServers!(idToUse, { signal }),
@@ -2574,22 +2588,19 @@ export class SourceManager {
             sourcesToTry.push(primarySource);
         }
 
-        // Backup sources: when prefix present (convert ID) OR when raw slug (one-piece-100?ep=2) try all slug-capable sources
-        const backupNames = hasSourcePrefix
-            ? ['CloudflareHiAnimeAPI', 'AnimeKai', 'Kaido', 'Miruro', 'AnimePahe', '9Anime', 'Consumet'].filter(n => n !== primarySource?.name)
-            : ['CloudflareHiAnimeAPI', 'AnimeKai', 'Kaido', 'Miruro', 'AnimePahe', '9Anime', 'Consumet'];
+        // Backup sources: only names actually registered in the constructor (see REGISTERED_SOURCE_NAMES).
+        const backupNames = REGISTERED_SOURCE_NAMES.filter((n) => n !== primarySource?.name);
         for (const name of backupNames) {
-            if (isAdultContent && name !== 'WatchHentai') continue;
-            if (!isAdultContent && name === 'WatchHentai') continue;
+            if (isAdultContent && name !== 'WatchHentai' && name !== 'Hanime') continue;
+            if (!isAdultContent && (name === 'WatchHentai' || name === 'Hanime')) continue;
             const source = this.sources.get(name) as StreamingSource;
             if (source?.isAvailable && source.getStreamingLinks && !sourcesToTry.includes(source)) {
                 sourcesToTry.push(source);
             }
         }
 
-        // CloudflareHiAnimeAPI first: calls external aniwatch-API instances (not direct scraping),
-        // works from Render cloud IPs since it hits HTTP APIs. AnimeKai next for dub support.
-        const STREAM_PRIORITY = ['CloudflareHiAnimeAPI', 'AnimeKai', 'Kaido', 'Miruro', 'AnimePahe', '9Anime', 'Consumet'];
+        // Tie-break order = constructor registration order (REGISTERED_SOURCE_NAMES).
+        const STREAM_PRIORITY = [...REGISTERED_SOURCE_NAMES];
         const ordered: StreamingSource[] = [];
         for (const name of STREAM_PRIORITY) {
             const s = sourcesToTry.find(x => x.name === name);
@@ -2668,16 +2679,16 @@ export class SourceManager {
 
             for (const source of finalSources) {
                 pending++;
-                const idToUse = (source === primarySource || !hasSourcePrefix) ? episodeId : this.buildSourceId(rawId, source.name);
+                const idToUse = this.resolveStreamingEpisodeId(episodeId, source, primarySource, hasSourcePrefix, rawId);
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
 
-                const usesPuppeteerStream = source.name === '9Anime' || source.name === 'Kaido';
+                const usesPuppeteerStream = source.name === '9Anime';
                 const usesSlowConsumetStream = source.name === 'AnimeKai';
                 const streamReliabilityOpts = usesPuppeteerStream
                     ? { timeout: 45_000, maxAttempts: 1 }
                     : usesSlowConsumetStream
                         ? { timeout: 30_000, maxAttempts: 1 }
-                        : { timeout: 12_000 };
+                        : { timeout: 22_000, maxAttempts: 1 };
                 this.executeReliably(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal }),
                     streamReliabilityOpts
@@ -2789,8 +2800,8 @@ export class SourceManager {
 
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
-        // Try AnimePahe, AnimeKai, and Consumet in parallel to maximize finding sub & dub streams
-        const consumetSources = ['AnimePahe', 'AnimeKai', 'Consumet']
+        // Same three registered Consumet-path sources as in the constructor (order = REGISTERED_SOURCE_NAMES subset).
+        const consumetSources = ['AnimeKai', 'AnimePahe', 'Consumet']
             .map(n => ({ name: n, src: this.sources.get(n) as StreamingSource }))
             .filter(({ src }) => src?.isAvailable && src.getStreamingLinks);
 

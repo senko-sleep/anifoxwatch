@@ -2,6 +2,7 @@ import './polyfills.js';
 import { Hono } from 'hono';
 import { logger } from './utils/logger.js';
 import { CloudflareSourceManager } from './services/source-manager-cloudflare.js';
+import { REGISTERED_SOURCE_NAMES } from './registered-sources.js';
 import { createAnimeRoutes } from './routes-worker/anime-routes.js';
 import { createStreamingRoutes } from './routes-worker/streaming-routes.js';
 import { createSourcesRoutes } from './routes-worker/sources-routes.js';
@@ -89,8 +90,8 @@ app.get('/api', (c) => c.json({
             setPreferred: 'POST /api/sources/preferred'
         }
     },
-    availableSources: ['CloudflareHiAnimeAPI'],
-    note: 'Using Cloudflare Workers-compatible fetch-based sources'
+    availableSources: [...REGISTERED_SOURCE_NAMES],
+    note: 'Worker uses CloudflareSourceManager; `availableSources` matches Express `npm run dev` registry.'
 }));
 
 // ============================================

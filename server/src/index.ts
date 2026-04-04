@@ -6,6 +6,7 @@ import sourcesRoutes from './routes/sources.js';
 import streamingRoutes from './routes/streaming.js';
 import { logger, createRequestContext, PerformanceTimer } from './utils/logger.js';
 import { reliabilityMiddleware, healthCheckMiddleware } from './middleware/reliability.js';
+import { REGISTERED_SOURCE_NAMES } from './registered-sources.js';
 // Extend Request interface to include id and reliability utilities
 interface ExtendedRequest extends Request {
     id: string;
@@ -148,7 +149,7 @@ app.get('/api', (_req: Request, res: Response) => {
                 setPreferred: 'POST /api/sources/preferred'
             }
         },
-        availableSources: ['9Anime', 'Aniwave', 'Aniwatch', 'Gogoanime', 'Consumet', 'Jikan']
+        availableSources: [...REGISTERED_SOURCE_NAMES]
     });
 });
 
@@ -205,14 +206,6 @@ const startServer = (port: number) => {
 ║   Health: ${baseUrl}/api/health                       ║
 ║   Port: ${port} ${isProduction ? '(Production)' : '(Local)'}                 ║
 ║                                                                  ║
-║   📡 Streaming Sources (Priority Order):                         ║
-║   • Kaido - Primary (kaido.to + aniwatch scraper)                ║
-║   • 9Anime - HD Sub/Dub                                          ║
-║   • Consumet - Gogoanime API aggregator                          ║
-║   • AnimeFLV - Regional / fallback                               ║
-║   • + 24 more backup sources for failover                        ║
-║   • Consumet - Multi-provider aggregator                         ║
-║                                                                  ║
 ║   ⚡ Features:                                                    ║
 ║   • Real-time streaming URLs                                     ║
 ║   • Auto-failover between sources                                ║
@@ -221,6 +214,7 @@ const startServer = (port: number) => {
 ║                                                                  ║
 ╚══════════════════════════════════════════════════════════════════╝
         `);
+        console.log(`📡 Registered sources (same as SourceManager constructor): ${REGISTERED_SOURCE_NAMES.join(' → ')}`);
     });
 
     // Connection timeout settings to prevent hanging connections
