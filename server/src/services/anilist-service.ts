@@ -237,6 +237,7 @@ export class AniListService {
         yearLesser?: number;
         format?: string;
         genres?: string[];
+        search?: string;
     }): Promise<AnimeSearchResult> {
         const page = filters.page || 1;
         const perPage = filters.perPage || 20;
@@ -246,6 +247,13 @@ export class AniListService {
         let mediaArgs = 'type: ANIME, isAdult: false'; // Default no adult for general browse
 
         const variables: any = { page, perPage };
+
+        // Text search
+        if (filters.search && filters.search.trim()) {
+            queryArgs += ', $search: String';
+            mediaArgs += ', search: $search';
+            variables.search = filters.search.trim();
+        }
 
         // Sort
         if (filters.sort && filters.sort.length > 0) {

@@ -209,10 +209,16 @@ export class GogoanimeSource extends BaseAnimeSource {
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
+        const epId = episodeId.replace(/^gogoanime-/i, '');
         try {
-            const response = await axios.get(`${this.baseUrl}/${episodeId}`, {
+            const response = await axios.get(`${this.baseUrl}/${epId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: options?.timeout || 15000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Referer': this.baseUrl
+                }
             });
             const $ = cheerio.load(response.data);
 
@@ -220,7 +226,10 @@ export class GogoanimeSource extends BaseAnimeSource {
             const subtitles: Array<{ url: string; lang: string }> = [];
 
             const iframeSrc = $('#load_anime iframe').attr('src') ||
-                $('.play-video iframe').attr('src');
+                $('.play-video iframe').attr('src') ||
+                $('iframe[src*="vidstreaming"]').attr('src') ||
+                $('iframe[src*="gogocdn"]').attr('src') ||
+                $('iframe[src*="streamani"]').attr('src');
 
             if (iframeSrc) {
                 let streamingUrl = iframeSrc;
@@ -231,56 +240,47 @@ export class GogoanimeSource extends BaseAnimeSource {
                 try {
                     const iframeResponse = await axios.get(streamingUrl, {
                         signal: options?.signal,
-                        timeout: options?.timeout || 10000,
+                        timeout: options?.timeout || 15000,
                         headers: {
                             'Referer': this.baseUrl,
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'text/html,*/*;q=0.8'
                         }
                     });
 
-                    const iframeHtml = iframeResponse.data;
-                    const m3u8Match = iframeHtml.match(/file:\s*["']([^"']*\.m3u8[^"']*)["']/);
+                    const iframeHtml = typeof iframeResponse.data === 'string'
+                        ? iframeResponse.data
+                        : JSON.stringify(iframeResponse.data);
+
+                    // Try to find m3u8 first (HLS stream), then mp4
+                    const m3u8Matches = [...iframeHtml.matchAll(/["']([^"']*\.m3u8[^"']*?)["']/g)];
                     const mp4Match = iframeHtml.match(/file:\s*["']([^"']*\.mp4[^"']*)["']/);
 
-                    if (m3u8Match) {
-                        sources.push({
-                            url: m3u8Match[1],
-                            quality: 'auto',
-                            isM3U8: true
-                        });
-                    } else if (mp4Match) {
+                    if (m3u8Matches.length > 0) {
+                        // Filter out obviously wrong URLs and pick the best one
+                        const validM3u8 = m3u8Matches
+                            .map(m => m[1])
+                            .filter(u => u.startsWith('http') && !u.includes('thumb') && !u.includes('poster'));
+                        if (validM3u8.length > 0) {
+                            sources.push({
+                                url: validM3u8[0],
+                                quality: 'auto',
+                                isM3U8: true
+                            });
+                        }
+                    }
+
+                    if (sources.length === 0 && mp4Match) {
                         sources.push({
                             url: mp4Match[1],
                             quality: '720p',
                             isM3U8: false
                         });
-                    } else {
-                        sources.push({
-                            url: streamingUrl,
-                            quality: 'auto',
-                            isM3U8: true
-                        });
                     }
-                } catch (iframeError) {
-                    sources.push({
-                        url: streamingUrl,
-                        quality: 'auto',
-                        isM3U8: true
-                    });
+                } catch {
+                    // If iframe fetch fails, don't add the iframe URL as a source (it's not playable)
                 }
             }
-
-            $('.dowloads a').each((i, el) => {
-                const downloadUrl = $(el).attr('href');
-                const quality = $(el).text().trim();
-                if (downloadUrl && quality) {
-                    sources.push({
-                        url: downloadUrl,
-                        quality: this.normalizeQuality(quality),
-                        isM3U8: false
-                    });
-                }
-            });
 
             return {
                 sources,
@@ -288,7 +288,8 @@ export class GogoanimeSource extends BaseAnimeSource {
                 headers: {
                     'Referer': this.baseUrl,
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
+                },
+                source: this.name
             };
         } catch (error) {
             this.handleError(error, 'getStreamingLinks');
@@ -392,13 +393,4 @@ export class GogoanimeSource extends BaseAnimeSource {
         return [];
     }
 
-    private normalizeQuality(quality: string): VideoSource['quality'] {
-        if (!quality) return 'auto';
-        const q = quality.toLowerCase();
-        if (q.includes('1080')) return '1080p';
-        if (q.includes('720')) return '720p';
-        if (q.includes('480')) return '480p';
-        if (q.includes('360')) return '360p';
-        return 'auto';
-    }
 }

@@ -7,6 +7,7 @@ import {
     HanimeSource,
     ConsumetSource,
     AnimeFLVSource,
+    GogoanimeSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -71,6 +72,7 @@ export class SourceManager {
         ['AnimePahe', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['9Anime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['AnimeFLV', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['Gogoanime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
@@ -115,6 +117,9 @@ export class SourceManager {
         this.registerSource(new ConsumetSource(process.env.CONSUMET_API_URL || 'https://api.consumet.org', 'gogoanime'));
         this.registerSource(new AnimeFLVSource());
 
+        // PRODUCTION FALLBACK: Gogoanime (anitaku.pe) — direct HTTP scraper, not Cloudflare-blocked
+        this.registerSource(new GogoanimeSource());
+
         // Adult sources
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
@@ -127,6 +132,7 @@ export class SourceManager {
         this.sourceRateLimits.set('AnimePahe', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('9Anime', { limit: 100, resetTime: 60000 });
         this.sourceRateLimits.set('AnimeFLV', { limit: 80, resetTime: 60000 });
+        this.sourceRateLimits.set('Gogoanime', { limit: 60, resetTime: 60000 });
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
         this.sourceRateLimits.set('Consumet', { limit: 60, resetTime: 60000 });
@@ -887,7 +893,7 @@ export class SourceManager {
             { prefix: 'animepahe-', source: 'AnimePahe' },
             { prefix: 'animekai-', source: 'AnimeKai' },
             { prefix: '9anime-', source: '9Anime' },
-            { prefix: 'gogoanime-', source: 'Consumet' },
+            { prefix: 'gogoanime-', source: 'Gogoanime' },
             { prefix: 'consumet-', source: 'Consumet' },
             { prefix: 'hanime-', source: 'WatchHentai' },
             { prefix: 'hh-', source: 'WatchHentai' },
@@ -1128,6 +1134,18 @@ export class SourceManager {
                 console.log(`❌ [SourceManager] No results from ANY source for query: "${query}"`);
                 console.log(`   Tried sources: ${sourcesToTry.map(s => s.name).join(', ')}`);
                 logger.warn(`No results from any source`, { query, page, triedSources: sourcesToTry.map(s => s.name) }, 'SourceManager');
+
+                // AniList fallback for search
+                try {
+                    console.log(`[SourceManager] search: scrapers empty, falling back to AniList for "${query}"`);
+                    const anilistResult = await anilistService.advancedSearch({ search: query, sort: ['SEARCH_MATCH'], perPage: 20, page });
+                    if (anilistResult.results.length > 0) {
+                        timer.end();
+                        return { ...anilistResult, source: 'AniList' };
+                    }
+                } catch (e) {
+                    console.warn(`[SourceManager] AniList search fallback failed:`, (e as Error).message);
+                }
             } else {
                 console.log(`✅ [SourceManager] Found ${sortedResults.length} results from: ${successfulSources.join(', ')}`);
             }
@@ -1780,7 +1798,18 @@ export class SourceManager {
         logger.aggregationComplete('getTrending', availableSources.map(s => s.name), successfulSources, uniqueResults.length, duration, { page });
         timer.end();
 
-        return uniqueResults;
+        if (uniqueResults.length > 0) return uniqueResults;
+
+        // AniList fallback when all scrapers fail
+        try {
+            console.log(`[SourceManager] getTrending: scrapers empty, falling back to AniList`);
+            const anilistResult = await anilistService.advancedSearch({ sort: ['TRENDING_DESC'], perPage: 24, page });
+            if (anilistResult.results.length > 0) return anilistResult.results;
+        } catch (e) {
+            console.warn(`[SourceManager] AniList trending fallback failed:`, (e as Error).message);
+        }
+
+        return [];
     }
 
     async getLatest(page: number = 1, sourceName?: string): Promise<AnimeBase[]> {
@@ -1864,7 +1893,18 @@ export class SourceManager {
         logger.aggregationComplete('getLatest', availableSources.map(s => s.name), successfulSources, uniqueResults.length, duration, { page });
         timer.end();
 
-        return uniqueResults;
+        if (uniqueResults.length > 0) return uniqueResults;
+
+        // AniList fallback when all scrapers fail
+        try {
+            console.log(`[SourceManager] getLatest: scrapers empty, falling back to AniList`);
+            const anilistResult = await anilistService.advancedSearch({ sort: ['START_DATE_DESC'], status: 'RELEASING', perPage: 24, page });
+            if (anilistResult.results.length > 0) return anilistResult.results;
+        } catch (e) {
+            console.warn(`[SourceManager] AniList latest fallback failed:`, (e as Error).message);
+        }
+
+        return [];
     }
 
     async getTopRated(page: number = 1, limit: number = 10, sourceName?: string): Promise<TopAnime[]> {
@@ -1880,17 +1920,30 @@ export class SourceManager {
                 console.log(`⚠️ [SourceManager] getTopRated returned no results from ${source.name}`);
             } else {
                 console.log(`✅ [SourceManager] getTopRated returned ${results.length} results from ${source.name}`);
+                return results;
             }
-            return results;
         } catch (error) {
             console.log(`❌ [SourceManager] getTopRated failed on ${source.name}: ${(error as Error).message}`);
             const fallback = this.getAvailableSource();
             if (fallback && fallback !== source) {
-                console.log(`   Trying fallback source: ${fallback.name}`);
-                return this.executeReliably(fallback.name, 'getTopRated', (signal) => fallback.getTopRated(page, limit, { signal }));
+                try {
+                    const results = await this.executeReliably(fallback.name, 'getTopRated', (signal) => fallback.getTopRated(page, limit, { signal }));
+                    if (results && results.length > 0) return results;
+                } catch { /* fall through to AniList */ }
             }
-            return [];
         }
+
+        // AniList fallback
+        try {
+            console.log(`[SourceManager] getTopRated: scrapers empty, falling back to AniList`);
+            const anilistResult = await anilistService.getTopRatedAnime(page, limit);
+            if (anilistResult.results.length > 0) {
+                return anilistResult.results.map((a, i) => ({ rank: (page - 1) * limit + i + 1, anime: a }));
+            }
+        } catch (e) {
+            console.warn(`[SourceManager] AniList top-rated fallback failed:`, (e as Error).message);
+        }
+        return [];
     }
 
     /**
@@ -2128,9 +2181,8 @@ export class SourceManager {
         let hasNextPage = false;
         let finalResults: AnimeBase[] = [];
 
-        // STRATEGY: Use source-native browse/filter capabilities first.
-        // We avoid AniList for browsing because it often returns results without streaming matches.
-        const canUseAniList = filters.source === 'AniList';
+        // STRATEGY: Try AniList first (stable public API), then fall back to native scrapers.
+        const canUseAniList = true;
 
         if (canUseAniList) {
             logger.info(`[SourceManager] Using AniList-only strategy for browse`, filters);
@@ -2180,7 +2232,7 @@ export class SourceManager {
                     for (const anime of anilistResult.results) {
                         const match = this.findStreamingMatchInstant(anime.title);
                         if (match) {
-                            // Has streaming source - include it
+                            // Has streaming source - include it with richer data
                             enrichedResults.push({
                                 ...match,
                                 genres: anime.genres,
@@ -2189,9 +2241,10 @@ export class SourceManager {
                                 streamingId: match.id,
                                 source: match.source || 'Kaido'
                             });
+                        } else {
+                            // Include AniList result directly — streaming ID resolved lazily on watch
+                            enrichedResults.push(anime);
                         }
-                        // REMOVED: No longer include AniList-only results without streaming IDs
-                        // Users need to be able to actually watch the anime from browse results
                     }
 
                     // Apply content mode filtering to AniList results
@@ -2806,8 +2859,9 @@ export class SourceManager {
 
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
-        // Same three registered Consumet-path sources as in the constructor (order = REGISTERED_SOURCE_NAMES subset).
-        const consumetSources = ['AnimeKai', 'AnimePahe', 'Consumet']
+        // Registered sources to try for cross-source fallback (by title search).
+        // Gogoanime is placed first as a reliable production fallback (direct HTTP, not Cloudflare-blocked).
+        const consumetSources = ['Gogoanime', 'AnimeKai', 'AnimePahe', 'Consumet']
             .map(n => ({ name: n, src: this.sources.get(n) as StreamingSource }))
             .filter(({ src }) => src?.isAvailable && src.getStreamingLinks);
 
