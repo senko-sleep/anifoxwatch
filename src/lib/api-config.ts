@@ -59,7 +59,7 @@ function configFromUrl(envApiUrl: string): ApiConfig {
  * - **`VITE_DEV_API_URL`:** absolute override (e.g. another port).
  *
  * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then Render default
- * (`anifoxwatch.web.app` + other prod builds expect the Render API unless overridden).
+ * (`https://anifoxwatch-sm7s.onrender.com` unless overridden).
  */
 /**
  * Build the URL for an API path. When `baseUrl` is empty (local dev + Vite proxy),
