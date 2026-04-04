@@ -1,0 +1,17 @@
+# Upload context for `gcloud run deploy --source` (Dockerfile build)
+.gcloudignore
+.git
+.gitignore
+fly.toml
+*.md
+.env
+.env.*
+
+node_modules
+dist
+.wrangler
+testing
+test-*
+**/*.test.ts
+coverage
+*.log
