@@ -4,6 +4,7 @@ FROM node:20-slim AS builder
 WORKDIR /app
 
 COPY package*.json tsconfig.json ./
+COPY patches ./patches
 RUN npm ci
 
 COPY src ./src
@@ -32,6 +33,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 
 COPY package*.json ./
+COPY patches ./patches
 RUN npm ci --only=production
 
 # Copy compiled JS from builder

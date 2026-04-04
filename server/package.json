@@ -10,6 +10,7 @@
         "start:prod": "node dist/index.js",
         "start:optimized": "node dist/index-optimized.js",
         "start:api": "tsx src/index.ts",
+        "deploy:fly": "flyctl deploy",
         "deploy:cloudflare": "wrangler deploy",
         "dev:cloudflare": "wrangler dev",
         "test": "vitest",

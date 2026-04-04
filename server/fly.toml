@@ -1,0 +1,40 @@
+# AniStream Hub API — Fly.io (Dockerfile in this directory)
+#
+# Prereqs: https://fly.io/docs/hands-on/install-flyctl/
+#   PowerShell: iwr https://fly.io/install.ps1 -useb | iex
+#
+# First deploy (creates app if needed):
+#   cd server
+#   fly auth login
+#   fly apps create anistream-hub-api   # pick a unique name if taken; then set `app` below
+#   fly deploy
+#
+# Optional secrets (same as Render):
+#   fly secrets set HIANIME_API_URL=https://anifoxwatch-api.anifoxwatch.workers.dev
+#
+# Smoke test:
+#   API_URL=https://<your-app>.fly.dev npx tsx testing/test-cloudrun.ts
+
+app = 'anistream-hub-api'
+primary_region = 'iad'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  NODE_ENV = 'production'
+  PORT = '8080'
+  CORS_ORIGIN = '*'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[vm]]
+  cpu_kind = 'shared'
+  cpus = 1
+  memory = '2gb'
