@@ -239,7 +239,7 @@ app.get('/api', (_req: Request, res: Response) => {
                 metrics: 'GET /metrics'
             }
         },
-        availableSources: ['HiAnimeDirect', 'HiAnime', 'Gogoanime', '9Anime', 'Aniwave', 'Aniwatch', 'Consumet', 'WatchHentai']
+        availableSources: ['AnimeKai', 'AnimePahe', '9Anime', 'Consumet', 'AnimeFLV', 'WatchHentai', 'Hanime']
     });
 });
 
@@ -341,12 +341,9 @@ const startServer = (port: number) => {
 ║   • Graceful shutdown handling                                               ║
 ║                                                                              ║
 ║   📡 STREAMING SOURCES (Priority Order):                                     ║
-║   • HiAnimeDirect - Primary (Deep Scraping)                                  ║
-║   • HiAnime - Secondary (API Fallback)                                       ║
-║   • Gogoanime - Tertiary (Direct Scraping)                                   ║
-║   • 9Anime, Aniwave, Aniwatch - Additional Fallbacks                         ║
-║   • Consumet - Multi-provider Aggregator                                     ║
-║   • WatchHentai - Adult Content                                              ║
+║   • AnimeKai — primary (Consumet extensions)                                   ║
+║   • AnimePahe, 9Anime, Consumet, AnimeFLV                                      ║
+║   • WatchHentai / Hanime — adult                                               ║
 ║                                                                              ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
         `);

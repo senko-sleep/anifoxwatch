@@ -13,7 +13,7 @@ import { streamExtractor } from '../services/stream-extractor.js';
  * Strategy:
  * - Scrapes 9animetv.to directly for anime metadata, episodes, and servers
  * - Uses Puppeteer to extract streaming links directly from the page (scraping logic)
- * - Fallback to HiAnime API if scraping fails
+ * - Falls back to kaido.to with the same slug/embed shape when 9animetv.to fails
  */
 export class NineAnimeSource extends BaseAnimeSource {
     name = '9Anime';

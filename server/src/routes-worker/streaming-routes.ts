@@ -219,15 +219,15 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
                 'megacloud': { referer: 'https://megacloud.blog/' },
                 'vidcloud': { referer: 'https://vidcloud9.com/' },
                 'rapid-cloud': { referer: 'https://rapid-cloud.co/' },
-                'netmagcdn': { referer: 'https://hianime.city/', origin: 'https://hianime.city' },
-                'biananset': { referer: 'https://hianime.city/', origin: 'https://hianime.city' },
-                'anicdnstream': { referer: 'https://hianime.city/' },
+                'netmagcdn': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
+                'biananset': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
+                'anicdnstream': { referer: 'https://aniwatchtv.to/' },
                 'gogocdn': { referer: 'https://gogoanime.run/' },
                 'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
                 'hstorage.xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
                 'xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
                 'googlevideo': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
-                'default': { referer: 'https://hianime.city/' }
+                'default': { referer: 'https://aniwatchtv.to/' }
             };
 
             const matchedConfig = Object.entries(cdnConfig).find(([key]) => domain.includes(key));

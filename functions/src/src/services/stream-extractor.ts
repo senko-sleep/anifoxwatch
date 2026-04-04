@@ -39,6 +39,7 @@ class StreamExtractor {
 
         this.browserLaunchPromise = puppeteer.launch({
             headless: true,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -47,7 +48,8 @@ class StreamExtractor {
                 '--disable-gpu',
                 '--window-size=1920,1080',
                 '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process'
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--js-flags="--max-old-space-size=256"'
             ]
         });
 
@@ -80,11 +82,11 @@ class StreamExtractor {
     }
 
     /**
-     * Extract streams from 9animetv.to episode page
+     * Extract streams from a Zoro-style watch site (9anime, Kaido, etc.)
      */
-    async extractFrom9Anime(animeSlug: string, episodeId: string): Promise<ExtractionResult> {
-        const url = `https://9animetv.to/watch/${animeSlug}?ep=${episodeId}`;
-        logger.info(`[StreamExtractor] Extracting from 9anime: ${url}`);
+    async extractFrom9Anime(animeSlug: string, episodeId: string, watchBaseUrl: string = 'https://9animetv.to'): Promise<ExtractionResult> {
+        const url = `${watchBaseUrl.replace(/\/$/, '')}/watch/${animeSlug}?ep=${episodeId}`;
+        logger.info(`[StreamExtractor] Extracting from watch site (${watchBaseUrl}): ${url}`);
 
         const page = await this.createPage();
         const streams: ExtractedStream[] = [];
@@ -234,6 +236,11 @@ class StreamExtractor {
         }
     }
 
+    /** Same player layout as 9animetv; uses kaido.to watch URLs */
+    extractFromKaido(animeSlug: string, episodeId: string): Promise<ExtractionResult> {
+        return this.extractFrom9Anime(animeSlug, episodeId, 'https://kaido.to');
+    }
+
     /**
      * Extract stream from embed URL directly (rapid-cloud, megacloud, etc.)
      */
@@ -334,16 +341,7 @@ class StreamExtractor {
     async extractWithFallbacks(animeSlug: string, episodeId: string): Promise<ExtractionResult> {
         logger.info(`[StreamExtractor] Starting extraction with fallbacks for ${animeSlug} ep ${episodeId}`);
 
-        // Method 1: Direct 9anime extraction
-        let result = await this.extractFrom9Anime(animeSlug, episodeId);
-        if (result.success) {
-            return result;
-        }
-
-        // Method 2: Try HiAnime if 9anime fails
-        // Convert slug to HiAnime format (remove numeric suffix and use as-is)
-        const hiAnimeSlug = animeSlug.replace(/-\d+$/, '');
-        result = await this.extractFromHiAnime(hiAnimeSlug, episodeId);
+        const result = await this.extractFrom9Anime(animeSlug, episodeId);
         if (result.success) {
             return result;
         }
@@ -354,65 +352,6 @@ class StreamExtractor {
             subtitles: [],
             error: 'All extraction methods failed'
         };
-    }
-
-    /**
-     * Extract from HiAnime/Zoro
-     */
-    async extractFromHiAnime(animeSlug: string, episodeNum: string): Promise<ExtractionResult> {
-        // HiAnime uses different URL structure
-        const url = `https://hianimez.to/watch/${animeSlug}?ep=${episodeNum}`;
-        logger.info(`[StreamExtractor] Trying HiAnime: ${url}`);
-
-        const page = await this.createPage();
-        const streams: ExtractedStream[] = [];
-        const subtitles: { url: string; lang: string }[] = [];
-
-        try {
-            await page.setRequestInterception(true);
-
-            const capturedM3u8s = new Set<string>();
-
-            page.on('request', (request) => {
-                const reqUrl = request.url();
-                if (reqUrl.includes('.m3u8') && !reqUrl.includes('subtitles')) {
-                    capturedM3u8s.add(reqUrl);
-                }
-                request.continue();
-            });
-
-            await page.goto(url, {
-                waitUntil: 'networkidle2',
-                timeout: 45000
-            });
-
-            await this.delay(8000);
-
-            for (const m3u8Url of capturedM3u8s) {
-                streams.push({
-                    url: m3u8Url,
-                    quality: this.detectQuality(m3u8Url),
-                    type: 'hls'
-                });
-            }
-
-            return {
-                success: streams.length > 0,
-                streams,
-                subtitles,
-                error: streams.length === 0 ? 'No streams found from HiAnime' : undefined
-            };
-
-        } catch (error: any) {
-            return {
-                success: false,
-                streams: [],
-                subtitles: [],
-                error: error.message
-            };
-        } finally {
-            await page.close();
-        }
     }
 
     private detectQuality(url: string): string {

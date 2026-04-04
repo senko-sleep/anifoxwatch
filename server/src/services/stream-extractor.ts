@@ -341,16 +341,7 @@ class StreamExtractor {
     async extractWithFallbacks(animeSlug: string, episodeId: string): Promise<ExtractionResult> {
         logger.info(`[StreamExtractor] Starting extraction with fallbacks for ${animeSlug} ep ${episodeId}`);
 
-        // Method 1: Direct 9anime extraction
-        let result = await this.extractFrom9Anime(animeSlug, episodeId);
-        if (result.success) {
-            return result;
-        }
-
-        // Method 2: Try HiAnime if 9anime fails
-        // Convert slug to HiAnime format (remove numeric suffix and use as-is)
-        const hiAnimeSlug = animeSlug.replace(/-\d+$/, '');
-        result = await this.extractFromHiAnime(hiAnimeSlug, episodeId);
+        const result = await this.extractFrom9Anime(animeSlug, episodeId);
         if (result.success) {
             return result;
         }
@@ -361,65 +352,6 @@ class StreamExtractor {
             subtitles: [],
             error: 'All extraction methods failed'
         };
-    }
-
-    /**
-     * Extract from HiAnime/Zoro
-     */
-    async extractFromHiAnime(animeSlug: string, episodeNum: string): Promise<ExtractionResult> {
-        // HiAnime uses different URL structure
-        const url = `https://aniwatchtv.to/watch/${animeSlug}?ep=${episodeNum}`;
-        logger.info(`[StreamExtractor] Trying HiAnime: ${url}`);
-
-        const page = await this.createPage();
-        const streams: ExtractedStream[] = [];
-        const subtitles: { url: string; lang: string }[] = [];
-
-        try {
-            await page.setRequestInterception(true);
-
-            const capturedM3u8s = new Set<string>();
-
-            page.on('request', (request) => {
-                const reqUrl = request.url();
-                if (reqUrl.includes('.m3u8') && !reqUrl.includes('subtitles')) {
-                    capturedM3u8s.add(reqUrl);
-                }
-                request.continue();
-            });
-
-            await page.goto(url, {
-                waitUntil: 'networkidle2',
-                timeout: 45000
-            });
-
-            await this.delay(8000);
-
-            for (const m3u8Url of capturedM3u8s) {
-                streams.push({
-                    url: m3u8Url,
-                    quality: this.detectQuality(m3u8Url),
-                    type: 'hls'
-                });
-            }
-
-            return {
-                success: streams.length > 0,
-                streams,
-                subtitles,
-                error: streams.length === 0 ? 'No streams found from HiAnime' : undefined
-            };
-
-        } catch (error: any) {
-            return {
-                success: false,
-                streams: [],
-                subtitles: [],
-                error: error.message
-            };
-        } finally {
-            await page.close();
-        }
     }
 
     private detectQuality(url: string): string {

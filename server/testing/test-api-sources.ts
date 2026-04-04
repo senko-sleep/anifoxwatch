@@ -1,15 +1,13 @@
 /**
  * Test working anime sources via API
- * Tests HiAnime, 9Anime, AniWatch, Aniwave, etc.
+ * Tests registered API sources (AnimeKai, 9Anime, …).
  */
 
 import axios from 'axios';
 
 const API_BASE = 'http://localhost:3002';
 const TEST_EPISODES = [
-    // HiAnime test episodes
-    { source: 'HiAnime', id: 'one-piece-10092', episode: 'episode-1' },
-    { source: 'HiAnimeDirect', id: 'one-piece', episode: '1000' },
+    { source: 'AnimeKai', id: 'one-piece', episode: '1000' },
     // 9Anime test
     { source: '9Anime', id: 'one-piece', episode: '100' },
     // AniWatch test

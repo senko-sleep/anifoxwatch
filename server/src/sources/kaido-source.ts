@@ -31,9 +31,8 @@ export class KaidoSource extends BaseAnimeSource {
         };
     }
 
-    /** kaido- and legacy hianime- prefixes share the same site slug */
     private stripProviderPrefix(id: string): string {
-        return id.replace(/^kaido-/i, '').replace(/^hianime-/i, '');
+        return id.replace(/^kaido-/i, '');
     }
 
     async search(query: string, page: number = 1, _filters?: Record<string, unknown>, options?: SourceRequestOptions): Promise<AnimeSearchResult> {

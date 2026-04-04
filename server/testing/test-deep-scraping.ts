@@ -1,17 +1,16 @@
 /**
- * Test Deep Scraping - Tests the HiAnimeDirectSource for streaming
- * This test verifies that deep scraping works and returns valid streaming URLs
+ * Test deep streaming path via AnimeKai (Consumet) + source manager.
  */
 
-import { HiAnimeDirectSource } from '../src/sources/hianime-direct-source.js';
+import { AnimeKaiSource } from '../src/sources/animekai-source.js';
 import { sourceManager } from '../src/services/source-manager.js';
 
-async function testHiAnimeDirectSource() {
+async function testAnimeKaiDeep() {
     console.log('='.repeat(60));
-    console.log('HIANIME DIRECT SOURCE TESTS (Deep Scraping)');
+    console.log('ANIMEKAI SOURCE TESTS (streaming)');
     console.log('='.repeat(60));
 
-    const source = new HiAnimeDirectSource();
+    const source = new AnimeKaiSource();
 
     // Test 1: Health Check
     console.log('\n📍 Test 1: Health Check');
@@ -40,10 +39,13 @@ async function testHiAnimeDirectSource() {
     }
 
     // Test 3: Get Episodes
-    console.log('\n📍 Test 3: Get Episodes for "one-piece-100"');
+    console.log('\n📍 Test 3: Get Episodes (from search)');
     let episodeId: string | null = null;
     try {
-        const episodes = await source.getEpisodes('hianime-one-piece-100');
+        const os = await source.search('one piece', 1);
+        const aid = os.results[0]?.id;
+        if (!aid) throw new Error('no anime from search');
+        const episodes = await source.getEpisodes(aid);
         console.log(`   Total Episodes: ${episodes.length}`);
         if (episodes.length > 0) {
             episodeId = episodes[0].id;
@@ -74,7 +76,7 @@ async function testHiAnimeDirectSource() {
     if (episodeId) {
         console.log('\n📍 Test 5: Get Streaming Links (CRITICAL - Deep Scraping)');
         try {
-            const streamData = await source.getStreamingLinks(episodeId, 'hd-2', 'sub');
+            const streamData = await source.getStreamingLinks(episodeId, undefined, 'sub');
             console.log(`   Video sources: ${streamData.sources.length}`);
             console.log(`   Subtitles: ${streamData.subtitles?.length || 0}`);
 
@@ -111,7 +113,7 @@ async function testHiAnimeDirectSource() {
 async function testSourceManager() {
     console.log('\n');
     console.log('='.repeat(60));
-    console.log('SOURCE MANAGER TESTS (with HiAnimeDirect)');
+    console.log('SOURCE MANAGER TESTS');
     console.log('='.repeat(60));
 
     // Test 1: Available Sources
@@ -133,7 +135,7 @@ async function testSourceManager() {
         const episodeId = 'one-piece-100?ep=2142';
         console.log(`   Testing episode: ${episodeId}`);
 
-        const streamData = await sourceManager.getStreamingLinks(episodeId, 'hd-2', 'sub');
+        const streamData = await sourceManager.getStreamingLinks(episodeId, undefined, 'sub');
         console.log(`   Video sources: ${streamData.sources.length}`);
         console.log(`   Subtitles: ${streamData.subtitles?.length || 0}`);
 
@@ -156,23 +158,25 @@ async function testDifferentAnime() {
     console.log('TEST DIFFERENT ANIME');
     console.log('='.repeat(60));
 
-    const source = new HiAnimeDirectSource();
+    const source = new AnimeKaiSource();
 
-    const testAnime = [
-        { name: 'Naruto', id: 'naruto-shippuuden-355' },
-        { name: 'Attack on Titan', id: 'shingeki-no-kyojin-112' },
-        { name: 'Demon Slayer', id: 'kimetsu-no-yaiba-47' },
-    ];
+    const testAnime = [{ name: 'Naruto', q: 'naruto shippuden' }];
 
     for (const anime of testAnime) {
         console.log(`\n📍 Testing: ${anime.name}`);
         try {
-            const episodes = await source.getEpisodes(`hianime-${anime.id}`);
+            const sr = await source.search(anime.q, 1);
+            const aid = sr.results[0]?.id;
+            if (!aid) {
+                console.log('   ❌ No search result');
+                continue;
+            }
+            const episodes = await source.getEpisodes(aid);
             if (episodes.length > 0) {
                 const episodeId = episodes[0].id;
                 console.log(`   Episode ID: ${episodeId}`);
 
-                const streamData = await source.getStreamingLinks(episodeId!, 'hd-2', 'sub');
+                const streamData = await source.getStreamingLinks(episodeId!, undefined, 'sub');
                 if (streamData.sources.length > 0) {
                     console.log(`   ✅ SUCCESS: ${streamData.sources.length} sources found`);
                     console.log(`   URL: ${streamData.sources[0].url?.substring(0, 60)}...`);
@@ -191,7 +195,7 @@ async function testDifferentAnime() {
 async function main() {
     console.log('\n🚀 Starting Deep Scraping Tests...\n');
 
-    await testHiAnimeDirectSource();
+    await testAnimeKaiDeep();
     await testSourceManager();
     await testDifferentAnime();
 

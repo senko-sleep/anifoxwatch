@@ -38,7 +38,7 @@ type AniWatchApiAnime = {
 };
 
 /**
- * Aniwatch/HiAnime Source - Direct scraper for high-quality streams
+ * Aniwatch (Zoro) source — direct scraper for high-quality streams
  * Supports multiple servers with auto-fallback
  * Fast HLS streaming with multiple quality options
  */

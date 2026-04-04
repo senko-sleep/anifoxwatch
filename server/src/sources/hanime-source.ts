@@ -56,6 +56,16 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
+    private heightToVideoQuality(height: unknown): VideoSource['quality'] {
+        const n = typeof height === 'number' ? height : parseInt(String(height), 10);
+        if (!Number.isFinite(n)) return 'auto';
+        if (n >= 1080) return '1080p';
+        if (n >= 720) return '720p';
+        if (n >= 480) return '480p';
+        if (n >= 360) return '360p';
+        return 'auto';
+    }
+
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
             const response = await axios.get(this.baseUrl, {
@@ -143,7 +153,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
             this.setCache(cacheKey, result, this.cacheTTL.search);
             return result;
         } catch (error) {
-            logger.error(`[Hanime] Search failed:`, error);
+            logger.error(`[Hanime] Search failed:`, error instanceof Error ? error : new Error(String(error)));
             return {
                 results: [],
                 totalPages: 0,
@@ -196,7 +206,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
             this.setCache(cacheKey, results, this.cacheTTL.search);
             return results;
         } catch (error) {
-            logger.error(`[Hanime] getTrending failed:`, error);
+            logger.error(`[Hanime] getTrending failed:`, error instanceof Error ? error : new Error(String(error)));
             return [];
         }
     }
@@ -242,7 +252,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
             this.setCache(cacheKey, results, this.cacheTTL.search);
             return results;
         } catch (error) {
-            logger.error(`[Hanime] getLatest failed:`, error);
+            logger.error(`[Hanime] getLatest failed:`, error instanceof Error ? error : new Error(String(error)));
             return [];
         }
     }
@@ -298,7 +308,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
             this.setCache(cacheKey, result, this.cacheTTL.search);
             return result;
         } catch (error) {
-            logger.error(`[Hanime] getAnimeByGenre failed:`, error);
+            logger.error(`[Hanime] getAnimeByGenre failed:`, error instanceof Error ? error : new Error(String(error)));
             return {
                 results: [],
                 totalPages: 0,
@@ -432,7 +442,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
             this.setCache(cacheKey, anime, this.cacheTTL.anime);
             return anime;
         } catch (error) {
-            logger.error(`[Hanime] getAnime failed:`, error);
+            logger.error(`[Hanime] getAnime failed:`, error instanceof Error ? error : new Error(String(error)));
             return null;
         }
     }
@@ -444,7 +454,9 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
             id: `hanime-${slug}`,
             number: 1,
             title: 'Full Episode',
-            isFiller: false
+            isFiller: false,
+            hasSub: true,
+            hasDub: false
         }];
     }
 
@@ -488,7 +500,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                                 for (const stream of srv.streams) {
                                     sources.push({
                                         url: stream.url,
-                                        quality: stream.height ? `${stream.height}p` : 'auto',
+                                        quality: this.heightToVideoQuality(stream.height),
                                         isM3U8: stream.url?.includes('.m3u8')
                                     });
                                 }
@@ -524,7 +536,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
 
             return result;
         } catch (error) {
-            logger.error(`[Hanime] getStreamingLinks failed:`, error);
+            logger.error(`[Hanime] getStreamingLinks failed:`, error instanceof Error ? error : new Error(String(error)));
             return { sources: [], subtitles: [] };
         }
     }

@@ -10,14 +10,13 @@
  *   6. HEAD-validate the actual stream URL to confirm it's playable
  *   7. If a source fails streaming, retry with different episodes/servers
  * 
- * Also tests the HiAnime sources since they're the backbone of the fallback chain.
+ * Covers primary streaming sources end-to-end.
  * 
  * Usage: npx tsx server/testing/test-all-sources.ts
  */
 
 import axios from 'axios';
-import { HiAnimeDirectSource } from '../src/sources/hianime-direct-source.js';
-import { HiAnimeSource } from '../src/sources/hianime-source.js';
+import { AnimeKaiSource } from '../src/sources/animekai-source.js';
 import { NineAnimeSource } from '../src/sources/nineanime-source.js';
 import { KaidoSource } from '../src/sources/kaido-source.js';
 import { AnimeFLVSource } from '../src/sources/animeflv-source.js';
@@ -37,10 +36,8 @@ interface SourceInstance {
     getEpisodeServers?(epId: string, opts?: unknown): Promise<Array<{ name: string; url?: string; type?: string }>>;
 }
 
-// All non-adult sources to test — including HiAnime backbone
 const SOURCES_TO_TEST: SourceInstance[] = [
-    new HiAnimeDirectSource() as unknown as SourceInstance,
-    new HiAnimeSource() as unknown as SourceInstance,
+    new AnimeKaiSource() as unknown as SourceInstance,
     new NineAnimeSource() as unknown as SourceInstance,
     new KaidoSource() as unknown as SourceInstance,
     new AnimeFLVSource() as unknown as SourceInstance,
@@ -364,7 +361,7 @@ async function main() {
 
     // Fallback chain analysis
     console.log(`\n🔗 FALLBACK CHAIN STATUS:`);
-    const chainSources = ['HiAnimeDirect', 'HiAnime', '9Anime', 'Kaido', 'AnimeFLV'];
+    const chainSources = ['AnimeKai', '9Anime', 'Kaido', 'AnimeFLV'];
     for (const name of chainSources) {
         const r = allResults.find(r => r.source === name);
         if (r) {

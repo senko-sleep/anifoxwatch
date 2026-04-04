@@ -43,6 +43,6 @@ export { AnimeOwlSource } from './animeowl-source.js';
 export { AnimeLandSource } from './animeland-source.js';
 export { AnimeFreakSource } from './animefreak-source.js';
 
-// Miruro: scrapes miruro.in + HiAnime scraper for streams (sub + dub)
+// Miruro: miruro.in metadata + Consumet Zoro (aniwatchtv.to) for streams
 export { MiruroSource } from './miruro-source.js';
 

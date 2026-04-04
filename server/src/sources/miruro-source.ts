@@ -1,15 +1,10 @@
 /**
- * MiruroSource — scrapes miruro.in for episode metadata, then uses
- * two streaming backends:
- *   1) @consumet/extensions Hianime (with hianime.nz mirror)
- *   2) aniwatch HiAnime.Scraper (aniwatchtv.to fallback)
- *
- * Both support sub + dub via the same episode ID format.
+ * MiruroSource — scrapes miruro.in for episode metadata, then resolves streams
+ * via @consumet/extensions Zoro (aniwatchtv.to mirror).
  */
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { HiAnime } from 'aniwatch';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
@@ -25,23 +20,14 @@ export class MiruroSource extends BaseAnimeSource {
     name = 'Miruro';
     baseUrl = 'https://www.miruro.in';
     private consumetProvider: any = null;
-    private aniwatchScraper: HiAnime.Scraper | null = null;
 
     private async getConsumetProvider() {
         if (!this.consumetProvider) {
             const mod = await getConsumetMod();
-            this.consumetProvider = new mod.ANIME.Hianime();
-            (this.consumetProvider as any).baseUrl = 'https://hianime.nz';
+            this.consumetProvider = new mod.ANIME.Zoro();
+            (this.consumetProvider as { baseUrl: string }).baseUrl = 'https://aniwatchtv.to';
         }
         return this.consumetProvider;
-    }
-
-    private getAniwatchScraper(): HiAnime.Scraper {
-        if (!this.aniwatchScraper) {
-            // @ts-expect-error - aniwatch scraper constructor
-            this.aniwatchScraper = new HiAnime.Scraper('https://aniwatchtv.to');
-        }
-        return this.aniwatchScraper;
     }
 
     private stripPrefix(id: string): string {
@@ -74,14 +60,14 @@ export class MiruroSource extends BaseAnimeSource {
             image: data.image || data.poster || '',
             cover: data.cover || data.image || '',
             description: data.description || '',
-            type: (data.type || 'TV') as any,
-            status: (data.status || 'Ongoing') as any,
+            type: (data.type || 'TV') as AnimeBase['type'],
+            status: (data.status || 'Ongoing') as AnimeBase['status'],
             rating: data.rating || 0,
             episodes: data.totalEpisodes || data.episodes || 0,
             episodesAired: data.totalEpisodes || 0,
             genres: data.genres || [],
             studios: [],
-            year: data.releaseDate ? parseInt(data.releaseDate) : 0,
+            year: data.releaseDate ? parseInt(data.releaseDate, 10) : 0,
             subCount: data.sub || data.totalEpisodes || 0,
             dubCount: data.dub || 0,
             source: this.name,
@@ -89,14 +75,14 @@ export class MiruroSource extends BaseAnimeSource {
         };
     }
 
-    async search(query: string, page: number = 1, _filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
+    async search(query: string, page: number = 1, _filters?: unknown, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         try {
             const p = await this.getConsumetProvider();
             const res = await Promise.race([
                 p.search(query, page),
-                new Promise<any>((_, r) => setTimeout(() => r(new Error('timeout')), 12000)),
+                new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 12000)),
             ]);
-            const results = (res.results || []).map((r: any) => this.mapAnime(r));
+            const results = (res.results || []).map((r: unknown) => this.mapAnime(r));
             this.handleSuccess();
             return {
                 results,
@@ -114,17 +100,17 @@ export class MiruroSource extends BaseAnimeSource {
     async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         const slug = this.stripPrefix(id);
 
-        // Try miruro.in details page first
         try {
             const res = await axios.get(`${this.baseUrl}/details/${slug}`, {
                 timeout: options?.timeout || 12000,
                 signal: options?.signal,
-                headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': this.baseUrl + '/' },
+                headers: { 'User-Agent': 'Mozilla/5.0', Referer: `${this.baseUrl}/` },
             });
             const $ = cheerio.load(res.data);
-            const title = $('h2').first().text().trim()
-                || $('meta[property="og:title"]').attr('content')?.replace(/\| Miruro$/, '').trim()
-                || slug;
+            const title =
+                $('h2').first().text().trim() ||
+                $('meta[property="og:title"]').attr('content')?.replace(/\| Miruro$/, '').trim() ||
+                slug;
             const image = $('meta[property="og:image"]').attr('content') || '';
             const description = $('meta[property="og:description"]').attr('content') || '';
             const genres: string[] = [];
@@ -134,10 +120,23 @@ export class MiruroSource extends BaseAnimeSource {
             });
             this.handleSuccess();
             return {
-                id, title, image, cover: image, description,
-                type: 'TV', status: 'Ongoing', rating: 0,
-                episodes: 0, episodesAired: 0, genres, studios: [],
-                year: 0, subCount: 0, dubCount: 0, source: this.name, isMature: false,
+                id,
+                title,
+                image,
+                cover: image,
+                description,
+                type: 'TV',
+                status: 'Ongoing',
+                rating: 0,
+                episodes: 0,
+                episodesAired: 0,
+                genres,
+                studios: [],
+                year: 0,
+                subCount: 0,
+                dubCount: 0,
+                source: this.name,
+                isMature: false,
             };
         } catch (error) {
             this.handleError(error, 'getAnime');
@@ -148,7 +147,6 @@ export class MiruroSource extends BaseAnimeSource {
     async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         const slug = this.stripPrefix(animeId);
 
-        // Primary: scrape miruro.in watch page
         try {
             const episodes = await this.scrapeEpisodesFromMiruro(slug, options);
             if (episodes.length > 0) {
@@ -159,21 +157,20 @@ export class MiruroSource extends BaseAnimeSource {
             logger.warn(`[Miruro] HTML scrape failed: ${(e as Error).message?.substring(0, 80)}`, undefined, this.name);
         }
 
-        // Fallback: consumet Hianime
         try {
             const p = await this.getConsumetProvider();
             const info = await Promise.race([
                 p.fetchAnimeInfo(slug),
-                new Promise<any>((_, r) => setTimeout(() => r(new Error('timeout')), 12000)),
+                new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 12000)),
             ]);
-            const episodes: Episode[] = (info.episodes || []).map((ep: any, i: number) => ({
-                id: ep.id ? ep.id.replace('$episode$', '?ep=') : `${slug}?ep=${i + 1}`,
-                number: ep.number || i + 1,
-                title: ep.title || `Episode ${ep.number || i + 1}`,
-                isFiller: ep.isFiller || false,
+            const episodes: Episode[] = (info.episodes || []).map((ep: Record<string, unknown>, i: number) => ({
+                id: ep.id ? String(ep.id).replace('$episode$', '?ep=') : `${slug}?ep=${i + 1}`,
+                number: (ep.number as number) || i + 1,
+                title: (ep.title as string) || `Episode ${(ep.number as number) || i + 1}`,
+                isFiller: !!ep.isFiller,
                 hasSub: ep.isSubbed !== false,
-                hasDub: ep.isDubbed || false,
-                thumbnail: ep.image || '',
+                hasDub: !!ep.isDubbed,
+                thumbnail: (ep.image as string) || '',
             }));
             this.handleSuccess();
             return episodes;
@@ -187,7 +184,10 @@ export class MiruroSource extends BaseAnimeSource {
         const res = await axios.get(`${this.baseUrl}/watch/${slug}`, {
             signal: options?.signal,
             timeout: options?.timeout || 12000,
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Referer': this.baseUrl + '/' },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                Referer: `${this.baseUrl}/`,
+            },
             maxRedirects: 5,
         });
         const $ = cheerio.load(res.data);
@@ -200,7 +200,7 @@ export class MiruroSource extends BaseAnimeSource {
             if (!epMatch) return;
 
             const numMatch = text.match(/^(\d+)/);
-            const epNum = numMatch ? parseInt(numMatch[1]) : _i + 1;
+            const epNum = numMatch ? parseInt(numMatch[1], 10) : _i + 1;
 
             episodes.push({
                 id: `${slug}?ep=${epMatch[1]}`,
@@ -231,30 +231,25 @@ export class MiruroSource extends BaseAnimeSource {
         category: 'sub' | 'dub' = 'sub',
         options?: SourceRequestOptions,
     ): Promise<StreamingData> {
-        // Strategy 1: consumet Hianime provider (hianime.nz)
-        const consumetResult = await this.tryConsumetStreaming(episodeId, server, category);
-        if (consumetResult.sources.length > 0) return consumetResult;
-
-        // Strategy 2: aniwatch HiAnime.Scraper (aniwatchtv.to)
-        const aniwatchResult = await this.tryAniwatchStreaming(episodeId, server, category);
-        if (aniwatchResult.sources.length > 0) return aniwatchResult;
-
-        return { sources: [], subtitles: [] };
+        return this.tryZoroStreaming(episodeId, server, category, options);
     }
 
-    private async tryConsumetStreaming(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
+    private async tryZoroStreaming(
+        episodeId: string,
+        server?: string,
+        category: 'sub' | 'dub' = 'sub',
+        options?: SourceRequestOptions,
+    ): Promise<StreamingData> {
         try {
             const mod = await getConsumetMod();
             const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
             const consumetId = this.toConsumetEpId(episodeId);
 
-            const serversToTry = server
-                ? [server]
-                : [mod.StreamingServers.MegaCloud, mod.StreamingServers.VidCloud];
+            const serversToTry = server ? [server] : [mod.StreamingServers.MegaCloud, mod.StreamingServers.VidCloud];
 
             for (const srv of serversToTry) {
                 try {
-                    logger.info(`[Miruro/consumet] ${category} ${consumetId} → ${srv}`, undefined, this.name);
+                    logger.info(`[Miruro/zoro] ${category} ${consumetId} → ${srv}`, undefined, this.name);
                     const p = await this.getConsumetProvider();
                     const data = await Promise.race([
                         p.fetchEpisodeSources(consumetId, srv, subOrDub),
@@ -263,71 +258,45 @@ export class MiruroSource extends BaseAnimeSource {
 
                     if (data.sources?.length > 0) {
                         const sd = this.mapStreamingData(data);
-                        logger.info(`[Miruro/consumet] ✅ ${sd.sources.length} ${category} sources via ${srv}`, undefined, this.name);
+                        logger.info(`[Miruro/zoro] ✅ ${sd.sources.length} ${category} sources via ${srv}`, undefined, this.name);
                         this.handleSuccess();
                         return sd;
                     }
                 } catch (err) {
-                    logger.warn(`[Miruro/consumet] ${srv} fail: ${(err as Error).message?.substring(0, 80)}`, undefined, this.name);
+                    logger.warn(`[Miruro/zoro] ${srv} fail: ${(err as Error).message?.substring(0, 80)}`, undefined, this.name);
                 }
             }
         } catch (err) {
-            logger.warn(`[Miruro/consumet] init fail: ${(err as Error).message?.substring(0, 60)}`, undefined, this.name);
+            logger.warn(`[Miruro/zoro] init fail: ${(err as Error).message?.substring(0, 60)}`, undefined, this.name);
         }
         return { sources: [], subtitles: [] };
     }
 
-    private async tryAniwatchStreaming(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
-        const serversToTry = server ? [server] : ['hd-1', 'hd-2'];
-
-        for (const srv of serversToTry) {
-            try {
-                logger.info(`[Miruro/aniwatch] ${category} ${episodeId} → ${srv}`, undefined, this.name);
-                const data = await Promise.race([
-                    this.getAniwatchScraper().getEpisodeSources(
-                        episodeId,
-                        srv as HiAnime.AnimeServers,
-                        category,
-                    ),
-                    new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000)),
-                ]);
-
-                if (data.sources?.length > 0) {
-                    const rawData = data as Record<string, unknown>;
-                    const streamData: StreamingData = {
-                        sources: (data.sources as Array<{ url: string; isM3U8?: boolean }>).map((s): VideoSource => ({
-                            url: s.url,
-                            quality: 'auto',
-                            isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-                        })),
-                        subtitles: ((rawData.tracks || rawData.subtitles || []) as Array<{ url: string; lang?: string; language?: string; label?: string }>)
-                            .filter((t) => t.lang !== 'thumbnails')
-                            .map((sub) => ({ url: sub.url, lang: sub.lang || sub.language || 'Unknown', label: sub.label || sub.lang || sub.language })),
-                        headers: (rawData.headers as Record<string, string>) || { 'Referer': 'https://megacloud.blog/' },
-                        source: this.name,
-                    };
-                    logger.info(`[Miruro/aniwatch] ✅ ${streamData.sources.length} ${category} sources via ${srv}`, undefined, this.name);
-                    this.handleSuccess();
-                    return streamData;
-                }
-            } catch (err) {
-                logger.warn(`[Miruro/aniwatch] ${srv} fail: ${(err as Error).message?.substring(0, 80)}`, undefined, this.name);
-            }
-        }
-        return { sources: [], subtitles: [] };
-    }
-
-    private mapStreamingData(data: any): StreamingData {
+    private mapStreamingData(data: {
+        sources?: Array<{ url: string; quality?: VideoSource['quality']; isM3U8?: boolean }>;
+        subtitles?: Array<{ url: string; lang?: string; label?: string }>;
+        headers?: Record<string, string>;
+        intro?: StreamingData['intro'];
+        outro?: StreamingData['outro'];
+    }): StreamingData {
+        const sources = data.sources || [];
+        const subtitles = data.subtitles || [];
         return {
-            sources: (data.sources || []).map((s: any): VideoSource => ({
-                url: s.url,
-                quality: s.quality || 'auto',
-                isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-            })),
-            subtitles: (data.subtitles || [])
-                .filter((t: any) => t.lang !== 'Thumbnails' && t.lang !== 'thumbnails')
-                .map((sub: any) => ({ url: sub.url, lang: sub.lang || 'Unknown', label: sub.label || sub.lang })),
-            headers: data.headers || { 'Referer': 'https://megacloud.blog/' },
+            sources: sources.map(
+                (s): VideoSource => ({
+                    url: s.url,
+                    quality: s.quality || 'auto',
+                    isM3U8: !!(s.isM3U8 || s.url?.includes('.m3u8')),
+                }),
+            ),
+            subtitles: subtitles
+                .filter((t) => t.lang !== 'Thumbnails' && t.lang !== 'thumbnails')
+                .map((sub) => ({
+                    url: sub.url,
+                    lang: sub.lang || 'Unknown',
+                    label: sub.label || sub.lang || 'Unknown',
+                })),
+            headers: data.headers || { Referer: 'https://megacloud.blog/' },
             intro: data.intro,
             outro: data.outro,
             source: this.name,
@@ -339,10 +308,10 @@ export class MiruroSource extends BaseAnimeSource {
             const p = await this.getConsumetProvider();
             const res = await Promise.race([
                 p.fetchMostPopular(page),
-                new Promise<any>((_, r) => setTimeout(() => r(new Error('timeout')), 12000)),
+                new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 12000)),
             ]);
             this.handleSuccess();
-            return (res.results || []).map((r: any) => this.mapAnime(r));
+            return (res.results || []).map((r: unknown) => this.mapAnime(r));
         } catch (error) {
             this.handleError(error, 'getTrending');
             return [];
@@ -354,10 +323,10 @@ export class MiruroSource extends BaseAnimeSource {
             const p = await this.getConsumetProvider();
             const res = await Promise.race([
                 p.fetchRecentlyUpdated(page),
-                new Promise<any>((_, r) => setTimeout(() => r(new Error('timeout')), 12000)),
+                new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 12000)),
             ]);
             this.handleSuccess();
-            return (res.results || []).map((r: any) => this.mapAnime(r));
+            return (res.results || []).map((r: unknown) => this.mapAnime(r));
         } catch (error) {
             this.handleError(error, 'getLatest');
             return [];

@@ -92,7 +92,7 @@ async function runHomePageTests(): Promise<void> {
   ];
 
   // Test with different sources
-  const testSources = ['HiAnimeDirect', 'Zoro', 'AnimePahe', 'Gogoanime'];
+  const testSources = ['AnimeKai', 'Zoro', 'AnimePahe', 'Gogoanime'];
 
   console.log('Testing Core Endpoints...');
   for (const section of sections) {

@@ -52,7 +52,7 @@ async function verifyStream() {
             const domain = urlObj.hostname;
             console.log(`   Domain: ${domain}`);
 
-            let referer = 'https://hianimez.to/';
+            let referer = 'https://aniwatchtv.to/';
             let origin: string | undefined = undefined;
 
             if (domain.includes('hstorage') || domain.includes('xyz')) {

@@ -1,15 +1,15 @@
 /**
- * Comprehensive Source Tests - Tests the HiAnime source and source manager
+ * Comprehensive source tests — AnimeKai + source manager
  */
 import { sourceManager } from '../src/services/source-manager.js';
-import { HiAnimeSource } from '../src/sources/hianime-source.js';
+import { AnimeKaiSource } from '../src/sources/animekai-source.js';
 
-async function testHiAnimeSource() {
+async function testAnimeKaiSource() {
     console.log('='.repeat(60));
-    console.log('HIANIME SOURCE TESTS');
+    console.log('ANIMEKAI SOURCE TESTS');
     console.log('='.repeat(60));
 
-    const source = new HiAnimeSource();
+    const source = new AnimeKaiSource();
 
     // Test 1: Health Check
     console.log('\n📍 Test 1: Health Check');
@@ -153,7 +153,7 @@ async function testEpisodeAndStreaming() {
     console.log('EPISODE AND STREAMING TESTS');
     console.log('='.repeat(60));
 
-    const source = new HiAnimeSource();
+    const source = new AnimeKaiSource();
 
     // First search for an anime
     console.log('\n📍 Searching for "Steins Gate" to test episodes...');
@@ -214,7 +214,7 @@ async function testEpisodeAndStreaming() {
             // Test: Get Streaming Links
             console.log('\n📍 Test: Get Streaming Links');
             try {
-                const streamData = await source.getStreamingLinks(episodes[0].id, 'hd-1', 'sub');
+                const streamData = await source.getStreamingLinks(episodes[0].id, undefined, 'sub');
                 console.log(`   Video sources: ${streamData.sources.length}`);
                 console.log(`   Subtitles: ${streamData.subtitles?.length || 0}`);
                 if (streamData.sources.length > 0) {
@@ -235,7 +235,7 @@ async function testEpisodeAndStreaming() {
 async function main() {
     console.log('\n🚀 Starting Comprehensive Source Tests...\n');
 
-    await testHiAnimeSource();
+    await testAnimeKaiSource();
     await testSourceManager();
     await testEpisodeAndStreaming();
 

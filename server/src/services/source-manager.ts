@@ -757,7 +757,7 @@ export class SourceManager {
         'animekai-', 'animepahe-',
         '9anime-', 'gogoanime-', 'consumet-',
         'animeflv-', 'anilist-', 'watchhentai-', 'hanime-',
-        'hianime-', 'aniwave-', 'aniwatch-'
+        'aniwave-', 'aniwatch-'
     ];
 
     /**
@@ -780,7 +780,7 @@ export class SourceManager {
 
     /**
      * Extract the raw anime ID without source prefix
-     * e.g., "hianime-one-piece-100" -> "one-piece-100"
+     * e.g., "9anime-one-piece-100" -> "one-piece-100"
      */
     private extractRawId(id: string): string {
         const lowerId = id.toLowerCase();
@@ -845,7 +845,7 @@ export class SourceManager {
     }
 
     /**
-     * Map hianime-/aniwatch-/aniwave- IDs to 9anime- watch shape for {@link NineAnimeSource} (Puppeteer path — same as npm run dev).
+     * Map aniwatch-/aniwave- IDs to 9anime- watch shape for {@link NineAnimeSource} (Puppeteer path — same as npm run dev).
      */
     private resolveStreamingEpisodeId(
         episodeId: string,
@@ -856,7 +856,7 @@ export class SourceManager {
     ): string {
         if (source.name === '9Anime') {
             const slug = episodeId.split('?')[0].toLowerCase();
-            if (slug.startsWith('hianime-') || slug.startsWith('aniwave-') || slug.startsWith('aniwatch-')) {
+            if (slug.startsWith('aniwave-') || slug.startsWith('aniwatch-')) {
                 return this.buildSourceId(rawId, '9Anime');
             }
         }
@@ -882,7 +882,6 @@ export class SourceManager {
 
         const prefixes = [
             { prefix: 'kaido-', source: 'Kaido' },
-            { prefix: 'hianime-', source: '9Anime' },
             { prefix: 'aniwave-', source: '9Anime' },
             { prefix: 'aniwatch-', source: '9Anime' },
             { prefix: 'animepahe-', source: 'AnimePahe' },
@@ -2586,7 +2585,7 @@ export class SourceManager {
 
         const sourcesToTry: StreamingSource[] = [];
         
-        // Add primary source first: matching prefix (e.g. hianime-) or any available for raw slug
+        // Add primary source first: matching prefix or any available for raw slug
         const primaryMatchesId = primarySource && hasSourcePrefix && primarySource.getStreamingLinks;
         if (primaryMatchesId && !sourcesToTry.includes(primarySource!)) {
             sourcesToTry.push(primarySource!);

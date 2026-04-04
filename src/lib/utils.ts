@@ -48,7 +48,7 @@ export function isValidEpisodeCount(n: number | undefined | null): boolean {
  * The backend's extractRawId handles prefixed IDs transparently, so raw slugs work.
  */
 const KNOWN_PREFIXES = [
-  'hianime-', 'animepahe-', 'animekai-',
+  'animepahe-', 'animekai-',
   '9anime-', 'aniwave-', 'aniwatch-',
   'gogoanime-', 'consumet-', 'zoro-', 'animesuge-',
   'kaido-', 'anix-', 'kickassanime-', 'yugenanime-', 'animixplay-',

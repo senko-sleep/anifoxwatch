@@ -6,7 +6,7 @@
  *   API_BASE=http://localhost:3001 node server/testing/test-100-sources.js
  *   npm run test:stream  (from server dir)
  *
- * Backend tries HiAnimeDirect → HiAnime → 9Anime → Kaido for any slug.
+ * Backend tries AnimeKai → 9Anime → Consumet → other registered sources for slugs.
  */
 
 const API_BASE = process.env.API_BASE || process.env.API_URL || 'http://localhost:3001';
@@ -32,7 +32,7 @@ const TEST_EPISODE_IDS = [
 ];
 
 const DOMAINS_TO_CHECK = [
-  'https://hianimez.to',
+  'https://aniwatchtv.to',
   'https://9anime.lu',
   'https://aniwave.to',
   'https://kaido.to',

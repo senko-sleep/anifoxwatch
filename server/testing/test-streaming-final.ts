@@ -4,7 +4,7 @@
  */
 
 import axios from 'axios';
-import { HiAnimeDirectSource } from '../src/sources/hianime-direct-source.js';
+import { AnimeKaiSource } from '../src/sources/animekai-source.js';
 
 interface TestResult {
     anime: string;
@@ -48,7 +48,7 @@ async function validateStreamUrl(url: string, headers?: Record<string, string>):
     }
 }
 
-async function testAnimeStreaming(source: HiAnimeDirectSource, animeId: string, animeName: string): Promise<TestResult> {
+async function testAnimeStreaming(source: AnimeKaiSource, animeId: string, animeName: string): Promise<TestResult> {
     const result: TestResult = {
         anime: animeName,
         episodeId: '',
@@ -58,7 +58,7 @@ async function testAnimeStreaming(source: HiAnimeDirectSource, animeId: string, 
 
     try {
         // Get episodes
-        const episodes = await source.getEpisodes(`hianime-${animeId}`);
+        const episodes = await source.getEpisodes(animeId);
         if (episodes.length === 0) {
             result.error = 'No episodes found';
             return result;
@@ -67,7 +67,7 @@ async function testAnimeStreaming(source: HiAnimeDirectSource, animeId: string, 
         result.episodeId = episodes[0].id || '';
 
         // Get streaming links
-        const streamData = await source.getStreamingLinks(result.episodeId, 'hd-2', 'sub');
+        const streamData = await source.getStreamingLinks(result.episodeId, undefined, 'sub');
 
         if (streamData.sources.length === 0) {
             result.error = 'No streaming sources found';
@@ -96,7 +96,7 @@ async function main() {
     console.log('='.repeat(70));
     console.log('\nThis test validates that streaming URLs are actually accessible.\n');
 
-    const source = new HiAnimeDirectSource();
+    const source = new AnimeKaiSource();
 
     // Health check first
     console.log('📍 Health Check...');
@@ -110,20 +110,29 @@ async function main() {
 
     // Test multiple anime
     const testCases = [
-        { id: 'one-piece-100', name: 'One Piece' },
-        { id: 'naruto-shippuuden-355', name: 'Naruto Shippuden' },
-        { id: 'kimetsu-no-yaiba-47', name: 'Demon Slayer' },
-        { id: 'shingeki-no-kyojin-112', name: 'Attack on Titan' },
-        { id: 'jujutsu-kaisen-2nd-season-18413', name: 'Jujutsu Kaisen S2' },
+        { id: '', q: 'one piece', name: 'One Piece' },
+        { id: '', q: 'naruto', name: 'Naruto' },
     ];
 
     const results: TestResult[] = [];
 
     for (const testCase of testCases) {
         console.log(`\n📍 Testing: ${testCase.name}`);
-        console.log(`   Anime ID: ${testCase.id}`);
+        const sr = await source.search(testCase.q, 1);
+        const aid = sr.results[0]?.id;
+        if (!aid) {
+            results.push({
+                anime: testCase.name,
+                episodeId: '',
+                server: 'hd-2',
+                success: false,
+                error: 'No search result',
+            });
+            continue;
+        }
+        console.log(`   Anime ID: ${aid}`);
 
-        const result = await testAnimeStreaming(source, testCase.id, testCase.name);
+        const result = await testAnimeStreaming(source, aid, testCase.name);
         results.push(result);
 
         if (result.success) {

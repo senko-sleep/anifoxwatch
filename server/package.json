@@ -15,7 +15,6 @@
         "deploy:cloudflare": "wrangler deploy",
         "dev:cloudflare": "wrangler dev",
         "test": "vitest",
-        "test:hianime-city": "tsx testing/test-hianime-city.ts",
         "test:hero": "tsx testing/test-hero-spotlight.ts",
         "test:cloudrun": "tsx testing/test-cloudrun.ts",
         "test:smoke": "tsx testing/test-cloudrun.ts",

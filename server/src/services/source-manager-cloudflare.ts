@@ -4,7 +4,7 @@
  * No Node.js dependencies (axios, http.Agent, aniwatch package) required
  */
 
-import { CloudflareHiAnimeAPISource } from '../sources/cloudflare-hianime-api-source.js';
+import { CloudflareConsumetFetchSource } from '../sources/cloudflare-consumet-fetch-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth } from '../types/anime.js';
 import { SourceRequestOptions } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
@@ -30,13 +30,12 @@ interface StreamingSource {
  */
 export class CloudflareSourceManager {
     private sources: Map<string, StreamingSource> = new Map();
-    private primarySource: string = 'CloudflareHiAnimeAPI';
+    private primarySource: string = 'CloudflareConsumet';
     private healthStatus: Map<string, SourceHealth> = new Map();
-    private sourceOrder: string[] = ['CloudflareHiAnimeAPI'];
+    private sourceOrder: string[] = ['CloudflareConsumet'];
 
     constructor() {
-        // Register Cloudflare-compatible sources
-        this.registerSource(new CloudflareHiAnimeAPISource());
+        this.registerSource(new CloudflareConsumetFetchSource());
 
         logger.info(`[CloudflareSourceManager] Initialized with ${this.sources.size} sources`, undefined, 'CloudflareSourceManager');
     }
@@ -111,11 +110,7 @@ export class CloudflareSourceManager {
         return this.sources.get(this.primarySource) || null;
     }
 
-    private getStreamingSource(id: string): StreamingSource | null {
-        // For hianime- prefixed IDs, use CloudflareHiAnimeAPI
-        if (id.toLowerCase().startsWith('hianime-')) {
-            return this.sources.get('CloudflareHiAnimeAPI') || null;
-        }
+    private getStreamingSource(_id: string): StreamingSource | null {
         return this.getAvailableSource();
     }
 

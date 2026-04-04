@@ -63,12 +63,8 @@ const CDN_CONFIGS: Array<{
         ]
     },
     {
-        pattern: /hianime/i,
-        configs: [
-            { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
-            { referer: 'https://hianime.city/', origin: 'https://hianime.city' },
-            { referer: 'https://hianime.pe/', origin: 'https://hianime.pe' }
-        ]
+        pattern: /aniwatchtv|megacloud|rapid-cloud/i,
+        configs: [{ referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }],
     },
     {
         pattern: /watchhentai/i,
@@ -88,7 +84,7 @@ function getCdnConfigs(hostname: string): Array<{ referer: string; origin?: stri
             return config.configs;
         }
     }
-    // Default config (aniwatchtv.to after hianime.city shutdown)
+    // Default embed referer
     return [
         { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
         { referer: 'https://9anime.lu/', origin: 'https://9anime.lu' }
@@ -539,7 +535,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
                 { referer: 'https://kwik.cx/', origin: 'https://kwik.cx' },
                 { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
-                { referer: 'https://hianime.nz/', origin: 'https://hianime.nz' },
+                { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
             ];
             for (const e of extras) {
                 if (!refererCombos.some((c) => c.referer === e.referer)) {

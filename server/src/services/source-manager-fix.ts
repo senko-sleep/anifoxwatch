@@ -30,7 +30,7 @@ export async function getAnimeByGenreAniList(this: any, genre: string, page: num
                             genres: anime.genres,
                             rating: anime.rating || bestMatch.rating,
                             streamingId: bestMatch.id,
-                            source: 'HiAnimeDirect'
+                            source: 'AnimeKai'
                         };
                     }
                     

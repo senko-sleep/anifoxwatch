@@ -258,11 +258,11 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'megacloud': { referer: 'https://megacloud.blog/' },
             'vidcloud': { referer: 'https://vidcloud9.com/' },
             'rapid-cloud': { referer: 'https://rapid-cloud.co/' },
-            'netmagcdn': { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
-            'biananset': { referer: 'https://hianimez.to/', origin: 'https://hianimez.to' },
-            'anicdnstream': { referer: 'https://hianimez.to/' },
+            'netmagcdn': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
+            'biananset': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
+            'anicdnstream': { referer: 'https://aniwatchtv.to/' },
             'gogocdn': { referer: 'https://gogoanime.run/' },
-            'default': { referer: 'https://hianimez.to/' }
+            'default': { referer: 'https://aniwatchtv.to/' }
         };
 
         const matchedConfig = Object.entries(cdnConfig).find(([key]) => domain.includes(key));

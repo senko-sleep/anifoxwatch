@@ -14,7 +14,9 @@ RUN npx tsc --project tsconfig.json
 
 FROM node:20-slim
 
-RUN apt-get update && apt-get install -y \
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq \
+    && apt-get install -qq -y --no-install-recommends \
     chromium \
     fonts-ipafont-gothic \
     fonts-wqy-zenhei \
@@ -23,7 +25,6 @@ RUN apt-get update && apt-get install -y \
     fonts-freefont-ttf \
     libxss1 \
     dumb-init \
-    --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true

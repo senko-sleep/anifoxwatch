@@ -10,7 +10,7 @@ const TIMEOUT = 30000;
 
 // All 28 sources
 const ALL_SOURCES = [
-  'HiAnimeDirect', 'HiAnime', 'Zoro', 'AnimePahe', 'AnimeSuge', 'Kaido', 'Anix',
+  'AnimeKai', 'Zoro', 'AnimePahe', 'AnimeSuge', 'Kaido', 'Anix',
   'Gogoanime', '9Anime', 'Aniwave', 'Aniwatch', 'KickassAnime', 'YugenAnime',
   'AniMixPlay', 'AnimeFox', 'AnimeDAO', 'AnimeFLV', 'AnimeSaturn', 'Crunchyroll',
   'AnimeOnsen', 'Marin', 'AnimeHeaven', 'AnimeKisa', 'AnimeOwl', 'AnimeLand',
