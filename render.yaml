@@ -1,10 +1,14 @@
+# Use Docker for the API (not Native Node). Chromium is installed for Puppeteer/9Anime.
+# Build context must be repo root (.) so server/patches copies work — even if Dockerfile path is ./server/Dockerfile.
+# Free tier "spins down" — first request may take ~50s+ (RENDER-DEPLOY.txt).
+
 services:
-  # ── Backend API (Docker — required for Chromium/Puppeteer) ────────────────
+  # ── Backend API (Docker — Chromium for Puppeteer) ─────────────────────────
   - type: web
-    name: anistream-api
+    name: anifoxwatch
     env: docker
-    dockerfilePath: ./server/Dockerfile
-    dockerContext: ./server
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     region: oregon
     plan: free
     healthCheckPath: /health
@@ -29,6 +33,6 @@ services:
       - key: NODE_ENV
         value: production
       # After the API service is first deployed, copy its URL here:
-      # e.g. https://anistream-api.onrender.com
+      # Must match the Docker web service URL above (same host as API).
       - key: VITE_API_URL
         value: https://anifoxwatch-w2xk.onrender.com

@@ -1,7 +1,5 @@
-# Same image as /Dockerfile. Build context MUST be the repo root (parent of server/):
-#   docker build -f server/Dockerfile .
-#   docker build -f Dockerfile .
-# (If context is ./server, COPY server/... will fail.)
+# API image — Docker build context must be the REPO ROOT (monorepo), not ./server.
+# Render: Dockerfile path ./Dockerfile, context .   OR path ./server/Dockerfile, context still .
 
 FROM node:20-slim AS builder
 

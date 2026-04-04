@@ -1,0 +1,10 @@
+# Root Docker context (Render): keep uploads small
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.env
+.env.*
+*.log
+**/.wrangler

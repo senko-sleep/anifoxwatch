@@ -31,8 +31,10 @@ if (-not $ProjectId) {
     exit 1
 }
 
-$ServerRoot = Split-Path -Parent $PSScriptRoot
-Set-Location $ServerRoot
+# Dockerfile COPY server/... requires build context = repo root (not server/).
+$ServerDir = Split-Path -Parent $PSScriptRoot
+$RepoRoot = Split-Path -Parent $ServerDir
+Set-Location $RepoRoot
 
 Write-Host "Project: $ProjectId | Region: $Region | Service: $Service" -ForegroundColor Cyan
 Write-Host "Enabling required APIs (safe to re-run)..." -ForegroundColor Gray

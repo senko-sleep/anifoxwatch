@@ -1,0 +1,21 @@
+DEPLOY API ON RENDER (simple)
+
+Problem you had
+  • "Node" free Web Service runs `tsx` with NO Chromium → Puppeteer (9Anime) often fails.
+  • Free tier sleeps ~50s → first request can time out if the app only waits ~45s.
+
+Fix (what you should do in the Render dashboard)
+  1. Open your API service (e.g. anifoxwatch).
+  2. Settings → switch environment from "Node" to "Docker" (or delete this service and create a NEW Web Service from Blueprint / Docker).
+  3. If Docker manually:
+     • Docker build context: .  (repo root — REQUIRED so server/patches is found)
+     • Dockerfile path: Dockerfile  OR  server/Dockerfile  (same recipe; both need context .)
+  4. Start command: leave EMPTY (the Dockerfile CMD already runs: node dist/index.js)
+  5. Health check path: /health
+  6. Env: PORT=8080, NODE_ENV=production, CORS_ORIGIN=*
+
+Optional
+  • "Always on" or a cron job GET https://yourservice.onrender.com/health every 10 min → avoids cold sleep (paid / external ping).
+  • This repo includes render.yaml — you can use Render "Blueprint" from Git for the same Docker setup.
+
+After Docker deploy, Puppeteer uses /usr/bin/chromium from the image (same idea as local).

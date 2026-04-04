@@ -453,10 +453,10 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         try {
-            // Streaming requests can take longer due to cross-source fallbacks (up to 20-30s)
-            // Use custom fetch rather than the default timeout-constrained fetchWithRetry
+            // Streaming: slow fallbacks + Render free cold start (~50s) — avoid aborting too early.
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 45000);
+            const streamTimeoutMs = this.apiBase().includes('onrender.com') ? 120_000 : 60_000;
+            const timeoutId = setTimeout(() => controller.abort(), streamTimeoutMs);
             
             const response = await fetch(`${this.apiBase()}/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`, {
                 signal: controller.signal,
