@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getApiConfig } from '@/lib/api-config';
+import { isPlaceholderAnimeDescription } from '@/lib/utils';
 
 /**
  * Multi-source hero anime fetcher with fallbacks:
@@ -53,14 +54,15 @@ interface CachedHeroData {
   version: number;
 }
 
-const CACHE_KEY = 'anistream_hero_v3';
+const CACHE_KEY = 'anistream_hero_v6';
 const CACHE_TTL = 30 * 60 * 1000;
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 6;
 
-// Clear all old cache keys on load
+// Clear legacy cache keys on load
 try {
   localStorage.removeItem('anistream_hero_cache');
   localStorage.removeItem('anistream_hero_cache_v2');
+  localStorage.removeItem('anistream_hero_v3');
 } catch { /* ignore */ }
 
 function getCachedData(): HeroAnime[] | null {
@@ -86,7 +88,7 @@ function setCachedData(anime: HeroAnime[], source: string): void {
 }
 
 function cleanDescription(desc: string): string {
-  return desc
+  const t = desc
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
@@ -97,13 +99,15 @@ function cleanDescription(desc: string): string {
     .replace(/&#039;/g, "'")
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+  if (isPlaceholderAnimeDescription(t)) return '';
+  return t;
 }
 
 // ─── AniList GraphQL ────────────────────────────────────────────────────────
 
 const ANILIST_QUERY = `{
-  Page(page:1,perPage:25){
-    media(type:ANIME,sort:TRENDING_DESC,isAdult:false){
+  Page(page:1,perPage:50){
+    media(type:ANIME,sort:POPULARITY_DESC,isAdult:false){
       id
       idMal
       title{english romaji native}
@@ -126,11 +130,34 @@ const ANILIST_QUERY = `{
   }
 }`;
 
+function hasHttpBanner(m: Record<string, unknown>): boolean {
+  const b = m.bannerImage;
+  return typeof b === 'string' && /^https?:\/\//i.test(b.trim());
+}
+
+async function fetchJikanSynopsis(malId: number): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/full`);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: { synopsis?: string | null } };
+    const s = json.data?.synopsis;
+    if (typeof s !== 'string') return null;
+    const t = s.replace(/\s*\[Written by[^\]]*\]\s*$/i, '').replace(/\s+/g, ' ').trim();
+    return t.length >= 55 ? t.slice(0, 1200) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchFromAniList(): Promise<HeroAnime[]> {
   const response = await fetch('https://graphql.anilist.co', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({ query: ANILIST_QUERY })
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'User-Agent': 'AniStreamHub/1.0',
+    },
+    body: JSON.stringify({ query: ANILIST_QUERY }),
   });
 
   const json = await response.json();
@@ -141,25 +168,63 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
   }
 
   const media: Record<string, unknown>[] = json?.data?.Page?.media || [];
+  const candidates = media.filter(hasHttpBanner);
+  candidates.sort((a, b) => ((b.popularity as number) || 0) - ((a.popularity as number) || 0));
 
-  return media
-    .filter((m: Record<string, unknown>) => {
-      const desc = m.description as string | null;
-      return m.bannerImage && desc && desc.length > 50;
-    })
-    .map((m: Record<string, unknown>) => ({
+  const out: HeroAnime[] = [];
+  let jikanCalls = 0;
+
+  for (const m of candidates) {
+    if (out.length >= 20) break;
+
+    let desc = cleanDescription((m.description as string) || '');
+    const idMal = m.idMal != null ? Number(m.idMal) : null;
+
+    if (isPlaceholderAnimeDescription(desc) && idMal != null && Number.isFinite(idMal) && jikanCalls < 14) {
+      jikanCalls += 1;
+      await new Promise((r) => setTimeout(r, 380));
+      const j = await fetchJikanSynopsis(idMal);
+      if (j) desc = j;
+    }
+
+    if (isPlaceholderAnimeDescription(desc) || desc.length < 45) {
+      continue;
+    }
+
+    out.push({
       ...(m as unknown as HeroAnime),
-      description: cleanDescription(m.description as string),
+      description: desc,
       source: 'anilist' as const,
-    }))
-    .slice(0, 20);
+    });
+  }
+
+  return out;
+}
+
+async function fetchFromHeroSpotlightAPI(): Promise<HeroAnime[]> {
+  const { baseUrl } = getApiConfig();
+  const url = baseUrl ? `${baseUrl.replace(/\/$/, '')}/api/anime/hero-spotlight` : '/api/anime/hero-spotlight';
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`hero-spotlight HTTP ${response.status}`);
+  }
+  const json = (await response.json()) as { results?: HeroAnime[] };
+  const results = json.results;
+  if (!Array.isArray(results) || results.length === 0) {
+    throw new Error('hero-spotlight empty');
+  }
+  return results.map((a) => ({
+    ...a,
+    description: cleanDescription(a.description || ''),
+  }));
 }
 
 // ─── Local API fallback ─────────────────────────────────────────────────────
 
 async function fetchFromLocalAPI(): Promise<HeroAnime[]> {
   const baseUrl = getApiConfig().baseUrl;
-  const response = await fetch(`${baseUrl}/api/anime/trending?limit=25`);
+  const prefix = baseUrl ? `${baseUrl.replace(/\/$/, '')}` : '';
+  const response = await fetch(`${prefix}/api/anime/trending?limit=25`);
   if (!response.ok) throw new Error(`Local API ${response.status}`);
   const data = await response.json();
   const list: Record<string, unknown>[] = data.results || data || [];
@@ -170,9 +235,14 @@ async function fetchFromLocalAPI(): Promise<HeroAnime[]> {
       id: parseInt(a.id as string) || Math.floor(Math.random() * 1e6),
       idMal: null,
       title: { english: a.title as string, romaji: a.title as string, native: (a.titleJapanese as string) || null },
-      bannerImage: (a.banner || a.cover || a.image) as string,
+      bannerImage: typeof a.banner === 'string' && /^https?:\/\//i.test(a.banner.trim())
+        ? (a.banner as string)
+        : ((a.cover || a.image) as string),
       coverImage: { extraLarge: (a.cover || a.image) as string, large: (a.image) as string, color: null },
-      description: (a.description as string) || 'Watch this trending anime now!',
+      description: (() => {
+        const d = cleanDescription((a.description as string) || '');
+        return isPlaceholderAnimeDescription(d) ? '' : d;
+      })(),
       genres: (a.genres as string[]) || [],
       averageScore: a.rating ? (a.rating as number) * 10 : null,
       popularity: 0,
@@ -193,19 +263,33 @@ async function fetchFromLocalAPI(): Promise<HeroAnime[]> {
 // ─── Orchestrator ───────────────────────────────────────────────────────────
 
 async function fetchHeroAnime(): Promise<HeroAnime[]> {
-  // Try AniList
+  // 1) Server: AniList widescreen banners + Jikan synopsis when needed (best quality)
+  try {
+    const data = await fetchFromHeroSpotlightAPI();
+    if (data.length > 0) {
+      console.log(
+        `[Hero] ✅ ${data.length} from /api/anime/hero-spotlight (${data.filter((d) => d.trailer?.id).length} w/ trailers)`
+      );
+      setCachedData(data, 'hero-spotlight');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] hero-spotlight API failed, trying direct AniList:', err);
+  }
+
+  // 2) Browser: AniList + optional Jikan (same rules: real banner URL + real synopsis)
   try {
     const data = await fetchFromAniList();
     if (data.length > 0) {
-      console.log(`[Hero] ✅ ${data.length} anime from AniList (${data.filter(d => d.trailer?.id).length} with trailers)`);
+      console.log(`[Hero] ✅ ${data.length} anime from AniList direct (${data.filter((d) => d.trailer?.id).length} w/ trailers)`);
       setCachedData(data, 'AniList');
       return data;
     }
   } catch (err) {
-    console.warn('[Hero] AniList failed, trying fallback:', err);
+    console.warn('[Hero] AniList direct failed, trying local trending:', err);
   }
 
-  // Fallback
+  // 3) Local streaming catalog (banner may be cover-only; last resort)
   try {
     const data = await fetchFromLocalAPI();
     if (data.length > 0) {

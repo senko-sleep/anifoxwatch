@@ -186,10 +186,13 @@ export function isPlaceholderAnimeDescription(raw: string | undefined | null): b
   if (raw == null || typeof raw !== 'string') return true;
   const t = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   if (t.length === 0) return true;
-  const low = t.toLowerCase();
+  const low = t.toLowerCase().replace(/[.…]+$/g, '').trim();
   if (low.includes('no description available')) return true;
+  if (low === 'no description' || low.startsWith('no description ')) return true;
   if (low.includes('could not fetch description')) return true;
+  if (low === 'n/a' || low === 'n/a.' || low === 'tba' || low === 'tbd') return true;
   if (low === 'hentai video') return true;
+  if (low.includes('trending title from our catalog')) return true;
   return false;
 }
 

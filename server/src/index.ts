@@ -121,6 +121,7 @@ app.get('/api', (_req: Request, res: Response) => {
                 search: 'GET /api/anime/search?q={query}&page={page}&source={source}',
                 searchAll: 'GET /api/anime/search-all?q={query}&page={page}',
                 trending: 'GET /api/anime/trending?page={page}&source={source}',
+                heroSpotlight: 'GET /api/anime/hero-spotlight — AniList banners + synopsis (Jikan fill-in)',
                 latest: 'GET /api/anime/latest?page={page}&source={source}',
                 topRated: 'GET /api/anime/top-rated?page={page}&limit={limit}&source={source}',
                 details: 'GET /api/anime/:id',

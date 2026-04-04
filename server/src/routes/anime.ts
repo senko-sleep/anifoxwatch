@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
 import { anilistService } from '../services/anilist-service.js';
+import { getHeroSpotlightCached, invalidateHeroSpotlightCache } from '../services/hero-spotlight-service.js';
 import { logger, createRequestContext, PerformanceTimer } from '../utils/logger.js';
 
 const router = Router();
@@ -107,6 +108,33 @@ router.get('/trending', async (req: Request, res: Response): Promise<void> => {
     } catch (error) {
         console.error('Trending error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * @route GET /api/anime/hero-spotlight
+ * Home hero: AniList widescreen banners + synopsis (Jikan when AniList text is short).
+ * Query refresh=1 bypasses server cache.
+ */
+router.get('/hero-spotlight', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
+        if (refresh) {
+            invalidateHeroSpotlightCache();
+        }
+        const results = await getHeroSpotlightCached();
+        res.set('Cache-Control', 'public, max-age=300');
+        const malOn = Boolean(
+            process.env.MAL_CLIENT_ID?.trim() || process.env.MYANIMELIST_CLIENT_ID?.trim()
+        );
+        res.json({
+            results,
+            source: malOn ? 'anilist+jikan+mal' : 'anilist+jikan',
+            count: results.length,
+        });
+    } catch (error) {
+        logger.error('Hero spotlight error', error as Error, {}, 'AnimeRoutes');
+        res.status(500).json({ error: 'Hero spotlight failed', results: [], count: 0 });
     }
 });
 
