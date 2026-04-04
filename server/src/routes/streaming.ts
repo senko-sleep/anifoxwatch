@@ -6,6 +6,19 @@ import { lookup } from 'dns/promises';
 
 const router = Router();
 
+/**
+ * AnimeKai (and peers) return a placeholder server named "default". Passing that to
+ * /api/stream/watch disables multi-server racing and confuses upstream APIs that expect
+ * concrete embed ids (hd-1, hd-2, vidstreaming, …). Treat it as "no preference".
+ */
+function normalizeStreamServerQuery(raw: unknown): string | undefined {
+    const v = Array.isArray(raw) ? raw[0] : raw;
+    if (typeof v !== 'string') return undefined;
+    const s = v.trim();
+    if (!s || s.toLowerCase() === 'default') return undefined;
+    return s;
+}
+
 // Known dead/unresolvable domains that should be filtered out
 const DEAD_DOMAINS = [
     'streamable.cloud',
@@ -311,7 +324,8 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         episodeId = `${episodeId}?ep=${req.query.ep}`;
     }
 
-    const { server, category, proxy: useProxy = 'true', tryAll = 'true' } = req.query;
+    const { category, proxy: useProxy = 'true', tryAll = 'true' } = req.query;
+    const server = normalizeStreamServerQuery(req.query.server);
     const requestId = (req as any).id;
     const shouldProxy = useProxy !== 'false';
     const shouldTryAll = tryAll !== 'false' && !server; // Only try all if no specific server requested

@@ -12,6 +12,9 @@
  *   - On **remote** hosts, if every CDN/upstream blocks datacenter IPs, you may get HTTP 404
  *     `No streaming sources found` — that still counts as **pass** (API + routing OK), unless you set
  *     `STREAM_TEST_STRICT=1` to require real m3u8 URLs on remote too.
+ *
+ * PowerShell: `STREAM_TEST_STRICT` persists for the session. To force relaxed remote checks:
+ *   Remove-Item Env:STREAM_TEST_STRICT -ErrorAction SilentlyContinue
  */
 
 const BASE = (process.env.API_URL ?? 'http://localhost:8080').replace(/\/$/, '');
@@ -152,28 +155,72 @@ async function testStreaming() {
     let episodeId = '';
 
     await check('Streaming – resolve anime + episode (prefer AnimeKai IDs)', async () => {
-        /** AnimeKai uses Consumet episode IDs (`$ep=`) that usually work on cloud hosts; 9anime `?ep=` needs Puppeteer and often fails on Render. */
-        const tries: { q: string; source?: string }[] = [
-            { q: 'dandadan', source: 'AnimeKai' },
-            { q: 'spy x family', source: 'AnimeKai' },
-            { q: 'one piece', source: 'AnimeKai' },
-            { q: 'naruto', source: 'AnimeKai' },
-            { q: 'chainsaw man', source: 'AnimeKai' },
-        ];
+        /**
+         * Remote/datacenter: only Consumet-style episode IDs (`$ep=`) are realistic; `?ep=` needs Puppeteer and usually fails on Render.
+         * Local dev: allow `source=AnimeKai` and any episode id format.
+         */
+        const remote = !isLocalBaseUrl(BASE);
+        const queries = ['dandadan', 'spy x family', 'one piece', 'naruto', 'chainsaw man'];
 
-        for (const { q, source } of tries) {
-            const qs = new URLSearchParams({
-                q,
-                page: '1',
-                ...(source ? { source } : {}),
-            });
+        const tryResolve = async (
+            q: string,
+            pickRow: (search: any) => { id?: string; title?: string } | undefined
+        ): Promise<string | null> => {
+            let search: any;
+            try {
+                search = await fetchJSON(
+                    `/api/anime/search?${new URLSearchParams({ q, page: '1' })}`,
+                    35_000
+                );
+            } catch {
+                return null;
+            }
+            const row = pickRow(search);
+            if (!row?.id) return null;
+
+            let data: any;
+            try {
+                data = await fetchJSON(`/api/anime/episodes?id=${encodeURIComponent(row.id)}`, 90_000);
+            } catch {
+                return null;
+            }
+            const eps = data.episodes as Array<{ id?: string; number?: number }> | undefined;
+            const ep = eps?.find((e) => e.number === 1) || eps?.[0];
+            if (!ep?.id || !eps?.length) return null;
+
+            if (remote && ep.id.includes('?ep=') && !ep.id.includes('$ep=')) return null;
+
+            animeId = row.id;
+            episodeId = ep.id;
+            const short = episodeId.length > 72 ? `${episodeId.slice(0, 72)}…` : episodeId;
+            return `anime=${animeId} (${row.title}) | ${eps.length} eps | ep1=${short}`;
+        };
+
+        if (remote) {
+            for (const q of queries) {
+                const detail = await tryResolve(q, (search) =>
+                    (search.results ?? []).find((r: any) =>
+                        String(r.id).toLowerCase().startsWith('animekai-')
+                    )
+                );
+                if (detail) return detail;
+            }
+            throw new Error(
+                'Remote: no animekai- result in aggregate search (AnimeKai likely offline). Skip strict stream or fix sources.'
+            );
+        }
+
+        const sourceTries: { q: string; source?: string }[] = queries.map((q) => ({ q, source: 'AnimeKai' }));
+
+        for (const { q, source } of sourceTries) {
+            const qs = new URLSearchParams({ q, page: '1', ...(source ? { source } : {}) });
             let search: any;
             try {
                 search = await fetchJSON(`/api/anime/search?${qs}`, 35_000);
             } catch {
                 continue;
             }
-            let row = search.results?.[0] as { id?: string; title?: string } | undefined;
+            const row = search.results?.[0] as { id?: string; title?: string } | undefined;
             if (!row?.id) continue;
 
             let data: any;
@@ -204,6 +251,8 @@ async function testStreaming() {
 
     await check('Streaming – GET /api/stream/watch', async () => {
         const paths = [
+            // AnimeKai getEpisodeServers uses name "default" — must race real servers, not pass "default" upstream
+            `/api/stream/watch/${encodeURIComponent(episodeId)}?category=sub&server=default`,
             `/api/stream/watch/${encodeURIComponent(episodeId)}?category=sub`,
             `/api/stream/watch/${encodeURIComponent(episodeId)}?category=sub&server=hd-1&tryAll=false`,
             `/api/stream/watch/${encodeURIComponent(episodeId)}?category=sub&server=hd-3&tryAll=false`,
@@ -232,7 +281,13 @@ async function testStreaming() {
 async function main() {
     console.log(`\nAniStream API smoke test`);
     console.log(`Target: ${BASE}`);
-    console.log(`Stream/watch mode: ${STRICT_STREAM ? 'STRICT (must return m3u8)' : 'RELAXED (remote 404 “no sources” allowed)'}\n`);
+    console.log(`Stream/watch mode: ${STRICT_STREAM ? 'STRICT (must return m3u8)' : 'RELAXED (remote 404 “no sources” allowed)'}`);
+    if (process.env.STREAM_TEST_STRICT === '1' && !isLocalBaseUrl(BASE)) {
+        console.log(
+            `Note: STREAM_TEST_STRICT=1 — clear it for relaxed remote: Remove-Item Env:STREAM_TEST_STRICT -ErrorAction SilentlyContinue`
+        );
+    }
+    console.log('');
 
     console.log('── Health ──────────────────────────────────────');
     await testHealth();

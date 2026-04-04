@@ -544,6 +544,14 @@ app.get('/api/anime/years', (c) => {
 // Streaming Routes
 // ==========================================
 
+/** See streaming.ts — placeholder "default" must not block hd-* fallback racing. */
+function normalizeStreamServerQuery(raw: string | undefined): string | undefined {
+    if (typeof raw !== 'string') return undefined;
+    const s = raw.trim();
+    if (!s || s.toLowerCase() === 'default') return undefined;
+    return s;
+}
+
 app.get('/api/stream/servers/:episodeId', async (c) => {
     const episodeId = decodeURIComponent(c.req.param('episodeId'));
     try {
@@ -560,7 +568,7 @@ app.get('/api/stream/servers/:episodeId', async (c) => {
 
 app.get('/api/stream/watch/:episodeId', async (c) => {
     const episodeId = decodeURIComponent(c.req.param('episodeId'));
-    const server = c.req.query('server');
+    const server = normalizeStreamServerQuery(c.req.query('server'));
     const category = c.req.query('category') as 'sub' | 'dub' | undefined;
     const tryAll = c.req.query('tryAll') !== 'false';
     const useProxy = c.req.query('proxy') !== 'false';
