@@ -1,6 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
 import * as cheerio from 'cheerio';
-import { HiAnime } from 'aniwatch';
 import type { Browser, Page } from 'puppeteer';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
@@ -20,15 +19,6 @@ export class NineAnimeSource extends BaseAnimeSource {
     name = '9Anime';
     baseUrl = 'https://9animetv.to';
     private client: AxiosInstance;
-    private scraper: HiAnime.Scraper | null = null;
-
-    private getScraper(): HiAnime.Scraper {
-        if (!this.scraper) {
-            // @ts-expect-error - aniwatch scraper constructor (aniwatchtv.to after hianime.city shutdown)
-            this.scraper = new HiAnime.Scraper('https://aniwatchtv.to');
-        }
-        return this.scraper;
-    }
 
     // Smart caching with TTL
     private cache: Map<string, { data: any; expires: number }> = new Map();
@@ -39,12 +29,6 @@ export class NineAnimeSource extends BaseAnimeSource {
         stream: 2 * 60 * 60 * 1000, // 2 hours
         servers: 60 * 60 * 1000,    // 1 hour
     };
-
-    // HiAnime API instances for streaming fallback
-    private hianimeApis = [
-        'http://localhost:4000',
-        'https://anifoxwatch-api.anifoxwatch.workers.dev',
-    ];
 
     constructor() {
         super();
@@ -582,92 +566,75 @@ export class NineAnimeSource extends BaseAnimeSource {
     }
 
     async getStreamingLinks(episodeId: string, server: string = 'hd-1', category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
-        const cacheKey = `9anime-stream:${episodeId}:${server}:${category}`;
+        const cacheKey = `9anime-stream:${episodeId}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
 
+        if (!episodeId.includes('?ep=')) {
+            return { sources: [], subtitles: [] };
+        }
+
+        const [animeSlug, epPart] = episodeId.split('?');
+        const epNum = epPart?.replace('ep=', '')?.trim() || '';
+        if (!animeSlug || !epNum) return { sources: [], subtitles: [] };
+
         try {
-            // 1) Try native 9anime extraction (Puppeteer) when episodeId is slug?ep=id — works with 9anime episode IDs
-            if (episodeId.includes('?ep=')) {
-                const [animeSlug, epPart] = episodeId.split('?');
-                const epNum = epPart?.replace('ep=', '')?.trim() || '';
-                if (animeSlug && epNum) {
-                    try {
-                        const result = await Promise.race([
-                            streamExtractor.extractFrom9Anime(animeSlug, epNum),
-                            new Promise<{ success: false }>((_, rej) =>
-                                setTimeout(() => rej(new Error('Stream extractor timeout')), 22000)
-                            )
-                        ]).catch(() => ({ success: false, streams: [] as { url: string; quality: string; type: string }[] }));
-                        if (result.success && result.streams?.length > 0) {
-                            const streamData: StreamingData = {
-                                sources: result.streams.map((s) => ({
-                                    url: s.url,
-                                    quality: this.normalizeQuality(s.quality || 'auto') as 'auto' | '360p' | '480p' | '720p' | '1080p',
-                                    isM3U8: s.type === 'hls' || s.url?.includes('.m3u8'),
-                                })),
-                                subtitles: (result as { subtitles?: { url: string; lang: string }[] }).subtitles?.map((sub) => ({
-                                    url: sub.url,
-                                    lang: sub.lang,
-                                    label: sub.lang
-                                })) || [],
-                                headers: { Referer: 'https://9animetv.to/' },
-                                source: this.name
-                            };
-                            logger.info(`9Anime native extractor got ${streamData.sources.length} sources for ${episodeId}`, undefined, this.name);
-                            this.setCache(cacheKey, streamData, this.cacheTTL.stream);
-                            this.handleSuccess();
-                            return streamData;
-                        }
-                    } catch {
-                        // Fall through to aniwatch scraper
-                    }
-                }
+            // 1) Try native 9anime extraction via Puppeteer — this is what dev uses
+            const result9 = await Promise.race([
+                streamExtractor.extractFrom9Anime(animeSlug, epNum),
+                new Promise<{ success: false; streams: never[] }>((_, rej) =>
+                    setTimeout(() => rej(new Error('9anime extractor timeout')), 22000)
+                )
+            ]).catch(() => ({ success: false as const, streams: [] as { url: string; quality: string; type: string }[] }));
+
+            if (result9.success && result9.streams?.length > 0) {
+                const streamData = this.buildStreamData(result9, 'https://9animetv.to/');
+                logger.info(`9Anime Puppeteer got ${streamData.sources.length} sources for ${episodeId}`, undefined, this.name);
+                this.setCache(cacheKey, streamData, this.cacheTTL.stream);
+                this.handleSuccess();
+                return streamData;
             }
 
-            // 2) Fallback: aniwatch scraper (aniwatchtv.to) — same slug?ep= format may work for shared content
-            logger.info(`Using aniwatch scraper for ${episodeId}`, undefined, this.name);
-            const serverPriority = [server, 'hd-2', 'hd-1', 'hd-3'].filter((v, i, a) => a.indexOf(v) === i);
-            for (const srv of serverPriority) {
-                try {
-                    const data = await this.getScraper().getEpisodeSources(
-                        episodeId,
-                        srv as HiAnime.AnimeServers,
-                        category
-                    );
-                    if (data.sources && data.sources.length > 0) {
-                        const rawData = data as Record<string, unknown>;
-                        const streamData: StreamingData = {
-                            sources: (data.sources as Array<{ url: string; quality?: string; isM3U8?: boolean }>).map((s): VideoSource => ({
-                                url: s.url,
-                                quality: this.normalizeQuality(s.quality || 'auto'),
-                                isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-                            })),
-                            subtitles: ((rawData.tracks || rawData.subtitles || []) as Array<{ url: string; lang?: string; language?: string; label?: string }>)
-                                .filter((t) => t.lang !== 'thumbnails')
-                                .map((sub) => ({
-                                    url: sub.url,
-                                    lang: sub.lang || sub.language || 'Unknown',
-                                    label: sub.label || sub.lang || sub.language
-                                })),
-                            headers: (rawData.headers as Record<string, string>) || { 'Referer': 'https://megacloud.blog/' },
-                            source: this.name
-                        };
-                        logger.info(`Scraper got ${streamData.sources.length} sources for ${episodeId} via ${srv}`, undefined, this.name);
-                        this.setCache(cacheKey, streamData, this.cacheTTL.stream);
-                        this.handleSuccess();
-                        return streamData;
-                    }
-                } catch {
-                    // Try next server
-                }
+            // 2) Fallback: kaido.to (same slug/ep format, different domain — may not be IP-blocked)
+            logger.info(`9animetv.to failed for ${episodeId}, trying kaido.to`, undefined, this.name);
+            const resultKaido = await Promise.race([
+                streamExtractor.extractFromKaido(animeSlug, epNum),
+                new Promise<{ success: false; streams: never[] }>((_, rej) =>
+                    setTimeout(() => rej(new Error('kaido extractor timeout')), 22000)
+                )
+            ]).catch(() => ({ success: false as const, streams: [] as { url: string; quality: string; type: string }[] }));
+
+            if (resultKaido.success && resultKaido.streams?.length > 0) {
+                const streamData = this.buildStreamData(resultKaido, 'https://kaido.to/');
+                logger.info(`Kaido.to Puppeteer got ${streamData.sources.length} sources for ${episodeId}`, undefined, this.name);
+                this.setCache(cacheKey, streamData, this.cacheTTL.stream);
+                this.handleSuccess();
+                return streamData;
             }
 
+            logger.warn(`9Anime: no sources found for ${episodeId} from 9animetv.to or kaido.to`, undefined, this.name);
             return { sources: [], subtitles: [] };
         } catch (error) {
             this.handleError(error as any, 'getStreamingLinks');
             return { sources: [], subtitles: [] };
         }
+    }
+
+    private buildStreamData(result: { streams: { url: string; quality: string; type: string }[]; subtitles?: { url: string; lang: string }[] }, referer: string): StreamingData {
+        return {
+            sources: result.streams.map((s) => ({
+                url: s.url,
+                quality: this.normalizeQuality(s.quality || 'auto') as VideoSource['quality'],
+                isM3U8: s.type === 'hls' || s.url?.includes('.m3u8'),
+            })),
+            subtitles: (result.subtitles || []).map((sub) => ({
+                url: sub.url,
+                lang: sub.lang,
+                label: sub.lang
+            })),
+            headers: { Referer: referer },
+            source: this.name
+        };
     }
 
     async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
