@@ -8,6 +8,7 @@ import {
     ConsumetSource,
     AnimeFLVSource,
 } from '../sources/index.js';
+import { CloudflareHiAnimeAPISource } from '../sources/cloudflare-hianime-api-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
@@ -61,7 +62,7 @@ export class SourceManager {
     private sourceMetadata: Map<string, SourceMetadata> = new Map();
     
     private sourceOrder: string[] = [
-        'AnimeKai', 'AnimePahe', '9Anime', 'Consumet', 'AnimeFLV',
+        'AnimeKai', 'CloudflareHiAnimeAPI', 'AnimePahe', '9Anime', 'Consumet', 'AnimeFLV',
         'WatchHentai', 'Hanime'
     ];
 
@@ -74,6 +75,7 @@ export class SourceManager {
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
+        ['CloudflareHiAnimeAPI', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'high' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -107,6 +109,9 @@ export class SourceManager {
         // PRIMARY: AnimeKai — verified working HLS streams (sub + dub) via @consumet/extensions
         this.registerSource(new AnimeKaiSource());
 
+        // HTTP HiAnime proxies (Workers/Render) — works when Puppeteer/consumet fail on datacenter IPs
+        this.registerSource(new CloudflareHiAnimeAPISource(process.env.HIANIME_API_URL));
+
         // BACKUP: AnimePahe — @consumet/extensions
         this.registerSource(new AnimePaheDirectSource());
 
@@ -130,6 +135,7 @@ export class SourceManager {
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
         this.sourceRateLimits.set('Consumet', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('CloudflareHiAnimeAPI', { limit: 100, resetTime: 60000 });
 
         // Start health monitoring and perform initial health check
         this.startHealthMonitor();
@@ -804,6 +810,7 @@ export class SourceManager {
             'AnimePahe': 'animepahe-',
             'AnimeKai': 'animekai-',
             '9Anime': '9anime-',
+            'CloudflareHiAnimeAPI': 'hianime-',
             'Aniwave': 'aniwave-',
             'Aniwatch': 'aniwatch-',
             'Gogoanime': 'gogoanime-',
@@ -2744,6 +2751,25 @@ export class SourceManager {
                 const match = eps.find(e => e.id === episodeId);
                 if (match) targetEpNum = match.number;
             } catch { /* ignore */ }
+        }
+
+        // Method 1b: 9anime/kaido watch shape "slug?ep=INTERNAL" — ep is NOT the display number; match listing IDs
+        if (!targetEpNum && /^[^?]+\?ep=\d+$/i.test(episodeId)) {
+            const slugOnly = episodeId.split('?')[0];
+            const nine = this.sources.get('9Anime') as StreamingSource;
+            if (nine?.getEpisodes) {
+                try {
+                    const numericSuffix = slugOnly.match(/-(\d+)$/)?.[1];
+                    if (numericSuffix) {
+                        const eps = await Promise.race([
+                            nine.getEpisodes(`9anime-${slugOnly}`, { timeout: 12_000 }),
+                            new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 12_000))
+                        ]);
+                        const hit = eps.find((e) => e.id === episodeId);
+                        if (hit?.number != null) targetEpNum = hit.number;
+                    }
+                } catch { /* ignore */ }
+            }
         }
 
         // Method 2: try to infer from the episode's position (ep param is internal, not the episode number)
