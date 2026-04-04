@@ -313,6 +313,15 @@ export class HiAnimeDirectSource extends BaseAnimeSource implements GenreAwareSo
      * Get HD streaming links for an episode - DEEP SCRAPING
      */
     async getStreamingLinks(episodeId: string, server: string = 'hd-2', category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
+        // Guard against empty or malformed episode IDs. The aniwatch scraper constructs a URL
+        // like https://aniwatchtv.to/watch/<episodeId> — an empty or base-URL-only ID causes
+        // the scraper to request https://aniwatchtv.to/watch/ which returns non-HTML content,
+        // resulting in "cheerio.load() expects a string" (500) and "Not Found" (404) errors.
+        if (!episodeId || !episodeId.includes('?ep=')) {
+            logger.warn(`[${this.name}] Skipping invalid episodeId: "${episodeId}"`, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        }
+
         const cacheKey = `stream:${episodeId}:${server}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;

@@ -251,6 +251,16 @@ export class AnimeKaiSource extends BaseAnimeSource {
 
             return { sources: [], subtitles: [] };
         } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            // "Server X not found" means the CDN server is no longer listed on AnimeKai's
+            // episode page (e.g. megaup was removed). This is a soft failure — AnimeKai itself
+            // is still online, it just can't serve this episode via that server. Returning empty
+            // sources here avoids incrementing the consecutive-failure counter and prevents the
+            // source from being incorrectly marked offline.
+            if (/server .* not found/i.test(err.message)) {
+                logger.warn(`AnimeKai: CDN server unavailable for ${episodeId} — ${err.message}`, undefined, this.name);
+                return { sources: [], subtitles: [] };
+            }
             this.handleError(error, 'getStreamingLinks');
             return { sources: [], subtitles: [] };
         }
