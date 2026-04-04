@@ -58,7 +58,8 @@ function configFromUrl(envApiUrl: string): ApiConfig {
  * - **Remote only:** `VITE_USE_LOCAL_API=false` and set `VITE_API_URL` to a deployed API (for `vite` alone).
  * - **`VITE_DEV_API_URL`:** absolute override (e.g. another port).
  *
- * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then Cloudflare default.
+ * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then Render default
+ * (`anifoxwatch.web.app` + other prod builds expect the Render API unless overridden).
  */
 export function getApiConfig(): ApiConfig {
     if (import.meta.env.DEV) {
@@ -104,16 +105,16 @@ export function getApiConfig(): ApiConfig {
 
     if (isFirebaseHosting) {
         return {
-            deployment: 'cloudflare',
-            baseUrl: API_DEPLOYMENTS.cloudflare,
+            deployment: 'render',
+            baseUrl: API_DEPLOYMENTS.render,
             timeout: 30000,
             retries: 3
         };
     }
 
     return {
-        deployment: 'cloudflare',
-        baseUrl: API_DEPLOYMENTS.cloudflare,
+        deployment: 'render',
+        baseUrl: API_DEPLOYMENTS.render,
         timeout: 30000,
         retries: 3
     };
