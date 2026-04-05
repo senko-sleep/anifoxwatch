@@ -2492,22 +2492,17 @@ export class SourceManager {
             }
         }
 
-        // CRITICAL: Filter out any results that don't have valid streaming IDs
-        // Users must be able to actually watch anime from browse results
+        // Filter out results with no ID at all; AniList results are allowed through
+        // since streaming is resolved lazily on the watch page.
         const streamableResults = finalResults.filter(anime => {
-            // Must have an ID
             if (!anime.id) return false;
-            
-            // Reject pure AniList IDs without streaming capability
-            if (anime.id.startsWith('anilist-') && !anime.streamingId) {
-                return false;
-            }
-            
-            // Must have a known streaming source prefix OR be from a streaming source
+            // AniList results without a pre-matched streaming ID are still valid —
+            // the watch page resolves the streaming source lazily.
+            if (anime.id.startsWith('anilist-')) return true;
+            // For non-AniList results, require a known streaming source.
             const hasStreamingPrefix = this.hasKnownSourcePrefix(anime.id);
             const isFromStreamingSource = anime.source && !['AniList', 'MAL'].includes(anime.source);
-            
-            return hasStreamingPrefix || isFromStreamingSource || anime.streamingId;
+            return hasStreamingPrefix || isFromStreamingSource || !!anime.streamingId;
         });
 
         logger.info(`[SourceManager] Browse filtered: ${finalResults.length} -> ${streamableResults.length} streamable results`);
