@@ -243,7 +243,7 @@ export const Schedule = () => {
                                     key={day.key}
                                     onClick={() => handleDayChange(day.key)}
                                     className={cn(
-                                        'px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap relative',
+                                        'px-4 py-3 rounded-lg text-sm font-medium transition-all whitespace-nowrap relative touch-manipulation',
                                         selectedDay === day.key
                                             ? 'bg-fox-orange text-white shadow-lg'
                                             : 'bg-fox-surface hover:bg-fox-surface/80 text-muted-foreground',

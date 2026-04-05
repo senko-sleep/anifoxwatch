@@ -126,6 +126,11 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  /* Remove gray tap highlight on mobile touch */
+  a, button, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
   /* Ensure images don't cause layout shifts */
   img {
     display: block;
@@ -138,6 +143,12 @@
     ::-webkit-scrollbar {
       width: 0px;
       height: 0px;
+    }
+
+    /* Momentum scrolling for all scrollable containers on iOS */
+    .overflow-x-auto,
+    .overflow-y-auto {
+      -webkit-overflow-scrolling: touch;
     }
   }
 

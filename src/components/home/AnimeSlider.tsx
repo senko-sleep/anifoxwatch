@@ -75,8 +75,8 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
           <div className="pointer-events-none absolute left-0 top-0 bottom-8 w-20 z-10 bg-gradient-to-r from-background to-transparent" />
           <button
             onClick={() => scroll('left')}
-            className="absolute left-1 top-[38%] -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#0e1018]/90 border border-white/[0.1] backdrop-blur-md flex items-center justify-center text-white/70 shadow-xl
-              opacity-0 group-hover/slider:opacity-100 hover:bg-[#161820] hover:text-white hover:border-white/20 hover:scale-105 transition-all duration-200"
+            className="absolute left-1 top-[38%] -translate-y-1/2 z-20 w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-[#0e1018]/90 border border-white/[0.1] backdrop-blur-md flex items-center justify-center text-white/70 shadow-xl
+              opacity-60 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/slider:opacity-100 hover:bg-[#161820] hover:text-white hover:border-white/20 hover:scale-105 transition-all duration-200 touch-manipulation"
             aria-label="Scroll left"
           >
             <ChevronLeft className="w-4 h-4" />
@@ -88,8 +88,8 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
           <div className="pointer-events-none absolute right-0 top-0 bottom-8 w-20 z-10 bg-gradient-to-l from-background to-transparent" />
           <button
             onClick={() => scroll('right')}
-            className="absolute right-1 top-[38%] -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#0e1018]/90 border border-white/[0.1] backdrop-blur-md flex items-center justify-center text-white/70 shadow-xl
-              opacity-0 group-hover/slider:opacity-100 hover:bg-[#161820] hover:text-white hover:border-white/20 hover:scale-105 transition-all duration-200"
+            className="absolute right-1 top-[38%] -translate-y-1/2 z-20 w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-[#0e1018]/90 border border-white/[0.1] backdrop-blur-md flex items-center justify-center text-white/70 shadow-xl
+              opacity-60 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/slider:opacity-100 hover:bg-[#161820] hover:text-white hover:border-white/20 hover:scale-105 transition-all duration-200 touch-manipulation"
             aria-label="Scroll right"
           >
             <ChevronRight className="w-4 h-4" />

@@ -174,7 +174,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
           {/* ── Content panel ─────────────────────────────────────── */}
           <div className="pointer-events-none absolute inset-0 z-[5] flex items-end lg:items-center">
-            <div className="w-full flex items-end lg:items-center justify-between px-4 pb-5 sm:px-7 sm:pb-7 lg:px-10 lg:pb-0 gap-4">
+            <div className="w-full flex items-end lg:items-center justify-between px-4 pb-10 sm:px-7 sm:pb-10 lg:px-10 lg:pb-0 gap-4">
 
               {/* Left: text content */}
               <div
@@ -263,7 +263,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                 )}
 
                 {/* Synopsis */}
-                <p className="line-clamp-2 text-[12px] leading-relaxed text-zinc-400/90 sm:line-clamp-2 sm:text-sm max-w-[44ch]">
+                <p className="line-clamp-2 text-[12px] leading-relaxed text-zinc-400/90 sm:text-sm max-w-[44ch]">
                   {synopsis}
                 </p>
 
@@ -375,20 +375,22 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
           </div>
 
           {/* Slide dots — pinned bottom-center */}
-          <div className="pointer-events-auto absolute bottom-3 inset-x-0 z-[6] flex items-center justify-center gap-1.5">
+          <div className="pointer-events-auto absolute bottom-1 inset-x-0 z-[6] flex items-center justify-center gap-0.5">
             {heroAnime.slice(0, 12).map((_, idx) => (
               <button
                 key={idx}
                 type="button"
                 onClick={() => goToSlide(idx)}
-                className={cn(
-                  'rounded-full transition-all duration-300 touch-manipulation',
+                className="p-2 touch-manipulation flex items-center justify-center"
+                aria-label={`Slide ${idx + 1}`}
+              >
+                <span className={cn(
+                  'block rounded-full transition-all duration-300',
                   idx === currentIndex
                     ? 'w-5 h-1 bg-fox-orange shadow-[0_0_5px_1px] shadow-fox-orange/60'
                     : 'w-1 h-1 bg-white/25 hover:bg-white/50'
-                )}
-                aria-label={`Slide ${idx + 1}`}
-              />
+                )} />
+              </button>
             ))}
           </div>
         </div>

@@ -652,14 +652,14 @@ const Browse = () => {
   );
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-background font-sans text-foreground">
+    <div className="h-screen h-dvh flex flex-col overflow-hidden bg-background font-sans text-foreground">
       <Navbar />
 
       {/* App Shell Body */}
       <div className="relative flex flex-1 overflow-hidden">
         {/* Desktop Sidebar */}
         <aside className="hidden lg:flex flex-col w-[200px] xl:w-[220px] shrink-0 border-r border-white/[0.06] overflow-hidden">
-          <div className="flex-1 overflow-y-auto scrollbar-thin p-4 pt-5">
+          <div className="flex-1 overflow-y-auto overscroll-contain scrollbar-thin p-4 pt-5">
             <FilterPanel />
           </div>
         </aside>
@@ -874,7 +874,7 @@ const Browse = () => {
           </div>
 
           {/* Scrollable Results Area */}
-          <div ref={resultsContainerRef} className="flex-1 overflow-y-auto scrollbar-thin">
+          <div ref={resultsContainerRef} className="flex-1 overflow-y-auto overscroll-contain scrollbar-thin">
             <div className="px-3 sm:px-4 lg:px-6 py-4">
               <div className="max-w-[1600px] mx-auto">
                 {/* Active Filters */}

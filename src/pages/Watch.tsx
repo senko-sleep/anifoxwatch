@@ -602,18 +602,18 @@ const Watch = () => {
                   size="sm"
                   onClick={handlePrevEpisode}
                   disabled={!hasPrev}
-                  className="border-white/10 hover:bg-white/5 h-8 w-8 p-0 touch-manipulation"
+                  className="border-white/10 hover:bg-white/5 h-11 w-11 p-0 touch-manipulation"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-5 h-5" />
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleNextEpisode}
                   disabled={!hasNext}
-                  className="border-white/10 hover:bg-white/5 h-8 w-8 p-0 touch-manipulation"
+                  className="border-white/10 hover:bg-white/5 h-11 w-11 p-0 touch-manipulation"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-5 h-5" />
                 </Button>
               </div>
             </div>
@@ -714,7 +714,7 @@ const Watch = () => {
                   <span className="text-white/40 font-normal ml-2 text-xs">{episodes?.length || 0}</span>
                 </h3>
               </div>
-              <div className="max-h-[50vh] overflow-y-auto p-2 space-y-1">
+              <div className="max-h-[50vh] overflow-y-auto overscroll-contain p-2 space-y-1">
                 {episodes?.map((ep) => {
                   const progress = getEpisodeProgress(ep.number);
                   return (

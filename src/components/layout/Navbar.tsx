@@ -250,7 +250,7 @@ export const Navbar = () => {
             <Button
               variant="ghost"
               size="icon"
-              className="md:hidden hover:bg-white/[0.06] w-9 h-9 rounded-lg"
+              className="md:hidden hover:bg-white/[0.06] w-11 h-11 rounded-lg touch-manipulation"
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             >
               {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
