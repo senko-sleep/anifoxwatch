@@ -54,15 +54,16 @@ interface CachedHeroData {
   version: number;
 }
 
-const CACHE_KEY = 'anistream_hero_v6';
+const CACHE_KEY = 'anistream_hero_v7';
 const CACHE_TTL = 30 * 60 * 1000;
-const CACHE_VERSION = 6;
+const CACHE_VERSION = 7;
 
 // Clear legacy cache keys on load
 try {
   localStorage.removeItem('anistream_hero_cache');
   localStorage.removeItem('anistream_hero_cache_v2');
   localStorage.removeItem('anistream_hero_v3');
+  localStorage.removeItem('anistream_hero_v6');
 } catch { /* ignore */ }
 
 function getCachedData(): HeroAnime[] | null {
@@ -105,9 +106,10 @@ function cleanDescription(desc: string): string {
 
 // ─── AniList GraphQL ────────────────────────────────────────────────────────
 
-const ANILIST_QUERY = `{
+function buildAniListQuery(sort: string, filters: string): string {
+  return `{
   Page(page:1,perPage:50){
-    media(type:ANIME,sort:POPULARITY_DESC,isAdult:false){
+    media(type:ANIME,sort:${sort},isAdult:false${filters}){
       id
       idMal
       title{english romaji native}
@@ -129,6 +131,7 @@ const ANILIST_QUERY = `{
     }
   }
 }`;
+}
 
 function hasHttpBanner(m: Record<string, unknown>): boolean {
   const b = m.bannerImage;
@@ -149,27 +152,64 @@ async function fetchJikanSynopsis(malId: number): Promise<string | null> {
   }
 }
 
-async function fetchFromAniList(): Promise<HeroAnime[]> {
+function clientRecencyScore(m: Record<string, unknown>): number {
+  const currentYear = new Date().getFullYear();
+  const year = (m.seasonYear as number) || 0;
+  const status = (m.status as string) || '';
+  let score = 0;
+  if (status === 'RELEASING') score += 100_000;
+  if (year >= currentYear) score += 50_000;
+  else if (year >= currentYear - 1) score += 20_000;
+  else if (year >= currentYear - 2) score += 5_000;
+  score += Math.min((m.popularity as number) || 0, 100_000) * 0.1;
+  return score;
+}
+
+async function fetchAniListPage(query: string): Promise<Record<string, unknown>[]> {
   const response = await fetch('https://graphql.anilist.co', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'User-Agent': 'AniStreamHub/1.0',
-    },
-    body: JSON.stringify({ query: ANILIST_QUERY }),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ query }),
   });
-
   const json = await response.json();
+  if (json.errors) throw new Error(json.errors[0]?.message || 'AniList query failed');
+  return json?.data?.Page?.media || [];
+}
 
-  if (json.errors) {
-    console.error('[Hero] AniList errors:', json.errors);
-    throw new Error(json.errors[0]?.message || 'AniList query failed');
+async function fetchFromAniList(): Promise<HeroAnime[]> {
+  const currentYear = new Date().getFullYear();
+  const recentYear = currentYear - 1;
+  const formats = '[TV,MOVIE,ONA]';
+
+  const raw: Record<string, unknown>[] = [];
+
+  const queries = [
+    buildAniListQuery('TRENDING_DESC', `,status:RELEASING,format_in:${formats}`),
+    buildAniListQuery('TRENDING_DESC', `,seasonYear_greater:${recentYear},format_in:${formats}`),
+    buildAniListQuery('POPULARITY_DESC', `,seasonYear_greater:${recentYear},format_in:${formats}`),
+    buildAniListQuery('TRENDING_DESC', ``), // global fallback
+  ];
+
+  for (const q of queries) {
+    try {
+      const chunk = await fetchAniListPage(q);
+      raw.push(...chunk);
+    } catch (e) {
+      console.warn('[Hero] AniList page failed:', e);
+    }
   }
 
-  const media: Record<string, unknown>[] = json?.data?.Page?.media || [];
-  const candidates = media.filter(hasHttpBanner);
-  candidates.sort((a, b) => ((b.popularity as number) || 0) - ((a.popularity as number) || 0));
+  // Dedupe by id
+  const seen = new Set<number>();
+  const deduped = raw.filter((m) => {
+    const id = m.id as number;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+
+  const candidates = deduped.filter(hasHttpBanner);
+  candidates.sort((a, b) => clientRecencyScore(b) - clientRecencyScore(a));
 
   const out: HeroAnime[] = [];
   let jikanCalls = 0;

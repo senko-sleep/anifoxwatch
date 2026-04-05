@@ -532,7 +532,18 @@ const Watch = () => {
   // Mobile: Normal scrollable page layout (not forced fullscreen)
   if (isMobile()) {
     return (
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="min-h-screen flex flex-col bg-background relative overflow-x-hidden">
+        {/* Cinematic Backdrop — same as desktop */}
+        {anime?.cover && (
+          <div className="absolute inset-0 z-0 opacity-15 pointer-events-none select-none overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-background/70 to-background" />
+            <img
+              src={anime.cover}
+              alt=""
+              className="w-full h-full object-cover blur-3xl scale-110"
+            />
+          </div>
+        )}
         <Navbar />
 
         <main className="flex-1 relative z-10">
@@ -583,18 +594,18 @@ const Watch = () => {
           </div>
 
           {/* Episode Nav + Title */}
-          <div className="px-4 pt-3 pb-2">
-            <div className="flex items-start justify-between gap-3">
+          <div className="px-4 pt-3 pb-2 border-b border-white/[0.04]">
+            <div className="flex items-center justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <h2 className="text-base font-bold text-white truncate">
-                  EP {currentEpisode?.number || selectedEpisodeNum}
+                <p className="text-[10px] font-medium text-fox-orange/80 uppercase tracking-widest mb-0.5 truncate">{anime?.title}</p>
+                <h2 className="text-sm font-bold text-white leading-tight truncate">
+                  Episode {currentEpisode?.number || selectedEpisodeNum}
                   {currentEpisode?.title && currentEpisode.title !== `Episode ${currentEpisode.number}` && (
-                    <span className="text-muted-foreground font-normal ml-1.5 text-sm">
+                    <span className="text-zinc-400 font-normal ml-1.5">
                       — {currentEpisode.title}
                     </span>
                   )}
                 </h2>
-                <p className="text-xs text-muted-foreground mt-0.5 truncate">{anime?.title}</p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <Button
@@ -602,25 +613,25 @@ const Watch = () => {
                   size="sm"
                   onClick={handlePrevEpisode}
                   disabled={!hasPrev}
-                  className="border-white/10 hover:bg-white/5 h-11 w-11 p-0 touch-manipulation"
+                  className="border-white/10 hover:bg-white/5 h-9 w-9 p-0 touch-manipulation"
                 >
-                  <ChevronLeft className="w-5 h-5" />
+                  <ChevronLeft className="w-4 h-4" />
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleNextEpisode}
                   disabled={!hasNext}
-                  className="border-white/10 hover:bg-white/5 h-11 w-11 p-0 touch-manipulation"
+                  className="border-white/10 hover:bg-white/5 h-9 w-9 p-0 touch-manipulation"
                 >
-                  <ChevronRight className="w-5 h-5" />
+                  <ChevronRight className="w-4 h-4" />
                 </Button>
               </div>
             </div>
           </div>
 
           {/* Streaming Controls */}
-          <div className="px-4 pb-3">
+          <div className="px-4 pb-2">
             <StreamingControls
               audioType={audioType}
               onAudioTypeChange={(type) => {
@@ -647,7 +658,7 @@ const Watch = () => {
 
           {/* About Section */}
           <div className="px-4 pb-4">
-            <div className="rounded-xl border border-white/5 bg-card/30 p-4 backdrop-blur-md">
+            <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4 backdrop-blur-sm">
               <div className="flex gap-3">
                 <img
                   src={anime?.image}
@@ -707,11 +718,11 @@ const Watch = () => {
 
           {/* Episode List */}
           <div className="px-4 pb-6">
-            <div className="rounded-xl border border-white/5 bg-card/30 backdrop-blur-md overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-                <h3 className="text-sm font-semibold text-white">
+            <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] backdrop-blur-sm overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.05]">
+                <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">
                   Episodes
-                  <span className="text-white/40 font-normal ml-2 text-xs">{episodes?.length || 0}</span>
+                  <span className="text-white/30 font-normal ml-2">{episodes?.length || 0}</span>
                 </h3>
               </div>
               <div className="max-h-[50vh] overflow-y-auto overscroll-contain p-2 space-y-1">

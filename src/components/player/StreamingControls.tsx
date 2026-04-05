@@ -102,146 +102,205 @@ export function StreamingControls({
     : servers;
 
   return (
-    <div className="p-3 sm:p-4 bg-fox-surface/30 rounded-xl space-y-3 sm:space-y-4">
-      {/* Audio Type Toggle */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">Audio</span>
-        </div>
-        
-        <div className="flex items-center gap-1 p-1 bg-background/50 rounded-lg">
-          <Button
-            variant={audioType === 'sub' ? 'default' : 'ghost'}
-            size="sm"
+    <div className="bg-fox-surface/30 rounded-xl overflow-hidden">
+      {/* Mobile: compact single-row bar */}
+      <div className="flex items-center gap-1 px-2 py-1.5 sm:hidden">
+        {/* Sub/Dub toggle */}
+        <div className="flex items-center gap-0.5 p-0.5 bg-background/40 rounded-md">
+          <button
             onClick={() => onAudioTypeChange('sub')}
             disabled={!isSubAvailable}
             className={cn(
-              "gap-1.5 sm:gap-2 h-9 sm:h-8 px-3 sm:px-3 touch-manipulation",
-              audioType === 'sub' && "bg-fox-orange hover:bg-fox-orange/90"
+              "flex items-center gap-1 h-7 px-2.5 rounded text-[11px] font-bold transition-colors touch-manipulation",
+              audioType === 'sub'
+                ? "bg-fox-orange text-white"
+                : "text-zinc-400 hover:text-white"
             )}
           >
-            <Subtitles className="w-4 h-4" />
+            <Subtitles className="w-3 h-3" />
             SUB
-          </Button>
-          
-          <Button
-            variant={audioType === 'dub' ? 'default' : 'ghost'}
-            size="sm"
+          </button>
+          <button
             onClick={() => onAudioTypeChange('dub')}
             className={cn(
-              "gap-1.5 sm:gap-2 h-9 sm:h-8 px-3 sm:px-3 touch-manipulation",
-              audioType === 'dub' && "bg-green-600 hover:bg-green-600/90",
-              !hasDubConfirmed && audioType !== 'dub' && "opacity-60"
+              "flex items-center gap-1 h-7 px-2.5 rounded text-[11px] font-bold transition-colors touch-manipulation",
+              audioType === 'dub'
+                ? "bg-green-600 text-white"
+                : cn("text-zinc-400 hover:text-white", !hasDubConfirmed && "opacity-50")
             )}
           >
-            <Mic className="w-4 h-4" />
+            <Mic className="w-3 h-3" />
             DUB
-            {hasDubConfirmed && (
-              <CheckCircle2 className="w-3 h-3 ml-0.5 text-green-300" />
-            )}
-          </Button>
+          </button>
         </div>
-      </div>
 
-      {/* Quality Selector */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Monitor className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Quality</span>
-        </div>
-        
-        <Select value={quality} onValueChange={(v) => onQualityChange(v as QualityType)}>
-          <SelectTrigger className="w-36 sm:w-40 h-9 sm:h-10 bg-background/50">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {qualities.map(q => (
-              <SelectItem key={q} value={q}>
-                <div className="flex items-center gap-2">
-                  {q === '1080p' && <Badge className="bg-fox-orange text-xs px-1">HD</Badge>}
-                  {qualityLabels[q]}
-                </div>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+        <div className="w-px h-5 bg-white/10 mx-0.5" />
 
-      {/* Server Selector */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Server className="w-4 h-4 text-muted-foreground" />
-          <span className="text-sm font-medium">Server</span>
-        </div>
-        
+        {/* Server select */}
         {serversLoading ? (
-          <Skeleton className="w-40 h-10" />
+          <Skeleton className="w-24 h-7" />
         ) : (
           <Select value={selectedServer} onValueChange={onServerChange}>
-            <SelectTrigger className="w-36 sm:w-44 h-9 sm:h-10 bg-background/50">
-              <SelectValue placeholder="Select server" />
+            <SelectTrigger className="h-7 text-[11px] bg-background/40 border-white/10 px-2 min-w-0 flex-1 max-w-[130px]">
+              <Server className="w-3 h-3 shrink-0 text-zinc-500" />
+              <SelectValue placeholder="Server" />
             </SelectTrigger>
             <SelectContent>
               {visibleServers.map(server => (
                 <SelectItem key={`${server.type}-${server.name}`} value={server.name}>
-                  <div className="flex items-center gap-2">
-                    {selectedServer === server.name && (
-                      <CheckCircle2 className="w-3 h-3 text-green-500" />
-                    )}
-                    {server.name}
-                  </div>
+                  {server.name}
                 </SelectItem>
               ))}
               {visibleServers.length === 0 && (
-                <div className="px-2 py-4 text-center text-sm text-muted-foreground">
-                  <AlertCircle className="w-4 h-4 mx-auto mb-1" />
-                  No servers available
-                </div>
+                <div className="px-2 py-3 text-center text-xs text-muted-foreground">No servers</div>
               )}
             </SelectContent>
           </Select>
         )}
+
+        <div className="w-px h-5 bg-white/10 mx-0.5" />
+
+        {/* Autoplay toggle */}
+        <button
+          onClick={() => onAutoPlayChange(!autoPlay)}
+          className={cn(
+            "flex items-center gap-1 h-7 px-2 rounded text-[11px] font-medium transition-colors touch-manipulation",
+            autoPlay ? "text-fox-orange" : "text-zinc-500"
+          )}
+          title="Auto-play next episode"
+        >
+          <Zap className={cn("w-3 h-3", autoPlay && "fill-fox-orange")} />
+          <span className="hidden xs:inline">Auto</span>
+        </button>
       </div>
 
-      {/* Auto Play Toggle */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Zap className="w-4 h-4 text-muted-foreground" />
-          <Label htmlFor="autoplay" className="text-sm font-medium cursor-pointer">
-            Auto-play next episode
-          </Label>
-        </div>
-        
-        <Switch
-          id="autoplay"
-          checked={autoPlay}
-          onCheckedChange={onAutoPlayChange}
-        />
-      </div>
-
-      {/* Provider Selector */}
-      {showProviderSelector && onProviderChange && (
-        <div className="pt-2 border-t border-border/30">
-          <ProviderSelector
-            selectedProvider={selectedProvider}
-            onProviderChange={onProviderChange}
-            showHealthStatus={true}
-            compact={false}
-          />
-        </div>
-      )}
-
-      {/* Current Source Info */}
-      {currentSource && (
-        <div className="pt-2 border-t border-border/30">
-          <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Streaming from</span>
-            <Badge variant="outline" className="text-xs">
-              {currentSource}
-            </Badge>
+      {/* Desktop: original full layout */}
+      <div className="hidden sm:block p-4 space-y-4">
+        {/* Audio Type Toggle */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">Audio</span>
+          </div>
+          <div className="flex items-center gap-1 p-1 bg-background/50 rounded-lg">
+            <Button
+              variant={audioType === 'sub' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => onAudioTypeChange('sub')}
+              disabled={!isSubAvailable}
+              className={cn(
+                "gap-2 h-8 px-3 touch-manipulation",
+                audioType === 'sub' && "bg-fox-orange hover:bg-fox-orange/90"
+              )}
+            >
+              <Subtitles className="w-4 h-4" />
+              SUB
+            </Button>
+            <Button
+              variant={audioType === 'dub' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => onAudioTypeChange('dub')}
+              className={cn(
+                "gap-2 h-8 px-3 touch-manipulation",
+                audioType === 'dub' && "bg-green-600 hover:bg-green-600/90",
+                !hasDubConfirmed && audioType !== 'dub' && "opacity-60"
+              )}
+            >
+              <Mic className="w-4 h-4" />
+              DUB
+              {hasDubConfirmed && <CheckCircle2 className="w-3 h-3 ml-0.5 text-green-300" />}
+            </Button>
           </div>
         </div>
-      )}
+
+        {/* Quality Selector */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Monitor className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Quality</span>
+          </div>
+          <Select value={quality} onValueChange={(v) => onQualityChange(v as QualityType)}>
+            <SelectTrigger className="w-40 h-9 bg-background/50">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {qualities.map(q => (
+                <SelectItem key={q} value={q}>
+                  <div className="flex items-center gap-2">
+                    {q === '1080p' && <Badge className="bg-fox-orange text-xs px-1">HD</Badge>}
+                    {qualityLabels[q]}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Server Selector */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Server className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium">Server</span>
+          </div>
+          {serversLoading ? (
+            <Skeleton className="w-44 h-9" />
+          ) : (
+            <Select value={selectedServer} onValueChange={onServerChange}>
+              <SelectTrigger className="w-44 h-9 bg-background/50">
+                <SelectValue placeholder="Select server" />
+              </SelectTrigger>
+              <SelectContent>
+                {visibleServers.map(server => (
+                  <SelectItem key={`${server.type}-${server.name}`} value={server.name}>
+                    <div className="flex items-center gap-2">
+                      {selectedServer === server.name && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                      {server.name}
+                    </div>
+                  </SelectItem>
+                ))}
+                {visibleServers.length === 0 && (
+                  <div className="px-2 py-4 text-center text-sm text-muted-foreground">
+                    <AlertCircle className="w-4 h-4 mx-auto mb-1" />
+                    No servers available
+                  </div>
+                )}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+
+        {/* Auto Play Toggle */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Zap className="w-4 h-4 text-muted-foreground" />
+            <Label htmlFor="autoplay" className="text-sm font-medium cursor-pointer">
+              Auto-play next episode
+            </Label>
+          </div>
+          <Switch id="autoplay" checked={autoPlay} onCheckedChange={onAutoPlayChange} />
+        </div>
+
+        {/* Provider Selector */}
+        {showProviderSelector && onProviderChange && (
+          <div className="pt-2 border-t border-border/30">
+            <ProviderSelector
+              selectedProvider={selectedProvider}
+              onProviderChange={onProviderChange}
+              showHealthStatus={true}
+              compact={false}
+            />
+          </div>
+        )}
+
+        {/* Current Source Info */}
+        {currentSource && (
+          <div className="pt-2 border-t border-border/30">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Streaming from</span>
+              <Badge variant="outline" className="text-xs">{currentSource}</Badge>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

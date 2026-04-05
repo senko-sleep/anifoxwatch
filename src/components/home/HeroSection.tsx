@@ -126,7 +126,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
         onMouseLeave={() => setIsPaused(false)}
       >
         {/* Background slides */}
-        <div className="relative w-full h-[52vw] min-h-[320px] max-h-[600px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]">
+        <div className="relative w-full h-[58vw] min-h-[340px] max-h-[480px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]">
 
           {heroAnime.map((a, idx) => {
             const isActive = idx === currentIndex;
@@ -155,10 +155,10 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
           {/* Gradient layers */}
           <div className="pointer-events-none absolute inset-0 z-[4]">
-            {/* Strong left fade for text legibility */}
-            <div className="absolute inset-0 bg-gradient-to-r from-[#0c0e14] via-[#0c0e14]/80 sm:via-[#0c0e14]/65 to-transparent" />
-            {/* Bottom fade */}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent" style={{ background: 'linear-gradient(to top, #0c0e14 0%, #0c0e1490 18%, transparent 55%)' }} />
+            {/* Left fade — softer on mobile since content is bottom-anchored */}
+            <div className="absolute inset-0 bg-gradient-to-r from-[#0c0e14]/75 via-[#0c0e14]/30 to-transparent sm:from-[#0c0e14] sm:via-[#0c0e14]/65 sm:to-transparent" />
+            {/* Bottom fade — strong on mobile for text legibility */}
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent" style={{ background: 'linear-gradient(to top, #0c0e14 0%, #0c0e1490 22%, transparent 60%)' }} />
             {/* Right vignette to blend poster */}
             <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-[#0c0e14]/70 via-transparent to-transparent" />
             {/* Top edge */}
@@ -167,14 +167,14 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
           {/* Subtle orange accent glow left-bottom */}
           <div
-            className="pointer-events-none absolute bottom-0 left-0 z-[4] w-[55%] h-[50%] opacity-[0.18]"
+            className="pointer-events-none absolute bottom-0 left-0 z-[4] w-[65%] h-[55%] opacity-[0.22] sm:w-[55%] sm:h-[50%] sm:opacity-[0.18]"
             aria-hidden
             style={{ background: 'radial-gradient(ellipse at 20% 100%, hsl(28 95% 55% / 1) 0%, transparent 65%)' }}
           />
 
           {/* ── Content panel ─────────────────────────────────────── */}
           <div className="pointer-events-none absolute inset-0 z-[5] flex items-end lg:items-center">
-            <div className="w-full flex items-end lg:items-center justify-between px-4 pb-10 sm:px-7 sm:pb-10 lg:px-10 lg:pb-0 gap-4">
+            <div className="w-full flex items-end lg:items-center justify-between px-4 pb-7 sm:px-7 sm:pb-8 lg:px-10 lg:pb-0 gap-4">
 
               {/* Left: text content */}
               <div

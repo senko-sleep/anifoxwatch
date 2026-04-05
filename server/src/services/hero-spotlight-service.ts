@@ -13,9 +13,9 @@ const MAL_FIELDS =
   'id,title,main_picture,banner_image,synopsis,mean,num_list_users,media_type,status,start_season';
 
 const HERO_SPOTLIGHT_QUERY = `
-query HeroSpotlight($page: Int, $perPage: Int, $sort: [MediaSort]) {
+query HeroSpotlight($page: Int, $perPage: Int, $sort: [MediaSort], $status: MediaStatus, $seasonYear_greater: Int, $format_in: [MediaFormat]) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: $sort, isAdult: false) {
+    media(type: ANIME, sort: $sort, isAdult: false, status: $status, seasonYear_greater: $seasonYear_greater, format_in: $format_in) {
       id
       idMal
       title { english romaji native }
@@ -43,7 +43,7 @@ const MAX_HERO = 20;
 const MAX_JIKAN_CALLS = 18;
 const MAX_MAL_CALLS = 36;
 const MAX_HERO_SCAN = 100;
-const SERVER_CACHE_MS = 15 * 60 * 1000;
+const SERVER_CACHE_MS = 60 * 60 * 1000; // 1 hour — seasonal data changes slowly
 const JIKAN_GAP_MS = 380;
 const MAL_GAP_MS = 340;
 
@@ -94,10 +94,17 @@ function isWeakSynopsis(text: string): boolean {
   return false;
 }
 
+interface AniListPageFilters {
+  status?: string;
+  seasonYear_greater?: number;
+  format_in?: string[];
+}
+
 async function anilistPage(
   page: number,
   perPage: number,
-  sort: string
+  sort: string,
+  filters: AniListPageFilters = {}
 ): Promise<Record<string, unknown>[]> {
   const res = await fetch(ANILIST_URL, {
     method: 'POST',
@@ -108,7 +115,7 @@ async function anilistPage(
     },
     body: JSON.stringify({
       query: HERO_SPOTLIGHT_QUERY,
-      variables: { page, perPage, sort: [sort] },
+      variables: { page, perPage, sort: [sort], ...filters },
     }),
   });
   if (!res.ok) throw new Error(`AniList HTTP ${res.status}`);
@@ -234,25 +241,51 @@ function mapToHero(
   };
 }
 
+/** Score used to sort final results: currently airing recent anime rank highest. */
+function recencyScore(m: Record<string, unknown>): number {
+  const currentYear = new Date().getFullYear();
+  const year = (m.seasonYear as number) || 0;
+  const status = (m.status as string) || '';
+  let score = 0;
+  if (status === 'RELEASING') score += 100_000;
+  if (year >= currentYear) score += 50_000;
+  else if (year >= currentYear - 1) score += 20_000;
+  else if (year >= currentYear - 2) score += 5_000;
+  // Blend in a small popularity bonus so the newest one-shot ONA doesn't beat a hit series
+  score += Math.min((m.popularity as number) || 0, 100_000) * 0.1;
+  return score;
+}
+
 /**
- * Pulls popular + trending pages from AniList, merges MAL banner_image + synopsis when
+ * Pulls current-season + recent anime from AniList, merges MAL banner_image + synopsis when
  * MAL_CLIENT_ID is set, requires a final banner URL, enriches synopsis via Jikan if still thin.
  */
 export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
+  const currentYear = new Date().getFullYear();
+  const recentYear = currentYear - 1;
+  const formats = ['TV', 'MOVIE', 'ONA'];
+
   const raw: Record<string, unknown>[] = [];
-  const pages: [number, number, string][] = [
-    [1, 50, 'POPULARITY_DESC'],
-    [2, 50, 'POPULARITY_DESC'],
-    [1, 50, 'TRENDING_DESC'],
-    [1, 50, 'SCORE_DESC'],
+
+  // Priority 1: Currently airing, sorted by trending
+  // Priority 2: This year + last year, sorted by trending
+  // Priority 3: This year + last year, sorted by popularity (catch popular completed shows)
+  // Priority 4: Global trending fallback (in case recent queries return too few with banners)
+  const queries: Array<[number, number, string, AniListPageFilters]> = [
+    [1, 50, 'TRENDING_DESC', { status: 'RELEASING', format_in: formats }],
+    [1, 50, 'TRENDING_DESC', { seasonYear_greater: recentYear, format_in: formats }],
+    [2, 50, 'TRENDING_DESC', { seasonYear_greater: recentYear, format_in: formats }],
+    [1, 50, 'POPULARITY_DESC', { seasonYear_greater: recentYear, format_in: formats }],
+    [1, 50, 'TRENDING_DESC', {}], // global fallback
   ];
-  for (const [page, perPage, sort] of pages) {
+
+  for (const [page, perPage, sort, filters] of queries) {
     try {
-      const chunk = await anilistPage(page, perPage, sort);
+      const chunk = await anilistPage(page, perPage, sort, filters);
       raw.push(...chunk);
       await new Promise((r) => setTimeout(r, 120));
     } catch (e) {
-      logger.warn('[HeroSpotlight] AniList page failed', { page, sort, err: String(e) }, 'HeroSpotlight');
+      logger.warn('[HeroSpotlight] AniList page failed', { page, sort, filters, err: String(e) }, 'HeroSpotlight');
     }
   }
   if (raw.length === 0) {
@@ -260,11 +293,8 @@ export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
   }
 
   const sorted = dedupeById(raw);
-  sorted.sort((a, b) => {
-    const pa = (a.popularity as number) || 0;
-    const pb = (b.popularity as number) || 0;
-    return pb - pa;
-  });
+  // Sort: currently airing recent anime first, then recent, then older — popularity as tiebreaker
+  sorted.sort((a, b) => recencyScore(b) - recencyScore(a));
 
   const useMal = Boolean(malClientId());
   const pool = useMal ? sorted : sorted.filter((m) => anilistBannerUrl(m));
