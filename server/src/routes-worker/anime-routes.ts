@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { anilistService } from '../services/anilist-service.js';
+import { getHeroSpotlightCached } from '../services/hero-spotlight-service.js';
 
 // Use a flexible interface that works with both SourceManager and CloudflareSourceManager
 interface SourceManagerLike {
@@ -41,6 +42,16 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             return c.json(data);
         } catch (e: any) {
             return c.json({ error: e.message, results: [] }, 500);
+        }
+    });
+
+    // Get hero spotlight
+    app.get('/hero-spotlight', async (c) => {
+        try {
+            const results = await getHeroSpotlightCached();
+            return c.json(results);
+        } catch (error: any) {
+            return c.json({ error: error.message }, 500);
         }
     });
 
