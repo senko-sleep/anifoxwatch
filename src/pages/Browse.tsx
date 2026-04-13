@@ -318,8 +318,8 @@ const Browse = () => {
   const [shuffleBypass, setShuffleBypass] = useState(0);
   const hasSearchQuery = debouncedQuery.length >= 2;
 
-  // Use 100 results per page in infinite scroll mode for seamless experience
-  const resultsPerPage = scrollMode === 'infinite' ? 100 : 25;
+  // Load 150 items per page in infinite scroll with quick buffer for buttery smooth experience
+  const resultsPerPage = scrollMode === 'infinite' ? 150 : 25;
 
   // In infinite mode, use infinitePage for API calls; in paginated mode, use page
   const apiPage = scrollMode === 'infinite' ? infinitePage : page;
@@ -460,17 +460,20 @@ const Browse = () => {
     // Don't observe if not in infinite mode or no node
     if (scrollMode !== 'infinite' || !node) return;
 
-    // Create new observer rooted in the results container
+    // Create new observer for buttery smooth infinite scroll with quick buffer
+    // threshold: 0.1 triggers earlier, 800px rootMargin preloads content well before scroll reaches bottom
     observerRef.current = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
         if (entry.isIntersecting && hasMorePagesRef.current && !isLoadingMoreRef.current) {
-          setIsLoadingMore(true);
-          // Only increment infinitePage, not page (page stays at 1 in infinite mode)
-          setInfinitePage(prev => prev + 1);
+          // Use requestAnimationFrame to prevent jank during scroll
+          requestAnimationFrame(() => {
+            setIsLoadingMore(true);
+            setInfinitePage(prev => prev + 1);
+          });
         }
       },
-      { root: resultsContainerRef.current, rootMargin: '600px', threshold: 0 }
+      { rootMargin: '800px', threshold: 0.1 }
     );
 
     observerRef.current.observe(node);

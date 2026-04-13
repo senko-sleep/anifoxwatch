@@ -34,13 +34,11 @@ export const AnimeGrid = ({ anime, title, className, columns = 'auto' }: AnimeGr
           {title}
         </h2>
       )}
-      <div className={cn('grid gap-3 sm:gap-4', gridCols)}>
-        {anime.map((item, index) => (
+      <div className={cn('grid gap-3 sm:gap-4', gridCols)} style={{ willChange: 'transform', contain: 'layout paint' }}>
+        {anime.map((item) => (
           <AnimeCard
             key={item.id}
             anime={item}
-            className="animate-fade-in"
-            style={{ animationDelay: `${Math.min(index * 20, 200)}ms` } as React.CSSProperties}
             onMouseEnter={() => prefetchAnime(item.id)}
           />
         ))}
