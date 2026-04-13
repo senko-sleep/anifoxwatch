@@ -35,17 +35,24 @@ const TYPE_BADGE: Record<string, string> = {
   TV:      'bg-sky-600/90',
 };
 
+/**
+ * Global cache of poster URLs that have been successfully loaded during this session.
+ * Prevents image flicker when navigating back to the home page — re-mounted cards
+ * initialize with imgLoaded=true if the same URL was loaded before.
+ */
+const loadedImageCache = new Set<string>();
+
 export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardProps) => {
   const navigateId = anime.streamingId || anime.id;
   const navigate   = useNavigate();
   const location   = useLocation();
-  const [imgLoaded, setImgLoaded] = useState(false);
+  const posterSrc = pickAnimePoster(anime);
+  const [imgLoaded, setImgLoaded] = useState(() => posterSrc ? loadedImageCache.has(posterSrc) : false);
   const [imgError,  setImgError]  = useState(false);
   const [useProxy,  setUseProxy]  = useState(false);
   const [hovered, setHovered] = useState(false);
 
   const historyItem = WatchHistory.get().find(h => h.animeId === anime.id);
-  const posterSrc = pickAnimePoster(anime);
 
   const needsDetail = isPlaceholderAnimeDescription(anime.description);
 
@@ -156,7 +163,10 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
               )}
               loading="lazy"
               referrerPolicy="no-referrer"
-              onLoad={() => setImgLoaded(true)}
+              onLoad={() => {
+                setImgLoaded(true);
+                if (posterSrc) loadedImageCache.add(posterSrc);
+              }}
               onError={() => {
                 if (!useProxy && posterSrc) {
                   setUseProxy(true);

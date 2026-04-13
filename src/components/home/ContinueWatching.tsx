@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Play, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { WatchHistoryItem } from '@/lib/watch-history';
 import { Button } from '@/components/ui/button';
+import { ensureHttps } from '@/lib/utils';
 
 interface ContinueWatchingProps {
     items: WatchHistoryItem[];
@@ -69,7 +70,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                         <div className="relative aspect-video rounded-xl overflow-hidden bg-fox-surface shadow-lg">
                             {/* Main image: frame thumbnail if available, otherwise anime poster */}
                             <img
-                                src={item.frameThumbnail || item.animeImage}
+                                src={ensureHttps(item.frameThumbnail || item.animeImage)}
                                 alt={item.animeTitle}
                                 className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110"
                                 loading="lazy"
@@ -81,7 +82,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                             {/* Small anime poster icon in bottom-left corner */}
                             <div className="absolute bottom-8 left-2 w-10 h-14 rounded-md overflow-hidden shadow-lg ring-1 ring-white/20">
                                 <img
-                                    src={item.animeImage}
+                                    src={ensureHttps(item.animeImage)}
                                     alt={item.animeTitle}
                                     className="w-full h-full object-cover"
                                 />

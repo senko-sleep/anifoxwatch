@@ -24,7 +24,9 @@ async function ping() {
   try {
     await fetch(apiUrl('/health'), { 
       method: 'HEAD',
+      mode: 'cors',
       cache: 'no-cache',
+      referrerPolicy: 'no-referrer',
       signal: AbortSignal.timeout(10000)
     });
     consecutiveFailures = 0;

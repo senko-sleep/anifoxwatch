@@ -10,6 +10,8 @@ import {
     AnimeFLVSource,
     GogoanimeSource,
     AllAnimeSource,
+    KaidoSource,
+    ZoroSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -79,6 +81,8 @@ export class SourceManager {
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
+        ['Kaido', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['Zoro', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -126,6 +130,12 @@ export class SourceManager {
         // PRODUCTION: AllAnime — GraphQL API + fast4speed.rsvp CDN (accessible from cloud IPs)
         this.registerSource(new AllAnimeSource());
 
+        // BACKUP: Kaido (kaido.to) — used for enrichment + streaming fallback
+        this.registerSource(new KaidoSource());
+
+        // BACKUP: Zoro (zoro.to mirror) — additional streaming fallback
+        this.registerSource(new ZoroSource());
+
         // Adult sources
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
@@ -144,6 +154,8 @@ export class SourceManager {
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
         this.sourceRateLimits.set('Consumet', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('Kaido', { limit: 80, resetTime: 60000 });
+        this.sourceRateLimits.set('Zoro', { limit: 80, resetTime: 60000 });
 
         // Start health monitoring and perform initial health check
         this.startHealthMonitor();
@@ -2692,30 +2704,58 @@ export class SourceManager {
         const pickOrder = [...STREAM_PRIORITY, 'cross-source'];
         const allResults: RaceResult[] = [];
         let resolved = false;
+        let graceTimer: ReturnType<typeof setTimeout> | null = null;
+        const GRACE_PERIOD = 3000; // Wait up to 3s for a higher-priority source after first success
 
         const result = await new Promise<StreamingData>((resolveStream) => {
             let pending = 0;
+
+            const pickBestAndResolve = () => {
+                if (resolved) return;
+                const ok = allResults.filter(r => r.success);
+                if (ok.length === 0) return false;
+                // Pick the highest-priority successful source
+                let best: RaceResult | null = null;
+                for (const name of pickOrder) {
+                    const match = ok.find(r => r.source === name);
+                    if (match) { best = match; break; }
+                }
+                if (!best) best = ok[0];
+                resolved = true;
+                if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+                const duration = Date.now() - startTime;
+                logger.streamingSuccess('unknown', episodeId, best.source,
+                    best.data.sources[0]?.quality || 'unknown', duration);
+                timer.end();
+                console.log(`   ✅ Picked stream source: ${best.source} (${best.data.sources.length} URLs, ${duration}ms)`);
+                resolveStream(best.data);
+                return true;
+            };
 
             const tryResolve = () => {
                 if (resolved) return;
                 const ok = allResults.filter(r => r.success);
                 if (ok.length === 0) return;
-                // Pick the highest-priority successful source
-                for (const name of pickOrder) {
-                    const match = ok.find(r => r.source === name);
-                    if (match) {
-                        resolved = true;
-                        const duration = Date.now() - startTime;
-                        logger.streamingSuccess('unknown', episodeId, match.source,
-                            match.data.sources[0]?.quality || 'unknown', duration);
-                        timer.end();
-                        console.log(`   ✅ Picked stream source: ${match.source} (${match.data.sources.length} URLs, ${duration}ms)`);
-                        resolveStream(match.data);
-                        return;
-                    }
+
+                // Check if the top-priority source already responded (success or fail)
+                const topPriority = pickOrder[0];
+                const topResult = allResults.find(r => r.source === topPriority);
+                if (topResult) {
+                    // Top priority responded — pick best now
+                    pickBestAndResolve();
+                    return;
                 }
-                // If top priority hasn't resolved yet but we have *some* result, wait briefly
-                // for higher priority to maybe arrive
+
+                // First success arrived but top priority hasn't responded yet.
+                // Start a grace period — if top priority responds within GRACE_PERIOD, use it.
+                // Otherwise, resolve with what we have.
+                if (!graceTimer) {
+                    console.log(`   ⏱️ First stream available, waiting ${GRACE_PERIOD}ms for higher-priority source...`);
+                    graceTimer = setTimeout(() => {
+                        graceTimer = null;
+                        pickBestAndResolve();
+                    }, GRACE_PERIOD);
+                }
             };
 
             const onDone = () => {
@@ -2723,17 +2763,9 @@ export class SourceManager {
                 tryResolve();
                 if (pending <= 0 && !resolved) {
                     // All sources done, pick whatever we have
-                    const ok = allResults.filter(r => r.success);
-                    resolved = true;
-                    if (ok.length > 0) {
-                        const best = ok[0];
-                        const duration = Date.now() - startTime;
-                        logger.streamingSuccess('unknown', episodeId, best.source,
-                            best.data.sources[0]?.quality || 'unknown', duration);
-                        timer.end();
-                        console.log(`   ✅ Picked stream source: ${best.source} (${best.data.sources.length} URLs, ${duration}ms)`);
-                        resolveStream(best.data);
-                    } else {
+                    if (!pickBestAndResolve()) {
+                        resolved = true;
+                        if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
                         timer.end();
                         console.log(`   ❌ No sources found after trying all available sources`);
                         logger.streamingFailed('unknown', episodeId, 'all-sources', 'No sources returned streaming URLs');
@@ -2741,6 +2773,20 @@ export class SourceManager {
                     }
                 }
             };
+
+            // Global safety timeout — never wait more than 50s total
+            setTimeout(() => {
+                if (!resolved) {
+                    console.log(`   ⏰ Global streaming timeout (50s) — resolving with best available`);
+                    if (!pickBestAndResolve()) {
+                        resolved = true;
+                        if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+                        timer.end();
+                        logger.streamingFailed('unknown', episodeId, 'all-sources', 'Global timeout');
+                        resolveStream({ sources: [], subtitles: [] });
+                    }
+                }
+            }, 50_000);
 
             for (const source of finalSources) {
                 pending++;

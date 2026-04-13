@@ -24,21 +24,63 @@ app.set('etag', 'strong');
 app.set('x-powered-by', false);
 
 // CORS configuration
-const corsOptions = {
-    origin: process.env.CORS_ORIGIN || '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+// Explicitly allow all known frontend origins plus any wildcard from env.
+// The safety-net middleware below guarantees headers are present on EVERY response.
+const KNOWN_ORIGINS = [
+    'https://anifoxwatch.web.app',
+    'https://anifoxwatch.firebaseapp.com',
+    'https://anifox-frontend.onrender.com',
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+];
+const CORS_ALLOWED = process.env.CORS_ORIGIN || '*';
+
+const corsOptions: cors.CorsOptions = {
+    origin: (requestOrigin, callback) => {
+        // Always allow: reflect the requesting origin so browsers accept the response.
+        // Known origins are whitelisted explicitly; unknown origins are also allowed
+        // for API accessibility (public API).
+        if (!requestOrigin) {
+            // Non-browser requests (curl, server-to-server) — allow
+            callback(null, '*');
+        } else if (CORS_ALLOWED === '*' || KNOWN_ORIGINS.includes(requestOrigin)) {
+            callback(null, requestOrigin);
+        } else {
+            // Unknown origin — still allow for public API accessibility
+            callback(null, requestOrigin);
+        }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID', 'Range', 'Accept'],
+    exposedHeaders: ['Content-Length', 'Content-Range', 'Accept-Ranges'],
     credentials: true,
     maxAge: 86400 // 24 hours preflight cache
 };
 
 app.use(cors(corsOptions));
+
+// Explicit preflight handler for all routes
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '1mb' }));
 
-// Compression for responses
+// CORS safety-net: guarantee Access-Control-Allow-Origin is present on EVERY response.
+// The `cors` npm package should handle this, but on Render free-tier cold starts and
+// certain proxy configurations, the header can be dropped. This middleware catches those.
 app.use((req: Request, res: Response, next: NextFunction) => {
+    const origin = req.headers.origin;
+    // Set CORS headers if not already present (safety net)
+    res.on('finish', () => {});
+    if (!res.getHeader('Access-Control-Allow-Origin')) {
+        res.set('Access-Control-Allow-Origin', origin || '*');
+    }
+    if (!res.getHeader('Access-Control-Allow-Credentials')) {
+        res.set('Access-Control-Allow-Credentials', 'true');
+    }
     res.set('X-Content-Type-Options', 'nosniff');
     res.set('X-Frame-Options', 'DENY');
+    res.set('Vary', 'Origin');
     next();
 });
 
@@ -81,6 +123,10 @@ app.head('/', (_req: Request, res: Response) => {
 
 // Health check endpoint (fast response)
 app.get('/health', (_req: Request, res: Response) => {
+    // Explicit CORS headers as safety net — this endpoint is probed by the frontend
+    const origin = _req.headers.origin;
+    res.set('Access-Control-Allow-Origin', origin || '*');
+    res.set('Access-Control-Allow-Credentials', 'true');
     res.set('Cache-Control', 'no-cache');
     res.json({
         status: 'healthy',

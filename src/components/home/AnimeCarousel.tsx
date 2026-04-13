@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Play, Star, Info } from 'lucide-react';
-import { cn, formatRating } from '@/lib/utils';
+import { cn, formatRating, ensureHttps } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 
 interface CarouselAnime {
@@ -70,7 +70,7 @@ export const AnimeCarousel = ({ anime, title, autoPlay = false, showDetails = tr
         <div 
           className="absolute inset-0 transition-transform duration-700 ease-out"
           style={{
-            backgroundImage: `url(${currentAnime.cover || currentAnime.image})`,
+            backgroundImage: `url(${ensureHttps(currentAnime.cover || currentAnime.image)})`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
             transform: isHovered ? 'scale(1.05)' : 'scale(1)',
@@ -92,9 +92,10 @@ export const AnimeCarousel = ({ anime, title, autoPlay = false, showDetails = tr
             >
               <div className="w-40 lg:w-48 aspect-[2/3] rounded-xl overflow-hidden shadow-2xl ring-2 ring-white/10 transform transition-all duration-300 group-hover/poster:ring-fox-orange group-hover/poster:scale-105">
                 <img 
-                  src={currentAnime.image} 
+                  src={ensureHttps(currentAnime.image)} 
                   alt={currentAnime.title}
                   className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
                 />
               </div>
             </Link>

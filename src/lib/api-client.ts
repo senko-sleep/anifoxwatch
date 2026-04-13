@@ -203,6 +203,7 @@ class AnimeApiClient {
             try {
                 const response = await fetch(`${this.apiBase()}${endpoint}`, {
                     ...options,
+                    mode: 'cors',
                     signal: controller.signal,
                     headers: {
                         'Accept': 'application/json',
@@ -256,18 +257,36 @@ class AnimeApiClient {
                     throw new Error('Request timeout - please try again');
                 }
 
+                // Detect CORS / network failures — these surface as TypeError('Failed to fetch')
+                // with no response body. Render free-tier cold starts sometimes cause transient CORS drops.
+                const msg = lastError.message || '';
+                const isCorsOrNetwork = (
+                    msg.includes('Failed to fetch') ||
+                    msg.includes('NetworkError') ||
+                    msg.includes('ERR_FAILED') ||
+                    msg.includes('CORS')
+                );
+
+                if (isCorsOrNetwork && attempt === 0) {
+                    console.warn(`[API] Possible CORS/network error on ${endpoint}:`, msg,
+                        '— retrying in case of Render cold start');
+                }
+
                 // Retry on network errors and server errors
                 const isRetryable = attempt < retries && (
-                    lastError.message.includes('network') ||
-                    lastError.message.includes('Failed to fetch') ||
-                    lastError.message.includes('timeout') ||
-                    lastError.message.includes('502') ||
-                    lastError.message.includes('503') ||
-                    lastError.message.includes('504')
+                    isCorsOrNetwork ||
+                    msg.includes('network') ||
+                    msg.includes('timeout') ||
+                    msg.includes('502') ||
+                    msg.includes('503') ||
+                    msg.includes('504')
                 );
 
                 if (isRetryable) {
-                    const delay = Math.min(Math.pow(2, attempt) * 1000, 4000);
+                    // Longer delay on first attempt to let Render spin up
+                    const delay = attempt === 0 && isCorsOrNetwork
+                        ? 3000
+                        : Math.min(Math.pow(2, attempt) * 1000, 4000);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 }

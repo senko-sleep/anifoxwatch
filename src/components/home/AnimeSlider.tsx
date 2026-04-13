@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Star, Mic, Subtitles, Play, Clock, CalendarDays } from 'lucide-react';
-import { cn, normalizeRating, isValidAnimeYear, isValidEpisodeCount } from '@/lib/utils';
+import { cn, normalizeRating, isValidAnimeYear, isValidEpisodeCount, ensureHttps } from '@/lib/utils';
+import { apiUrl } from '@/lib/api-config';
 import { WatchHistory } from '@/lib/watch-history';
 
 interface AnimeItem {
@@ -34,6 +35,47 @@ const TYPE_COLORS: Record<string, { bg: string; text: string; border: string }> 
   ONA:     { bg: 'bg-emerald-600/85', text: 'text-white', border: 'border-emerald-400/30' },
   Special: { bg: 'bg-rose-600/85',    text: 'text-white', border: 'border-rose-400/30' },
   TV:      { bg: 'bg-sky-600/85',     text: 'text-white', border: 'border-sky-400/30' },
+};
+
+/** Image with proxy fallback — fixes images disappearing on back-navigation */
+const SliderImage = ({ src, alt }: { src: string; alt: string }) => {
+  const [imgSrc, setImgSrc] = useState(src);
+  const [loaded, setLoaded] = useState(false);
+  const [errored, setErrored] = useState(false);
+
+  // Reset state when src changes (e.g. data re-enriched after navigation)
+  const prevSrc = useRef(src);
+  if (prevSrc.current !== src) {
+    prevSrc.current = src;
+    setImgSrc(src);
+    setLoaded(false);
+    setErrored(false);
+  }
+
+  return (
+    <>
+      {!loaded && !errored && (
+        <div className="absolute inset-0 bg-zinc-800/60 animate-pulse" />
+      )}
+      <img
+        src={imgSrc}
+        alt={alt}
+        className={cn(
+          'w-full h-full object-cover transition-all duration-500 ease-out group-hover/card:scale-[1.06]',
+          loaded ? 'opacity-100' : 'opacity-0'
+        )}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onLoad={() => setLoaded(true)}
+        onError={() => {
+          if (!errored && src) {
+            setErrored(true);
+            setImgSrc(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(src)}`);
+          }
+        }}
+      />
+    </>
+  );
 };
 
 export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
@@ -135,13 +177,7 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
               {/* ── Poster ───────────────────────────────────────── */}
               <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-zinc-900/90 ring-1 ring-white/[0.05] transition-all duration-300 group-hover/card:ring-white/[0.14] group-hover/card:shadow-xl group-hover/card:shadow-black/50 group-hover/card:-translate-y-0.5">
 
-                <img
-                  src={item.image}
-                  alt={item.title}
-                  className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover/card:scale-[1.06]"
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                />
+                <SliderImage src={ensureHttps(item.image)} alt={item.title} />
 
                 {/* Type badge — top left */}
                 {item.type && (

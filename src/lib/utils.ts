@@ -78,10 +78,18 @@ export function isValidDurationLabel(s: string | undefined | null): boolean {
   return true;
 }
 
+/** Upgrade http:// URLs to https:// to avoid mixed-content browser blocks. */
+export function ensureHttps(url: string | undefined | null): string {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (trimmed.startsWith('http://')) return trimmed.replace('http://', 'https://');
+  return trimmed;
+}
+
 /** Poster URL for grid cards — many sources set `cover` or AniList fields but leave `image` empty. */
 export function pickAnimePoster(anime: Pick<Anime, 'image' | 'cover' | 'bannerImage' | 'coverImage'>): string {
   const u = anime.image || anime.cover || anime.bannerImage || anime.coverImage;
-  return typeof u === 'string' && u.trim() ? u.trim() : '';
+  return typeof u === 'string' && u.trim() ? ensureHttps(u) : '';
 }
 
 /** True when text looks like scraped MAL-style metadata rather than a title/studio/genre label. */
