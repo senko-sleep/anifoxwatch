@@ -2314,32 +2314,51 @@ export class SourceManager {
             const allAnime: AnimeBase[] = [];
             const sortType = filters.sort || 'popularity';
 
-            // Special Case 1: Genre-only browsing with source support
+            const isAdultSource = ['WatchHentai', 'Hanime'].includes(source.name);
+
+            // Special Case 1: Genre-only browsing with source support (including adult sources)
             if (filters.genres && filters.genres.length > 0 && typeof (source as any).getByGenre === 'function') {
                 try {
                     const genre = filters.genres[0];
                     const genreResult = await (source as any).getByGenre(genre, page);
+                    // If genre returns results, use them. Otherwise, don't fall through to massive crawl.
+                    // Just return empty or try getLatest for adult sources.
                     if (genreResult.results && genreResult.results.length > 0) {
                         finalResults = genreResult.results;
                         totalResults = genreResult.totalResults || 1000;
-                        totalPages = genreResult.totalPages || 100; // Boosted as requested
+                        totalPages = genreResult.totalPages || 100;
                         hasNextPage = genreResult.hasNextPage;
                         isPaginatedResult = true;
                         logger.info(`[SourceManager] Genre browse success via ${source.name} for genre: ${genre}`);
+                    } else if (isAdultSource) {
+                        // Genre not found on adult source - use getLatest instead of 48-page crawl
+                        const latestResult = await (source as any).getLatest(page);
+                        if (latestResult.length > 0) {
+                            finalResults = latestResult;
+                            totalResults = 100;
+                            totalPages = 5;
+                            hasNextPage = page < 5;
+                            isPaginatedResult = true;
+                            logger.info(`[SourceManager] Genre "${genre}" not found, falling back to latest via ${source.name}`);
+                        }
                     }
                 } catch (e) {
-                    logger.warn(`[SourceManager] Genre browse failed on ${source.name}, falling back to type or trending`);
+                    logger.warn(`[SourceManager] Genre browse failed on ${source.name}, trying getLatest for adult`);
+                    if (isAdultSource) {
+                        const latestResult = await (source as any).getLatest(page);
+                        if (latestResult.length > 0) {
+                            finalResults = latestResult;
+                            isPaginatedResult = true;
+                        }
+                    }
                 }
             }
 
-            // Special Case 2: Type-only browsing with source support
-            // Also use for adult sources to get proper pagination metadata
-            const isAdultSource = ['WatchHentai', 'Hanime'].includes(source.name);
-            if (!isPaginatedResult && typeof (source as any).getByType === 'function' && (filters.type || isAdultSource)) {
+            // Special Case 2: Type-only browsing for non-adult sources
+            // For adult sources without genre, use getLatest() instead of getByType() to avoid 48-page crawl
+            if (!isPaginatedResult && typeof (source as any).getByType === 'function' && filters.type && !isAdultSource) {
                 try {
-                    // For adult sources, fetch current page only to avoid cross-page duplicates
-                    // The source's parseAnimeItems already deduplicates episodes within the page
-                    const typeResult = await (source as any).getByType(filters.type || 'ONA', page);
+                    const typeResult = await (source as any).getByType(filters.type, page);
                     if (typeResult.results && typeResult.results.length > 0) {
                         finalResults = typeResult.results;
                         totalResults = typeResult.totalResults || typeResult.totalPages * (filters.limit || 25);
@@ -2350,6 +2369,23 @@ export class SourceManager {
                     }
                 } catch (e) {
                     logger.warn(`[SourceManager] Type browse failed on ${source.name}, falling back to trending`);
+                }
+            }
+
+            // Special Case 3: Adult source with no genre/type filter - use getLatest (not getByType which crawls)
+            if (!isPaginatedResult && isAdultSource && !filters.type && typeof (source as any).getLatest === 'function') {
+                try {
+                    const latestResult = await (source as any).getLatest(page);
+                    if (latestResult.length > 0) {
+                        finalResults = latestResult;
+                        totalResults = 100;
+                        totalPages = 5;
+                        hasNextPage = page < 5;
+                        isPaginatedResult = true;
+                        logger.info(`[SourceManager] Adult source ${source.name} using latest page ${page} (${latestResult.length} results)`);
+                    }
+                } catch (e) {
+                    logger.warn(`[SourceManager] getLatest failed on ${source.name}, falling back to trending`);
                 }
             }
 

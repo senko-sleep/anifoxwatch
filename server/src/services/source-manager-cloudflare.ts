@@ -305,11 +305,18 @@ export class CloudflareSourceManager {
             const source = this.getAvailableSource(filters.source || 'WatchHentai');
             if (!source) return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
             try {
+                // First try genre if provided
                 if (filters.genres?.length > 0 && 'getByGenre' in source) {
-                    return await (source as any).getByGenre(filters.genres[0], page);
+                    const genreResult = await (source as any).getByGenre(filters.genres[0], page);
+                    // Use genre results if found, otherwise fall back to getLatest
+                    if (genreResult.results && genreResult.results.length > 0) {
+                        return genreResult;
+                    }
                 }
+                // Use getLatest for initial load or when genre not found - avoids 48-page crawl
                 const res = await source.getLatest(page);
-                return { results: res, totalPages: 1, currentPage: page, hasNextPage: false, source: source.name };
+                const totalPages = 5;
+                return { results: res, totalPages, currentPage: page, hasNextPage: page < totalPages, source: source.name };
             } catch {
                 return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
             }

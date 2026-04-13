@@ -78,9 +78,47 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
 
   // AniList complexity limit: batch max 25 at a time
   const BATCH_SIZE = 25;
+
+  // For adult content, skip non-adult filter query and use adult filter instead
+  // This avoids 25 wasted API calls that would miss hentai anyway
+  if (includeAdult) {
+    // Build queries with explicit isAdult:true filter
+    for (let offset = 0; offset < titles.length; offset += BATCH_SIZE) {
+      const batch = titles.slice(offset, offset + BATCH_SIZE);
+      const fragments = batch.map((title, i) => {
+        const escaped = title.replace(/"/g, '\\"').slice(0, 80);
+        return `q${i}: Page(page:1,perPage:1){ media(search:"${escaped}",type:ANIME,isAdult:true){ id title{english romaji} coverImage{extraLarge large} bannerImage } }`;
+      });
+      const query = `{ ${fragments.join(' ')} }`;
+
+      try {
+        const response = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ query }),
+        });
+
+        if (!response.ok) continue;
+
+        const json = await response.json();
+        if (json.errors) continue;
+
+        for (let i = 0; i < batch.length; i++) {
+          const page = json.data?.[`q${i}`];
+          const media: AniListCoverMedia | undefined = page?.media?.[0];
+          if (media?.coverImage?.extraLarge) {
+            result.set(normTitle(batch[i]), media);
+          }
+        }
+      } catch { /* ignore fetch errors */ }
+    }
+    return result;
+  }
+
+  // For non-adult content, use default (non-adult) filter
   for (let offset = 0; offset < titles.length; offset += BATCH_SIZE) {
     const batch = titles.slice(offset, offset + BATCH_SIZE);
-    const query = buildBatchQuery(batch, includeAdult);
+    const query = buildBatchQuery(batch, false);
 
     try {
       const response = await fetch('https://graphql.anilist.co', {
@@ -113,37 +151,35 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
     }
   }
 
-  // Retry missed titles with explicit isAdult:true for adult content
-  if (includeAdult) {
-    const missed = titles.filter(t => !result.has(normTitle(t)));
-    if (missed.length > 0) {
-      for (let offset = 0; offset < missed.length; offset += BATCH_SIZE) {
-        const batch = missed.slice(offset, offset + BATCH_SIZE);
-        const fragments = batch.map((title, i) => {
-          const escaped = title.replace(/"/g, '\\"').slice(0, 80);
-          return `q${i}: Page(page:1,perPage:1){ media(search:"${escaped}",type:ANIME,isAdult:true){ id title{english romaji} coverImage{extraLarge large} bannerImage } }`;
+  // Retry missed titles with explicit isAdult:true
+  const missed = titles.filter(t => !result.has(normTitle(t)));
+  if (missed.length > 0) {
+    for (let offset = 0; offset < missed.length; offset += BATCH_SIZE) {
+      const batch = missed.slice(offset, offset + BATCH_SIZE);
+      const fragments = batch.map((title, i) => {
+        const escaped = title.replace(/"/g, '\\"').slice(0, 80);
+        return `q${i}: Page(page:1,perPage:1){ media(search:"${escaped}",type:ANIME,isAdult:true){ id title{english romaji} coverImage{extraLarge large} bannerImage } }`;
+      });
+      const query = `{ ${fragments.join(' ')} }`;
+
+      try {
+        const response = await fetch('https://graphql.anilist.co', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ query }),
         });
-        const query = `{ ${fragments.join(' ')} }`;
+        if (!response.ok) continue;
+        const json = await response.json();
+        if (json.errors) continue;
 
-        try {
-          const response = await fetch('https://graphql.anilist.co', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ query }),
-          });
-          if (!response.ok) continue;
-          const json = await response.json();
-          if (json.errors) continue;
-
-          for (let i = 0; i < batch.length; i++) {
-            const page = json.data?.[`q${i}`];
-            const media: AniListCoverMedia | undefined = page?.media?.[0];
-            if (media?.coverImage?.extraLarge) {
-              result.set(normTitle(batch[i]), media);
-            }
+        for (let i = 0; i < batch.length; i++) {
+          const page = json.data?.[`q${i}`];
+          const media: AniListCoverMedia | undefined = page?.media?.[0];
+          if (media?.coverImage?.extraLarge) {
+            result.set(normTitle(batch[i]), media);
           }
-        } catch { /* ignore retry failures */ }
-      }
+        }
+      } catch { /* ignore retry failures */ }
     }
   }
 
