@@ -121,6 +121,9 @@ export const VideoPlayer = ({
   const bgDownloadControllerRef = useRef<AbortController | null>(null);
   const cachedBlobUrlRef = useRef<string | null>(null);
 
+  // Blob URL created for native HLS manifest pre-fetch (iOS workaround)
+  const nativeHlsBlobUrlRef = useRef<string | null>(null);
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -361,40 +364,94 @@ export const VideoPlayer = ({
       hlsRef.current = hls;
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       playerLog('info', 'Using native HLS support');
-      video.src = src;
 
-      video.addEventListener('loadedmetadata', () => {
-        playerLog('info', 'Video metadata loaded (native)');
-        setIsLoading(false);
+      const attachNativeHls = (videoSrc: string) => {
+        video.src = videoSrc;
 
-        const savedPos = loadSavedPosition();
-        if (savedPos > 5) {
-          video.currentTime = savedPos;
-          setCurrentTime(savedPos);
-          setShowPositionRestored(true);
-          setTimeout(() => setShowPositionRestored(false), 3000);
-        }
+        video.addEventListener('loadedmetadata', () => {
+          playerLog('info', 'Video metadata loaded (native)');
+          setIsLoading(false);
 
-        video.play().catch(() => { });
-      });
+          const savedPos = loadSavedPosition();
+          if (savedPos > 5) {
+            video.currentTime = savedPos;
+            setCurrentTime(savedPos);
+            setShowPositionRestored(true);
+            setTimeout(() => setShowPositionRestored(false), 3000);
+          }
 
-      video.addEventListener('error', () => {
-        const now = Date.now();
-        if (errorFiredRef.current && (now - lastErrorTimeRef.current) < 1000) {
-          return;
-        }
-
-        errorFiredRef.current = true;
-        lastErrorTimeRef.current = now;
-
-        const err = video.error;
-        playerLog('error', 'Native video error', {
-          code: err?.code,
-          message: err?.message
+          video.play().catch(() => { });
         });
-        setError('Failed to load video. Try a different server.');
-        onError?.('native_error');
-      });
+
+        video.addEventListener('error', () => {
+          const now = Date.now();
+          if (errorFiredRef.current && (now - lastErrorTimeRef.current) < 1000) {
+            return;
+          }
+
+          errorFiredRef.current = true;
+          lastErrorTimeRef.current = now;
+
+          const err = video.error;
+          playerLog('error', 'Native video error', {
+            code: err?.code,
+            message: err?.message
+          });
+          setError('Failed to load video. Try a different server.');
+          onError?.('native_error');
+        });
+      };
+
+      if (isM3U8) {
+        // Native video element sends Sec-Fetch-Dest: video, which the proxy (or upstream CDN)
+        // rejects with 403. Pre-fetch the manifest via fetch() (Sec-Fetch-Dest: empty, same as
+        // hls.js XHR), rewrite relative segment/key URLs to absolute, then hand iOS a blob URL.
+        (async () => {
+          try {
+            const res = await fetch(src);
+            if (!res.ok) throw new Error(`Manifest fetch failed: ${res.status}`);
+            const manifestText = await res.text();
+
+            // Derive the upstream base URL for resolving relative paths.
+            // The src may be a proxy URL like /api/stream/proxy?url=<encoded-upstream>.
+            let upstreamBase = src;
+            const proxyUrlMatch = src.match(/[?&]url=([^&]+)/);
+            if (proxyUrlMatch) {
+              try { upstreamBase = decodeURIComponent(proxyUrlMatch[1]); } catch { /* keep src */ }
+            }
+            const baseDir = upstreamBase.substring(0, upstreamBase.lastIndexOf('/') + 1);
+
+            // Make relative URI lines and URI= attributes absolute so iOS can resolve them.
+            const rewritten = manifestText
+              .split('\n')
+              .map(line => {
+                const t = line.trim();
+                if (!t || t.startsWith('#')) return line;
+                if (/^https?:\/\//.test(t)) return line;
+                try { return new URL(t, baseDir).href; } catch { return line; }
+              })
+              .join('\n')
+              .replace(/URI="([^"]+)"/g, (match, uri) => {
+                if (/^https?:\/\//.test(uri)) return match;
+                try { return `URI="${new URL(uri, baseDir).href}"`; } catch { return match; }
+              });
+
+            if (nativeHlsBlobUrlRef.current) {
+              URL.revokeObjectURL(nativeHlsBlobUrlRef.current);
+            }
+            const blob = new Blob([rewritten], { type: 'application/x-mpegURL' });
+            const blobUrl = URL.createObjectURL(blob);
+            nativeHlsBlobUrlRef.current = blobUrl;
+            playerLog('info', 'Native HLS: serving manifest as blob URL');
+            attachNativeHls(blobUrl);
+          } catch (err) {
+            playerLog('warn', 'Native HLS manifest pre-fetch failed, falling back to direct src', err);
+            attachNativeHls(src);
+          }
+        })();
+      } else {
+        attachNativeHls(src);
+      }
     } else {
       playerLog('info', 'Using direct video source');
       video.src = src;
@@ -424,6 +481,10 @@ export const VideoPlayer = ({
         playerLog('info', 'Destroying HLS instance');
         hlsRef.current.destroy();
         hlsRef.current = null;
+      }
+      if (nativeHlsBlobUrlRef.current) {
+        URL.revokeObjectURL(nativeHlsBlobUrlRef.current);
+        nativeHlsBlobUrlRef.current = null;
       }
     };
   }, [src, isM3U8, onError, loadSavedPosition]);

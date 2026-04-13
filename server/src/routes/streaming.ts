@@ -35,6 +35,12 @@ const CDN_CONFIGS: Array<{
     configs: Array<{ referer: string; origin?: string; userAgent?: string }>;
 }> = [
     {
+        pattern: /fast4speed|allanime/i,
+        configs: [
+            { referer: 'https://allanime.day/', origin: 'https://allanime.day' }
+        ]
+    },
+    {
         pattern: /rapid-cloud\.co/i,
         configs: [
             { referer: 'https://rapid-cloud.co/', origin: 'https://rapid-cloud.co' },

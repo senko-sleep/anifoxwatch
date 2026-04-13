@@ -298,6 +298,8 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
         try {
             // Determine best referer based on URL domain
             const cdnConfig: Record<string, { referer: string; origin?: string }> = {
+                'fast4speed': { referer: 'https://allanime.day/', origin: 'https://allanime.day' },
+                'allanime': { referer: 'https://allanime.day/', origin: 'https://allanime.day' },
                 'sunshinerays': { referer: 'https://rapid-cloud.co/' },
                 'sunburst': { referer: 'https://rapid-cloud.co/' },
                 'rainveil': { referer: 'https://rapid-cloud.co/' },
