@@ -206,7 +206,7 @@ export const Schedule = () => {
         <div className="min-h-screen bg-background text-foreground font-sans">
             <Navbar />
 
-            <main className="container mx-auto px-4 py-8">
+            <main className="container mx-auto px-4 py-8 pb-28 md:pb-12">
                 {/* Header */}
                 <div className="mb-8">
                     <h1 className="font-display text-3xl md:text-4xl font-bold mb-2 flex flex-wrap items-center gap-3 tracking-tight">

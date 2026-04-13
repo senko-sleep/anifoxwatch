@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { Play, Star, Clock, Captions, Mic, Sparkles, BookmarkPlus, ChevronRight, TrendingUp } from 'lucide-react';
+import { Play, Star, Clock, Captions, Sparkles, BookmarkPlus, ChevronRight, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeAnimeGenresForDisplay, isPlaceholderAnimeDescription } from '@/lib/utils';
 import { apiUrl } from '@/lib/api-config';
@@ -126,7 +126,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
         onMouseLeave={() => setIsPaused(false)}
       >
         {/* Background slides */}
-        <div className="relative w-full h-[58vw] min-h-[340px] max-h-[480px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]">
+        <div className="relative w-full h-[52vw] min-h-[280px] max-h-[400px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]">
 
           {heroAnime.map((a, idx) => {
             const isActive = idx === currentIndex;
@@ -174,12 +174,12 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
           {/* ── Content panel ─────────────────────────────────────── */}
           <div className="pointer-events-none absolute inset-0 z-[5] flex items-end lg:items-center">
-            <div className="w-full flex items-end lg:items-center justify-between px-4 pb-7 sm:px-7 sm:pb-8 lg:px-10 lg:pb-0 gap-4">
+            <div className="w-full flex items-end lg:items-center justify-between px-4 pb-5 sm:px-7 sm:pb-8 lg:px-10 lg:pb-0 gap-4">
 
               {/* Left: text content */}
               <div
                 className={cn(
-                  'pointer-events-auto flex flex-col gap-2.5 max-w-[min(30rem,88vw)] sm:max-w-[min(34rem,56%)] lg:max-w-[min(38rem,52%)] xl:max-w-[42rem] transition-all ease-out',
+                  'pointer-events-auto flex flex-col gap-1.5 sm:gap-2.5 max-w-[min(30rem,88vw)] sm:max-w-[min(34rem,56%)] lg:max-w-[min(38rem,52%)] xl:max-w-[42rem] transition-all ease-out',
                   contentVisible ? 'translate-y-0 opacity-100 duration-500' : 'translate-y-3 opacity-0 duration-200'
                 )}
               >
@@ -199,7 +199,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
                 {/* Title */}
                 <h1
-                  className="font-display text-xl font-bold leading-[1.15] tracking-tight text-white drop-shadow-[0_2px_24px_rgba(0,0,0,0.9)] sm:text-2xl md:text-3xl lg:text-[1.9rem] xl:text-[2.2rem]"
+                  className="font-display text-lg font-bold leading-[1.15] tracking-tight text-white drop-shadow-[0_2px_24px_rgba(0,0,0,0.9)] sm:text-2xl md:text-3xl lg:text-[1.9rem] xl:text-[2.2rem]"
                   style={{ textWrap: 'balance' } as CSSProperties}
                 >
                   {title}
@@ -217,40 +217,33 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                     {formatLabel}
                   </span>
                   {runtimeLabel && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-black/30 px-2 py-0.5 text-[10px] text-zinc-300 backdrop-blur-sm sm:text-[11px]">
+                    <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-black/30 px-2 py-0.5 text-[10px] text-zinc-300 backdrop-blur-sm sm:text-[11px]">
                       <Clock className="h-2.5 w-2.5 opacity-60" />
                       {runtimeLabel}
                     </span>
                   )}
-                  <span className="rounded-full border border-emerald-500/30 bg-emerald-950/40 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-300 sm:text-[11px]">
-                    4K
-                  </span>
-                  <span className="inline-flex items-center gap-0.5 rounded-full border border-sky-500/25 bg-sky-950/30 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-300 sm:text-[11px]">
+                  <span className="hidden sm:inline-flex items-center gap-0.5 rounded-full border border-sky-500/25 bg-sky-950/30 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-300 sm:text-[11px]">
                     <Captions className="h-2.5 w-2.5" />
                     Sub
                   </span>
-                  <span className="inline-flex items-center gap-0.5 rounded-full border border-green-500/25 bg-green-950/30 px-2 py-0.5 text-[10px] font-bold uppercase text-green-300 sm:text-[11px]">
-                    <Mic className="h-2.5 w-2.5" />
-                    Dub
-                  </span>
                   {epCountLabel && (
-                    <span className="rounded-full border border-white/[0.07] bg-white/[0.05] px-2 py-0.5 text-[10px] text-zinc-400 sm:text-[11px]">
+                    <span className="hidden sm:inline-block rounded-full border border-white/[0.07] bg-white/[0.05] px-2 py-0.5 text-[10px] text-zinc-400 sm:text-[11px]">
                       {epCountLabel}
                     </span>
                   )}
                 </div>
 
-                {/* Studio */}
+                {/* Studio — desktop only */}
                 {studio && (
-                  <p className="text-[11px] text-zinc-500 sm:text-xs -mt-0.5">
+                  <p className="hidden sm:block text-[11px] text-zinc-500 sm:text-xs -mt-0.5">
                     <span className="text-zinc-600">by </span>
                     <span className="text-zinc-400 font-medium">{studio}</span>
                   </p>
                 )}
 
-                {/* Genres */}
+                {/* Genres — desktop only */}
                 {displayGenres.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="hidden sm:flex flex-wrap gap-1.5">
                     {displayGenres.slice(0, 5).map((g) => (
                       <span
                         key={g}
@@ -262,30 +255,30 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                   </div>
                 )}
 
-                {/* Synopsis */}
-                <p className="line-clamp-2 text-[12px] leading-relaxed text-zinc-400/90 sm:text-sm max-w-[44ch]">
+                {/* Synopsis — desktop only */}
+                <p className="hidden sm:block line-clamp-2 text-[12px] leading-relaxed text-zinc-400/90 sm:text-sm max-w-[44ch]">
                   {synopsis}
                 </p>
 
                 {/* CTA buttons */}
-                <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <div className="flex items-center gap-2 pt-0.5">
                   <Button
                     onClick={() =>
                       navigate(watchPath, {
                         state: { from: location.pathname + location.search },
                       })
                     }
-                    className="h-9 gap-2 rounded-full bg-fox-orange px-5 text-sm font-semibold text-white shadow-lg shadow-fox-orange/30 ring-1 ring-white/10 hover:bg-fox-orange/90 sm:h-10 sm:px-6 transition-all duration-200 hover:scale-[1.03] hover:shadow-fox-orange/45"
+                    className="h-8 gap-1.5 rounded-full bg-fox-orange px-4 text-xs font-semibold text-white shadow-lg shadow-fox-orange/30 ring-1 ring-white/10 hover:bg-fox-orange/90 sm:h-10 sm:px-6 sm:text-sm sm:gap-2 transition-all duration-200 hover:scale-[1.03] hover:shadow-fox-orange/45"
                   >
-                    <Play className="h-3.5 w-3.5 fill-white" />
+                    <Play className="h-3 w-3 fill-white sm:h-3.5 sm:w-3.5" />
                     Watch Now
                   </Button>
                   <Button
                     variant="outline"
-                    className="h-9 gap-2 rounded-full border-white/[0.12] bg-white/[0.06] px-4 text-sm font-medium text-zinc-200 backdrop-blur-sm hover:bg-white/[0.1] hover:border-white/20 hover:text-white sm:h-10 sm:px-5 transition-all duration-200"
+                    className="h-8 gap-1.5 rounded-full border-white/[0.12] bg-white/[0.06] px-3 text-xs font-medium text-zinc-200 backdrop-blur-sm hover:bg-white/[0.1] hover:border-white/20 hover:text-white sm:h-10 sm:px-5 sm:text-sm transition-all duration-200"
                     onClick={() => navigate(watchPath, { state: { from: location.pathname + location.search } })}
                   >
-                    <BookmarkPlus className="h-3.5 w-3.5" />
+                    <BookmarkPlus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                     <span className="hidden sm:inline">Watchlist</span>
                   </Button>
                   <Link
@@ -375,7 +368,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
           </div>
 
           {/* Slide dots — pinned bottom-center */}
-          <div className="pointer-events-auto absolute bottom-1 inset-x-0 z-[6] flex items-center justify-center gap-0.5">
+          <div className="pointer-events-auto absolute bottom-0 inset-x-0 z-[6] flex items-center justify-center gap-0.5">
             {heroAnime.slice(0, 12).map((_, idx) => (
               <button
                 key={idx}

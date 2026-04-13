@@ -109,7 +109,7 @@ const Index = () => {
   const SkeletonRow = () => (
     <div className="flex gap-3 overflow-hidden">
       {[...Array(8)].map((_, i) => (
-        <div key={i} className="w-[9.5rem] sm:w-44 shrink-0 aspect-[2/3] rounded-xl bg-white/[0.04] animate-pulse" />
+        <div key={i} className="w-[10rem] sm:w-44 shrink-0 aspect-[2/3] rounded-xl bg-white/[0.04] animate-pulse" />
       ))}
     </div>
   );
@@ -149,7 +149,7 @@ const Index = () => {
       )}
 
       {/* ── Main content ──────────────────────────────────────────────── */}
-      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12 sm:pb-20 space-y-6 sm:space-y-10 pt-4 sm:pt-8">
+      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-28 sm:pb-20 space-y-5 sm:space-y-10 pt-3 sm:pt-8">
 
         {/* Continue Watching */}
         {history.length > 0 && (

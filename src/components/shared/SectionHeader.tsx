@@ -11,7 +11,6 @@ interface SectionHeaderProps {
     link?: string;
     linkText?: string;
     className?: string;
-    /** Softer typography for secondary rails (e.g. browse rows below a hero). */
     variant?: 'default' | 'quiet';
 }
 
@@ -19,35 +18,39 @@ export const SectionHeader = ({
     title,
     subtitle,
     link,
-    linkText = "See All",
+    linkText = 'See All',
     className,
     variant = 'default',
 }: SectionHeaderProps) => {
     const quiet = variant === 'quiet';
     return (
-        <div className={cn("flex items-baseline justify-between gap-4 mb-3 sm:mb-4", className)}>
-            <div className="min-w-0">
-                <h2
-                    className={cn(
-                        "font-display tracking-tight leading-tight",
-                        quiet
-                            ? "text-[15px] sm:text-base font-semibold text-zinc-200"
-                            : "text-base sm:text-lg font-semibold bg-gradient-to-r from-amber-100 via-fox-orange to-amber-200 bg-clip-text text-transparent"
-                    )}
-                >
-                    {title}
-                </h2>
-                {subtitle && (
-                    <p className={cn("mt-0.5 text-[11px] sm:text-xs text-zinc-500")}>
-                        {subtitle}
-                    </p>
+        <div className={cn('flex items-center justify-between gap-4 mb-3 sm:mb-4', className)}>
+            <div className="flex items-center gap-2.5 min-w-0">
+                {/* Left accent bar */}
+                {!quiet && (
+                    <span className="shrink-0 w-[3px] h-5 rounded-full bg-fox-orange shadow-[0_0_6px_1px] shadow-fox-orange/50" />
                 )}
+                <div className="min-w-0">
+                    <h2
+                        className={cn(
+                            'font-display tracking-tight leading-tight',
+                            quiet
+                                ? 'text-[15px] sm:text-base font-semibold text-zinc-300'
+                                : 'text-[15px] sm:text-lg font-bold text-white'
+                        )}
+                    >
+                        {title}
+                    </h2>
+                    {subtitle && (
+                        <p className="mt-0.5 text-[11px] sm:text-xs text-zinc-500">{subtitle}</p>
+                    )}
+                </div>
             </div>
 
             {link && (
                 <Link
                     to={link}
-                    className="text-xs font-medium text-zinc-500 hover:text-fox-orange transition-colors flex items-center gap-0.5 shrink-0 touch-manipulation"
+                    className="shrink-0 flex items-center gap-0.5 text-[11px] sm:text-xs font-semibold text-zinc-500 hover:text-fox-orange transition-colors touch-manipulation"
                 >
                     {linkText}
                     <ChevronRight className="w-3.5 h-3.5" />
