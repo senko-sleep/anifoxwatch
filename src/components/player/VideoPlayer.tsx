@@ -414,6 +414,12 @@ export const VideoPlayer = ({
     }
 
     return () => {
+      // Pause video to prevent audio playing after navigation
+      if (video) {
+        video.pause();
+        video.src = '';
+        video.load();
+      }
       if (hlsRef.current) {
         playerLog('info', 'Destroying HLS instance');
         hlsRef.current.destroy();
