@@ -392,12 +392,13 @@ const Watch = () => {
 
     const animeId = cleanAnimeId || anime.id;
     const storedPref = getAnimeAudioPref(animeId);
-    
-    const currentHasSub = currentEpisode.hasSub || !currentEpisode.hasDub;
+
+    // Only trust confirmed dub signals — serversHaveDub is NOT used here because streaming
+    // sources (e.g. AnimeKai) return a 'dub' server entry for every anime even when no dubbed
+    // content exists, which causes a 404 → error loop on sub-only titles.
     const currentHasDub =
       currentEpisode.hasDub ||
-      (anime?.dubCount != null && currentEpisode.number <= anime.dubCount) ||
-      serversHaveDub ||
+      (anime.dubCount != null && anime.dubCount > 0 && currentEpisode.number <= anime.dubCount) ||
       dubProbeHasSources;
 
     // If user explicitly chose sub for this anime, respect it
@@ -412,11 +413,11 @@ const Watch = () => {
       return;
     }
 
-    // No stored preference: auto-switch to dub if available
+    // No stored preference: auto-switch to dub only when confirmed available
     if (currentHasDub) {
       setAudioType('dub');
     }
-  }, [currentEpisode, anime, audioManuallySet, anime?.dubCount, serversHaveDub, dubProbeHasSources, cleanAnimeId, getAnimeAudioPref]);
+  }, [currentEpisode, anime, audioManuallySet, anime?.dubCount, dubProbeHasSources, cleanAnimeId, getAnimeAudioPref]);
 
   // Store user's manual audio choice when they change it
   useEffect(() => {
