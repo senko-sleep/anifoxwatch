@@ -3,7 +3,7 @@
  * Uses axios for fast HTTP requests instead of Puppeteer
  */
 
-import axios from 'axios';
+import axios from '../utils/axios-edge.js';
 import * as cheerio from 'cheerio';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';

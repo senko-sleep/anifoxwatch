@@ -3,7 +3,7 @@
  * Uses hanime.tv API for hentai streaming
  */
 
-import axios from 'axios';
+import axios from '../utils/axios-edge.js';
 import { AnimeBase, AnimeSearchResult, Episode } from '../types/anime.js';
 import { StreamingData, VideoSource } from '../types/streaming.js';
 import { BaseAnimeSource, GenreAwareSource, SourceRequestOptions } from './base-source.js';

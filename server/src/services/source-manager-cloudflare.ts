@@ -5,6 +5,8 @@
  */
 
 import { CloudflareConsumetFetchSource } from '../sources/cloudflare-consumet-fetch-source.js';
+import { WatchHentaiSource } from '../sources/watchhentai-source.js';
+import { HanimeSource } from '../sources/hanime-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth } from '../types/anime.js';
 import { SourceRequestOptions } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
@@ -36,6 +38,8 @@ export class CloudflareSourceManager {
 
     constructor() {
         this.registerSource(new CloudflareConsumetFetchSource());
+        this.registerSource(new WatchHentaiSource());
+        this.registerSource(new HanimeSource());
 
         logger.info(`[CloudflareSourceManager] Initialized with ${this.sources.size} sources`, undefined, 'CloudflareSourceManager');
     }
@@ -110,7 +114,18 @@ export class CloudflareSourceManager {
         return this.sources.get(this.primarySource) || null;
     }
 
-    private getStreamingSource(_id: string): StreamingSource | null {
+    private getStreamingSource(id: string): StreamingSource | null {
+        // Try to identify source from ID prefix
+        for (const source of this.sources.values()) {
+            if (id.startsWith(`${source.name.toLowerCase()}-`)) {
+                return source;
+            }
+        }
+        
+        // Specific id patterns
+        if (id.startsWith('hanime-')) return this.sources.get('Hanime') || null;
+        if (id.startsWith('watchhentai-')) return this.sources.get('WatchHentai') || null;
+
         return this.getAvailableSource();
     }
 
@@ -187,6 +202,49 @@ export class CloudflareSourceManager {
         } catch (error) {
             logger.error(`getTopRated failed`, error as Error, undefined, 'CloudflareSourceManager');
             return [];
+        }
+    }
+
+    async getAnimeByGenre(genre: string, page: number = 1, sourceName?: string): Promise<AnimeSearchResult> {
+        const source = this.getAvailableSource(sourceName);
+        if (!source || !('getByGenre' in source)) {
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: sourceName || 'none' };
+        }
+
+        try {
+            return await (source as any).getByGenre(genre, page);
+        } catch (error) {
+            logger.error(`getAnimeByGenre failed`, error as Error, undefined, 'CloudflareSourceManager');
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
+        }
+    }
+
+    async browseAnime(filters: any): Promise<AnimeSearchResult> {
+        const sourceName = filters.source;
+        // Priority adult source for adult modes if no source specific
+        let sourceToUse = sourceName;
+        if (!sourceName && (filters.mode === 'adult')) {
+             sourceToUse = 'WatchHentai';
+        }
+        const source = this.getAvailableSource(sourceToUse);
+        
+        if (!source) {
+            return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, source: 'none' };
+        }
+
+        try {
+            if (filters.genres && filters.genres.length > 0 && 'getByGenre' in source) {
+                return await (source as any).getByGenre(filters.genres[0], filters.page || 1);
+            }
+            if ('getByType' in source && filters.type) {
+                return await (source as any).getByType(filters.type, filters.page || 1);
+            }
+            
+            // Fallback
+            const res = await source.getLatest(filters.page || 1);
+            return { results: res, totalPages: 1, currentPage: filters.page || 1, hasNextPage: false, source: source.name };
+        } catch (e) {
+            return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, source: 'error' };
         }
     }
 
