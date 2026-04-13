@@ -117,8 +117,8 @@ export function getApiConfig(): ApiConfig {
 
     if (isFirebaseHosting) {
         return {
-            deployment: 'render',
-            baseUrl: API_DEPLOYMENTS.render,
+            deployment: 'cloudflare',
+            baseUrl: API_DEPLOYMENTS.cloudflare,
             timeout: 30000,
             retries: 3
         };

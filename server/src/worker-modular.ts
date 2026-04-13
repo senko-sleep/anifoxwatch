@@ -51,6 +51,11 @@ app.use('*', async (c, next) => {
 });
 
 // ============================================
+// Render backend URL for Puppeteer-dependent fallbacks
+// ============================================
+const RENDER_BACKEND_URL = 'https://anifoxwatch-sm7s.onrender.com';
+
+// ============================================
 // Health Check
 // ============================================
 app.get('/health', (c) => c.json({
@@ -59,6 +64,34 @@ app.get('/health', (c) => c.json({
     timestamp: new Date().toISOString(),
     version: '1.0.0-modular'
 }));
+
+// ============================================
+// Image Proxy (fallback for CORS / referrer-blocked images)
+// ============================================
+app.get('/api/image-proxy', async (c) => {
+    const url = c.req.query('url');
+    if (!url) return c.json({ error: 'url param required' }, 400);
+    try {
+        const resp = await fetch(url, {
+            headers: {
+                'Referer': new URL(url).origin,
+                'User-Agent': 'Mozilla/5.0',
+            },
+        });
+        if (!resp.ok) return c.json({ error: 'Image proxy failed' }, 502);
+        const ct = resp.headers.get('content-type') || 'image/jpeg';
+        return new Response(resp.body, {
+            status: 200,
+            headers: {
+                'Content-Type': ct,
+                'Cache-Control': 'public, max-age=86400',
+                'Access-Control-Allow-Origin': '*',
+            },
+        });
+    } catch {
+        return c.json({ error: 'Image proxy failed' }, 502);
+    }
+});
 
 // ============================================
 // API Documentation

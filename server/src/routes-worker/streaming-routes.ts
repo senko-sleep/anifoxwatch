@@ -87,6 +87,41 @@ function normalizeStreamServerQuery(raw: string | string[] | undefined): string 
     return s;
 }
 
+/**
+ * Render backend URL for Puppeteer-dependent requests.
+ * CF Worker handles metadata (AniList) and proxy; Render handles stream extraction.
+ */
+const RENDER_BACKEND_URL = 'https://anifoxwatch-sm7s.onrender.com';
+
+/**
+ * Proxy a request to the Render backend (for routes that need Puppeteer/heavy scraping).
+ * Forwards query params and returns the JSON response with CORS headers.
+ */
+async function proxyToRender(path: string, timeoutMs = 120_000): Promise<Response> {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const resp = await fetch(`${RENDER_BACKEND_URL}${path}`, {
+            signal: controller.signal,
+            headers: { 'Accept': 'application/json' },
+        });
+        clearTimeout(tid);
+        // Clone into a new Response so we can add CORS headers
+        const body = await resp.text();
+        return new Response(body, {
+            status: resp.status,
+            headers: {
+                'Content-Type': resp.headers.get('Content-Type') || 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'private, max-age=300',
+            },
+        });
+    } catch (e) {
+        clearTimeout(tid);
+        throw e;
+    }
+}
+
 export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
     const app = new Hono();
 
@@ -97,15 +132,19 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
         try {
             if (typeof sourceManager.getEpisodeServers === 'function') {
                 const servers = await sourceManager.getEpisodeServers(episodeId);
-                return c.json({ servers });
+                if (servers && servers.length > 0) return c.json({ servers });
             }
-            return c.json({ servers: [] });
+        } catch {}
+
+        // Fallback: proxy to Render backend (has Puppeteer sources)
+        try {
+            return await proxyToRender(`/api/stream/servers/${encodeURIComponent(episodeId)}`);
         } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+            return c.json({ servers: [], error: e.message }, 502);
         }
     });
 
-    // Get streaming links
+    // Get streaming links — try local sources first, then proxy to Render for Puppeteer
     app.get('/watch/:episodeId', async (c) => {
         const episodeId = decodeURIComponent(c.req.param('episodeId'));
         const explicitServer = normalizeStreamServerQuery(c.req.query('server'));
@@ -116,6 +155,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
         let streamData: any = { sources: [], subtitles: [] };
         let lastError: string | null = null;
 
+        // 1) Try local CF Worker sources (CloudflareConsumet, WatchHentai, Hanime)
         try {
             if (typeof sourceManager.getStreamingLinks === 'function') {
                 streamData = await sourceManager.getStreamingLinks(
@@ -126,6 +166,52 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
             }
         } catch (error: any) {
             lastError = error.message;
+        }
+
+        // 2) If local sources returned nothing, proxy to Render (Puppeteer sources)
+        if (!streamData.sources || streamData.sources.length === 0) {
+            try {
+                const qs = new URLSearchParams();
+                if (explicitServer) qs.set('server', explicitServer);
+                if (category) qs.set('category', category);
+                const qsStr = qs.toString() ? `?${qs.toString()}` : '';
+                const renderResp = await proxyToRender(
+                    `/api/stream/watch/${encodeURIComponent(episodeId)}${qsStr}`,
+                    120_000
+                );
+                if (renderResp.ok) {
+                    const renderData = await renderResp.json() as any;
+                    if (renderData.sources && renderData.sources.length > 0) {
+                        streamData = renderData;
+                        // Rewrite Render proxy URLs to use our CF Worker proxy instead
+                        if (useProxy) {
+                            streamData.sources = streamData.sources.map((s: any) => {
+                                // If Render already wrapped in its proxy, extract original URL
+                                const origUrl = s.originalUrl || s.url;
+                                const unwrapped = origUrl.includes('/api/stream/proxy?url=')
+                                    ? decodeURIComponent(origUrl.split('/api/stream/proxy?url=')[1]?.split('&')[0] || origUrl)
+                                    : origUrl;
+                                return {
+                                    ...s,
+                                    url: proxyUrl(unwrapped, proxyBase),
+                                    originalUrl: unwrapped,
+                                };
+                            });
+                            if (streamData.subtitles) {
+                                streamData.subtitles = streamData.subtitles.map((sub: any) => {
+                                    const origUrl = sub.url;
+                                    const unwrapped = origUrl.includes('/api/stream/proxy?url=')
+                                        ? decodeURIComponent(origUrl.split('/api/stream/proxy?url=')[1]?.split('&')[0] || origUrl)
+                                        : origUrl;
+                                    return { ...sub, url: proxyUrl(unwrapped, proxyBase) };
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch (renderErr: any) {
+                lastError = `CF local + Render both failed: ${renderErr.message}`;
+            }
         }
 
         const winningSource = typeof streamData?.source === 'string' ? streamData.source : undefined;
@@ -143,8 +229,8 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
             }, 404);
         }
 
-        // Proxy the stream URLs if requested
-        if (useProxy) {
+        // Proxy the stream URLs if requested (and not already rewritten above from Render)
+        if (useProxy && !streamData.sources[0]?.url?.includes('/api/stream/proxy')) {
             streamData.sources = streamData.sources.map((source: any) => ({
                 ...source,
                 url: proxyUrl(source.url, proxyBase),

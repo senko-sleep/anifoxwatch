@@ -2,6 +2,42 @@ import { Hono } from 'hono';
 import { anilistService } from '../services/anilist-service.js';
 import { getHeroSpotlightCached } from '../services/hero-spotlight-service.js';
 
+/**
+ * Render backend URL for fallback when CF Worker sources can't handle the request.
+ * Source-prefixed IDs (allanime-*, animekai-*, 9anime-*, kaido-*, akih-*) need Puppeteer.
+ */
+const RENDER_BACKEND_URL = 'https://anifoxwatch-sm7s.onrender.com';
+
+async function proxyToRender(path: string, timeoutMs = 30_000): Promise<Response> {
+    const controller = new AbortController();
+    const tid = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const resp = await fetch(`${RENDER_BACKEND_URL}${path}`, {
+            signal: controller.signal,
+            headers: { 'Accept': 'application/json' },
+        });
+        clearTimeout(tid);
+        const body = await resp.text();
+        return new Response(body, {
+            status: resp.status,
+            headers: {
+                'Content-Type': resp.headers.get('Content-Type') || 'application/json',
+                'Access-Control-Allow-Origin': '*',
+            },
+        });
+    } catch (e) {
+        clearTimeout(tid);
+        throw e;
+    }
+}
+
+/** IDs that need Render (Puppeteer sources) — CF Worker can't handle these. */
+const RENDER_PREFIXES = ['allanime-', 'animekai-', '9anime-', 'kaido-', 'akih-', 'miruro-', 'aniwave-', 'anix-', 'zoro-', 'animefox-', 'gogoanime-', 'animepahe-', 'animeflv-'];
+function needsRender(id: string): boolean {
+    const lower = id.toLowerCase();
+    return RENDER_PREFIXES.some(p => lower.startsWith(p));
+}
+
 // Use a flexible interface that works with both SourceManager and CloudflareSourceManager
 interface SourceManagerLike {
     search(query: string, page?: number, sourceName?: string, options?: { mode?: string }): Promise<any>;
@@ -390,9 +426,24 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const id = c.req.query('id');
         if (!id) return c.json({ error: 'Query parameter "id" is required' }, 400);
 
+        // Source-prefixed IDs → proxy to Render (Puppeteer sources)
+        if (needsRender(id)) {
+            try {
+                return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`);
+            } catch (e: any) {
+                return c.json({ error: e.message }, 502);
+            }
+        }
+
         try {
             const result = await sourceManager.getAnime(id);
-            if (!result) return c.json({ error: 'Anime not found' }, 404);
+            if (!result) {
+                // Fallback to Render if local source returned null
+                try {
+                    return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`);
+                } catch {}
+                return c.json({ error: 'Anime not found' }, 404);
+            }
             return c.json(result);
         } catch (e: any) {
             return c.json({ error: e.message }, 500);
@@ -404,8 +455,23 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const id = c.req.query('id');
         if (!id) return c.json({ error: 'Query parameter "id" is required' }, 400);
 
+        // Source-prefixed IDs → proxy to Render
+        if (needsRender(id)) {
+            try {
+                return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`);
+            } catch (e: any) {
+                return c.json({ error: e.message, episodes: [] }, 502);
+            }
+        }
+
         try {
             const result = await sourceManager.getEpisodes(id);
+            if (!result || result.length === 0) {
+                // Fallback to Render if local returned empty
+                try {
+                    return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`);
+                } catch {}
+            }
             return c.json({ episodes: result });
         } catch (e: any) {
             return c.json({ error: e.message }, 500);
@@ -467,10 +533,21 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     // Get anime details (param-based)
     app.get('/:id', async (c) => {
         const id = decodeURIComponent(c.req.param('id'));
+
+        if (needsRender(id)) {
+            try {
+                return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`);
+            } catch (e: any) {
+                return c.json({ error: e.message }, 502);
+            }
+        }
         
         try {
             const data = await sourceManager.getAnime(id);
-            if (!data) return c.json({ error: 'Anime not found' }, 404);
+            if (!data) {
+                try { return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`); } catch {}
+                return c.json({ error: 'Anime not found' }, 404);
+            }
             return c.json(data);
         } catch (e: any) {
             return c.json({ error: e.message }, 500);
@@ -480,9 +557,20 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     // Get episodes (param-based)
     app.get('/:id/episodes', async (c) => {
         const id = decodeURIComponent(c.req.param('id'));
+
+        if (needsRender(id)) {
+            try {
+                return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`);
+            } catch (e: any) {
+                return c.json({ error: e.message, episodes: [] }, 502);
+            }
+        }
         
         try {
             const data = await sourceManager.getEpisodes(id);
+            if (!data || data.length === 0) {
+                try { return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`); } catch {}
+            }
             return c.json({ episodes: data });
         } catch (e: any) {
             return c.json({ error: e.message }, 500);

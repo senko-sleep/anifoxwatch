@@ -43,6 +43,7 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # Must match live API host (no trailing slash). If Render gives a new URL, update this and BASE_URL above.
+      # Primary API: Cloudflare Workers (no cold starts, global edge).
+      # Render backend is used as fallback for Puppeteer-dependent routes.
       - key: VITE_API_URL
-        value: https://anifoxwatch-sm7s.onrender.com
+        value: https://anifoxwatch-api.anya-bot.workers.dev

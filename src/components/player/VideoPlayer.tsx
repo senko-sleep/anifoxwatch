@@ -1125,7 +1125,7 @@ export const VideoPlayer = ({
         preload="auto"
         playsInline
         onClick={isMobile() ? undefined : togglePlay}
-        crossOrigin="anonymous"
+        crossOrigin={isM3U8 && !Hls.isSupported() ? undefined : "anonymous"}
       >
         {subtitles.map((sub, i) => (
           <track
