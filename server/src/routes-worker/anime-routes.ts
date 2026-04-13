@@ -77,21 +77,37 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const page = Number(c.req.query('page')) || 1;
         const source = c.req.query('source');
         const mode = c.req.query('mode') as 'safe' | 'mixed' | 'adult' | undefined;
+        const qs = c.req.url.split('?')[1] || '';
 
         if (!q) return c.json({ error: 'Query parameter "q" is required' }, 400);
 
         // Render-only source → proxy
         if (sourceNeedsRender(source)) {
-            try { return await proxyToRender(`/api/anime/search?${c.req.url.split('?')[1] || ''}`); } catch (e: any) {
+            try { return await proxyToRender(`/api/anime/search?${qs}`); } catch (e: any) {
                 return c.json({ error: e.message, results: [] }, 502);
             }
         }
 
+        // Adult mode always uses local hentai sources (WatchHentai/Hanime)
+        if (mode === 'adult') {
+            try {
+                const data = await sourceManager.search(q, page, source, { mode: 'adult' });
+                if (data.results.length > 0) return c.json(data);
+            } catch (_) { void _; }
+            // Fallback to Render for adult if local sources are down too
+            try { return await proxyToRender(`/api/anime/search?${qs}`); } catch (_) { void _; }
+            return c.json({ results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' });
+        }
+
+        // Safe/mixed: try local first, fall back to Render if empty
         try {
             const data = await sourceManager.search(q, page, source, { mode: mode || 'safe' });
-            return c.json(data);
-        } catch (e: any) {
-            return c.json({ error: e.message, results: [] }, 500);
+            if (data.results.length > 0) return c.json(data);
+        } catch (_) { void _; }
+
+        // Local returned nothing — proxy to Render
+        try { return await proxyToRender(`/api/anime/search?${qs}`, 45_000); } catch (e: any) {
+            return c.json({ error: e.message, results: [] }, 502);
         }
     });
 
@@ -398,32 +414,37 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             if (filters[key] === undefined) delete filters[key];
         });
 
+        const browseQs = c.req.url.split('?')[1] || '';
+
+        // Adult mode — use local hentai sources, fall back to Render if empty
+        if (filters.mode === 'adult') {
+            try {
+                if (sourceManager.browseAnime) {
+                    const result = await sourceManager.browseAnime(filters);
+                    if (result.results?.length > 0) {
+                        return c.json({ results: result.results, currentPage: page, totalPages: result.totalPages || 1, hasNextPage: result.hasNextPage || false, totalResults: result.results.length, source: result.source || 'adult' });
+                    }
+                }
+            } catch (_) { void _; }
+            try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
+            return c.json({ results: [], currentPage: page, totalPages: 0, hasNextPage: false, totalResults: 0, source: 'none' });
+        }
+
         try {
             if (!sourceManager.browseAnime) {
-                // Fallback to trending
+                try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
                 const trending = await sourceManager.getTrending(page);
-                return c.json({
-                    results: trending || [],
-                    currentPage: page,
-                    totalPages: 1,
-                    hasNextPage: false,
-                    totalResults: trending?.length || 0,
-                    filters: { type: query.type, genre: query.genre, status: query.status, year: query.year, sort: query.sort, order: query.order },
-                    source: 'fallback'
-                });
+                return c.json({ results: trending || [], currentPage: page, totalPages: 1, hasNextPage: false, totalResults: trending?.length || 0, source: 'fallback' });
             }
             const result = await sourceManager.browseAnime(filters);
-            return c.json({
-                results: result.results || [],
-                currentPage: page,
-                totalPages: result.totalPages || 1,
-                hasNextPage: result.hasNextPage || false,
-                totalResults: result.results?.length || 0,
-                filters: { type: query.type, genre: query.genre, status: query.status, year: query.year, sort: query.sort, order: query.order },
-                source: query.source || 'default'
-            });
+            // Local returned nothing — proxy to Render
+            if (!result.results?.length) {
+                try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
+            }
+            return c.json({ results: result.results || [], currentPage: page, totalPages: result.totalPages || 1, hasNextPage: result.hasNextPage || false, totalResults: result.results?.length || 0, source: query.source || result.source || 'default' });
         } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+            try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
+            return c.json({ error: e.message, results: [] }, 500);
         }
     });
 
@@ -452,12 +473,14 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     // Get anime details (query-based)
     app.get('/', async (c) => {
         const id = c.req.query('id');
+        const source = c.req.query('source');
         if (!id) return c.json({ error: 'Query parameter "id" is required' }, 400);
 
-        // Source-prefixed IDs → proxy to Render (Puppeteer sources)
-        if (needsRender(id)) {
+        // Source-prefixed IDs or render-only sources → proxy to Render (Puppeteer sources)
+        if (needsRender(id) || sourceNeedsRender(source)) {
+            const qs = source ? `id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}` : `id=${encodeURIComponent(id)}`;
             try {
-                return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`);
+                return await proxyToRender(`/api/anime?${qs}`);
             } catch (e: any) {
                 return c.json({ error: e.message }, 502);
             }
@@ -481,12 +504,14 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     // Get episodes (query-based)
     app.get('/episodes', async (c) => {
         const id = c.req.query('id');
+        const source = c.req.query('source');
         if (!id) return c.json({ error: 'Query parameter "id" is required' }, 400);
 
-        // Source-prefixed IDs → proxy to Render
-        if (needsRender(id)) {
+        // Source-prefixed IDs or render-only sources → proxy to Render
+        if (needsRender(id) || sourceNeedsRender(source)) {
+            const qs = source ? `id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}` : `id=${encodeURIComponent(id)}`;
             try {
-                return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`);
+                return await proxyToRender(`/api/anime/episodes?${qs}`);
             } catch (e: any) {
                 return c.json({ error: e.message, episodes: [] }, 502);
             }

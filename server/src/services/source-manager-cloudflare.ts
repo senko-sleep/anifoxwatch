@@ -137,7 +137,7 @@ export class CloudflareSourceManager {
     async search(query: string, page: number = 1, sourceName?: string, options?: { mode?: string }): Promise<AnimeSearchResult> {
         const mode = options?.mode || 'safe';
 
-        // Adult mode: delegate to WatchHentai/Hanime
+        // Adult mode: delegate to WatchHentai/Hanime only
         if (mode === 'adult') {
             const source = this.getAvailableSource(sourceName || 'WatchHentai');
             if (source) {
@@ -146,7 +146,32 @@ export class CloudflareSourceManager {
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
         }
 
-        // Safe/mixed: AniList primary, Consumet fallback
+        // Mixed mode: merge AniList + WatchHentai results
+        if (mode === 'mixed') {
+            const [safeResult, adultResult] = await Promise.allSettled([
+                anilistService.advancedSearch({ search: query, sort: ['SEARCH_MATCH'], perPage: 15, page }),
+                (async () => {
+                    const hentaiSource = this.sources.get('WatchHentai');
+                    return hentaiSource ? hentaiSource.search(query, page) : null;
+                })()
+            ]);
+            const safeResults = safeResult.status === 'fulfilled' ? safeResult.value.results : [];
+            const adultResults = adultResult.status === 'fulfilled' && adultResult.value ? adultResult.value.results : [];
+            const combined = [...safeResults, ...adultResults];
+            return {
+                results: combined,
+                totalPages: Math.max(
+                    safeResult.status === 'fulfilled' ? safeResult.value.totalPages : 0,
+                    adultResult.status === 'fulfilled' && adultResult.value ? adultResult.value.totalPages : 0
+                ),
+                currentPage: page,
+                hasNextPage: (safeResult.status === 'fulfilled' && safeResult.value.hasNextPage) ||
+                    (adultResult.status === 'fulfilled' && !!adultResult.value?.hasNextPage),
+                source: 'mixed'
+            };
+        }
+
+        // Safe: AniList primary, Consumet fallback
         try {
             const result = await anilistService.advancedSearch({ search: query, sort: ['SEARCH_MATCH'], perPage: 20, page });
             if (result.results.length > 0) return result;

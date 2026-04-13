@@ -11,7 +11,10 @@
       "Bash(firebase deploy:*)",
       "Bash(npx firebase:*)",
       "Bash(echo \"Exit: $?\")",
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "Bash(curl -s \"https://anifoxwatch-api.anya-bot.workers.dev/api/anime/browse?page=1&mode=safe\")",
+      "Bash(curl -s \"https://anifoxwatch-api.anya-bot.workers.dev/health\")",
+      "Bash(npx wrangler:*)"
     ]
   }
 }
