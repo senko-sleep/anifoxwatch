@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiClient, SourceHealth, StreamingData, EpisodeServer, ScheduleResponse, LeaderboardResponse, SeasonalResponse } from '@/lib/api-client';
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
+import { enrichWithAniListCovers } from '@/lib/anilist-covers';
 
 // Query keys for caching and invalidation
 export const queryKeys = {
@@ -25,7 +26,10 @@ export const queryKeys = {
 export function useTrending(page: number = 1, limit?: number) {
     return useQuery<Anime[], Error>({
         queryKey: queryKeys.trending(page, limit?.toString()),
-        queryFn: () => apiClient.getTrending(page, undefined, limit),
+        queryFn: async () => {
+            const results = await apiClient.getTrending(page, undefined, limit);
+            return enrichWithAniListCovers(results);
+        },
         staleTime: 5 * 60 * 1000,
         gcTime: 10 * 60 * 1000,
     });
@@ -34,7 +38,10 @@ export function useTrending(page: number = 1, limit?: number) {
 export function useLatest(page: number = 1, source?: string) {
     return useQuery<Anime[], Error>({
         queryKey: queryKeys.latest(page, source),
-        queryFn: () => apiClient.getLatest(page, source),
+        queryFn: async () => {
+            const results = await apiClient.getLatest(page, source);
+            return enrichWithAniListCovers(results);
+        },
         staleTime: 3 * 60 * 1000, // Shorter for latest
         gcTime: 5 * 60 * 1000,
     });
@@ -109,7 +116,9 @@ export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boo
         queryFn: async () => {
             try {
                 const result = await apiClient.browseAnime(filters, page, bypassCache, limit);
-                return result;
+                // Enrich with AniList HD covers
+                const enrichedResults = await enrichWithAniListCovers(result.results);
+                return { ...result, results: enrichedResults };
             } catch (error) {
                 console.error('[useBrowse] Browse failed:', error);
                 // Return empty result instead of throwing
@@ -186,7 +195,11 @@ export function useLeaderboard(type: 'trending' | 'top-rated' = 'trending', page
 export function useSeasonal(year?: number, season?: string, page: number = 1, enabled: boolean = true) {
     return useQuery<import('@/lib/api-client').SeasonalResponse, Error>({
         queryKey: queryKeys.seasonal(year, season, page),
-        queryFn: () => apiClient.getSeasonal(year, season, page),
+        queryFn: async () => {
+            const response = await apiClient.getSeasonal(year, season, page);
+            const enrichedResults = await enrichWithAniListCovers(response.results);
+            return { ...response, results: enrichedResults };
+        },
         enabled,
         staleTime: 30 * 60 * 1000, // 30 minutes - seasonal data is fairly static
         gcTime: 60 * 60 * 1000,

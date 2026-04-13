@@ -255,10 +255,21 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                   </div>
                 )}
 
-                {/* Synopsis — desktop only */}
-                <p className="hidden sm:block line-clamp-2 text-[12px] leading-relaxed text-zinc-400/90 sm:text-sm max-w-[44ch]">
-                  {synopsis}
-                </p>
+                {/* Synopsis — desktop only, scrollable */}
+                <div className="hidden sm:block relative max-w-[44ch]">
+                  <div
+                    className="overflow-y-auto pr-2 text-[12px] leading-relaxed text-zinc-400/90 sm:text-sm"
+                    style={{
+                      maxHeight: '4.5em',
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: 'rgba(255,255,255,0.12) transparent',
+                    }}
+                  >
+                    <p>{synopsis}</p>
+                  </div>
+                  {/* Fade hint at bottom when content overflows */}
+                  <div className="pointer-events-none absolute bottom-0 left-0 right-2 h-4 bg-gradient-to-t from-[#0c0e14]/80 to-transparent" />
+                </div>
 
                 {/* CTA buttons */}
                 <div className="flex items-center gap-2 pt-0.5">

@@ -5,6 +5,7 @@ import {
     NineAnimeSource,
     WatchHentaiSource,
     HanimeSource,
+    AkiHSource,
     ConsumetSource,
     AnimeFLVSource,
     GogoanimeSource,
@@ -128,6 +129,7 @@ export class SourceManager {
         // Adult sources
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
+        this.registerSource(new AkiHSource());
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
@@ -768,7 +770,7 @@ export class SourceManager {
     private readonly knownPrefixes = [
         'animekai-', 'animepahe-',
         '9anime-', 'gogoanime-', 'consumet-',
-        'animeflv-', 'anilist-', 'watchhentai-', 'hanime-',
+        'animeflv-', 'anilist-', 'watchhentai-', 'hanime-', 'akih-',
         'aniwave-', 'aniwatch-', 'allanime-'
     ];
 
@@ -905,6 +907,7 @@ export class SourceManager {
             { prefix: 'hanime-', source: 'WatchHentai' },
             { prefix: 'hh-', source: 'WatchHentai' },
             { prefix: 'watchhentai-', source: 'WatchHentai' },
+            { prefix: 'akih-', source: 'AkiH' },
             { prefix: 'watchhentai-series/', source: 'WatchHentai' },
             { prefix: 'watchhentai-videos/', source: 'WatchHentai' },
             { prefix: 'animeflv-', source: 'AnimeFLV' },
@@ -947,7 +950,7 @@ export class SourceManager {
         console.log(`🔍 [SourceManager] Search request: "${query}" (page: ${page}, mode: ${mode}, source: ${sourceName || 'auto'})`);
 
         if (mode === 'adult') {
-            const adultSources = ['WatchHentai', 'Hanime']
+            const adultSources = ['WatchHentai', 'Hanime', 'AkiH']
                 .map(name => this.getAvailableSource(name))
                 .filter(source => source && source.isAvailable) as StreamingSource[];
 
@@ -2126,7 +2129,7 @@ export class SourceManager {
 
         if (mode === 'adult') {
             // Use only WatchHentai for adult content - simpler and more consistent
-            effectiveSource = filters.source && ['WatchHentai', 'Hanime'].includes(filters.source) 
+            effectiveSource = filters.source && ['WatchHentai', 'Hanime', 'AkiH'].includes(filters.source) 
                 ? filters.source 
                 : 'WatchHentai';
         } else if (mode === 'mixed') {
@@ -2189,7 +2192,8 @@ export class SourceManager {
         let finalResults: AnimeBase[] = [];
 
         // STRATEGY: Try AniList first (stable public API), then fall back to native scrapers.
-        const canUseAniList = true;
+        // Skip AniList for adult mode - use native source methods instead
+        const canUseAniList = filters.mode !== 'adult';
 
         if (canUseAniList) {
             logger.info(`[SourceManager] Using AniList-only strategy for browse`, filters);

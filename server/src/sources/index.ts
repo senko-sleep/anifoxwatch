@@ -7,6 +7,7 @@ export { AnimeKaiSource } from './animekai-source.js';
 // Adult/Hentai Sources
 export { WatchHentaiSource } from './watchhentai-source.js';
 export { HanimeSource } from './hanime-source.js';
+export { AkiHSource } from './akih-source.js';
 export { ConsumetSource } from './consumet-source.js';
 export { AniwatchSource } from './aniwatch-source.js';
 export { GogoanimeSource } from './gogoanime-source.js';
