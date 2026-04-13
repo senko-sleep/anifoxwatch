@@ -1262,70 +1262,108 @@ export const VideoPlayer = ({
         )}
 
         {/* Bottom controls — stopPropagation on touch so taps here never reach the video */}
-        <div
-          className="absolute bottom-0 left-0 right-0 p-4 space-y-2"
-          onTouchStart={(e) => e.stopPropagation()}
-          onTouchEnd={(e) => e.stopPropagation()}
-          onTouchMove={(e) => e.stopPropagation()}
-        >
-          {/* Progress bar */}
           <div
-            ref={progressContainerRef}
-            className="relative group/progress"
-            onMouseEnter={() => setIsProgressHovering(true)}
-            onMouseLeave={() => setIsProgressHovering(false)}
-            onMouseMove={(e) => setProgressMouseX(e.clientX)}
-            onTouchStart={(e) => {
-              e.stopPropagation();
-              if (e.touches[0]) {
-                setIsProgressTouching(true);
-                setProgressTouchX(e.touches[0].clientX);
-              }
-            }}
-            onTouchMove={(e) => {
-              e.stopPropagation();
-              if (e.touches[0]) {
-                setProgressTouchX(e.touches[0].clientX);
-              }
-            }}
-            onTouchEnd={(e) => {
-              e.stopPropagation();
-              setTimeout(() => setIsProgressTouching(false), 300);
-            }}
+            className="absolute bottom-0 left-0 right-0 p-4 space-y-2"
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchEnd={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
           >
-            <div className="absolute bottom-0 left-0 right-0 h-1.5 md:h-1 bg-white/20 rounded-full overflow-hidden">
+            {/* Progress bar — Netflix / YouTube premium style */}
+            <div
+              ref={progressContainerRef}
+              className="relative group/progress cursor-pointer py-2"
+              onMouseEnter={() => setIsProgressHovering(true)}
+              onMouseLeave={() => setIsProgressHovering(false)}
+              onMouseMove={(e) => setProgressMouseX(e.clientX)}
+              onClick={(e) => {
+                const rect = progressContainerRef.current?.getBoundingClientRect();
+                if (rect) {
+                  const x = e.clientX - rect.left;
+                  const percentage = x / rect.width;
+                  const time = percentage * (duration || 0);
+                  handleSeek([time]);
+                }
+              }}
+              onTouchStart={(e) => {
+                e.stopPropagation();
+                if (e.touches[0]) {
+                  setIsProgressTouching(true);
+                  setProgressTouchX(e.touches[0].clientX);
+                }
+              }}
+              onTouchMove={(e) => {
+                e.stopPropagation();
+                if (e.touches[0]) {
+                  setProgressTouchX(e.touches[0].clientX);
+                }
+              }}
+              onTouchEnd={(e) => {
+                e.stopPropagation();
+                setTimeout(() => setIsProgressTouching(false), 300);
+              }}
+            >
+              {/* Track container — grows on hover like Netflix */}
+              <div className={cn(
+                "relative w-full rounded-full overflow-hidden transition-all duration-200 ease-out",
+                isMobile()
+                  ? "h-[5px]"
+                  : "h-[3px] group-hover/progress:h-[6px]"
+              )}>
+                {/* Background track */}
+                <div className="absolute inset-0 bg-white/20" />
+                {/* Buffered */}
+                <div
+                  className="absolute inset-y-0 left-0 bg-white/30 transition-[width] duration-300"
+                  style={{ width: `${duration > 0 ? (buffered / duration) * 100 : 0}%` }}
+                />
+                {/* Played — with glow on hover */}
+                <div
+                  className={cn(
+                    "absolute inset-y-0 left-0 bg-fox-orange transition-shadow duration-200",
+                    (isProgressHovering || isProgressTouching) && "shadow-[0_0_8px_rgba(255,120,30,0.6)]"
+                  )}
+                  style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                />
+                {/* Hover position indicator line */}
+                {(isProgressHovering || isProgressTouching) && progressContainerRef.current && (() => {
+                  const rect = progressContainerRef.current!.getBoundingClientRect();
+                  const mx = (isProgressTouching ? progressTouchX : progressMouseX) - rect.left;
+                  const pct = Math.max(0, Math.min(100, (mx / rect.width) * 100));
+                  return (
+                    <div
+                      className="absolute inset-y-0 w-[2px] bg-white/60 pointer-events-none z-10"
+                      style={{ left: `${pct}%`, transform: 'translateX(-50%)' }}
+                    />
+                  );
+                })()}
+              </div>
+
+              {/* Scrub dot — appears on hover at playback position */}
               <div
-                className="absolute h-full bg-white/40"
-                style={{ width: `${(buffered / duration) * 100}%` }}
+                className={cn(
+                  "absolute top-1/2 -translate-y-1/2 rounded-full bg-fox-orange border-2 border-white transition-all duration-200 pointer-events-none z-20",
+                  (isProgressHovering || isProgressTouching)
+                    ? "w-[14px] h-[14px] opacity-100 shadow-[0_0_10px_rgba(255,120,30,0.7)]"
+                    : "w-[10px] h-[10px] opacity-0"
+                )}
+                style={{
+                  left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%`,
+                  transform: 'translate(-50%, -50%)',
+                }}
               />
-              <div
-                className="absolute h-full bg-fox-orange"
-                style={{ width: `${(currentTime / duration) * 100}%` }}
+
+              {/* Video Preview */}
+              <VideoPreview
+                src={src}
+                isM3U8={isM3U8}
+                currentTime={currentTime}
+                duration={duration}
+                isHovering={isProgressHovering || isProgressTouching}
+                mouseX={isProgressTouching ? progressTouchX : progressMouseX}
+                containerRef={progressContainerRef}
+                poster={poster}
               />
             </div>
-            <Slider
-              value={[currentTime]}
-              max={duration || 100}
-              step={0.1}
-              onValueChange={handleSeek}
-              className={cn(
-                "absolute bottom-0 left-0 right-0 transition-opacity cursor-pointer",
-                isMobile() ? "opacity-100 h-2" : "opacity-0 group-hover/progress:opacity-100"
-              )}
-            />
-
-            {/* Video Preview */}
-            <VideoPreview
-              src={src}
-              isM3U8={isM3U8}
-              currentTime={currentTime}
-              duration={duration}
-              isHovering={isProgressHovering || isProgressTouching}
-              mouseX={isProgressTouching ? progressTouchX : progressMouseX}
-              containerRef={progressContainerRef}
-              poster={poster}
-            />
-          </div>
 
           {/* Control buttons */}
           <div className="flex items-center justify-between">

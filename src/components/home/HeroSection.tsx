@@ -179,7 +179,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
               {/* Left: text content */}
               <div
                 className={cn(
-                  'pointer-events-auto flex flex-col gap-1.5 sm:gap-2.5 max-w-[min(30rem,88vw)] sm:max-w-[min(34rem,56%)] lg:max-w-[min(38rem,52%)] xl:max-w-[42rem] transition-all ease-out',
+                  'pointer-events-auto flex flex-col gap-2.5 sm:gap-3.5 max-w-[min(30rem,88vw)] sm:max-w-[min(34rem,56%)] lg:max-w-[min(38rem,52%)] xl:max-w-[42rem] transition-all ease-out',
                   contentVisible ? 'translate-y-0 opacity-100 duration-500' : 'translate-y-3 opacity-0 duration-200'
                 )}
               >
@@ -235,7 +235,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
                 {/* Studio — desktop only */}
                 {studio && (
-                  <p className="hidden sm:block text-[11px] text-zinc-500 sm:text-xs -mt-0.5">
+                  <p className="hidden sm:block text-[11px] text-zinc-500 sm:text-xs -mt-1">
                     <span className="text-zinc-600">by </span>
                     <span className="text-zinc-400 font-medium">{studio}</span>
                   </p>
@@ -256,7 +256,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                 )}
 
                 {/* Synopsis — desktop only, scrollable */}
-                <div className="hidden sm:block relative max-w-[44ch]">
+                <div className="hidden sm:block relative max-w-[44ch] mt-0.5">
                   <div
                     className="overflow-y-auto pr-2 text-[12px] leading-relaxed text-zinc-400/90 sm:text-sm"
                     style={{
@@ -272,7 +272,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                 </div>
 
                 {/* CTA buttons */}
-                <div className="flex items-center gap-2 pt-0.5">
+                <div className="flex items-center gap-2 pt-1 sm:pt-1.5">
                   <Button
                     onClick={() =>
                       navigate(watchPath, {

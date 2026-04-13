@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
-import { cn } from '@/lib/utils';
+import { PostProxyLoader } from '@/lib/hls-post-loader';
 
 export interface VideoPreviewProps {
   src: string;
@@ -28,33 +28,34 @@ export const VideoPreview = ({
   const [previewTime, setPreviewTime] = useState(0);
   const [position, setPosition] = useState(0);
   const [isReady, setIsReady] = useState(false);
+  const lastSeekTimeRef = useRef(0);
 
-  // Calculate preview time and position based on mouseX
+  const PREVIEW_W = 220;
+  const PREVIEW_H = 124;
+
+  const formatTime = useCallback((seconds: number): string => {
+    if (!isFinite(seconds) || seconds < 0) return '0:00';
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    if (hrs > 0) return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  }, []);
+
+  // Pre-initialize preview video as soon as src is available (NOT on hover)
+  // IMPORTANT: video element is ALWAYS rendered (hidden) so this ref is never null
   useEffect(() => {
-    if (!containerRef.current || !isHovering) return;
-
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(mouseX - rect.left, rect.width));
-    const percentage = x / rect.width;
-    const time = percentage * duration;
-
-    setPreviewTime(time);
-    setPosition(x);
-
-    if (videoRef.current && isReady) {
-      videoRef.current.currentTime = time;
-    }
-  }, [mouseX, isHovering, duration, containerRef, isReady]);
-
-  // Initialize preview video
-  useEffect(() => {
-    if (!src || !isHovering) {
-      setIsReady(false);
-      return;
-    }
+    if (!src) return;
 
     const video = videoRef.current;
     if (!video) return;
+
+    video.preload = 'auto';
+    video.muted = true;
+    video.playsInline = true;
+
+    // Pause first to stop any previous playback
+    video.pause();
 
     if (isM3U8 && Hls.isSupported()) {
       if (hlsRef.current) {
@@ -62,12 +63,14 @@ export const VideoPreview = ({
       }
 
       const hls = new Hls({
-        enableWorker: true,
-        lowLatencyMode: true,
-        maxBufferLength: 1,
-        maxMaxBufferLength: 2,
-        backBufferLength: 0,
-        startLevel: 0, // Lowest quality for fastest scrubbing
+        enableWorker: false,
+        lowLatencyMode: false,
+        maxBufferLength: 5,
+        maxMaxBufferLength: 10,
+        backBufferLength: 5,
+        startLevel: 0,
+        loader: PostProxyLoader,
+        xhrSetup: (xhr) => { xhr.timeout = 15000; },
       });
 
       hls.loadSource(src);
@@ -75,19 +78,26 @@ export const VideoPreview = ({
       hlsRef.current = hls;
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        console.log('[VideoPreview] HLS manifest parsed, ready for seeking');
         setIsReady(true);
       });
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (data.fatal) {
-          console.error("Preview HLS Error:", data);
+          console.error('[VideoPreview] Fatal HLS error:', data.type);
           setIsReady(false);
         }
       });
     } else {
       video.src = src;
-      video.onloadeddata = () => setIsReady(true);
-      video.onerror = () => setIsReady(false);
+      video.onloadeddata = () => {
+        console.log('[VideoPreview] Video loaded, ready for seeking');
+        setIsReady(true);
+      };
+      video.onerror = () => {
+        console.error('[VideoPreview] Video load error');
+        setIsReady(false);
+      };
     }
 
     return () => {
@@ -97,66 +107,175 @@ export const VideoPreview = ({
       }
       setIsReady(false);
     };
-  }, [src, isM3U8, isHovering]);
+  }, [src, isM3U8]);
 
-  if (!isHovering) return null;
+  // Seek the preview video when hovering
+  useEffect(() => {
+    if (!isHovering || !containerRef.current || !duration) return;
 
-  const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+    const rect = containerRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(mouseX - rect.left, rect.width));
+    const percentage = x / rect.width;
+    const time = percentage * duration;
+
+    setPreviewTime(time);
+    setPosition(x);
+
+    const video = videoRef.current;
+    if (!video || !isReady) return;
+
+    // Throttle seeks to avoid overwhelming the decoder
+    const now = performance.now();
+    if (now - lastSeekTimeRef.current < 60) return;
+    lastSeekTimeRef.current = now;
+
+    // Pause playback and seek to exact position for frame display
+    video.pause();
+    video.currentTime = time;
+  }, [mouseX, isHovering, duration, containerRef, isReady]);
+
+  // Clamp the tooltip position so it doesn't overflow the progress bar
+  const containerRect = containerRef.current?.getBoundingClientRect();
+  const halfW = PREVIEW_W / 2 + 8;
+  const containerWidth = containerRect?.width ?? 800;
+  const clampedPosition = Math.max(halfW, Math.min(position, containerWidth - halfW));
 
   return (
-    <div
-      className="absolute bottom-6 pointer-events-none transform -translate-x-1/2 flex flex-col items-center z-50 transition-all duration-200"
-      style={{
-        left: position,
-        opacity: isHovering ? 1 : 0,
-        scale: isHovering ? 1 : 0.95
-      }}
-    >
-      <div className="relative w-48 aspect-video bg-black/90 rounded-xl border-2 border-white/20 overflow-hidden shadow-[0_10px_40px_rgba(0,0,0,0.6)] backdrop-blur-xl">
-        {/* Glow effect */}
-        <div className="absolute inset-0 bg-gradient-to-br from-fox-orange/20 via-transparent to-transparent opacity-50" />
+    <>
+      {/* Hidden preview video — ALWAYS rendered so HLS can attach and preload on mount */}
+      <video
+        ref={videoRef}
+        className="absolute w-0 h-0 opacity-0 pointer-events-none"
+        muted
+        playsInline
+        tabIndex={-1}
+        aria-hidden="true"
+      />
 
-        <video
-          ref={videoRef}
-          className={cn(
-            "w-full h-full object-cover transition-opacity duration-300",
-            isReady ? "opacity-100" : "opacity-0"
-          )}
-          muted
-          playsInline
-        />
+      {/* Preview tooltip — only visible on hover */}
+      {isHovering && (
+        <div
+          className="absolute bottom-8 pointer-events-none flex flex-col items-center z-50"
+          style={{
+            left: clampedPosition,
+            transform: 'translateX(-50%)',
+            opacity: 1,
+            transition: 'left 50ms linear, opacity 150ms ease',
+          }}
+        >
+          {/* Preview Card — Netflix-style */}
+          <div
+            className="relative overflow-hidden rounded-lg shadow-[0_8px_32px_rgba(0,0,0,0.8)]"
+            style={{ width: PREVIEW_W, height: PREVIEW_H }}
+          >
+            {/* Border glow */}
+            <div className="absolute -inset-px rounded-lg border border-white/20 z-10 pointer-events-none" />
 
-        {/* Fallback/Loading poster */}
-        {!isReady && (
-          <img
-            src={poster}
-            className="absolute inset-0 w-full h-full object-cover blur-md opacity-40 scale-110"
-            alt="Loading preview..."
-          />
-        )}
+            {/* Preview canvas — draws the hidden video's current frame */}
+            <PreviewCanvas videoRef={videoRef} width={PREVIEW_W} height={PREVIEW_H} isHovering={isHovering} poster={poster} />
 
-        {/* Loading Spinner */}
-        {!isReady && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-8 h-8 border-[3px] border-fox-orange/20 border-t-fox-orange rounded-full animate-spin" />
+            {/* Time Badge — centered bottom */}
+            <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 to-transparent pt-5 pb-1.5 px-2 flex justify-center z-10">
+              <span className="text-[11px] font-bold text-white tabular-nums tracking-wide drop-shadow-lg">
+                {formatTime(previewTime)}
+              </span>
+            </div>
           </div>
-        )}
 
-        {/* Time Badge */}
-        <div className="absolute bottom-2 left-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-bold text-white border border-white/10 shadow-lg">
-          {formatTime(previewTime)}
+          {/* Arrow indicator */}
+          <div className="w-2.5 h-2.5 bg-black rotate-45 -mt-[5px] border-r border-b border-white/15 shadow-xl" />
         </div>
-
-        {/* Scanline Effect */}
-        <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.1)_50%),linear-gradient(90deg,rgba(255,0,0,0.03),rgba(0,255,0,0.01),rgba(0,0,255,0.03))] bg-[length:100%_2px,3px_100%] opacity-20" />
-      </div>
-
-      {/* Tooltip Arrow */}
-      <div className="w-3 h-3 bg-black/90 border-r border-b border-white/10 rotate-45 -mt-1.5 shadow-xl" />
-    </div>
+      )}
+    </>
   );
 };
+
+/**
+ * Draws frames from the preview video onto a canvas.
+ * Falls back to showing the video element directly if canvas capture fails (CORS).
+ */
+function PreviewCanvas({
+  videoRef,
+  width,
+  height,
+  isHovering,
+  poster,
+}: {
+  videoRef: React.RefObject<HTMLVideoElement>;
+  width: number;
+  height: number;
+  isHovering: boolean;
+  poster: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [hasFrame, setHasFrame] = useState(false);
+  const [canvasFailed, setCanvasFailed] = useState(false);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isHovering) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      return;
+    }
+
+    let active = true;
+
+    const draw = () => {
+      if (!active) return;
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      if (video && canvas && video.readyState >= 2 && !canvasFailed) {
+        try {
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, width, height);
+            if (!hasFrame) setHasFrame(true);
+          }
+        } catch {
+          setCanvasFailed(true);
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(draw);
+    };
+
+    rafRef.current = requestAnimationFrame(draw);
+
+    return () => {
+      active = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [isHovering, videoRef, width, height, canvasFailed, hasFrame]);
+
+  // If canvas capture fails (CORS), show poster as fallback
+  if (canvasFailed) {
+    return (
+      <img
+        src={poster}
+        className="absolute inset-0 w-full h-full object-cover"
+        alt=""
+      />
+    );
+  }
+
+  return (
+    <>
+      <canvas
+        ref={canvasRef}
+        width={width}
+        height={height}
+        className="w-full h-full object-cover"
+        style={{ opacity: hasFrame ? 1 : 0, transition: 'opacity 80ms ease' }}
+      />
+      {/* Poster fallback while waiting for first frame */}
+      {!hasFrame && (
+        <img
+          src={poster}
+          className="absolute inset-0 w-full h-full object-cover opacity-60"
+          alt=""
+        />
+      )}
+    </>
+  );
+}

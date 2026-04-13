@@ -132,7 +132,7 @@ export const Schedule = () => {
         let anime = scheduleData.groupedByDay[selectedDay] || [];
         
         // Apply search filter
-        if (searchQuery.trim()) {
+        if (searchQuery && searchQuery.trim()) {
             const query = searchQuery.toLowerCase();
             anime = anime.filter(item => 
                 item.title.toLowerCase().includes(query) ||

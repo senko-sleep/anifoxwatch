@@ -91,7 +91,7 @@ const Watch = () => {
   // State
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(1);
-  const [audioType, setAudioType] = useState<AudioType>('dub');
+  const [audioType, setAudioType] = useState<AudioType>('sub');
   const [audioManuallySet, setAudioManuallySet] = useState(false);
   const [quality, setQuality] = useState<QualityType>('auto');
   const [selectedServer, setSelectedServer] = useState<string>('');
@@ -365,10 +365,34 @@ const Watch = () => {
   const hasPrev = episodes?.findIndex(e => e.id === selectedEpisode) > 0;
   const hasNext = episodes ? episodes.findIndex(e => e.id === selectedEpisode) < episodes.length - 1 : false;
 
-  // Prefer dub when episode is dub-only (metadata) or dub is confirmed via servers/stream probe
+  // Helper: get/set per-anime audio preference
+  const getAnimeAudioPref = useCallback((animeId: string): AudioType | null => {
+    try {
+      const prefs = JSON.parse(localStorage.getItem('anime_audio_prefs') || '{}');
+      return prefs[animeId] || null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const setAnimeAudioPref = useCallback((animeId: string, type: AudioType) => {
+    try {
+      const prefs = JSON.parse(localStorage.getItem('anime_audio_prefs') || '{}');
+      prefs[animeId] = type;
+      localStorage.setItem('anime_audio_prefs', JSON.stringify(prefs));
+    } catch {
+      // Ignore storage errors
+    }
+  }, []);
+
+  // Auto-switch to dub when available, unless user manually chose sub for this anime
   useEffect(() => {
-    if (!currentEpisode) return;
+    if (!currentEpisode || !anime) return;
     if (audioManuallySet) return;
+
+    const animeId = cleanAnimeId || anime.id;
+    const storedPref = getAnimeAudioPref(animeId);
+    
     const currentHasSub = currentEpisode.hasSub || !currentEpisode.hasDub;
     const currentHasDub =
       currentEpisode.hasDub ||
@@ -376,10 +400,31 @@ const Watch = () => {
       serversHaveDub ||
       dubProbeHasSources;
 
-    if (currentHasSub === false && currentHasDub) {
+    // If user explicitly chose sub for this anime, respect it
+    if (storedPref === 'sub') {
+      setAudioType('sub');
+      return;
+    }
+
+    // If user explicitly chose dub for this anime, respect it
+    if (storedPref === 'dub') {
+      setAudioType('dub');
+      return;
+    }
+
+    // No stored preference: auto-switch to dub if available
+    if (currentHasDub) {
       setAudioType('dub');
     }
-  }, [currentEpisode, audioManuallySet, anime?.dubCount, serversHaveDub, dubProbeHasSources]);
+  }, [currentEpisode, anime, audioManuallySet, anime?.dubCount, serversHaveDub, dubProbeHasSources, cleanAnimeId, getAnimeAudioPref]);
+
+  // Store user's manual audio choice when they change it
+  useEffect(() => {
+    if (audioManuallySet && anime) {
+      const animeId = cleanAnimeId || anime.id;
+      setAnimeAudioPref(animeId, audioType);
+    }
+  }, [audioManuallySet, audioType, anime, cleanAnimeId, setAnimeAudioPref]);
 
   // Reset manual audio choice when switching episodes
   useEffect(() => {
@@ -747,10 +792,9 @@ const Watch = () => {
                         <div className="flex-1 min-w-0">
                           <p className="text-sm truncate">{ep.title || `Episode ${ep.number}`}</p>
                           <div className="flex items-center gap-2 mt-0.5">
-                            {(ep.hasSub || !ep.hasDub) && <span className="text-[10px] text-white/50">SUB</span>}
+                            {ep.hasSub && <span className="text-[10px] text-white/50">SUB</span>}
                             {(ep.hasDub ||
-                              (anime?.dubCount != null && ep.number <= anime.dubCount) ||
-                              dubAvailable) && (
+                              (anime?.dubCount != null && ep.number <= anime.dubCount)) && (
                               <span className="text-[10px] text-green-400/70">DUB</span>
                             )}
                             {progress > 0 && progress < 0.9 && (

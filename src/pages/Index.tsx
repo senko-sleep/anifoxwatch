@@ -30,12 +30,12 @@ const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (
 const Index = () => {
   useDocumentTitle('Home');
 
-  const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useTrending(1, 24);
-  const { data: seasonalData,  isLoading: seasonalLoading }  = useSeasonal();
+  const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useTrending(1, 24, 'safe');
+  const { data: seasonalData,  isLoading: seasonalLoading }  = useSeasonal(undefined, undefined, 1, true, 'safe');
   const { data: upcomingData }                                = useUpcoming();
-  const { data: latestAnime,   isLoading: latestLoading }    = useLatest(1);
-  const { data: moviesData,    isLoading: moviesLoading }    = useBrowse({ type: 'Movie', sort: 'popularity' }, 1, true, false, 20);
-  const { data: actionData,    isLoading: actionLoading }    = useBrowse({ genre: 'Action', sort: 'trending' }, 1, true, false, 20);
+  const { data: latestAnime,   isLoading: latestLoading }    = useLatest(1, undefined, 'safe');
+  const { data: moviesData,    isLoading: moviesLoading }    = useBrowse({ type: 'Movie', sort: 'popularity', mode: 'safe' }, 1, true, false, 20);
+  const { data: actionData,    isLoading: actionLoading }    = useBrowse({ genre: 'Action', sort: 'trending', mode: 'safe' }, 1, true, false, 20);
   const { history, removeFromHistory }                        = useWatchHistory();
   const { heroAnime, isLoading: heroLoading }                 = useHeroAnime();
 

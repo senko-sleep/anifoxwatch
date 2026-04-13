@@ -92,10 +92,9 @@ export function StreamingControls({
   const subServers = servers.filter(s => s.type === 'sub');
   const dubServers = servers.filter(s => s.type === 'dub');
 
-  const isSubAvailable = true;
+  const isSubAvailable = hasSub || subServers.length > 0 || servers.length > 0;
   const hasDubConfirmed = hasDub || dubServers.length > 0;
-  // Always allow clicking DUB — our detection is imperfect and we don't want to lock users out
-  const isDubAvailable = true;
+  const isDubAvailable = hasDubConfirmed;
 
   const visibleServers = (audioType === 'dub' ? dubServers : subServers).length
     ? (audioType === 'dub' ? dubServers : subServers)
@@ -121,12 +120,14 @@ export function StreamingControls({
             SUB
           </button>
           <button
-            onClick={() => onAudioTypeChange('dub')}
+            onClick={() => isDubAvailable && onAudioTypeChange('dub')}
+            disabled={!isDubAvailable}
             className={cn(
               "flex items-center gap-1 h-7 px-2.5 rounded text-[11px] font-bold transition-colors touch-manipulation",
+              !isDubAvailable && "opacity-40 cursor-not-allowed",
               audioType === 'dub'
                 ? "bg-green-600 text-white"
-                : cn("text-zinc-400 hover:text-white", !hasDubConfirmed && "opacity-50")
+                : "text-zinc-400 hover:text-white"
             )}
           >
             <Mic className="w-3 h-3" />
@@ -199,15 +200,16 @@ export function StreamingControls({
               variant={audioType === 'dub' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => onAudioTypeChange('dub')}
+              disabled={!isDubAvailable}
               className={cn(
                 "gap-2 h-8 px-3 touch-manipulation",
                 audioType === 'dub' && "bg-green-600 hover:bg-green-600/90",
-                !hasDubConfirmed && audioType !== 'dub' && "opacity-60"
+                !isDubAvailable && "opacity-40 cursor-not-allowed"
               )}
             >
               <Mic className="w-4 h-4" />
               DUB
-              {hasDubConfirmed && <CheckCircle2 className="w-3 h-3 ml-0.5 text-green-300" />}
+              {isDubAvailable && <CheckCircle2 className="w-3 h-3 ml-0.5 text-green-300" />}
             </Button>
           </div>
         </div>

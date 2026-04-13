@@ -54,7 +54,7 @@ const KNOWN_PREFIXES = [
   'kaido-', 'anix-', 'kickassanime-', 'yugenanime-', 'animixplay-',
   'animefox-', 'animedao-', 'animeflv-', 'animesaturn-', 'crunchyroll-',
   'animeonsen-', 'marin-', 'animeheaven-', 'animekisa-', 'animeowl-',
-  'animeland-', 'animefreak-', 'miruro-',
+  'animeland-', 'animefreak-', 'miruro-', 'akih-', 'watchhentai-', 'hanime-',
 ];
 
 export function stripSourcePrefix(id: string): string {
@@ -113,6 +113,7 @@ export function normalizeAnimeGenresForDisplay(genres: string[] | undefined | nu
   if (!genres?.length) return [];
 
   const fromBlob = (raw: string): string[] => {
+    if (!raw) return [];
     const t = raw.trim();
     if (!t) return [];
 
@@ -216,14 +217,14 @@ export function buildAnimeWatchBlurb(anime: Pick<Anime, 'title' | 'genres' | 'ty
 }
 
 /**
- * Deduplicate search hits by normalized title; prefer `animekai-*` IDs for streaming.
+ * Deduplicate search hits by normalized title; prefer `animekai-*` or `akih-*` IDs for streaming.
  * Do not strip spaces (that collapses unrelated titles and drops rows vs. the header search).
  */
 export function dedupeSearchResultsForGrid<T extends { id: string; title: string }>(results: T[]): T[] {
   const normalizeTitle = (title: string): string =>
     title
       .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -235,8 +236,15 @@ export function dedupeSearchResultsForGrid<T extends { id: string; title: string
       seen.set(key, anime);
     } else {
       const existingIsKai = existing.id?.startsWith('animekai-');
+      const existingIsAkiH = existing.id?.startsWith('akih-');
       const newIsKai = anime.id?.startsWith('animekai-');
-      if (newIsKai && !existingIsKai) {
+      const newIsAkiH = anime.id?.startsWith('akih-');
+      
+      // Prefer animekai or akih IDs over other sources
+      const existingPriority = existingIsKai ? 2 : (existingIsAkiH ? 1 : 0);
+      const newPriority = newIsKai ? 2 : (newIsAkiH ? 1 : 0);
+      
+      if (newPriority > existingPriority) {
         seen.set(key, anime);
       }
     }

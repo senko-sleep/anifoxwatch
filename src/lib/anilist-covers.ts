@@ -61,15 +61,18 @@ function persistCache(): void {
  * Build a batched GraphQL query that searches for multiple titles in one call.
  * AniList supports aliased fields, so we send `q0: Page(…){media(search:"…")…} …`
  */
-function buildBatchQuery(titles: string[]): string {
+function buildBatchQuery(titles: string[], includeAdult: boolean = false): string {
   const fragments = titles.map((title, i) => {
     const escaped = title.replace(/"/g, '\\"').slice(0, 80);
-    return `q${i}: Page(page:1,perPage:1){ media(search:"${escaped}",type:ANIME,isAdult:false){ id title{english romaji} coverImage{extraLarge large} bannerImage } }`;
+    // When includeAdult is true, omit isAdult filter so AniList returns both SFW and NSFW results.
+    // When false, explicitly set isAdult:false to exclude adult content.
+    const adultFilter = includeAdult ? '' : ',isAdult:false';
+    return `q${i}: Page(page:1,perPage:1){ media(search:"${escaped}",type:ANIME${adultFilter}){ id title{english romaji} coverImage{extraLarge large} bannerImage } }`;
   });
   return `{ ${fragments.join(' ')} }`;
 }
 
-async function fetchBatchCovers(titles: string[]): Promise<Map<string, AniListCoverMedia>> {
+async function fetchBatchCovers(titles: string[], includeAdult: boolean = false): Promise<Map<string, AniListCoverMedia>> {
   const result = new Map<string, AniListCoverMedia>();
   if (titles.length === 0) return result;
 
@@ -77,7 +80,7 @@ async function fetchBatchCovers(titles: string[]): Promise<Map<string, AniListCo
   const BATCH_SIZE = 25;
   for (let offset = 0; offset < titles.length; offset += BATCH_SIZE) {
     const batch = titles.slice(offset, offset + BATCH_SIZE);
-    const query = buildBatchQuery(batch);
+    const query = buildBatchQuery(batch, includeAdult);
 
     try {
       const response = await fetch('https://graphql.anilist.co', {
@@ -110,6 +113,40 @@ async function fetchBatchCovers(titles: string[]): Promise<Map<string, AniListCo
     }
   }
 
+  // Retry missed titles with explicit isAdult:true for adult content
+  if (includeAdult) {
+    const missed = titles.filter(t => !result.has(normTitle(t)));
+    if (missed.length > 0) {
+      for (let offset = 0; offset < missed.length; offset += BATCH_SIZE) {
+        const batch = missed.slice(offset, offset + BATCH_SIZE);
+        const fragments = batch.map((title, i) => {
+          const escaped = title.replace(/"/g, '\\"').slice(0, 80);
+          return `q${i}: Page(page:1,perPage:1){ media(search:"${escaped}",type:ANIME,isAdult:true){ id title{english romaji} coverImage{extraLarge large} bannerImage } }`;
+        });
+        const query = `{ ${fragments.join(' ')} }`;
+
+        try {
+          const response = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ query }),
+          });
+          if (!response.ok) continue;
+          const json = await response.json();
+          if (json.errors) continue;
+
+          for (let i = 0; i < batch.length; i++) {
+            const page = json.data?.[`q${i}`];
+            const media: AniListCoverMedia | undefined = page?.media?.[0];
+            if (media?.coverImage?.extraLarge) {
+              result.set(normTitle(batch[i]), media);
+            }
+          }
+        } catch { /* ignore retry failures */ }
+      }
+    }
+  }
+
   return result;
 }
 
@@ -126,7 +163,7 @@ const inflight = new Map<string, Promise<Anime[]>>();
  * - The original array order is preserved; items that fail to match keep
  *   their original images.
  */
-export async function enrichWithAniListCovers(anime: Anime[]): Promise<Anime[]> {
+export async function enrichWithAniListCovers(anime: Anime[], includeAdult: boolean = false): Promise<Anime[]> {
   if (!anime || anime.length === 0) return anime;
 
   const cache = loadCacheFromStorage();
@@ -151,7 +188,7 @@ export async function enrichWithAniListCovers(anime: Anime[]): Promise<Anime[]> 
 
     const promise = (async () => {
       try {
-        const results = await fetchBatchCovers(uniqueNeeded);
+        const results = await fetchBatchCovers(uniqueNeeded, includeAdult);
 
         // Populate cache
         for (const [key, media] of results.entries()) {

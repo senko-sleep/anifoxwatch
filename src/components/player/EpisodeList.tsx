@@ -226,15 +226,14 @@ export function EpisodeList({
                     </p>
 
                     <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                      {(episode.hasSub || !episode.hasDub) && (
+                      {episode.hasSub && (
                         <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
                           <Subtitles className="w-2 h-2 flex-shrink-0" />
                           SUB
                         </span>
                       )}
                       {(episode.hasDub ||
-                        (anime?.dubCount != null && episode.number <= anime.dubCount) ||
-                        serversHaveDub) && (
+                        (anime?.dubCount != null && episode.number <= anime.dubCount)) && (
                         <span className="flex items-center gap-0.5 text-[10px] text-green-500 whitespace-nowrap">
                           <Mic className="w-2 h-2 flex-shrink-0" />
                           DUB

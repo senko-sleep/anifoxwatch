@@ -23,24 +23,28 @@ export const queryKeys = {
 
 // ============ ANIME DATA HOOKS ============
 
-export function useTrending(page: number = 1, limit?: number) {
+export function useTrending(page: number = 1, limit?: number, mode: 'safe' | 'mixed' | 'adult' = 'safe') {
     return useQuery<Anime[], Error>({
         queryKey: queryKeys.trending(page, limit?.toString()),
         queryFn: async () => {
             const results = await apiClient.getTrending(page, undefined, limit);
-            return enrichWithAniListCovers(results);
+            // Enrich with AniList HD covers (include adult content for adult mode)
+            const includeAdult = mode === 'adult' || mode === 'mixed';
+            return enrichWithAniListCovers(results, includeAdult);
         },
         staleTime: 5 * 60 * 1000,
         gcTime: 10 * 60 * 1000,
     });
 }
 
-export function useLatest(page: number = 1, source?: string) {
+export function useLatest(page: number = 1, source?: string, mode: 'safe' | 'mixed' | 'adult' = 'safe') {
     return useQuery<Anime[], Error>({
         queryKey: queryKeys.latest(page, source),
         queryFn: async () => {
             const results = await apiClient.getLatest(page, source);
-            return enrichWithAniListCovers(results);
+            // Enrich with AniList HD covers (include adult content for adult mode)
+            const includeAdult = mode === 'adult' || mode === 'mixed';
+            return enrichWithAniListCovers(results, includeAdult);
         },
         staleTime: 3 * 60 * 1000, // Shorter for latest
         gcTime: 5 * 60 * 1000,
@@ -116,8 +120,9 @@ export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boo
         queryFn: async () => {
             try {
                 const result = await apiClient.browseAnime(filters, page, bypassCache, limit);
-                // Enrich with AniList HD covers
-                const enrichedResults = await enrichWithAniListCovers(result.results);
+                // Enrich with AniList HD covers (include adult content for adult mode)
+                const includeAdult = filters.mode === 'adult' || filters.mode === 'mixed';
+                const enrichedResults = await enrichWithAniListCovers(result.results, includeAdult);
                 return { ...result, results: enrichedResults };
             } catch (error) {
                 console.error('[useBrowse] Browse failed:', error);
@@ -192,12 +197,14 @@ export function useLeaderboard(type: 'trending' | 'top-rated' = 'trending', page
     });
 }
 
-export function useSeasonal(year?: number, season?: string, page: number = 1, enabled: boolean = true) {
+export function useSeasonal(year?: number, season?: string, page: number = 1, enabled: boolean = true, mode: 'safe' | 'mixed' | 'adult' = 'safe') {
     return useQuery<import('@/lib/api-client').SeasonalResponse, Error>({
         queryKey: queryKeys.seasonal(year, season, page),
         queryFn: async () => {
             const response = await apiClient.getSeasonal(year, season, page);
-            const enrichedResults = await enrichWithAniListCovers(response.results);
+            // Enrich with AniList HD covers (include adult content for adult mode)
+            const includeAdult = mode === 'adult' || mode === 'mixed';
+            const enrichedResults = await enrichWithAniListCovers(response.results, includeAdult);
             return { ...response, results: enrichedResults };
         },
         enabled,
