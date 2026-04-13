@@ -104,8 +104,8 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                                 />
                             </div>
 
-                            {/* Episode badge - bottom center */}
-                            <div className="absolute bottom-2 left-1/2 -translate-x-1/2">
+                            {/* Episode badge - bottom left */}
+                            <div className="absolute bottom-2 left-2">
                                 <Badge className="bg-fox-orange/90 hover:bg-fox-orange text-white text-[10px] font-medium px-2 py-0.5 backdrop-blur-sm border-0">
                                     EP {item.episodeNumber}
                                 </Badge>
