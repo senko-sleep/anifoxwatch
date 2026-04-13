@@ -350,11 +350,11 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             }
             const result = await sourceManager.browseAnime(filters);
             return c.json({
-                results: result.anime || [],
+                results: result.results || [],
                 currentPage: page,
                 totalPages: result.totalPages || 1,
                 hasNextPage: result.hasNextPage || false,
-                totalResults: result.totalResults || result.anime?.length || 0,
+                totalResults: result.results?.length || 0,
                 filters: { type: query.type, genre: query.genre, status: query.status, year: query.year, sort: query.sort, order: query.order },
                 source: query.source || 'default'
             });

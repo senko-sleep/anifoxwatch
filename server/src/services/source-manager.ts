@@ -1340,8 +1340,8 @@ export class SourceManager {
 
                 // Now search for streaming source using the title
                 const title = anilistData.title;
-                logger.info(`[SourceManager] Looking for streaming match for: ${title}`);
-                const streamingMatch = await this.findStreamingAnimeByTitle(title);
+                logger.info(`[SourceManager] Looking for streaming match for: ${title} (type: ${anilistData.type})`);
+                const streamingMatch = await this.findStreamingAnimeByTitle(title, anilistData.type);
 
                 if (streamingMatch) {
                     logger.info(`[SourceManager] Found streaming match: ${streamingMatch.id}`);
@@ -1416,51 +1416,44 @@ export class SourceManager {
         // SPECIAL HANDLING: AniList IDs need title-based search to find streaming source
         if (animeId.toLowerCase().startsWith('anilist-')) {
             console.log(`   🔍 AniList ID detected - searching by title for streaming source`);
-            
+
             try {
                 // Get anime details from AniList
                 const anilistId = animeId.replace(/^anilist-/i, '');
                 const numericId = parseInt(anilistId, 10);
-                
+
                 if (!isNaN(numericId)) {
+                    // Fast path: we've already resolved this AniList ID to a streaming ID recently
+                    const cachedMapping = this.anilistStreamingIdCache.get(numericId);
+                    if (cachedMapping && cachedMapping.timestamp > Date.now() - this.ANILIST_STREAMING_ID_TTL) {
+                        console.log(`   ⚡ Cache hit: AniList ${numericId} → ${cachedMapping.streamingId}`);
+                        const episodes = await this.getEpisodes(cachedMapping.streamingId);
+                        if (episodes && episodes.length > 0) {
+                            timer.end();
+                            return episodes;
+                        }
+                        // Cached ID no longer works — fall through to re-resolve
+                        this.anilistStreamingIdCache.delete(numericId);
+                    }
+
                     const anilistData = await anilistService.getAnimeById(numericId);
-                    
+
                     if (anilistData?.title) {
                         const searchTitle = anilistData.title;
-                        console.log(`   🔍 Resolving streaming episodes for AniList title: "${searchTitle}"`);
+                        console.log(`   🔍 Resolving streaming episodes for AniList title: "${searchTitle}" (type: ${anilistData.type})`);
 
                         // Same matching as getAnime() — avoids wrong first-page aggregate results
-                        const byTitle = await this.findStreamingAnimeByTitle(searchTitle);
+                        const byTitle = await this.findStreamingAnimeByTitle(searchTitle, anilistData.type);
                         if (byTitle?.id && !byTitle.id.startsWith('anilist-')) {
                             console.log(`   ✅ findStreamingAnimeByTitle: "${byTitle.title}" (${byTitle.id})`);
                             const episodes = await this.getEpisodes(byTitle.id);
                             if (episodes && episodes.length > 0) {
                                 const duration = Date.now() - startTime;
                                 console.log(`   ✅ Got ${episodes.length} episodes via title match in ${duration}ms`);
+                                // Cache this resolution for 30 min
+                                this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
                                 timer.end();
                                 return episodes;
-                            }
-                        }
-
-                        const searchResult = await this.search(searchTitle, 1);
-                        if (searchResult.results?.length) {
-                            const normalizedSearch = this.normalizeTitle(searchTitle);
-                            let bestMatch = searchResult.results[0];
-                            for (const result of searchResult.results) {
-                                if (this.normalizeTitle(result.title) === normalizedSearch) {
-                                    bestMatch = result;
-                                    break;
-                                }
-                            }
-                            const streamingId = bestMatch.id;
-                            if (streamingId && !streamingId.startsWith('anilist-')) {
-                                const episodes = await this.getEpisodes(streamingId);
-                                if (episodes && episodes.length > 0) {
-                                    const duration = Date.now() - startTime;
-                                    console.log(`   ✅ Got ${episodes.length} episodes via aggregate search in ${duration}ms`);
-                                    timer.end();
-                                    return episodes;
-                                }
                             }
                         }
 
@@ -1470,7 +1463,7 @@ export class SourceManager {
             } catch (err) {
                 console.log(`   ❌ AniList title search failed: ${(err as Error).message}`);
             }
-            
+
             timer.end();
             return [];
         }
@@ -3368,23 +3361,30 @@ export class SourceManager {
     }
 
     private searchCache: Map<string, { results: AnimeBase[]; timestamp: number }> = new Map();
-    private readonly SEARCH_CACHE_TTL = 60 * 1000; // 1 minute cache
+    private readonly SEARCH_CACHE_TTL = 10 * 60 * 1000; // 10 minute cache
+    // Long-lived cache: AniList numeric ID → resolved streaming ID. Avoids repeated title searches.
+    private anilistStreamingIdCache: Map<number, { streamingId: string; timestamp: number }> = new Map();
+    private readonly ANILIST_STREAMING_ID_TTL = 30 * 60 * 1000; // 30 minutes
 
     /**
      * Calculate similarity between two strings (simple Levenshtein-based ratio)
      */
     private calculateSimilarity(str1: string, str2: string): number {
-        const s1 = str1.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-        const s2 = str2.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+        const s1 = str1.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        const s2 = str2.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
         // Exact match after normalization
         if (s1 === s2) return 1.0;
 
         // Check if one contains the other
-        if (s1.includes(s2) || s2.includes(s1)) {
-            const shorter = s1.length < s2.length ? s1 : s2;
-            const longer = s1.length < s2.length ? s2 : s1;
-            return shorter.length / longer.length; // Ratio of containment
+        if (s2.includes(s1)) {
+            // Result is a superstring of query (e.g. result has extra subtitle words)
+            return s1.length / s2.length;
+        }
+        if (s1.includes(s2)) {
+            // Result is a substring of query — result is too general (e.g. "Spy x Family" matching
+            // "Spy x Family Code: White"). Penalise heavily so a more specific match wins.
+            return (s2.length / s1.length) * 0.55;
         }
 
         // Word-based matching
@@ -3393,17 +3393,24 @@ export class SourceManager {
 
         if (words1.length === 0 || words2.length === 0) return 0;
 
-        const matches = words1.filter(w =>
+        const matchedQueryWords = words1.filter(w =>
             words2.some(w2 => w.includes(w2) || w2.includes(w))
         );
 
-        return matches.length / Math.max(words1.length, words2.length);
+        const baseScore = matchedQueryWords.length / Math.max(words1.length, words2.length);
+
+        // Penalise when significant query words are absent from the result.
+        // "code" and "white" being missing tells us this is the wrong entry entirely.
+        const missingRatio = (words1.length - matchedQueryWords.length) / words1.length;
+        const penaltyFactor = 1 - missingRatio * 0.5;
+
+        return baseScore * penaltyFactor;
     }
 
     /**
      * Find the best matching anime from search results
      */
-    private findBestMatch(title: string, results: AnimeBase[]): AnimeBase | null {
+    private findBestMatch(title: string, results: AnimeBase[], animeType?: string): AnimeBase | null {
         if (!results || results.length === 0) return null;
 
         // If only one result and it's a close match, use it
@@ -3415,12 +3422,17 @@ export class SourceManager {
             return null;
         }
 
-        // Find best match
+        // Find best match — apply a type-match bonus so e.g. "Spy x Family Code: White" (Movie)
+        // won't be confused with the "Spy x Family" TV series entries.
         let bestMatch: AnimeBase | null = null;
         let bestScore = 0;
 
         for (const anime of results) {
-            const score = this.calculateSimilarity(title, anime.title);
+            let score = this.calculateSimilarity(title, anime.title);
+            // Boost when the result's type matches what we're looking for
+            if (animeType && anime.type && anime.type === animeType) {
+                score += 0.15;
+            }
             if (score > bestScore) {
                 bestScore = score;
                 bestMatch = anime;
@@ -3439,16 +3451,16 @@ export class SourceManager {
      * Batch search for multiple anime titles at once
      * More efficient than searching individually
      */
-    async findStreamingAnimeByTitle(title: string): Promise<AnimeBase | null> {
+    async findStreamingAnimeByTitle(title: string, animeType?: string): Promise<AnimeBase | null> {
         try {
-            console.log(`🔎 [SourceManager] Finding streaming match for AniList title: "${title}"`);
-            
+            console.log(`🔎 [SourceManager] Finding streaming match for AniList title: "${title}" (type: ${animeType || 'unknown'})`);
+
             // Check cache first
             const cacheKey = title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 30);
             const cached = this.searchCache.get(cacheKey);
             if (cached && cached.timestamp > Date.now() - this.SEARCH_CACHE_TTL) {
                 console.log(`   ✅ Using cached results for "${title}"`);
-                return this.findBestMatch(title, cached.results);
+                return this.findBestMatch(title, cached.results, animeType);
             }
 
             let source = this.sources.get('Kaido');
@@ -3479,7 +3491,7 @@ export class SourceManager {
                 timestamp: Date.now()
             });
 
-            const bestMatch = this.findBestMatch(title, results);
+            const bestMatch = this.findBestMatch(title, results, animeType);
 
             if (bestMatch) {
                 console.log(`   ✅ Found streaming match: ${bestMatch.title} (${bestMatch.id})`);

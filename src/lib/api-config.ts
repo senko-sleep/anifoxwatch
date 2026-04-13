@@ -22,7 +22,7 @@ export interface ApiConfig {
  */
 export const API_DEPLOYMENTS = {
     local: 'http://localhost:3001',
-    cloudflare: 'https://anifoxwatch-api.anifoxwatch.workers.dev',
+    cloudflare: 'https://anifoxwatch-api.anya-bot.workers.dev',
     render: 'https://anifoxwatch-sm7s.onrender.com',
     firebase: '/api', // Firebase Functions proxy endpoint
     custom: '' // Will be set from environment variable
@@ -125,11 +125,22 @@ export function getApiConfig(): ApiConfig {
     }
 
     return {
-        deployment: 'render',
-        baseUrl: API_DEPLOYMENTS.render,
+        deployment: 'cloudflare',
+        baseUrl: API_DEPLOYMENTS.cloudflare,
         timeout: 30000,
         retries: 3
     };
+}
+
+/**
+ * Get fallback API URL when primary is unreachable.
+ * Cloudflare → Render, Render → Cloudflare.
+ */
+export function getApiFallbackUrl(): string | null {
+    const { baseUrl } = getApiConfig();
+    if (baseUrl.includes('workers.dev')) return API_DEPLOYMENTS.render;
+    if (baseUrl.includes('onrender.com')) return API_DEPLOYMENTS.cloudflare;
+    return null;
 }
 
 /**

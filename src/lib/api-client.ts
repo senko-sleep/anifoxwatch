@@ -1,5 +1,5 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
-import { getApiConfig } from './api-config';
+import { getApiConfig, getApiFallbackUrl } from './api-config';
 
 interface BrowseFilters {
     type?: string;
@@ -127,8 +127,12 @@ class AnimeApiClient {
     private inflight: Map<string, Promise<unknown>> = new Map();
     private readonly MAX_RETRIES = 2;
     private readonly TIMEOUT_MS = 25000;
+    private readonly FALLBACK_TTL = 5 * 60 * 1000; // 5 min before retrying primary
     private _online = true;
     private _lastOnlineCheck = 0;
+    /** Non-null when we've switched to a fallback URL after primary failed. */
+    private _activeBase: string | null = null;
+    private _activeBaseExpires: number = 0;
 
     constructor() {
         if (typeof window !== 'undefined') {
@@ -138,8 +142,12 @@ class AnimeApiClient {
         }
     }
 
-    /** Resolved on each call so dev server picks up env / getApiConfig() without stale base URL. */
+    /** Returns the active base URL — fallback if primary is down, otherwise primary. */
     private apiBase(): string {
+        if (this._activeBase && this._activeBaseExpires > Date.now()) {
+            return this._activeBase;
+        }
+        this._activeBase = null;
         return getApiConfig().baseUrl;
     }
 
@@ -292,6 +300,35 @@ class AnimeApiClient {
                 }
 
                 throw lastError;
+            }
+        }
+
+        // All retries on primary failed — try fallback URL once (Cloudflare ↔ Render)
+        const fallbackBase = getApiFallbackUrl();
+        if (fallbackBase && fallbackBase !== this.apiBase()) {
+            try {
+                console.warn(`[API] Primary failed, trying fallback: ${fallbackBase}`);
+                const controller = new AbortController();
+                const tid = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
+                const response = await fetch(`${fallbackBase}${endpoint}`, {
+                    ...options,
+                    mode: 'cors',
+                    signal: controller.signal,
+                    headers: { 'Accept': 'application/json', ...options?.headers }
+                });
+                clearTimeout(tid);
+                if (response.ok) {
+                    const data = await response.json() as T;
+                    // Switch all subsequent requests to the fallback for FALLBACK_TTL
+                    this._activeBase = fallbackBase;
+                    this._activeBaseExpires = Date.now() + this.FALLBACK_TTL;
+                    if (isGet) {
+                        this.cache.set(endpoint, { data, expires: Date.now() + this.getCacheTTL(endpoint) } as CacheEntry<T>);
+                    }
+                    return data;
+                }
+            } catch (fallbackErr) {
+                console.error('[API] Fallback also failed:', fallbackErr);
             }
         }
 
@@ -468,43 +505,61 @@ class AnimeApiClient {
         if (category) params.append('category', category);
 
         const queryString = params.toString() ? `?${params.toString()}` : '';
+        const streamPath = `/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`;
 
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
-        try {
-            // Streaming: slow fallbacks + Render free cold start (~50s) — avoid aborting too early.
+        const tryFetch = async (base: string): Promise<StreamingData> => {
+            const streamTimeoutMs = base.includes('onrender.com') ? 120_000 : 60_000;
             const controller = new AbortController();
-            const streamTimeoutMs = this.apiBase().includes('onrender.com') ? 120_000 : 60_000;
             const timeoutId = setTimeout(() => controller.abort(), streamTimeoutMs);
-            
-            const response = await fetch(`${this.apiBase()}/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`, {
-                signal: controller.signal,
-                headers: { 'Accept': 'application/json' }
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-                try { errorMessage = JSON.parse(errorText).error || errorMessage; } catch {}
-                throw Object.assign(new Error(errorMessage), { status: response.status });
+            try {
+                const response = await fetch(`${base}${streamPath}`, {
+                    signal: controller.signal,
+                    headers: { 'Accept': 'application/json' }
+                });
+                clearTimeout(timeoutId);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+                    try { errorMessage = JSON.parse(errorText).error || errorMessage; } catch {}
+                    throw Object.assign(new Error(errorMessage), { status: response.status });
+                }
+                return response.json();
+            } catch (e) {
+                clearTimeout(timeoutId);
+                throw e;
             }
-            
-            const data = await response.json();
+        };
 
+        try {
+            const data = await tryFetch(this.apiBase());
             console.log(`[API] ✅ Stream received:`, {
                 sources: data.sources?.length || 0,
-                qualities: data.sources?.map(s => s.quality).join(', '),
+                qualities: data.sources?.map((s: any) => s.quality).join(', '),
                 subtitles: data.subtitles?.length || 0,
                 hasIntro: !!data.intro,
                 source: data.source
             });
-
             return data;
-        } catch (error) {
-            console.error(`[API] ❌ Stream fetch failed:`, error);
-            throw error;
+        } catch (primaryErr) {
+            // Try fallback (Cloudflare ↔ Render) before giving up
+            const fallback = getApiFallbackUrl();
+            if (fallback && fallback !== this.apiBase()) {
+                console.warn(`[API] Stream primary failed, trying fallback: ${fallback}`);
+                try {
+                    const data = await tryFetch(fallback);
+                    // Remember fallback as active for subsequent requests
+                    this._activeBase = fallback;
+                    this._activeBaseExpires = Date.now() + this.FALLBACK_TTL;
+                    console.log(`[API] ✅ Stream received via fallback`);
+                    return data;
+                } catch (fallbackErr) {
+                    console.error(`[API] ❌ Fallback stream also failed:`, fallbackErr);
+                }
+            }
+            console.error(`[API] ❌ Stream fetch failed:`, primaryErr);
+            throw primaryErr;
         }
     }
 

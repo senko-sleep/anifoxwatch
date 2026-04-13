@@ -662,7 +662,7 @@ export const VideoPlayer = ({
       video.removeEventListener('canplay', handleCanPlay);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage]);
+  }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, autoFullscreen, isMobile]);
 
   // Fullscreen change handler
   useEffect(() => {

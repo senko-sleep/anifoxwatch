@@ -11,6 +11,7 @@ import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth } from '.
 import { SourceRequestOptions } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
+import { anilistService } from './anilist-service.js';
 
 interface StreamingSource {
     name: string;
@@ -130,25 +131,55 @@ export class CloudflareSourceManager {
     }
 
     // ============ ANIME DATA METHODS ============
+    // Strategy mirrors Render's SourceManager: AniList is primary for all metadata.
+    // Consumet is used only for streaming (episodes/watch).
 
-    async search(query: string, page: number = 1, sourceName?: string): Promise<AnimeSearchResult> {
-        const source = this.getAvailableSource(sourceName);
-        if (!source) {
+    async search(query: string, page: number = 1, sourceName?: string, options?: { mode?: string }): Promise<AnimeSearchResult> {
+        const mode = options?.mode || 'safe';
+
+        // Adult mode: delegate to WatchHentai/Hanime
+        if (mode === 'adult') {
+            const source = this.getAvailableSource(sourceName || 'WatchHentai');
+            if (source) {
+                try { return await source.search(query, page); } catch {}
+            }
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
         }
 
+        // Safe/mixed: AniList primary, Consumet fallback
         try {
-            return await source.search(query, page);
-        } catch (error) {
-            logger.error(`Search failed`, error as Error, { query }, 'CloudflareSourceManager');
-            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
+            const result = await anilistService.advancedSearch({ search: query, sort: ['SEARCH_MATCH'], perPage: 20, page });
+            if (result.results.length > 0) return result;
+        } catch (e) {
+            logger.warn(`AniList search failed`, { query, err: String(e) }, 'CloudflareSourceManager');
         }
+
+        // Consumet fallback
+        const source = this.getAvailableSource(sourceName);
+        if (source) {
+            try { return await source.search(query, page); } catch {}
+        }
+        return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
     }
 
     async getAnime(id: string): Promise<AnimeBase | null> {
+        // AniList ID: query AniList directly
+        if (id.toLowerCase().startsWith('anilist-')) {
+            const numericId = parseInt(id.replace(/^anilist-/i, ''), 10);
+            if (!isNaN(numericId)) {
+                try {
+                    const data = await anilistService.getAnimeById(numericId);
+                    if (data) return { ...data, id: `anilist-${numericId}` };
+                } catch (e) {
+                    logger.warn(`AniList getAnimeById failed`, { id, err: String(e) }, 'CloudflareSourceManager');
+                }
+            }
+            return null;
+        }
+
+        // Streaming source ID (consumet-*, watchhentai-*, hanime-*)
         const source = this.getStreamingSource(id);
         if (!source) return null;
-
         try {
             return await source.getAnime(id);
         } catch (error) {
@@ -158,9 +189,35 @@ export class CloudflareSourceManager {
     }
 
     async getEpisodes(animeId: string): Promise<Episode[]> {
+        // AniList ID: find streaming source by title (same as Render)
+        if (animeId.toLowerCase().startsWith('anilist-')) {
+            const numericId = parseInt(animeId.replace(/^anilist-/i, ''), 10);
+            if (!isNaN(numericId)) {
+                try {
+                    const anilistData = await anilistService.getAnimeById(numericId);
+                    if (anilistData?.title) {
+                        // Search Consumet by title to get streaming episodes
+                        const consumet = this.sources.get('CloudflareConsumet');
+                        if (consumet) {
+                            const searchResult = await consumet.search(anilistData.title, 1).catch(() => null);
+                            if (searchResult?.results?.length) {
+                                const streamingId = searchResult.results[0].id;
+                                if (streamingId && !streamingId.startsWith('anilist-')) {
+                                    const episodes = await consumet.getEpisodes(streamingId).catch(() => []);
+                                    if (episodes.length > 0) return episodes;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    logger.warn(`getEpisodes AniList lookup failed`, { animeId, err: String(e) }, 'CloudflareSourceManager');
+                }
+            }
+            return [];
+        }
+
         const source = this.getStreamingSource(animeId);
         if (!source) return [];
-
         try {
             return await source.getEpisodes(animeId);
         } catch (error) {
@@ -170,49 +227,68 @@ export class CloudflareSourceManager {
     }
 
     async getTrending(page: number = 1, sourceName?: string): Promise<AnimeBase[]> {
+        // AniList primary (same as Render's fallback which always wins in CF since no scrapers)
+        try {
+            const result = await anilistService.advancedSearch({ sort: ['TRENDING_DESC'], perPage: 24, page });
+            if (result.results.length > 0) return result.results;
+        } catch (e) {
+            logger.warn(`AniList getTrending failed`, { err: String(e) }, 'CloudflareSourceManager');
+        }
+
+        // Consumet fallback
         const source = this.getAvailableSource(sourceName);
         if (!source) return [];
-
         try {
             return await source.getTrending(page);
-        } catch (error) {
-            logger.error(`getTrending failed`, error as Error, undefined, 'CloudflareSourceManager');
+        } catch {
             return [];
         }
     }
 
     async getLatest(page: number = 1, sourceName?: string): Promise<AnimeBase[]> {
+        // AniList primary
+        try {
+            const result = await anilistService.advancedSearch({ sort: ['START_DATE_DESC'], status: 'RELEASING', perPage: 24, page });
+            if (result.results.length > 0) return result.results;
+        } catch (e) {
+            logger.warn(`AniList getLatest failed`, { err: String(e) }, 'CloudflareSourceManager');
+        }
+
+        // Consumet fallback
         const source = this.getAvailableSource(sourceName);
         if (!source) return [];
-
         try {
             return await source.getLatest(page);
-        } catch (error) {
-            logger.error(`getLatest failed`, error as Error, undefined, 'CloudflareSourceManager');
+        } catch {
             return [];
         }
     }
 
     async getTopRated(page: number = 1, limit: number = 10, sourceName?: string): Promise<TopAnime[]> {
+        try {
+            const result = await anilistService.getTopRatedAnime(page, limit);
+            if (result.results.length > 0) {
+                return result.results.map((a, i): TopAnime => ({
+                    rank: (page - 1) * limit + i + 1,
+                    anime: a,
+                }));
+            }
+        } catch (e) {
+            logger.warn(`AniList getTopRated failed`, { err: String(e) }, 'CloudflareSourceManager');
+        }
+
         const source = this.getAvailableSource(sourceName);
         if (!source) return [];
-
         try {
             return await source.getTopRated(page, limit);
-        } catch (error) {
-            logger.error(`getTopRated failed`, error as Error, undefined, 'CloudflareSourceManager');
+        } catch {
             return [];
         }
     }
 
-    async getAnimeByGenre(genre: string, page: number = 1, sourceName?: string): Promise<AnimeSearchResult> {
-        const source = this.getAvailableSource(sourceName);
-        if (!source || !('getByGenre' in source)) {
-            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: sourceName || 'none' };
-        }
-
+    async getAnimeByGenre(genre: string, page: number = 1, _sourceName?: string): Promise<AnimeSearchResult> {
         try {
-            return await (source as any).getByGenre(genre, page);
+            return await anilistService.searchByGenre(genre, page, 25);
         } catch (error) {
             logger.error(`getAnimeByGenre failed`, error as Error, undefined, 'CloudflareSourceManager');
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
@@ -220,31 +296,61 @@ export class CloudflareSourceManager {
     }
 
     async browseAnime(filters: any): Promise<AnimeSearchResult> {
-        const sourceName = filters.source;
-        // Priority adult source for adult modes if no source specific
-        let sourceToUse = sourceName;
-        if (!sourceName && (filters.mode === 'adult')) {
-             sourceToUse = 'WatchHentai';
-        }
-        const source = this.getAvailableSource(sourceToUse);
-        
-        if (!source) {
-            return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, source: 'none' };
+        const page = filters.page || 1;
+        const limit = filters.limit || 25;
+        const mode = filters.mode || 'safe';
+
+        // Adult mode: use WatchHentai/Hanime (same as Render)
+        if (mode === 'adult') {
+            const source = this.getAvailableSource(filters.source || 'WatchHentai');
+            if (!source) return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
+            try {
+                if (filters.genres?.length > 0 && 'getByGenre' in source) {
+                    return await (source as any).getByGenre(filters.genres[0], page);
+                }
+                const res = await source.getLatest(page);
+                return { results: res, totalPages: 1, currentPage: page, hasNextPage: false, source: source.name };
+            } catch {
+                return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
+            }
         }
 
+        // Safe/mixed: AniList strategy (mirrors Render's _executeBrowse)
         try {
-            if (filters.genres && filters.genres.length > 0 && 'getByGenre' in source) {
-                return await (source as any).getByGenre(filters.genres[0], filters.page || 1);
+            let anilistResult: AnimeSearchResult;
+
+            if (filters.genres?.length > 0) {
+                anilistResult = await anilistService.searchByGenre(filters.genres.join(','), page, limit, filters);
+            } else {
+                // Map sort values to AniList sorts (same as Render)
+                const sortMap: Record<string, string> = {
+                    popularity: 'POPULARITY_DESC',
+                    trending: 'TRENDING_DESC',
+                    recently_released: 'START_DATE_DESC',
+                    rating: 'SCORE_DESC',
+                    year: 'START_DATE_DESC',
+                    title: 'TITLE_ENGLISH_DESC',
+                };
+                const sort = sortMap[filters.sort || 'trending'] || 'TRENDING_DESC';
+
+                anilistResult = await anilistService.advancedSearch({
+                    page,
+                    perPage: limit,
+                    sort: [sort],
+                    type: filters.type?.toUpperCase(),
+                    status: filters.status?.toUpperCase(),
+                    season: filters.season?.toUpperCase(),
+                    year: filters.year,
+                    yearGreater: filters.startYear,
+                    yearLesser: filters.endYear,
+                    search: filters.search,
+                });
             }
-            if ('getByType' in source && filters.type) {
-                return await (source as any).getByType(filters.type, filters.page || 1);
-            }
-            
-            // Fallback
-            const res = await source.getLatest(filters.page || 1);
-            return { results: res, totalPages: 1, currentPage: filters.page || 1, hasNextPage: false, source: source.name };
+
+            return anilistResult;
         } catch (e) {
-            return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, source: 'error' };
+            logger.warn(`AniList browseAnime failed`, { err: String(e) }, 'CloudflareSourceManager');
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
         }
     }
 

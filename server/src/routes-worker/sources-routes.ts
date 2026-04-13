@@ -27,6 +27,27 @@ export function createSourcesRoutes(sourceManager: SourcesManagerLike) {
         return c.json({ sources: health });
     });
 
+    // Enhanced health (stub — matches Express server shape so the UI doesn't 404)
+    app.get('/health/enhanced', (c) => {
+        const health = sourceManager.getHealthStatus();
+        return c.json({
+            sources: health.map(s => ({
+                name: s.name,
+                status: s.status,
+                lastCheck: s.lastCheck,
+                capabilities: {
+                    supportsDub: false,
+                    supportsSub: true,
+                    hasScheduleData: false,
+                    hasGenreFiltering: true,
+                    quality: 'medium' as const,
+                },
+                successRate: s.status === 'online' ? 1 : 0,
+                avgLatency: s.latency ?? 0,
+            }))
+        });
+    });
+
     // Check all sources health
     app.post('/check', async (c) => {
         const health = await sourceManager.checkAllHealth();

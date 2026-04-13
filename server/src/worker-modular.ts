@@ -1,5 +1,6 @@
 import './polyfills.js';
 import { Hono } from 'hono';
+import { HiAnime } from 'aniwatch';
 import { logger } from './utils/logger.js';
 import { CloudflareSourceManager } from './services/source-manager-cloudflare.js';
 import { REGISTERED_SOURCE_NAMES } from './registered-sources.js';
@@ -14,6 +15,20 @@ import { createSourcesRoutes } from './routes-worker/sources-routes.js';
  */
 
 const app = new Hono();
+const hianime = new HiAnime.Scraper();
+
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+function createCacheKey(path: string, params: Record<string, string>): string {
+    return `${path}:${Object.entries(params).sort().join('&')}`;
+}
+
+function parsePage(query: Record<string, string>, defaultPage = 1): number {
+    const page = query.page;
+    if (!page) return defaultPage;
+    const parsed = parseInt(page, 10);
+    return isNaN(parsed) ? defaultPage : parsed;
+}
 
 // Initialize CloudflareSourceManager (uses fetch-based sources)
 const sourceManager = new CloudflareSourceManager();
@@ -95,24 +110,174 @@ app.get('/api', (c) => c.json({
 }));
 
 // ============================================
-// Mount Route Modules
+// Mount Route Modules (registered FIRST so /api/anime/* routes win over HiAnime /:id catch-all)
 // ============================================
 
-// Anime routes
 const animeRoutes = createAnimeRoutes(sourceManager);
 app.route('/api/anime', animeRoutes);
 
-// Streaming routes
 const streamingRoutes = createStreamingRoutes(sourceManager);
 app.route('/api/stream', streamingRoutes);
 
-// Sources routes
 const sourcesRoutes = createSourcesRoutes(sourceManager);
 app.route('/api/sources', sourcesRoutes);
 
 logger.info('All route modules loaded successfully', {
-    routes: ['anime', 'streaming', 'sources']
+    routes: ['anime', 'streaming', 'sources', 'hianime']
 }, 'Worker');
+
+// ============================================
+// HiAnime direct routes (for streaming; note: these use HiAnime slug IDs, not AniList IDs)
+// Mounted AFTER modular routes so /api/anime/* handlers above take priority
+// ============================================
+
+app.get('/api/home', async (c) => {
+    const page = parsePage(c.req.query());
+    try {
+        const data = await hianime.getHomePage();
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/search', async (c) => {
+    const query = c.req.query('q') || '';
+    const page = parsePage(c.req.query());
+    try {
+        const data = await hianime.search(query, page);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/azlist/:sortOption', async (c) => {
+    const sortOption = c.req.param('sortOption');
+    const page = parsePage(c.req.query());
+    try {
+        const data = await hianime.getAZList(sortOption as any, page);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/qtip/:animeId', async (c) => {
+    const animeId = c.req.param('animeId');
+    try {
+        const data = await hianime.getQtipInfo(animeId);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/category/:name', async (c) => {
+    const categoryName = c.req.param('name');
+    const page = parsePage(c.req.query());
+    try {
+        const data = await hianime.getCategoryAnime(categoryName as any, page);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/genre/:name', async (c) => {
+    const genreName = c.req.param('name');
+    const page = parsePage(c.req.query());
+    try {
+        const data = await hianime.getGenreAnime(genreName, page);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/producer/:name', async (c) => {
+    const producerName = c.req.param('name');
+    const page = parsePage(c.req.query());
+    try {
+        const data = await hianime.getProducerAnimes(producerName, page);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/schedule', async (c) => {
+    const date = c.req.query('date') || '';
+    const tzOffset = parseInt(c.req.query('tzOffset') || '-330', 10);
+    try {
+        const data = await hianime.getEstimatedSchedule(date, tzOffset);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/search/suggestion', async (c) => {
+    const query = c.req.query('q') || '';
+    try {
+        const data = await hianime.searchSuggestions(query);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/hianime/:animeId', async (c) => {
+    const animeId = c.req.param('animeId');
+    try {
+        const data = await hianime.getInfo(animeId);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/episode/servers', async (c) => {
+    const animeEpisodeId = c.req.query('animeEpisodeId') || '';
+    try {
+        const data = await hianime.getEpisodeServers(animeEpisodeId);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/episode/sources', async (c) => {
+    const animeEpisodeId = c.req.query('animeEpisodeId') || '';
+    const server = (c.req.query('server') || 'vidstreaming') as any;
+    const category = (c.req.query('category') || 'sub') as 'sub' | 'dub' | 'raw';
+    try {
+        const data = await hianime.getEpisodeSources(animeEpisodeId, server, category);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/hianime/:animeId/episodes', async (c) => {
+    const animeId = c.req.param('animeId');
+    try {
+        const data = await hianime.getEpisodes(animeId);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
+
+app.get('/api/hianime/:animeId/next-episode-schedule', async (c) => {
+    const animeId = c.req.param('animeId');
+    try {
+        const data = await hianime.getNextEpisodeSchedule(animeId);
+        return c.json({ status: 200, data });
+    } catch (e: any) {
+        return c.json({ status: 500, error: e.message }, 500);
+    }
+});
 
 // ============================================
 // Cloudflare Workers Entrypoint
