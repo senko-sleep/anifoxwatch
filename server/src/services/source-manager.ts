@@ -12,6 +12,9 @@ import {
     AllAnimeSource,
     KaidoSource,
     ZoroSource,
+    MiruroSource,
+    AniwaveSource,
+    AnixSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -83,6 +86,9 @@ export class SourceManager {
         ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['Kaido', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['Zoro', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['Miruro', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
+        ['Aniwave', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
+        ['Anix', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -136,6 +142,11 @@ export class SourceManager {
         // BACKUP: Zoro (zoro.to mirror) — additional streaming fallback
         this.registerSource(new ZoroSource());
 
+        // New expansions
+        this.registerSource(new MiruroSource());
+        this.registerSource(new AniwaveSource());
+        this.registerSource(new AnixSource());
+
         // Adult sources
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
@@ -156,6 +167,9 @@ export class SourceManager {
         this.sourceRateLimits.set('Consumet', { limit: 60, resetTime: 60000 });
         this.sourceRateLimits.set('Kaido', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('Zoro', { limit: 80, resetTime: 60000 });
+        this.sourceRateLimits.set('Miruro', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('Aniwave', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('Anix', { limit: 80, resetTime: 60000 });
 
         // Start health monitoring and perform initial health check
         this.startHealthMonitor();

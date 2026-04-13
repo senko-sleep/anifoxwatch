@@ -62,6 +62,7 @@ interface VideoPlayerProps {
   onBack?: () => void;
   onEpisodes?: () => void;
   onShowSettings?: () => void;
+  autoFullscreen?: boolean;
 }
 
 // Logger for video player events
@@ -100,7 +101,8 @@ export const VideoPlayer = ({
   animeSeason,
   onBack,
   onEpisodes,
-  onShowSettings
+  onShowSettings,
+  autoFullscreen = false
 }: VideoPlayerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -170,7 +172,7 @@ export const VideoPlayer = ({
   const [showMobileSettings, setShowMobileSettings] = useState(false);
   const [mobileSettingsTab, setMobileSettingsTab] = useState<'quality' | 'speed' | 'subtitles'>('quality');
 
-  // Auto-fullscreen on mobile: only trigger once per mount
+  // Auto-fullscreen on mobile: trigger once per mount when autoFullscreen prop is true
   const autoFullscreenFiredRef = useRef(false);
 
   // Helper to detect mobile device
@@ -509,7 +511,44 @@ export const VideoPlayer = ({
     const video = videoRef.current;
     if (!video) return;
 
-    const handlePlay = () => setIsPlaying(true);
+    const handlePlay = () => {
+      setIsPlaying(true);
+      
+      // Auto-fullscreen on mobile: only trigger once per mount when prop is true
+      if (autoFullscreen && isMobile() && !autoFullscreenFiredRef.current) {
+        autoFullscreenFiredRef.current = true;
+        
+        // Try webkitEnterFullscreen first (iOS Safari), then fallback to container fullscreen
+        if ((video as any).webkitEnterFullscreen) {
+          try {
+            (video as any).webkitEnterFullscreen();
+          } catch (e) {
+            playerLog('warn', 'Auto-fullscreen webkitEnterFullscreen failed', e);
+            tryEnterContainerFullscreen();
+          }
+        } else {
+          tryEnterContainerFullscreen();
+        }
+      }
+    };
+    
+    const tryEnterContainerFullscreen = async () => {
+      const container = containerRef.current;
+      if (container?.requestFullscreen) {
+        try {
+          await container.requestFullscreen();
+          if (screen.orientation && (screen.orientation as any).lock) {
+            try {
+              await (screen.orientation as any).lock('landscape');
+            } catch (e) {
+              playerLog('warn', 'Auto-fullscreen orientation lock failed', e);
+            }
+          }
+        } catch (e) {
+          playerLog('warn', 'Auto-fullscreen container request failed', e);
+        }
+      }
+    };
     const handlePause = () => {
       setIsPlaying(false);
       if (video.currentTime > 5 && video.duration - video.currentTime > 10) {

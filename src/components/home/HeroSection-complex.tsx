@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Play, Info, ChevronLeft, ChevronRight, Star, Calendar, Tv, Flame, Clock, TrendingUp, Shuffle, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Anime } from '@/types/anime';
-import { cn, formatRating } from '@/lib/utils';
+import { cn, formatRating, ensureHttps } from '@/lib/utils';
 import { apiClient } from '@/lib/api-client';
 
 interface HeroSectionProps {
@@ -100,7 +100,7 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
             )}
           >
             <img
-              src={anime.cover || anime.image}
+              src={ensureHttps(anime.cover || anime.image)}
               alt={anime.title}
               className={cn(
                 "w-full h-full object-cover object-center transition-all duration-2000 ease-in-out",
@@ -293,7 +293,7 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
               )}
             >
               <img
-                src={anime.image}
+                src={ensureHttps(anime.image)}
                 alt={anime.title}
                 className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
               />

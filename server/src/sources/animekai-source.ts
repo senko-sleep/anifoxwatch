@@ -195,7 +195,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
     private isBrokenCdn(url: string): boolean {
         try {
             const h = new URL(url).hostname;
-            return ['hub26link', 'net22lab'].some(bad => h.includes(bad));
+            return ['hub26link', 'net22lab', 'streamwish'].some(bad => h.includes(bad));
         } catch { return false; }
     }
 

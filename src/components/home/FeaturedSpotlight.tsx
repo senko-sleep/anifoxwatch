@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Play, Star, Clock, Film, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn, formatRating } from '@/lib/utils';
+import { cn, formatRating, ensureHttps } from '@/lib/utils';
 
 interface SpotlightAnime {
   id: string;
@@ -62,7 +62,7 @@ export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
           isTransitioning ? "opacity-0 scale-105" : "opacity-100 scale-100"
         )}
         style={{
-          backgroundImage: `url(${current.cover || current.image})`,
+          backgroundImage: `url(${ensureHttps(current.cover || current.image)})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center top',
         }}
@@ -169,7 +169,7 @@ export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
               >
                 <div className="w-72 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl ring-4 ring-white/10 hover:ring-fox-orange transition-all hover:scale-105">
                   <img 
-                    src={current.image} 
+                    src={ensureHttps(current.image)} 
                     alt={current.title}
                     className="w-full h-full object-cover"
                   />

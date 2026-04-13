@@ -17,4 +17,7 @@ export const REGISTERED_SOURCE_NAMES: readonly string[] = [
     'WatchHentai',
     'Hanime',
     'AkiH',
+    'Miruro',
+    'Aniwave',
+    'Anix',
 ];
