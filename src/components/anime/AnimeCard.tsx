@@ -167,10 +167,15 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
                 setImgLoaded(true);
                 if (posterSrc) loadedImageCache.add(posterSrc);
               }}
-              onError={() => {
-                if (!useProxy && posterSrc) {
+              onError={(e) => {
+                // Check if it's a DNS resolution error (ERR_NAME_NOT_RESOLVED)
+                // In this case, proxy won't help, so show placeholder immediately
+                const target = e.target as HTMLImageElement;
+                if (!useProxy && posterSrc && target.naturalWidth === 0) {
+                  // Try proxy once for other types of errors (CORS, 404, etc.)
                   setUseProxy(true);
                 } else {
+                  // DNS error or proxy also failed - show placeholder
                   setImgError(true);
                 }
               }}

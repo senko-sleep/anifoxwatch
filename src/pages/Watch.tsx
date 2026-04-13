@@ -5,6 +5,7 @@ import { Footer } from '@/components/layout/Footer';
 import { VideoPlayer } from '../components/player/VideoPlayer';
 import { EpisodeList } from '../components/player/EpisodeList';
 import { StreamingControls } from '../components/player/StreamingControls';
+import { DownloadManager } from '../components/player/DownloadManager';
 import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers, useDubStreamProbe } from '@/hooks/useAnime';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -137,10 +138,16 @@ const Watch = () => {
   );
   const dubPlaybackWorks =
     audioType === 'dub' && (streamData?.sources?.length ?? 0) > 0;
+  // Check if current stream data already contains dub sources (some sources return both sub and dub in one call)
+  const streamHasDubSources = useMemo(
+    () => (streamData?.source?.toLowerCase().includes('dub')) || false,
+    [streamData]
+  );
   const skipDubProbe =
     serversHaveDub ||
     metadataIndicatesDub ||
     dubPlaybackWorks ||
+    streamHasDubSources ||
     audioType !== 'sub';
 
   const { data: dubProbeData } = useDubStreamProbe(
@@ -702,6 +709,18 @@ const Watch = () => {
             />
           </div>
 
+          {/* Download Manager */}
+          {episodes && episodes.length > 0 && (
+            <div className="px-4 pb-2">
+              <DownloadManager
+                episodes={episodes}
+                animeTitle={anime?.title || 'Anime'}
+                animeId={cleanAnimeId}
+                audioType={audioType}
+              />
+            </div>
+          )}
+
           {/* About Section */}
           <div className="px-4 pb-4">
             <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4 backdrop-blur-sm">
@@ -1070,6 +1089,20 @@ const Watch = () => {
                 />
               </div>
 
+              {/* Download Manager */}
+              {episodes && episodes.length > 0 && (
+                <div className={cn(
+                  "transition-all duration-500",
+                  isCinemaMode && "max-w-4xl mx-auto"
+                )}>
+                  <DownloadManager
+                    episodes={episodes}
+                    animeTitle={anime.title || 'Anime'}
+                    animeId={cleanAnimeId}
+                    audioType={audioType}
+                  />
+                </div>
+              )}
 
               {/* Single about block below the player */}
               <div className={cn(

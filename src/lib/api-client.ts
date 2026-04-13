@@ -440,7 +440,42 @@ class AnimeApiClient {
             params.append('_t', String(Date.now()));
         }
 
-        return this.fetch<AnimeSearchResult>(`/api/anime/browse?${params}`);
+        // Browse requests can be slow due to AniList enrichment, use longer timeout
+        const endpoint = `/api/anime/browse?${params}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout for browse
+
+        try {
+            const response = await fetch(`${this.apiBase()}${endpoint}`, {
+                ...{ mode: 'cors', signal: controller.signal, headers: { 'Accept': 'application/json' } }
+            });
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+                try {
+                    const errorData = JSON.parse(errorText);
+                    if (errorData.error) {
+                        errorMessage = errorData.error;
+                    }
+                } catch {
+                    // Ignore JSON parse errors
+                }
+                throw Object.assign(new Error(errorMessage), { status: response.status });
+            }
+
+            const data = await response.json();
+            this._online = true;
+            return data;
+        } catch (error) {
+            clearTimeout(timeoutId);
+            const lastError = error as Error;
+            if (lastError.name === 'AbortError') {
+                throw new Error('Request timeout - please try again');
+            }
+            throw lastError;
+        }
     }
 
     async getRandomAnime(source?: string): Promise<Anime | null> {

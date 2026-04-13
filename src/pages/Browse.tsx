@@ -67,22 +67,20 @@ const SAFE_GENRES = [
 
 const ADULT_GENRES = [
   'Hentai', 'Ecchi', 'Yaoi', 'Yuri',
-  '3D', 'Ahegao', 'Anal', 'Animal Ears', 'BDSM', 'Beastiality', 'Big Boobs',
-  'Blackmail', 'Blowjob', 'Bondage', 'Brainwashed', 'Bukakke', 'Cat Girl',
-  'Censored', 'Cosplay', 'Creampie', 'Dark Skin', 'Deepthroat', 'Double Penetration',
-  'Facesitting', 'Facial', 'Femdom', 'Footjob', 'Futanari', 'Gangbang',
-  'Gyaru', 'Horny Slut', 'Housewife', 'Humiliation', 'Incest', 'Inflation',
-  'Internal Cumshot', 'Lactation', 'Large Breasts', 'Lolicon', 'Magical Girls',
-  'Maid', 'Megane', 'MILF', 'Mind Break', 'Molestation', 'NTR', 'Nuns', 'Nurses',
-  'Office Ladies', 'POV', 'Pregnant', 'Princess', 'Public Sex', 'Rape',
-  'Rim Job', 'Scat', 'School Girls', 'Shimapan', 'Shoutacon', 'Slaves',
-  'Squirting', 'Stocking', 'Strap On', 'Strapped On', 'Succubus', 'Swimsuit',
-  'Tentacles', 'Three Some', 'Tits Fuck', 'Torture', 'Toys', 'Train Molestation',
+  '3D', '2D', 'Ahegao', 'Anal', 'Animal Ears', 'BDSM', 'Beastiality', 'Big Boobs', 'Big Breast',
+  'Blackmail', 'Blowjob', 'Blow Job', 'Bondage', 'Brainwashed', 'Bukakke', 'Bukkake', 'Cat Girl',
+  'Censored', 'Comedy', 'Cosplay', 'Creampie', 'Dark Skin', 'Deepthroat', 'Double Penetration', 'Double Penetration',
+  'Facesitting', 'Facial', 'Femdom', 'Footjob', 'Foot Job', 'Futanari', 'Gangbang',
+  'Gyaru', 'Harem', 'Hardcore', 'HardCore', 'Hospital', 'Horny Slut', 'Housewife', 'Humiliation', 'Incest', 'Inflation',
+  'Internal Cumshot', 'Lactation', 'Large Breasts', 'Lolicon', 'Loli', 'Magical Girls', 'Maid', 'Masturbation',
+  'Megane', 'MILF', 'Milf', 'Mind Break', 'Mind Control', 'Molestation', 'Monster', 'NTR', 'Nuns', 'Nurses',
+  'Office Ladies', 'Orgy', 'Paizuri', 'Plot', 'POV', 'Pregnant', 'Princess', 'Public Sex', 'Rape',
+  'Rim Job', 'Scat', 'School Girls', 'Sex Toys', 'Shimapan', 'Shoutacon', 'Shota', 'Slaves',
+  'Softcore', 'Squirting', 'Stocking', 'Strap On', 'Strapped On', 'Succubus', 'Swimsuit',
+  'Teacher', 'Tentacles', 'Threesome', 'Three Some', 'Tits Fuck', 'Torture', 'Toys', 'Train Molestation', 'Trap',
   'Tsundere', 'Uncensored', 'Urination', 'Vanilla', 'Virgins', 'Widow', 'X-Ray',
-  'Blow Job', 'Boob Job', 'Glasses', 'Hand Job', 'Horror', 'Inflation', 'Loli',
-  'Masturbation', 'Mind Control', 'Monster', 'Nekomimi', 'Orgy', 'Plot',
-  'Reverse Rape', 'Shota', 'Softcore', 'Teacher', 'Threesome', 'Trap',
-  'Ugly Bastard', 'Female Doctor', 'Female Teacher'
+  'Boob Job', 'Family', 'Fantasy', 'Glasses', 'Hand Job', 'Horror', 'Inflation',
+  'Mind Control', 'Nekomimi', 'Reverse Rape', 'Bitch', 'Demon', 'Remove Censored', 'Furry'
 ];
 
 const MIXED_GENRES = [...SAFE_GENRES, ...ADULT_GENRES].sort();
