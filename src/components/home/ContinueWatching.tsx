@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Play, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { WatchHistoryItem } from '@/lib/watch-history';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { ensureHttps } from '@/lib/utils';
 
 interface ContinueWatchingProps {
@@ -103,12 +104,16 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                                 />
                             </div>
 
-                            {/* Episode info overlay */}
-                            <div className="absolute bottom-2 left-14 right-3 flex items-center justify-between">
-                                <span className="text-xs font-medium text-white/90">
+                            {/* Episode badge - top left */}
+                            <div className="absolute top-2 left-2">
+                                <Badge className="bg-fox-orange/90 hover:bg-fox-orange text-white text-[10px] font-medium px-2 py-0.5 backdrop-blur-sm border-0">
                                     EP {item.episodeNumber}
-                                </span>
-                                <span className="text-xs text-white/60">
+                                </Badge>
+                            </div>
+
+                            {/* Time left - bottom right */}
+                            <div className="absolute bottom-2 right-2">
+                                <span className="text-[10px] text-white/60 bg-black/50 px-1.5 py-0.5 rounded backdrop-blur-sm">
                                     {Math.floor((item.duration - item.timestamp) / 60)}m left
                                 </span>
                             </div>
