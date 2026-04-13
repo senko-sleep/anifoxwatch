@@ -13,9 +13,9 @@ const MAL_FIELDS =
   'id,title,main_picture,banner_image,synopsis,mean,num_list_users,media_type,status,start_season';
 
 const HERO_SPOTLIGHT_QUERY = `
-query HeroSpotlight($page: Int, $perPage: Int, $sort: [MediaSort], $status: MediaStatus, $seasonYear_greater: Int, $format_in: [MediaFormat]) {
+query HeroSpotlight($page: Int, $perPage: Int, $sort: [MediaSort], $status: MediaStatus, $seasonYear_gte: Int, $format_in: [MediaFormat]) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: $sort, isAdult: false, status: $status, seasonYear_greater: $seasonYear_greater, format_in: $format_in) {
+    media(type: ANIME, sort: $sort, isAdult: false, status: $status, seasonYear_gte: $seasonYear_gte, format_in: $format_in) {
       id
       idMal
       title { english romaji native }
@@ -96,7 +96,7 @@ function isWeakSynopsis(text: string): boolean {
 
 interface AniListPageFilters {
   status?: string;
-  seasonYear_greater?: number;
+  seasonYear_gte?: number;
   format_in?: string[];
 }
 
@@ -273,9 +273,9 @@ export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
   // Priority 4: Global trending fallback (in case recent queries return too few with banners)
   const queries: Array<[number, number, string, AniListPageFilters]> = [
     [1, 50, 'TRENDING_DESC', { status: 'RELEASING', format_in: formats }],
-    [1, 50, 'TRENDING_DESC', { seasonYear_greater: recentYear, format_in: formats }],
-    [2, 50, 'TRENDING_DESC', { seasonYear_greater: recentYear, format_in: formats }],
-    [1, 50, 'POPULARITY_DESC', { seasonYear_greater: recentYear, format_in: formats }],
+    [1, 50, 'TRENDING_DESC', { seasonYear_gte: recentYear, format_in: formats }],
+    [2, 50, 'TRENDING_DESC', { seasonYear_gte: recentYear, format_in: formats }],
+    [1, 50, 'POPULARITY_DESC', { seasonYear_gte: recentYear, format_in: formats }],
     [1, 50, 'TRENDING_DESC', {}], // global fallback
   ];
 

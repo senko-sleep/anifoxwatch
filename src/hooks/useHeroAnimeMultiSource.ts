@@ -185,8 +185,8 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
 
   const queries = [
     buildAniListQuery('TRENDING_DESC', `,status:RELEASING,format_in:${formats}`),
-    buildAniListQuery('TRENDING_DESC', `,seasonYear_greater:${recentYear},format_in:${formats}`),
-    buildAniListQuery('POPULARITY_DESC', `,seasonYear_greater:${recentYear},format_in:${formats}`),
+    buildAniListQuery('TRENDING_DESC', `,seasonYear_gte:${recentYear},format_in:${formats}`),
+    buildAniListQuery('POPULARITY_DESC', `,seasonYear_gte:${recentYear},format_in:${formats}`),
     buildAniListQuery('TRENDING_DESC', ``), // global fallback
   ];
 

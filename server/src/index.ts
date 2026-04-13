@@ -59,30 +59,30 @@ const corsOptions: cors.CorsOptions = {
     maxAge: 86400 // 24 hours preflight cache
 };
 
-app.use(cors(corsOptions));
-
-// Explicit preflight handler for all routes
-app.options('*', cors(corsOptions));
-app.use(express.json({ limit: '1mb' }));
-
 // CORS safety-net: guarantee Access-Control-Allow-Origin is present on EVERY response.
-// The `cors` npm package should handle this, but on Render free-tier cold starts and
-// certain proxy configurations, the header can be dropped. This middleware catches those.
+// This runs BEFORE all routes and middleware to ensure headers are always set
 app.use((req: Request, res: Response, next: NextFunction) => {
     const origin = req.headers.origin;
-    // Set CORS headers if not already present (safety net)
-    res.on('finish', () => {});
-    if (!res.getHeader('Access-Control-Allow-Origin')) {
-        res.set('Access-Control-Allow-Origin', origin || '*');
-    }
-    if (!res.getHeader('Access-Control-Allow-Credentials')) {
-        res.set('Access-Control-Allow-Credentials', 'true');
-    }
+    // Set CORS headers FIRST before any processing
+    res.set('Access-Control-Allow-Origin', origin || '*');
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Request-ID, Range, Accept');
+    res.set('Access-Control-Max-Age', '86400');
     res.set('X-Content-Type-Options', 'nosniff');
     res.set('X-Frame-Options', 'DENY');
     res.set('Vary', 'Origin');
+    
+    // Handle preflight OPTIONS immediately
+    if (req.method === 'OPTIONS') {
+        return res.status(204).end();
+    }
+    
     next();
 });
+
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '1mb' }));
 
 // Reliability middleware with circuit breaker, timeouts, and retries
 app.use(reliabilityMiddleware);
