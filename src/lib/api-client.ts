@@ -489,17 +489,21 @@ class AnimeApiClient {
         }
     }
 
-    async getAnime(id: string): Promise<Anime | null> {
+    async getAnime(id: string, source?: string): Promise<Anime | null> {
         try {
-            return await this.fetch<Anime>(`/api/anime?id=${encodeURIComponent(id)}`);
+            const params = new URLSearchParams({ id });
+            if (source) params.append('source', source);
+            return await this.fetch<Anime>(`/api/anime?${params}`);
         } catch {
             return null;
         }
     }
 
-    async getEpisodes(animeId: string): Promise<Episode[]> {
+    async getEpisodes(animeId: string, source?: string): Promise<Episode[]> {
+        const params = new URLSearchParams({ id: animeId });
+        if (source) params.append('source', source);
         const response = await this.fetch<{ episodes: Episode[] }>(
-            `/api/anime/episodes?id=${encodeURIComponent(animeId)}`
+            `/api/anime/episodes?${params}`
         );
         return response.episodes || [];
     }
@@ -634,7 +638,7 @@ class AnimeApiClient {
         const response = await this.fetch<{ sources: Array<{
             name: string;
             status: string;
-            lastCheck: Date;
+            lastCheck: string;
             capabilities?: {
                 supportsDub: boolean;
                 supportsSub: boolean;

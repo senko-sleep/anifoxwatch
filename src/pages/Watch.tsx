@@ -49,6 +49,8 @@ const Watch = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   // Get anime ID from search param (use route param as fallback for backwards compatibility)
   const cleanAnimeId = searchParams.get('id') || animeId || '';
+  // Source from history (e.g. 'hanime', 'aki-h') so the API knows where to look
+  const sourceParam = searchParams.get('source') || undefined;
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -117,8 +119,8 @@ const Watch = () => {
   }, []);
 
   // Data fetching
-  const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId);
-  const { data: episodes, isLoading: episodesLoading, isFetching: episodesFetching } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId);
+  const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
+  const { data: episodes, isLoading: episodesLoading, isFetching: episodesFetching } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
   const { data: servers, isLoading: serversLoading } = useEpisodeServers(selectedEpisode || '', !!selectedEpisode);
   const serversHaveDub = useMemo(
     () => servers?.some((s) => s.type === 'dub') ?? false,

@@ -530,6 +530,29 @@ const Browse = () => {
         )}
       </div>
 
+      {/* Content Mode — mobile only (desktop has it in the toolbar) */}
+      {isMobile && (
+        <div className="mb-4">
+          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600 mb-2">Content</h3>
+          <div className="flex gap-1">
+            {(['safe', 'mixed', 'adult'] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => { setMode(m); setPage(1); }}
+                className={cn(
+                  "flex-1 py-1.5 rounded-md text-[11px] font-medium transition-colors",
+                  mode === m
+                    ? "bg-fox-orange/15 text-fox-orange"
+                    : "text-zinc-500 hover:text-zinc-300 bg-white/[0.03] hover:bg-white/[0.06]"
+                )}
+              >
+                {m === 'safe' ? 'Safe' : m === 'mixed' ? 'Mixed' : '+18'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Format Section */}
       <div className="mb-4">
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-600 mb-2">Format</h3>

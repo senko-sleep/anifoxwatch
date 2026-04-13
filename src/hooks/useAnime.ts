@@ -145,19 +145,19 @@ export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boo
     });
 }
 
-export function useAnime(id: string, enabled: boolean = true) {
+export function useAnime(id: string, enabled: boolean = true, source?: string) {
     return useQuery<Anime | null, Error>({
-        queryKey: queryKeys.anime(id),
-        queryFn: () => apiClient.getAnime(id),
+        queryKey: [...queryKeys.anime(id), source],
+        queryFn: () => apiClient.getAnime(id, source),
         enabled: enabled && id.length > 0,
         staleTime: 10 * 60 * 1000,
     });
 }
 
-export function useEpisodes(animeId: string, enabled: boolean = true) {
+export function useEpisodes(animeId: string, enabled: boolean = true, source?: string) {
     return useQuery<Episode[], Error>({
-        queryKey: queryKeys.episodes(animeId),
-        queryFn: () => apiClient.getEpisodes(animeId),
+        queryKey: [...queryKeys.episodes(animeId), source],
+        queryFn: () => apiClient.getEpisodes(animeId, source),
         enabled: enabled && animeId.length > 0,
         staleTime: 10 * 60 * 1000,
     });

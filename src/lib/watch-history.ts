@@ -12,6 +12,7 @@ export interface WatchHistoryItem {
     lastWatched: number; // Date.now()
     progress: number; // 0 to 1
     frameThumbnail?: string; // Base64 or URL of video frame at timestamp
+    source?: string; // API source the anime came from (e.g. 'hanime', 'aki-h')
 }
 
 const HISTORY_KEY = 'anistream_watch_history';
@@ -45,7 +46,8 @@ export const WatchHistory = {
                 duration,
                 lastWatched: Date.now(),
                 progress: duration > 0 ? timestamp / duration : 0,
-                frameThumbnail
+                frameThumbnail,
+                source: anime.source,
             };
 
             // Add to beginning

@@ -64,7 +64,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                 {items.map((item) => (
                     <Link
                         key={item.animeId}
-                        to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}`}
+                        to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}${item.source ? `&source=${encodeURIComponent(item.source)}` : ''}`}
                         state={{ from: location.pathname + location.search }}
                         className="shrink-0 w-48 sm:w-56 group/card touch-manipulation"
                     >
@@ -112,17 +112,19 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                             </div>
 
                             {/* Time left - bottom right */}
-                            <div className="absolute bottom-2 right-2">
-                                <span className="text-[10px] text-white/60 bg-black/50 px-1.5 py-0.5 rounded backdrop-blur-sm">
-                                    {Math.floor((item.duration - item.timestamp) / 60)}m left
-                                </span>
-                            </div>
+                            {item.duration > 0 && item.timestamp < item.duration && (
+                                <div className="absolute bottom-2 right-2">
+                                    <span className="text-[10px] text-white/60 bg-black/50 px-1.5 py-0.5 rounded backdrop-blur-sm">
+                                        {Math.max(0, Math.floor((item.duration - item.timestamp) / 60))}m left
+                                    </span>
+                                </div>
+                            )}
 
-                            {/* Remove button */}
+                            {/* Remove button — always visible on mobile, hover-only on desktop */}
                             <Button
                                 variant="ghost"
                                 size="icon"
-                                className="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover/card:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 hover:text-white text-white/70 rounded-full"
+                                className="absolute top-2 right-2 h-7 w-7 opacity-60 sm:opacity-0 sm:group-hover/card:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 hover:text-white text-white/70 rounded-full"
                                 onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();

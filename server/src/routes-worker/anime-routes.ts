@@ -38,6 +38,13 @@ function needsRender(id: string): boolean {
     return RENDER_PREFIXES.some(p => lower.startsWith(p));
 }
 
+/** Sources only available on Render (require Puppeteer, axios+cheerio with node deps, etc.) */
+const RENDER_ONLY_SOURCES = ['akih', 'allanime', '9anime', 'kaido', 'animekai', 'miruro', 'aniwave', 'anix', 'zoro', 'animefox', 'gogoanime', 'animepahe', 'animeflv'];
+function sourceNeedsRender(source?: string): boolean {
+    if (!source) return false;
+    return RENDER_ONLY_SOURCES.some(s => source.toLowerCase() === s.toLowerCase());
+}
+
 // Use a flexible interface that works with both SourceManager and CloudflareSourceManager
 interface SourceManagerLike {
     search(query: string, page?: number, sourceName?: string, options?: { mode?: string }): Promise<any>;
@@ -72,6 +79,13 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const mode = c.req.query('mode') as 'safe' | 'mixed' | 'adult' | undefined;
 
         if (!q) return c.json({ error: 'Query parameter "q" is required' }, 400);
+
+        // Render-only source → proxy
+        if (sourceNeedsRender(source)) {
+            try { return await proxyToRender(`/api/anime/search?${c.req.url.split('?')[1] || ''}`); } catch (e: any) {
+                return c.json({ error: e.message, results: [] }, 502);
+            }
+        }
 
         try {
             const data = await sourceManager.search(q, page, source, { mode: mode || 'safe' });
@@ -301,6 +315,13 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const limit = Number(query.limit) || 20;
         const genres = query.genre ? (query.genre as string).split(',').map(g => g.trim()) : [];
 
+        // Render-only source → proxy
+        if (sourceNeedsRender(query.source as string)) {
+            try { return await proxyToRender(`/api/anime/filter?${c.req.url.split('?')[1] || ''}`); } catch (e: any) {
+                return c.json({ error: e.message }, 502);
+            }
+        }
+
         const filters: any = {
             type: query.type,
             genres: genres.length > 0 ? genres : undefined,
@@ -351,6 +372,13 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const limit = Number(query.limit) || 25;
         const genreParam = (query.genres as string) || (query.genre as string);
         const parsedGenres = genreParam ? genreParam.split(',').map(g => g.trim()) : [];
+
+        // Render-only source → proxy entire request to Render
+        if (sourceNeedsRender(query.source as string)) {
+            try { return await proxyToRender(`/api/anime/browse?${c.req.url.split('?')[1] || ''}`); } catch (e: any) {
+                return c.json({ error: e.message, results: [] }, 502);
+            }
+        }
 
         const filters: any = {
             type: query.type,
