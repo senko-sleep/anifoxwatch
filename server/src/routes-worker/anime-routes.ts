@@ -8,7 +8,7 @@ import { getHeroSpotlightCached } from '../services/hero-spotlight-service.js';
  */
 const RENDER_BACKEND_URL = 'https://anifoxwatch-sm7s.onrender.com';
 
-async function proxyToRender(path: string, timeoutMs = 30_000): Promise<Response> {
+async function proxyToRender(path: string, timeoutMs = 50_000): Promise<Response> {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -115,9 +115,19 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     app.get('/hero-spotlight', async (c) => {
         try {
             const results = await getHeroSpotlightCached();
-            return c.json(results);
+            if (results && ((Array.isArray(results) && results.length > 0) || (results as any).results?.length > 0)) {
+                return c.json(results);
+            }
+            // Empty result — fall through to Render
+            throw new Error('Empty hero-spotlight result');
         } catch (error: any) {
-            return c.json({ error: error.message }, 500);
+            // Fallback: proxy hero-spotlight to Render (AniList from CF Worker IPs often fails)
+            try {
+                const qs = c.req.url.includes('?') ? `?${c.req.url.split('?')[1]}` : '';
+                return await proxyToRender(`/api/anime/hero-spotlight${qs}`, 45_000);
+            } catch (renderErr: any) {
+                return c.json({ error: `CF + Render both failed: ${error.message}`, results: [], count: 0 }, 500);
+            }
         }
     });
 
@@ -143,9 +153,19 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         
         try {
             const data = await sourceManager.getTrending(page, source);
-            return c.json({ results: data, source: source || 'default' });
+            if (data && data.length > 0) {
+                return c.json({ results: data, source: source || 'default' });
+            }
+            // Empty — fall through to Render
+            throw new Error('Empty trending result');
         } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+            // Fallback to Render
+            try {
+                const qs = c.req.url.split('?')[1] || '';
+                return await proxyToRender(`/api/anime/trending?${qs}`, 50_000);
+            } catch (renderErr: any) {
+                return c.json({ error: e.message, results: [] }, 500);
+            }
         }
     });
 
@@ -156,9 +176,18 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         
         try {
             const data = await sourceManager.getLatest(page, source);
-            return c.json({ results: data, source: source || 'default' });
+            if (data && data.length > 0) {
+                return c.json({ results: data, source: source || 'default' });
+            }
+            throw new Error('Empty latest result');
         } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+            // Fallback to Render
+            try {
+                const qs = c.req.url.split('?')[1] || '';
+                return await proxyToRender(`/api/anime/latest?${qs}`, 50_000);
+            } catch (renderErr: any) {
+                return c.json({ error: e.message, results: [] }, 500);
+            }
         }
     });
 
@@ -170,9 +199,18 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         
         try {
             const data = await sourceManager.getTopRated(page, limit, source);
-            return c.json({ results: data });
+            if (data && data.length > 0) {
+                return c.json({ results: data });
+            }
+            throw new Error('Empty top-rated result');
         } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+            // Fallback to Render
+            try {
+                const qs = c.req.url.split('?')[1] || '';
+                return await proxyToRender(`/api/anime/top-rated?${qs}`, 50_000);
+            } catch (renderErr: any) {
+                return c.json({ error: e.message, results: [] }, 500);
+            }
         }
     });
 

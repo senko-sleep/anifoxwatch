@@ -266,7 +266,11 @@ const Watch = () => {
 
     // Check if we've exhausted ALL retry options (all sources on all servers)
     if (serverRetryCount >= maxServerRetries) {
-      console.log('[Watch] ❌ All servers exhausted, stopping retries');
+      if (audioType === 'dub') {
+        console.log('[Watch] ❌ All dub servers exhausted, falling back to sub');
+        toast.info('Dub unavailable — switching to Sub');
+        setAudioType('sub');
+      }
       return;
     }
 
@@ -285,7 +289,7 @@ const Watch = () => {
       setSelectedServer(nextServer.name);
       setServerRetryCount(prev => prev + 1);
     }
-  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData]);
+  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType]);
 
   // Reset retry count when episode or audio changes (new stream fetch)
   useEffect(() => {
@@ -297,14 +301,27 @@ const Watch = () => {
     setSourceRetryIndex(0);
   }, [streamData, selectedServer, audioType, quality]);
 
-  // Get best quality source
+  // Auto-fallback: if dub stream returned no sources, silently switch to sub
+  useEffect(() => {
+    if (audioType !== 'dub' || streamLoading) return;
+    if (streamData && streamData.sources?.length === 0) {
+      console.log('[Watch] No dub sources for this episode, falling back to sub');
+      toast.info('Dub not available for this episode — switching to Sub');
+      setAudioType('sub');
+    }
+  }, [audioType, streamLoading, streamData]);
+
+  // Get best quality source - skip sources that previously failed
   const getVideoSource = useCallback(() => {
     if (!streamData?.sources?.length) return null;
 
-    const sources = streamData.sources;
+    // Filter out sources that previously had errors (simple retry tracking)
+    const sources = streamData.sources.filter((_, idx) => idx >= sourceRetryIndex);
+    
+    if (!sources.length) return null;
 
     // If the current URL failed, rotate through available sources
-    const fallbackSource = sources[sourceRetryIndex];
+    const fallbackSource = sources[0];
     if (fallbackSource) return fallbackSource;
 
     // Find matching quality or best available
@@ -602,9 +619,10 @@ const Watch = () => {
         <Navbar />
 
         <main className="flex-1 relative z-10">
-          {/* Video Player */}
+          {/* Video Player - Larger viewport with HD effect */}
           <div className="w-full bg-black" ref={playerRef}>
-            <div className="relative aspect-video">
+            <div className="relative w-full max-w-[95vw] mx-auto aspect-[16/9] lg:aspect-[16/8] xl:aspect-[16/7] shadow-2xl ring-1 ring-white/10">
+              <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/20 pointer-events-none z-10" />
               {streamLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-black">
                   <div className="flex flex-col items-center gap-3">
@@ -871,7 +889,7 @@ const Watch = () => {
         isCinemaMode && "pt-[calc(56.25vw+2rem)] md:pt-[calc(56.25vw+3rem)] lg:pt-[calc(56.25vw+4rem)]"
       )}>
         <div className={cn(
-          "max-w-[1800px] mx-auto px-4 pb-12 transition-all duration-500",
+          "max-w-[95vw] mx-auto px-4 pb-12 transition-all duration-500",
           isCinemaMode ? "pt-6" : "pt-6"
         )}>
           <Button
@@ -901,7 +919,13 @@ const Watch = () => {
               {/* Video Player Container */}
               <div className="relative group">
                 <div className="absolute -inset-1 bg-gradient-to-r from-fox-orange/20 to-purple-600/20 rounded-2xl blur opacity-30 group-hover:opacity-60 transition duration-1000"></div>
-                <div className="relative aspect-video bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
+                <div className="relative aspect-[16/9] bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
+                  <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/20 pointer-events-none z-10" />
+                  {/* HD Effect overlay */}
+                  <div className="absolute inset-0 pointer-events-none z-10">
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-black/5" />
+                    <div className="absolute inset-0 bg-gradient-to-r from-black/5 via-transparent to-black/5" />
+                  </div>
                   {streamLoading ? (
                     <div className="absolute inset-0 flex items-center justify-center bg-zinc-950/80 backdrop-blur-sm">
                       <div className="flex flex-col items-center gap-4">
@@ -1197,6 +1221,7 @@ const Watch = () => {
                     isLoading={episodesLoading}
                     anime={anime}
                     serversHaveDub={dubAvailable}
+                    dubCount={anime?.dubCount ?? 0}
                   />
                 </div>
               </div>

@@ -15,7 +15,7 @@ import { useWatchHistory } from '@/hooks/useWatchHistory';
 import { useHeroAnime } from '@/hooks/useHeroAnimeMultiSource';
 import { AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useCallback } from 'react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (string | null)[] | null } | null) => {
@@ -31,11 +31,11 @@ const Index = () => {
   useDocumentTitle('Home');
 
   const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useTrending(1, 24, 'safe');
-  const { data: seasonalData,  isLoading: seasonalLoading }  = useSeasonal(undefined, undefined, 1, true, 'safe');
+  const { data: seasonalData,  isLoading: seasonalLoading,  refetch: refetchSeasonal  } = useSeasonal(undefined, undefined, 1, true, 'safe');
   const { data: upcomingData }                                = useUpcoming();
-  const { data: latestAnime,   isLoading: latestLoading }    = useLatest(1, undefined, 'safe');
-  const { data: moviesData,    isLoading: moviesLoading }    = useBrowse({ type: 'Movie', sort: 'popularity', mode: 'safe' }, 1, true, false, 20);
-  const { data: actionData,    isLoading: actionLoading }    = useBrowse({ genre: 'Action', sort: 'trending', mode: 'safe' }, 1, true, false, 20);
+  const { data: latestAnime,   isLoading: latestLoading,    refetch: refetchLatest   } = useLatest(1, undefined, 'safe');
+  const { data: moviesData,    isLoading: moviesLoading,    refetch: refetchMovies   } = useBrowse({ type: 'Movie', sort: 'popularity', mode: 'safe' }, 1, true, false, 20);
+  const { data: actionData,    isLoading: actionLoading,    refetch: refetchAction   } = useBrowse({ genre: 'Action', sort: 'trending', mode: 'safe' }, 1, true, false, 20);
   const { history, removeFromHistory }                        = useWatchHistory();
   const { heroAnime, isLoading: heroLoading }                 = useHeroAnime();
 
@@ -106,6 +106,17 @@ const Index = () => {
   const isLoading      = trendingLoading || heroLoading;
   const handleRefresh  = () => { refetchTrending(); };
 
+  // Inline empty-state — shown when a section finishes loading but returned nothing
+  const EmptySection = useCallback(({ onRetry }: { onRetry: () => void }) => (
+    <div className="flex items-center gap-3 py-3 px-1 text-sm text-muted-foreground">
+      <AlertCircle className="w-3.5 h-3.5 shrink-0 text-zinc-600" />
+      <span className="text-xs text-zinc-600">Couldn't load — server may be waking up.</span>
+      <Button onClick={onRetry} size="sm" variant="ghost" className="h-6 px-2 text-xs text-zinc-500 hover:text-white ml-auto shrink-0">
+        <RefreshCw className="w-3 h-3 mr-1" />Retry
+      </Button>
+    </div>
+  ), []);
+
   const SkeletonRow = () => (
     <div className="flex gap-3 overflow-hidden">
       {[...Array(8)].map((_, i) => (
@@ -162,50 +173,42 @@ const Index = () => {
         {/* Trending Now */}
         <section>
           <SectionHeader title="Trending Now" link="/browse?sort=trending" linkText="View all" />
-          {trendingLoading ? <SkeletonRow /> : dedupTrending.length > 0 ? (
-            <AnimeSlider anime={dedupTrending.slice(0, 20)} cardSize="md" />
-          ) : null}
+          {trendingLoading ? <SkeletonRow /> : dedupTrending.length > 0
+            ? <AnimeSlider anime={dedupTrending.slice(0, 20)} cardSize="md" />
+            : <EmptySection onRetry={refetchTrending} />}
         </section>
 
         {/* This Season */}
-        {(seasonalLoading || dedupSeasonal.length > 0) && (
-          <section>
-            <SectionHeader title={currentSeasonLabel} link="/browse?status=ongoing" linkText="Browse" />
-            {seasonalLoading ? <SkeletonRow /> : (
-              <AnimeSlider anime={dedupSeasonal.slice(0, 20)} cardSize="md" />
-            )}
-          </section>
-        )}
+        <section>
+          <SectionHeader title={currentSeasonLabel} link="/browse?status=ongoing" linkText="Browse" />
+          {seasonalLoading ? <SkeletonRow /> : dedupSeasonal.length > 0
+            ? <AnimeSlider anime={dedupSeasonal.slice(0, 20)} cardSize="md" />
+            : <EmptySection onRetry={refetchSeasonal} />}
+        </section>
 
         {/* Latest Episodes */}
-        {(latestLoading || dedupLatest.length > 0) && (
-          <section>
-            <SectionHeader title="Latest Episodes" link="/browse?sort=recently_released" linkText="More" />
-            {latestLoading ? <SkeletonRow /> : (
-              <AnimeSlider anime={dedupLatest.slice(0, 20)} cardSize="md" />
-            )}
-          </section>
-        )}
+        <section>
+          <SectionHeader title="Latest Episodes" link="/browse?sort=recently_released" linkText="More" />
+          {latestLoading ? <SkeletonRow /> : dedupLatest.length > 0
+            ? <AnimeSlider anime={dedupLatest.slice(0, 20)} cardSize="md" />
+            : <EmptySection onRetry={refetchLatest} />}
+        </section>
 
         {/* Action Anime */}
-        {(actionLoading || dedupAction.length > 0) && (
-          <section>
-            <SectionHeader title="Action Anime" link="/browse?genre=Action" linkText="View all" />
-            {actionLoading ? <SkeletonRow /> : (
-              <AnimeSlider anime={dedupAction.slice(0, 20)} cardSize="md" />
-            )}
-          </section>
-        )}
+        <section>
+          <SectionHeader title="Action Anime" link="/browse?genre=Action" linkText="View all" />
+          {actionLoading ? <SkeletonRow /> : dedupAction.length > 0
+            ? <AnimeSlider anime={dedupAction.slice(0, 20)} cardSize="md" />
+            : <EmptySection onRetry={refetchAction} />}
+        </section>
 
         {/* Popular Movies */}
-        {(moviesLoading || dedupMovies.length > 0) && (
-          <section>
-            <SectionHeader title="Popular Movies" link="/browse?type=Movie" linkText="View all" />
-            {moviesLoading ? <SkeletonRow /> : (
-              <AnimeSlider anime={dedupMovies.slice(0, 20)} cardSize="md" />
-            )}
-          </section>
-        )}
+        <section>
+          <SectionHeader title="Popular Movies" link="/browse?type=Movie" linkText="View all" />
+          {moviesLoading ? <SkeletonRow /> : dedupMovies.length > 0
+            ? <AnimeSlider anime={dedupMovies.slice(0, 20)} cardSize="md" />
+            : <EmptySection onRetry={refetchMovies} />}
+        </section>
 
         {/* Coming Soon */}
         {dedupUpcoming.length > 0 && (

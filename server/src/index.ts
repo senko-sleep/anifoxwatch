@@ -283,7 +283,7 @@ const startServer = (port: number) => {
     // Self-ping keep-alive to prevent idle shutdown on Render/Koyeb free tier
     if (process.env.NODE_ENV === 'production') {
         const BASE_URL = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || `http://localhost:${port}`;
-        const KEEP_ALIVE_INTERVAL = 10 * 60 * 1000; // 10 minutes
+        const KEEP_ALIVE_INTERVAL = 3 * 60 * 1000; // 3 minutes — keeps Render warm (idles after ~15 min)
         setInterval(async () => {
             try {
                 const res = await fetch(`${BASE_URL}/health`);

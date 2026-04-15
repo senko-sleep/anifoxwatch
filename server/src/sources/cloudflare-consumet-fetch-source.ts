@@ -73,7 +73,7 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
             }
         }
         const ctl = new AbortController();
-        const ms = Math.min(options?.timeout ?? 12000, 15000);
+        const ms = Math.min(options?.timeout ?? 8000, 10000);
         const tid = setTimeout(() => ctl.abort(), ms);
         try {
             if (options?.signal) {

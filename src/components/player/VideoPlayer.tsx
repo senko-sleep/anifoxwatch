@@ -136,6 +136,13 @@ export const VideoPlayer = ({
   const [showSkipOutro, setShowSkipOutro] = useState(false);
   const [showNextEpisodeCountdown, setShowNextEpisodeCountdown] = useState(false);
   const [nextEpisodeCountdown, setNextEpisodeCountdown] = useState(10);
+  const [autoNextEnabled, setAutoNextEnabled] = useState(() => {
+    const saved = localStorage.getItem('player_autoNext');
+    return saved === null ? true : saved === 'true';
+  });
+  const autoNextEnabledRef = useRef(autoNextEnabled);
+  autoNextEnabledRef.current = autoNextEnabled;
+  const outroCountdownFiredRef = useRef(false);
   const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -238,6 +245,7 @@ export const VideoPlayer = ({
     setError(null);
     retryCountRef.current = 0;
     errorFiredRef.current = false;
+    outroCountdownFiredRef.current = false;
 
     playerLog('info', 'Initializing video player', {
       src: src.substring(0, 100) + '...',
@@ -252,30 +260,33 @@ export const VideoPlayer = ({
 
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: false,
-        backBufferLength: 90,
+        lowLatencyMode: true,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 5,
+        liveDurationInfinity: true,
+        backBufferLength: 60,
         maxBufferLength: 60,
-        maxMaxBufferLength: 600,
-        maxBufferHole: 0.5,
+        maxMaxBufferLength: 120,
+        maxBufferHole: 0.3,
         startLevel: -1,
-        abrEwmaDefaultEstimate: 10000000,
-        abrEwmaFastLive: 3,
-        abrEwmaSlowLive: 9,
-        abrEwmaFastVoD: 3,
-        abrEwmaSlowVoD: 9,
+        abrEwmaDefaultEstimate: 50000000,
+        abrEwmaFastLive: 5,
+        abrEwmaSlowLive: 15,
+        abrEwmaFastVoD: 5,
+        abrEwmaSlowVoD: 15,
         abrMaxWithRealBitrate: true,
         testBandwidth: true,
         startFragPrefetch: true,
-        fragLoadingMaxRetry: 6,
-        manifestLoadingMaxRetry: 4,
-        levelLoadingMaxRetry: 4,
-        fragLoadingRetryDelay: 500,
-        manifestLoadingRetryDelay: 500,
-        nudgeOffset: 0.2,
+        fragLoadingMaxRetry: 4,
+        manifestLoadingMaxRetry: 3,
+        levelLoadingMaxRetry: 3,
+        fragLoadingRetryDelay: 200,
+        manifestLoadingRetryDelay: 200,
+        nudgeOffset: 0.1,
         nudgeMaxRetry: 5,
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 30000;
+          xhr.timeout = 20000;
         }
       });
 
@@ -664,10 +675,18 @@ export const VideoPlayer = ({
         setShowSkipIntro(false);
       }
 
-      if (outro && video.currentTime >= outro.start && video.currentTime < outro.end) {
-        setShowSkipOutro(true);
-      } else {
-        setShowSkipOutro(false);
+      if (outro) {
+        const inOutro = time >= outro.start && time < outro.end;
+        if (inOutro && hasNextEpisode && autoNextEnabledRef.current) {
+          if (!outroCountdownFiredRef.current) {
+            outroCountdownFiredRef.current = true;
+            setShowNextEpisodeCountdown(true);
+            setNextEpisodeCountdown(10);
+          }
+          setShowSkipOutro(false);
+        } else {
+          setShowSkipOutro(inOutro);
+        }
       }
     };
     const handleDurationChange = () => setDuration(video.duration);
@@ -679,15 +698,11 @@ export const VideoPlayer = ({
     const handleEnded = () => {
       setIsPlaying(false);
       clearSavedPosition();
-
-      if (hasNextEpisode) {
-        setShowNextEpisodeCountdown(prev => {
-          if (!prev) {
-            setNextEpisodeCountdown(10);
-            return true;
-          }
-          return prev;
-        });
+      // Fallback: trigger countdown if outro never fired it
+      if (hasNextEpisode && !outroCountdownFiredRef.current && autoNextEnabledRef.current) {
+        outroCountdownFiredRef.current = true;
+        setShowNextEpisodeCountdown(true);
+        setNextEpisodeCountdown(10);
       }
     };
     const handleWaiting = () => {
@@ -729,7 +744,7 @@ export const VideoPlayer = ({
       video.removeEventListener('canplay', handleCanPlay);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [intro, outro, onEnded, hasNextEpisode, showNextEpisodeCountdown, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, autoFullscreen, isMobile]);
+  }, [intro, outro, onEnded, hasNextEpisode, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, autoFullscreen, isMobile]);
 
   // Fullscreen change handler
   useEffect(() => {
@@ -743,6 +758,11 @@ export const VideoPlayer = ({
 
   // Next episode countdown timer
   useEffect(() => {
+    if (!autoNextEnabled) {
+      setShowNextEpisodeCountdown(false);
+      setNextEpisodeCountdown(10);
+      return;
+    }
     if (showNextEpisodeCountdown && nextEpisodeCountdown > 0) {
       const timer = setTimeout(() => {
         setNextEpisodeCountdown(prev => prev - 1);
@@ -753,15 +773,21 @@ export const VideoPlayer = ({
       setNextEpisodeCountdown(10);
       onNextEpisode?.();
     }
-  }, [showNextEpisodeCountdown, nextEpisodeCountdown, onNextEpisode]);
+  }, [showNextEpisodeCountdown, nextEpisodeCountdown, onNextEpisode, autoNextEnabled]);
 
   // Picture-in-Picture handlers
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const handleEnterPiP = () => setIsPiPActive(true);
-    const handleLeavePiP = () => setIsPiPActive(false);
+    const handleEnterPiP = () => {
+      setIsPiPActive(true);
+      playerLog('info', 'Entered Picture-in-Picture mode');
+    };
+    const handleLeavePiP = () => {
+      setIsPiPActive(false);
+      playerLog('info', 'Left Picture-in-Picture mode');
+    };
 
     video.addEventListener('enterpictureinpicture', handleEnterPiP);
     video.addEventListener('leavepictureinpicture', handleLeavePiP);
@@ -771,6 +797,7 @@ export const VideoPlayer = ({
       video.removeEventListener('leavepictureinpicture', handleLeavePiP);
     };
   }, []);
+
 
   // Subtitle track handler
   useEffect(() => {
@@ -1181,12 +1208,13 @@ export const VideoPlayer = ({
       {/* Video element — no onClick on mobile to prevent accidental pauses */}
       <video
         ref={videoRef}
-        className="w-full h-full"
+        className="w-full h-full object-contain"
         poster={poster}
         preload="auto"
         playsInline
         onClick={isMobile() ? undefined : togglePlay}
         crossOrigin={isM3U8 && !Hls.isSupported() ? undefined : "anonymous"}
+        style={{ willChange: 'contents', transform: 'translateZ(0)' }}
       >
         {subtitles.map((sub, i) => (
           <track
@@ -1252,38 +1280,69 @@ export const VideoPlayer = ({
         </div>
       )}
 
-      {/* Next Episode Countdown */}
+      {/* Next Episode Countdown — Modern translucent card */}
       {showNextEpisodeCountdown && hasNextEpisode && (
-        <div className="absolute bottom-24 right-4 bg-black/90 backdrop-blur-sm border border-white/20 rounded-lg p-4 animate-in slide-in-from-right z-20">
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-white text-sm font-medium">Next Episode</p>
-            <div className="w-12 h-12 rounded-full bg-fox-orange/20 flex items-center justify-center">
-              <span className="text-fox-orange text-lg font-bold">{nextEpisodeCountdown}</span>
+        <div className="absolute bottom-28 right-4 bg-black/60 backdrop-blur-md border border-white/5 rounded-2xl p-3 animate-in slide-in-from-right duration-300 z-20 w-72 shadow-2xl">
+          <div className="flex items-center gap-3">
+            {/* Anime thumbnail */}
+            {animeImage && (
+              <div className="relative w-16 h-10 flex-shrink-0 rounded-lg overflow-hidden">
+                <img
+                  src={animeImage}
+                  alt={animeTitle || 'Next episode'}
+                  className="w-full h-full object-cover"
+                />
+                {/* Countdown overlay on image */}
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                  <span className="text-white text-sm font-bold">{nextEpisodeCountdown}</span>
+                </div>
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-white/50 text-[10px] uppercase tracking-wider mb-0.5">Up Next</p>
+              <p className="text-white text-xs font-medium truncate">
+                Episode {selectedEpisodeNum ? selectedEpisodeNum + 1 : 'Next'}
+              </p>
             </div>
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setShowNextEpisodeCountdown(false);
-                  setNextEpisodeCountdown(10);
-                }}
-                className="border-white/20 hover:bg-white/10 text-white text-xs"
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => {
-                  onNextEpisode?.();
-                  setShowNextEpisodeCountdown(false);
-                  setNextEpisodeCountdown(10);
-                }}
-                className="bg-fox-orange hover:bg-fox-orange/90 text-white text-xs"
-              >
-                Play Now
-              </Button>
+            {/* Circular progress indicator */}
+            <div className="relative w-8 h-8 flex-shrink-0">
+              <svg className="w-8 h-8 -rotate-90" viewBox="0 0 32 32">
+                <circle cx="16" cy="16" r="14" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="2" />
+                <circle
+                  cx="16" cy="16" r="14" fill="none"
+                  stroke="#f97316"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeDasharray={`${2 * Math.PI * 14}`}
+                  strokeDashoffset={`${2 * Math.PI * 14 * (nextEpisodeCountdown / 10)}`}
+                  style={{ transition: 'stroke-dashoffset 1s linear' }}
+                />
+              </svg>
             </div>
+          </div>
+          <div className="flex gap-2 mt-3">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setShowNextEpisodeCountdown(false);
+                setNextEpisodeCountdown(10);
+              }}
+              className="flex-1 hover:bg-white/10 text-white/70 hover:text-white text-[11px] h-7"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                onNextEpisode?.();
+                setShowNextEpisodeCountdown(false);
+                setNextEpisodeCountdown(10);
+              }}
+              className="flex-1 bg-fox-orange hover:bg-fox-orange/90 text-white text-[11px] h-7"
+            >
+              Play Now
+            </Button>
           </div>
         </div>
       )}
@@ -1635,6 +1694,12 @@ export const VideoPlayer = ({
                           {playbackSpeed === speed && <Check className="w-4 h-4 ml-2" />}
                         </DropdownMenuItem>
                       ))}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel>Auto-Next Episode</DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => { const next = !autoNextEnabled; setAutoNextEnabled(next); localStorage.setItem('player_autoNext', next.toString()); }}>
+                        <span className="flex-1">Auto-play next ({autoNextEnabled ? 'On' : 'Off'})</span>
+                        {autoNextEnabled && <Check className="w-4 h-4 ml-2" />}
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </>

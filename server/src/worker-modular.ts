@@ -7,6 +7,7 @@ import { REGISTERED_SOURCE_NAMES } from './registered-sources.js';
 import { createAnimeRoutes } from './routes-worker/anime-routes.js';
 import { createStreamingRoutes } from './routes-worker/streaming-routes.js';
 import { createSourcesRoutes } from './routes-worker/sources-routes.js';
+import { reliableRequest, getCircuitBreakerStates } from './utils/workers-reliability.js';
 
 /**
  * Modular Cloudflare Worker
@@ -62,7 +63,8 @@ app.get('/health', (c) => c.json({
     status: 'healthy',
     environment: 'cloudflare-workers',
     timestamp: new Date().toISOString(),
-    version: '1.0.0-modular'
+    version: '1.0.0-modular',
+    circuitBreakers: getCircuitBreakerStates()
 }));
 
 // ============================================
@@ -167,7 +169,12 @@ logger.info('All route modules loaded successfully', {
 app.get('/api/home', async (c) => {
     const page = parsePage(c.req.query());
     try {
-        const data = await hianime.getHomePage();
+        const data = await reliableRequest(
+            'HiAnime',
+            'getHomePage',
+            () => hianime.getHomePage(),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -178,7 +185,12 @@ app.get('/api/search', async (c) => {
     const query = c.req.query('q') || '';
     const page = parsePage(c.req.query());
     try {
-        const data = await hianime.search(query, page);
+        const data = await reliableRequest(
+            'HiAnime',
+            'search',
+            () => hianime.search(query, page),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -189,7 +201,12 @@ app.get('/api/azlist/:sortOption', async (c) => {
     const sortOption = c.req.param('sortOption');
     const page = parsePage(c.req.query());
     try {
-        const data = await hianime.getAZList(sortOption as any, page);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getAZList',
+            () => hianime.getAZList(sortOption as any, page),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -199,7 +216,12 @@ app.get('/api/azlist/:sortOption', async (c) => {
 app.get('/api/qtip/:animeId', async (c) => {
     const animeId = c.req.param('animeId');
     try {
-        const data = await hianime.getQtipInfo(animeId);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getQtipInfo',
+            () => hianime.getQtipInfo(animeId),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -210,7 +232,12 @@ app.get('/api/category/:name', async (c) => {
     const categoryName = c.req.param('name');
     const page = parsePage(c.req.query());
     try {
-        const data = await hianime.getCategoryAnime(categoryName as any, page);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getCategoryAnime',
+            () => hianime.getCategoryAnime(categoryName as any, page),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -221,7 +248,12 @@ app.get('/api/genre/:name', async (c) => {
     const genreName = c.req.param('name');
     const page = parsePage(c.req.query());
     try {
-        const data = await hianime.getGenreAnime(genreName, page);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getGenreAnime',
+            () => hianime.getGenreAnime(genreName, page),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -232,7 +264,12 @@ app.get('/api/producer/:name', async (c) => {
     const producerName = c.req.param('name');
     const page = parsePage(c.req.query());
     try {
-        const data = await hianime.getProducerAnimes(producerName, page);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getProducerAnimes',
+            () => hianime.getProducerAnimes(producerName, page),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -243,7 +280,12 @@ app.get('/api/schedule', async (c) => {
     const date = c.req.query('date') || '';
     const tzOffset = parseInt(c.req.query('tzOffset') || '-330', 10);
     try {
-        const data = await hianime.getEstimatedSchedule(date, tzOffset);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getEstimatedSchedule',
+            () => hianime.getEstimatedSchedule(date, tzOffset),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -253,7 +295,12 @@ app.get('/api/schedule', async (c) => {
 app.get('/api/search/suggestion', async (c) => {
     const query = c.req.query('q') || '';
     try {
-        const data = await hianime.searchSuggestions(query);
+        const data = await reliableRequest(
+            'HiAnime',
+            'searchSuggestions',
+            () => hianime.searchSuggestions(query),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -263,7 +310,12 @@ app.get('/api/search/suggestion', async (c) => {
 app.get('/api/hianime/:animeId', async (c) => {
     const animeId = c.req.param('animeId');
     try {
-        const data = await hianime.getInfo(animeId);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getInfo',
+            () => hianime.getInfo(animeId),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -273,7 +325,12 @@ app.get('/api/hianime/:animeId', async (c) => {
 app.get('/api/episode/servers', async (c) => {
     const animeEpisodeId = c.req.query('animeEpisodeId') || '';
     try {
-        const data = await hianime.getEpisodeServers(animeEpisodeId);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getEpisodeServers',
+            () => hianime.getEpisodeServers(animeEpisodeId),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -285,7 +342,12 @@ app.get('/api/episode/sources', async (c) => {
     const server = (c.req.query('server') || 'vidstreaming') as any;
     const category = (c.req.query('category') || 'sub') as 'sub' | 'dub' | 'raw';
     try {
-        const data = await hianime.getEpisodeSources(animeEpisodeId, server, category);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getEpisodeSources',
+            () => hianime.getEpisodeSources(animeEpisodeId, server, category),
+            { maxAttempts: 2, timeout: 15000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -295,7 +357,12 @@ app.get('/api/episode/sources', async (c) => {
 app.get('/api/hianime/:animeId/episodes', async (c) => {
     const animeId = c.req.param('animeId');
     try {
-        const data = await hianime.getEpisodes(animeId);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getEpisodes',
+            () => hianime.getEpisodes(animeId),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);
@@ -305,7 +372,12 @@ app.get('/api/hianime/:animeId/episodes', async (c) => {
 app.get('/api/hianime/:animeId/next-episode-schedule', async (c) => {
     const animeId = c.req.param('animeId');
     try {
-        const data = await hianime.getNextEpisodeSchedule(animeId);
+        const data = await reliableRequest(
+            'HiAnime',
+            'getNextEpisodeSchedule',
+            () => hianime.getNextEpisodeSchedule(animeId),
+            { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+        );
         return c.json({ status: 200, data });
     } catch (e: any) {
         return c.json({ status: 500, error: e.message }, 500);

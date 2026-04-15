@@ -470,7 +470,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             const allSeries = new Map<string, AnimeBase>();
             const maxSourcePages = this.SOURCE_PAGES_TO_FETCH;
 
-            logger.info(`[WatchHentai] Building series index from ${maxSourcePages} source pages...`);
+            logger.info(`[WatchHentai] Building series index from ${maxSourcePages} source pages (fast mode)...`);
 
             // Fetch pages in batches of 5 for speed
             const batchSize = 5;

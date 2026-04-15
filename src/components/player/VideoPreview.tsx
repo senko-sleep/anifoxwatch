@@ -124,9 +124,9 @@ export const VideoPreview = ({
     const video = videoRef.current;
     if (!video || !isReady) return;
 
-    // Throttle seeks to avoid overwhelming the decoder
+    // Reduced throttle for smoother hover - only 16ms (1 frame) instead of 60ms
     const now = performance.now();
-    if (now - lastSeekTimeRef.current < 60) return;
+    if (now - lastSeekTimeRef.current < 16) return;
     lastSeekTimeRef.current = now;
 
     // Pause playback and seek to exact position for frame display
@@ -160,7 +160,7 @@ export const VideoPreview = ({
             left: clampedPosition,
             transform: 'translateX(-50%)',
             opacity: 1,
-            transition: 'left 50ms linear, opacity 150ms ease',
+            transition: 'opacity 150ms ease',
           }}
         >
           {/* Preview Card — Netflix-style */}
@@ -211,6 +211,7 @@ function PreviewCanvas({
   const [hasFrame, setHasFrame] = useState(false);
   const [canvasFailed, setCanvasFailed] = useState(false);
   const rafRef = useRef<number | null>(null);
+  const lastDrawTimeRef = useRef(0);
 
   useEffect(() => {
     if (!isHovering) {
@@ -224,6 +225,14 @@ function PreviewCanvas({
       if (!active) return;
       const video = videoRef.current;
       const canvas = canvasRef.current;
+
+      // Throttle canvas drawing to 33ms (30fps) to reduce CPU load
+      const now = performance.now();
+      if (now - lastDrawTimeRef.current < 33) {
+        rafRef.current = requestAnimationFrame(draw);
+        return;
+      }
+      lastDrawTimeRef.current = now;
 
       if (video && canvas && video.readyState >= 2 && !canvasFailed) {
         try {

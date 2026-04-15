@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { Episode, Anime } from '@/types/anime';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,8 @@ interface EpisodeListProps {
   anime?: Anime | null;
   /** True when episode servers API returned dub streams (metadata may omit dubCount/hasDub) */
   serversHaveDub?: boolean;
+  /** How many episodes are actually dubbed — used for per-episode badge accuracy */
+  dubCount?: number;
 }
 
 type SortOrder = 'asc' | 'desc';
@@ -42,11 +44,34 @@ export function EpisodeList({
   isLoading = false,
   anime,
   serversHaveDub = false,
+  dubCount,
 }: EpisodeListProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [selectedSeason, setSelectedSeason] = useState<string>('all');
   const [showFillers, setShowFillers] = useState(true);
+  const selectedEpisodeRef = useRef<HTMLButtonElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to selected episode within the episode list only
+  useEffect(() => {
+    if (selectedEpisodeId && selectedEpisodeRef.current && scrollAreaRef.current) {
+      const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollContainer) {
+        const element = selectedEpisodeRef.current;
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        
+        const scrollTop = scrollContainer.scrollTop;
+        const targetScrollTop = scrollTop + (elementRect.top - containerRect.top) - (containerRect.height / 2) + (elementRect.height / 2);
+        
+        scrollContainer.scrollTo({
+          top: targetScrollTop,
+          behavior: 'smooth'
+        });
+      }
+    }
+  }, [selectedEpisodeId]);
 
   // Group episodes by season (every 12-26 episodes typically)
   const seasons = useMemo(() => {
@@ -179,7 +204,7 @@ export function EpisodeList({
       </div>
 
       {/* Episode List */}
-      <ScrollArea className="flex-1 min-h-0">
+      <ScrollArea className="flex-1 min-h-0" ref={scrollAreaRef}>
         <div className="p-1.5 space-y-1">
           {filteredEpisodes.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground text-sm">
@@ -189,6 +214,7 @@ export function EpisodeList({
             filteredEpisodes.map(episode => (
               <button
                 key={episode.id}
+                ref={selectedEpisodeId === episode.id ? selectedEpisodeRef : null}
                 onClick={() => onEpisodeSelect(episode.id, episode.number)}
                 className={cn(
                   "w-full p-2 rounded-lg text-left transition-all",
@@ -225,26 +251,33 @@ export function EpisodeList({
                       }
                     </p>
 
-                    <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                      {episode.hasSub && (
-                        <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
-                          <Subtitles className="w-2 h-2 flex-shrink-0" />
-                          SUB
-                        </span>
-                      )}
-                      {(episode.hasDub ||
-                        (anime?.dubCount != null && episode.number <= anime.dubCount)) && (
-                        <span className="flex items-center gap-0.5 text-[10px] text-green-500 whitespace-nowrap">
-                          <Mic className="w-2 h-2 flex-shrink-0" />
-                          DUB
-                        </span>
-                      )}
-                      {episode.isFiller && (
-                        <Badge variant="outline" className="text-[9px] px-1 py-0 text-yellow-500 border-yellow-500/50 whitespace-nowrap">
-                          Filler
-                        </Badge>
-                      )}
-                    </div>
+                    {(() => {
+                      // Per-episode dub accuracy: use dubCount cutoff when per-ep flag is ambiguous
+                      const effectiveDubCount = dubCount ?? anime?.dubCount ?? 0;
+                      const epHasDub = episode.hasDub || (effectiveDubCount > 0 && episode.number <= effectiveDubCount);
+                      const epHasSub = episode.hasSub || !epHasDub;
+                      return (
+                        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                          {epHasSub && (
+                            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
+                              <Subtitles className="w-2 h-2 flex-shrink-0" />
+                              SUB
+                            </span>
+                          )}
+                          {epHasDub && (
+                            <span className="flex items-center gap-0.5 text-[10px] text-green-500 whitespace-nowrap">
+                              <Mic className="w-2 h-2 flex-shrink-0" />
+                              DUB
+                            </span>
+                          )}
+                          {episode.isFiller && (
+                            <Badge variant="outline" className="text-[9px] px-1 py-0 text-yellow-500 border-yellow-500/50 whitespace-nowrap">
+                              Filler
+                            </Badge>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </button>

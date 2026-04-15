@@ -390,10 +390,13 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         // be direct — browsers often hit ERR_SSL_PROTOCOL_ERROR on raw HTTPS to owocdn.
         // Always proxy owocdn/vault through this API so HLS loads same-origin.
         const DIRECT_PLAY_DOMAINS = ['kwik.si', 'kwik.cx'];
+        // Skip proxy for unreliable/rate-limited domains - let browser try direct
+        const UNRELIABLE_DOMAINS = ['rrr.', 'megaup.', 'streamtape.', 'dood.'];
         const isDirect = (url: string) => {
             try {
                 const h = new URL(url).hostname.toLowerCase();
-                return DIRECT_PLAY_DOMAINS.some((d) => h.includes(d));
+                return DIRECT_PLAY_DOMAINS.some((d) => h.includes(d)) || 
+                       UNRELIABLE_DOMAINS.some((d) => h.includes(d));
             } catch { return false; }
         };
 

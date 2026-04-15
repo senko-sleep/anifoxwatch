@@ -12,6 +12,7 @@ interface TopAnimeCardProps {
 export const TopAnimeCard = ({ item, className, style }: TopAnimeCardProps) => {
   const { rank, anime } = item;
   const location = useLocation();
+  const posterSrc = pickAnimePoster(anime);
 
   // Rank colors for top 3
   const getRankStyle = (rank: number) => {
@@ -77,9 +78,9 @@ export const TopAnimeCard = ({ item, className, style }: TopAnimeCardProps) => {
               {anime.type}
             </span>
           )}
-          {(anime as any).episodes > 0 && (
+          {anime.episodes !== undefined && anime.episodes > 0 && (
             <span className="text-[10px] text-muted-foreground">
-              {(anime as any).episodes} eps
+              {anime.episodes} eps
             </span>
           )}
         </div>

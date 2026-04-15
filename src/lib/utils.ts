@@ -86,9 +86,10 @@ export function ensureHttps(url: string | undefined | null): string {
   return trimmed;
 }
 
-/** Poster URL for grid cards — many sources set `cover` or AniList fields but leave `image` empty. */
+/** Poster URL for grid cards — prioritize AniList coverImage (higher quality) over image. */
 export function pickAnimePoster(anime: Pick<Anime, 'image' | 'cover' | 'bannerImage' | 'coverImage'>): string {
-  const u = anime.image || anime.cover || anime.bannerImage || anime.coverImage;
+  // Prioritize AniList's coverImage (high quality cover), then fallback to image, then other sources
+  const u = anime.coverImage || anime.image || anime.cover || anime.bannerImage;
   return typeof u === 'string' && u.trim() ? ensureHttps(u) : '';
 }
 

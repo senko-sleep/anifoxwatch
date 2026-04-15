@@ -7,11 +7,13 @@
 import { CloudflareConsumetFetchSource } from '../sources/cloudflare-consumet-fetch-source.js';
 import { WatchHentaiSource } from '../sources/watchhentai-source.js';
 import { HanimeSource } from '../sources/hanime-source.js';
+import { GogoPlayDirectSource } from '../sources/gogoplay-direct-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth } from '../types/anime.js';
 import { SourceRequestOptions } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
 import { anilistService } from './anilist-service.js';
+import { reliableRequest, isCircuitBreakerOpen, recordFailure, recordSuccess } from '../utils/workers-reliability.js';
 
 interface StreamingSource {
     name: string;
@@ -35,12 +37,13 @@ export class CloudflareSourceManager {
     private sources: Map<string, StreamingSource> = new Map();
     private primarySource: string = 'CloudflareConsumet';
     private healthStatus: Map<string, SourceHealth> = new Map();
-    private sourceOrder: string[] = ['CloudflareConsumet'];
+    private sourceOrder: string[] = ['GogoPlayDirect', 'CloudflareConsumet', 'WatchHentai', 'Hanime'];
 
     constructor() {
         this.registerSource(new CloudflareConsumetFetchSource());
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
+        this.registerSource(new GogoPlayDirectSource());
 
         logger.info(`[CloudflareSourceManager] Initialized with ${this.sources.size} sources`, undefined, 'CloudflareSourceManager');
     }
@@ -122,10 +125,12 @@ export class CloudflareSourceManager {
                 return source;
             }
         }
-        
+
         // Specific id patterns
         if (id.startsWith('hanime-')) return this.sources.get('Hanime') || null;
         if (id.startsWith('watchhentai-')) return this.sources.get('WatchHentai') || null;
+        if (id.startsWith('gogoplay-')) return this.sources.get('GogoPlayDirect') || null;
+        if (id.startsWith('consumet-')) return this.sources.get('CloudflareConsumet') || null;
 
         return this.getAvailableSource();
     }
@@ -252,41 +257,55 @@ export class CloudflareSourceManager {
     }
 
     async getTrending(page: number = 1, sourceName?: string): Promise<AnimeBase[]> {
-        // AniList primary (same as Render's fallback which always wins in CF since no scrapers)
+        // AniList primary — 12s timeout (GraphQL can spike under load)
         try {
-            const result = await anilistService.advancedSearch({ sort: ['TRENDING_DESC'], perPage: 24, page });
+            const result = await Promise.race([
+                anilistService.advancedSearch({ sort: ['TRENDING_DESC'], perPage: 24, page }),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error('AniList timeout')), 12000))
+            ]);
             if (result.results.length > 0) return result.results;
         } catch (e) {
             logger.warn(`AniList getTrending failed`, { err: String(e) }, 'CloudflareSourceManager');
         }
 
-        // Consumet fallback
-        const source = this.getAvailableSource(sourceName);
-        if (!source) return [];
-        try {
-            return await source.getTrending(page);
-        } catch {
-            return [];
+        // Consumet fallback — avoids cold-starting Render just for trending
+        const consumet = this.sources.get('CloudflareConsumet');
+        if (consumet) {
+            try {
+                const results = await consumet.getTrending(page);
+                if (results.length > 0) return results;
+            } catch (e) {
+                logger.warn(`Consumet getTrending fallback failed`, { err: String(e) }, 'CloudflareSourceManager');
+            }
         }
+
+        return [];
     }
 
     async getLatest(page: number = 1, sourceName?: string): Promise<AnimeBase[]> {
-        // AniList primary
+        // AniList primary — 12s timeout
         try {
-            const result = await anilistService.advancedSearch({ sort: ['START_DATE_DESC'], status: 'RELEASING', perPage: 24, page });
+            const result = await Promise.race([
+                anilistService.advancedSearch({ sort: ['START_DATE_DESC'], status: 'RELEASING', perPage: 24, page }),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error('AniList timeout')), 12000))
+            ]);
             if (result.results.length > 0) return result.results;
         } catch (e) {
             logger.warn(`AniList getLatest failed`, { err: String(e) }, 'CloudflareSourceManager');
         }
 
         // Consumet fallback
-        const source = this.getAvailableSource(sourceName);
-        if (!source) return [];
-        try {
-            return await source.getLatest(page);
-        } catch {
-            return [];
+        const consumet = this.sources.get('CloudflareConsumet');
+        if (consumet) {
+            try {
+                const results = await consumet.getLatest(page);
+                if (results.length > 0) return results;
+            } catch (e) {
+                logger.warn(`Consumet getLatest fallback failed`, { err: String(e) }, 'CloudflareSourceManager');
+            }
         }
+
+        return [];
     }
 
     async getTopRated(page: number = 1, limit: number = 10, sourceName?: string): Promise<TopAnime[]> {
@@ -338,22 +357,22 @@ export class CloudflareSourceManager {
                         return genreResult;
                     }
                 }
-                // Use getLatest for initial load or when genre not found - avoids 48-page crawl
+                // Use getLatest for initial load or when genre not found - faster than series index
                 const res = await source.getLatest(page);
-                const totalPages = 5;
+                const totalPages = 10; // Increased from 5 for more content
                 return { results: res, totalPages, currentPage: page, hasNextPage: page < totalPages, source: source.name };
             } catch {
                 return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
             }
         }
 
-        // Safe/mixed: AniList strategy (mirrors Render's _executeBrowse)
+        // Safe/mixed: AniList strategy with timeout (mirrors Render's _executeBrowse)
+        // Timeout fast so route-level Render fallback kicks in
         try {
-            let anilistResult: AnimeSearchResult;
-
-            if (filters.genres?.length > 0) {
-                anilistResult = await anilistService.searchByGenre(filters.genres.join(','), page, limit, filters);
-            } else {
+            const anilistPromise = (async (): Promise<AnimeSearchResult> => {
+                if (filters.genres?.length > 0) {
+                    return anilistService.searchByGenre(filters.genres.join(','), page, limit, filters);
+                }
                 // Map sort values to AniList sorts (same as Render)
                 const sortMap: Record<string, string> = {
                     popularity: 'POPULARITY_DESC',
@@ -365,7 +384,7 @@ export class CloudflareSourceManager {
                 };
                 const sort = sortMap[filters.sort || 'trending'] || 'TRENDING_DESC';
 
-                anilistResult = await anilistService.advancedSearch({
+                return anilistService.advancedSearch({
                     page,
                     perPage: limit,
                     sort: [sort],
@@ -377,8 +396,15 @@ export class CloudflareSourceManager {
                     yearLesser: filters.endYear,
                     search: filters.search,
                 });
-            }
+            })();
 
+            const anilistResult = await Promise.race([
+                anilistPromise,
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error('AniList browse timeout (10s)')), 10000))
+            ]);
+
+            if (anilistResult.results?.length > 0) return anilistResult;
+            // Empty result — return it so route layer can try Render
             return anilistResult;
         } catch (e) {
             logger.warn(`AniList browseAnime failed`, { err: String(e) }, 'CloudflareSourceManager');
@@ -415,19 +441,80 @@ export class CloudflareSourceManager {
             return { sources: [], subtitles: [] };
         }
 
+        // Check circuit breaker before attempting
+        if (isCircuitBreakerOpen(source.name)) {
+            logger.warn(`Circuit breaker OPEN for ${source.name}, skipping to fallback`, undefined, 'CloudflareSourceManager');
+            // Try fallback immediately if primary is circuit-open
+            if (source.name !== 'CloudflareConsumet') {
+                const fallbackSource = this.sources.get('CloudflareConsumet');
+                if (fallbackSource?.getStreamingLinks && !isCircuitBreakerOpen('CloudflareConsumet')) {
+                    try {
+                        const fallbackData = await Promise.race([
+                            fallbackSource.getStreamingLinks(episodeId, server, category),
+                            new Promise<StreamingData>((_, reject) =>
+                                setTimeout(() => reject(new Error('Fallback timeout (15s)')), 15000)
+                            )
+                        ]);
+                        if (fallbackData.sources.length > 0) {
+                            recordSuccess('CloudflareConsumet');
+                            return fallbackData;
+                        }
+                    } catch (fallbackError) {
+                        recordFailure('CloudflareConsumet');
+                    }
+                }
+            }
+            return { sources: [], subtitles: [] };
+        }
+
         try {
             logger.info(`Getting streaming links for ${episodeId} (server: ${server}, category: ${category})`, undefined, 'CloudflareSourceManager');
-            const streamData = await source.getStreamingLinks(episodeId, server, category);
-            
+
+            // Add timeout to prevent hanging - increased to 30s
+            const streamData = await Promise.race([
+                source.getStreamingLinks(episodeId, server, category),
+                new Promise<StreamingData>((_, reject) =>
+                    setTimeout(() => reject(new Error('Streaming timeout (30s)')), 30000)
+                )
+            ]);
+
             if (streamData.sources.length > 0) {
                 logger.info(`Found ${streamData.sources.length} sources for ${episodeId}`, undefined, 'CloudflareSourceManager');
+                recordSuccess(source.name);
             } else {
                 logger.warn(`No sources found for ${episodeId}`, undefined, 'CloudflareSourceManager');
+                recordFailure(source.name);
             }
 
             return streamData;
         } catch (error) {
             logger.error(`getStreamingLinks failed`, error as Error, { episodeId, server }, 'CloudflareSourceManager');
+            recordFailure(source.name);
+
+            // Try fallback to other sources if primary fails
+            if (source.name !== 'CloudflareConsumet') {
+                logger.info(`Trying fallback to CloudflareConsumet for ${episodeId}`, undefined, 'CloudflareSourceManager');
+                try {
+                    const fallbackSource = this.sources.get('CloudflareConsumet');
+                    if (fallbackSource?.getStreamingLinks && !isCircuitBreakerOpen('CloudflareConsumet')) {
+                        const fallbackData = await Promise.race([
+                            fallbackSource.getStreamingLinks(episodeId, server, category),
+                            new Promise<StreamingData>((_, reject) =>
+                                setTimeout(() => reject(new Error('Fallback timeout (15s)')), 15000)
+                            )
+                        ]);
+                        if (fallbackData.sources.length > 0) {
+                            logger.info(`Fallback succeeded for ${episodeId}`, undefined, 'CloudflareSourceManager');
+                            recordSuccess('CloudflareConsumet');
+                            return fallbackData;
+                        }
+                    }
+                } catch (fallbackError) {
+                    recordFailure('CloudflareConsumet');
+                    logger.error(`Fallback also failed`, fallbackError as Error, { episodeId }, 'CloudflareSourceManager');
+                }
+            }
+
             return { sources: [], subtitles: [] };
         }
     }
