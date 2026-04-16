@@ -4,6 +4,100 @@ import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js';
 
+// Embed domains that we CANNOT extract video URLs from via fetch (require JS execution)
+const NON_EXTRACTABLE_EMBEDS = ['mega.nz', 'hqq.tv', 'netu.tv'];
+
+/**
+ * Extract direct video URL from Streamtape embed page.
+ * Streamtape stores the video link in hidden divs (robotlink/ideoolink)
+ * and applies JS string manipulation. We replicate that logic.
+ */
+async function extractStreamtapeUrl(embedUrl: string): Promise<string | null> {
+    try {
+        const resp = await axios.get(embedUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            },
+            timeout: 10000,
+        });
+        const html: string = resp.data;
+
+        // Method 1: Parse ALL JS assignments that build the real video URL.
+        // Streamtape sets robotlink/ideoolink/botlink multiple times; the LAST one wins.
+        // Pattern examples:
+        //   getElementById('robotlink').innerHTML = '//streamtape.com/ge'+ ('xcdt_video?...token=xxx').substring(2).substring(1);
+        //   getElementById('botlink').innerHTML = '//streamtape.com/ge'+ ('xyzat_video?...').substring(4);
+        const jsPattern = /getElementById\(['"](?:robotlink|ideoolink|botlink)['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*(?:['"]['"]\s*\+\s*)?\(?['"]([^'"]+)['"]\)?\.substring\((\d+)\)(?:\.substring\((\d+)\))?/g;
+        let lastMatch: RegExpExecArray | null = null;
+        let m: RegExpExecArray | null;
+        while ((m = jsPattern.exec(html)) !== null) {
+            lastMatch = m;
+        }
+
+        if (lastMatch) {
+            const prefix = lastMatch[1]; // e.g. '//streamtape.com/ge'
+            let suffix = lastMatch[2];   // e.g. 'xcdt_video?...token=xxx'
+            const sub1 = parseInt(lastMatch[3], 10);
+            const sub2 = lastMatch[4] ? parseInt(lastMatch[4], 10) : undefined;
+            suffix = suffix.substring(sub1);
+            if (sub2 !== undefined) suffix = suffix.substring(sub2);
+            const videoUrl = `https:${prefix}${suffix}`;
+            if (videoUrl.includes('/get_video?') || videoUrl.includes('streamtape.com')) {
+                return videoUrl;
+            }
+        }
+
+        // Method 2: Fallback — grab the robotlink div content directly
+        // The div token may be a decoy, but it's better than nothing
+        const divMatch = html.match(/<div id="robotlink"[^>]*>([^<]+)<\/div>/);
+        if (divMatch) {
+            const partial = divMatch[1].trim();
+            if (partial.includes('/get_video?')) {
+                return partial.startsWith('http') ? partial : `https:${partial}`;
+            }
+        }
+
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Extract direct video URL from StreamWish embed page.
+ * StreamWish may pack the m3u8 URL inside obfuscated JS.
+ * Falls back to returning null if the page requires full JS execution.
+ */
+async function extractStreamwishUrl(embedUrl: string): Promise<string | null> {
+    try {
+        const resp = await axios.get(embedUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Referer': 'https://www3.animeflv.net',
+            },
+            timeout: 10000,
+        });
+        const html: string = resp.data;
+
+        // Look for direct m3u8 URL in the page source
+        const m3u8Match = html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/);
+        if (m3u8Match) return m3u8Match[1];
+
+        // Look for sources array pattern
+        const sourcesMatch = html.match(/sources\s*:\s*\[\{[^}]*file\s*:\s*["'](https?:\/\/[^"']+)["']/);
+        if (sourcesMatch) return sourcesMatch[1];
+
+        // Look for any m3u8 URL in the page
+        const anyM3u8 = html.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/i);
+        if (anyM3u8) return anyM3u8[0];
+
+        // StreamWish often uses a JS loader — if page is <1500 chars, it's the loader page (no video data)
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 export class AnimeFLVSource extends BaseAnimeSource {
     name = 'AnimeFLV';
     baseUrl = 'https://www3.animeflv.net';
@@ -230,13 +324,17 @@ export class AnimeFLVSource extends BaseAnimeSource {
             // Extract videos from script — format: var videos = {"SUB":[{"server":"sw","title":"SW","code":"https://..."},...]}
             const scriptContent = $('script:contains("var videos")').html() || '';
             const videosMatch = scriptContent.match(/var videos\s*=\s*(\{[\s\S]*?\});/);
+
+            // Collect raw embed URLs from the page first
+            interface RawEmbed { serverName: string; url: string }
+            const rawEmbeds: RawEmbed[] = [];
+
             if (videosMatch) {
                 try {
                     const videos = JSON.parse(videosMatch[1]);
                     const category_key = category === 'dub' ? 'LAT' : 'SUB';
                     const serverList = videos[category_key] || videos.SUB || [];
-                    serverList.forEach((v: { code: string; title: string; url?: string }) => {
-                        // code can be a direct URL or an iframe src="..." string
+                    serverList.forEach((v: { server: string; code: string; title: string; url?: string }) => {
                         let url = '';
                         if (v.code.startsWith('http')) {
                             url = v.code;
@@ -245,10 +343,9 @@ export class AnimeFLVSource extends BaseAnimeSource {
                             if (srcMatch) url = srcMatch[1];
                         }
                         if (url) {
-                            sources.push({
+                            rawEmbeds.push({
+                                serverName: (v.server || v.title || '').toLowerCase(),
                                 url: url.startsWith('http') ? url : `https:${url}`,
-                                quality: 'auto',
-                                isM3U8: url.includes('.m3u8')
                             });
                         }
                     });
@@ -258,13 +355,76 @@ export class AnimeFLVSource extends BaseAnimeSource {
             }
 
             // Fallback: extract iframe
-            const iframeSrc = $('iframe').attr('src');
-            if (iframeSrc && sources.length === 0) {
-                sources.push({
-                    url: iframeSrc.startsWith('http') ? iframeSrc : `https:${iframeSrc}`,
-                    quality: 'auto',
-                    isM3U8: false
-                });
+            if (rawEmbeds.length === 0) {
+                const iframeSrc = $('iframe').attr('src');
+                if (iframeSrc) {
+                    rawEmbeds.push({
+                        serverName: 'iframe',
+                        url: iframeSrc.startsWith('http') ? iframeSrc : `https:${iframeSrc}`,
+                    });
+                }
+            }
+
+            // Now resolve embed URLs to actual playable video URLs
+            const extractionPromises = rawEmbeds.map(async (embed) => {
+                const { serverName, url } = embed;
+                try {
+                    const hostname = new URL(url).hostname;
+
+                    // Skip non-extractable embeds entirely
+                    if (NON_EXTRACTABLE_EMBEDS.some(d => hostname.includes(d))) {
+                        return null;
+                    }
+
+                    // Streamtape: extract direct video URL
+                    if (hostname.includes('streamtape')) {
+                        const directUrl = await extractStreamtapeUrl(url);
+                        if (directUrl) {
+                            return {
+                                url: directUrl,
+                                quality: 'auto',
+                                isM3U8: false,
+                                server: 'streamtape',
+                            } as VideoSource;
+                        }
+                        return null;
+                    }
+
+                    // StreamWish: try to extract m3u8 (may fail if page is JS-only loader)
+                    if (hostname.includes('streamwish') || hostname.includes('sfastwish') || hostname.includes('filelions') || hostname.includes('swdyu')) {
+                        const directUrl = await extractStreamwishUrl(url);
+                        if (directUrl) {
+                            return {
+                                url: directUrl,
+                                quality: 'auto',
+                                isM3U8: directUrl.includes('.m3u8'),
+                                server: 'streamwish',
+                            } as VideoSource;
+                        }
+                        return null; // JS-only loader, can't extract
+                    }
+
+                    // For unknown embeds: if URL points to a direct video file, keep it
+                    if (url.includes('.m3u8') || url.includes('.mp4')) {
+                        return {
+                            url,
+                            quality: 'auto',
+                            isM3U8: url.includes('.m3u8'),
+                        } as VideoSource;
+                    }
+
+                    // Unknown embed — skip (don't return HTML pages as video sources)
+                    return null;
+                } catch {
+                    return null;
+                }
+            });
+
+            const extractedResults = await Promise.allSettled(extractionPromises);
+            for (const result of extractedResults) {
+                if (result.status === 'fulfilled' && result.value) {
+                    sources.push(result.value);
+                }
             }
 
             return { sources, subtitles: [], headers: { 'Referer': this.baseUrl } };

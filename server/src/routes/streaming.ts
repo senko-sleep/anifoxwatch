@@ -501,6 +501,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'animepahe': { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
             'pahe': { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
             'nextcdn': { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
+            'streamtape': { referer: 'https://streamtape.com/', origin: 'https://streamtape.com' },
+            'tapecontent': { referer: 'https://streamtape.com/', origin: 'https://streamtape.com' },
+            'streamwish': { referer: 'https://streamwish.to/', origin: 'https://streamwish.to' },
             'default': { referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' }
         };
 

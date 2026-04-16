@@ -321,6 +321,9 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
                 'nextcdn':      { referer: 'https://animepahe.ru/',      origin: 'https://animepahe.ru' },
                 'hstorage':     { referer: 'https://watchhentai.net/',   origin: 'https://watchhentai.net' },
                 'googlevideo':  { referer: 'https://watchhentai.net/',   origin: 'https://watchhentai.net' },
+                'streamtape':   { referer: 'https://streamtape.com/',    origin: 'https://streamtape.com' },
+                'tapecontent':  { referer: 'https://streamtape.com/',    origin: 'https://streamtape.com' },
+                'streamwish':   { referer: 'https://streamwish.to/',     origin: 'https://streamwish.to' },
             };
 
             const matched = Object.entries(cdnConfig).find(([key]) => domain.includes(key));
