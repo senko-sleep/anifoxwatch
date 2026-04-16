@@ -6,7 +6,7 @@ import { VideoPlayer } from '../components/player/VideoPlayer';
 import { EpisodeList } from '../components/player/EpisodeList';
 import { StreamingControls } from '../components/player/StreamingControls';
 import { DownloadManager } from '../components/player/DownloadManager';
-import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers, useDubStreamProbe } from '@/hooks/useAnime';
+import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers, useDubStreamProbe, usePrefetchNextEpisode } from '@/hooks/useAnime';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -156,12 +156,8 @@ const Watch = () => {
     () => (streamData?.source?.toLowerCase().includes('dub')) || false,
     [streamData]
   );
-  const skipDubProbe =
-    serversHaveDub ||
-    metadataIndicatesDub ||
-    dubPlaybackWorks ||
-    streamHasDubSources ||
-    audioType !== 'sub';
+  // Disable dub probe to avoid duplicate requests - rely on server list and metadata
+  const skipDubProbe = true;
 
   const { data: dubProbeData } = useDubStreamProbe(
     selectedEpisode || '',
@@ -203,18 +199,6 @@ const Watch = () => {
 
 
 
-  // Auto-select server when servers load, episode changes, or sub/dub toggles.
-  // Never leave selectedServer empty — that used to disable streaming and show stale video.
-  useEffect(() => {
-    if (!servers?.length) return;
-
-    const matchingServers = servers.filter(s => s.type === audioType);
-    if (matchingServers.length > 0) {
-      setSelectedServer(matchingServers[0].name);
-    } else if (!selectedServer || !servers.some(s => s.name === selectedServer)) {
-      setSelectedServer(servers[0].name);
-    }
-  }, [servers, audioType, selectedEpisode]);
 
   // Auto-failover on stream error
   useEffect(() => {
@@ -227,6 +211,7 @@ const Watch = () => {
         duration: 3000,
       });
       setSelectedServer(nextServer.name);
+      setUserPickedServer(true);
       setServerRetryCount(prev => prev + 1);
     }
   }, [streamError, servers, selectedServer, serverRetryCount]);
@@ -298,6 +283,7 @@ const Watch = () => {
       const nextServer = servers[(currentIndex + 1) % servers.length];
       console.log(`[Watch] 🔄 Player failover to server: ${nextServer.name} (attempt ${serverRetryCount + 1}/${servers.length})`);
       setSelectedServer(nextServer.name);
+      setUserPickedServer(true);
       setServerRetryCount(prev => prev + 1);
     }
   }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType]);
@@ -399,6 +385,17 @@ const Watch = () => {
   const currentEpisode = episodes?.find(e => e.id === selectedEpisode);
   const hasPrev = episodes?.findIndex(e => e.id === selectedEpisode) > 0;
   const hasNext = episodes ? episodes.findIndex(e => e.id === selectedEpisode) < episodes.length - 1 : false;
+
+  // Prefetch next episode's stream so switching episodes feels instant
+  const prefetchNext = usePrefetchNextEpisode();
+  useEffect(() => {
+    if (!episodes?.length || !selectedEpisode || !cleanAnimeId) return;
+    const idx = episodes.findIndex(e => e.id === selectedEpisode);
+    if (idx >= 0 && idx < episodes.length - 1) {
+      const next = episodes[idx + 1];
+      prefetchNext(cleanAnimeId, next.id, audioType);
+    }
+  }, [episodes, selectedEpisode, cleanAnimeId, audioType, prefetchNext]);
 
   // Helper: get/set per-anime audio preference
   const getAnimeAudioPref = useCallback((animeId: string): AudioType | null => {
@@ -1146,6 +1143,7 @@ const Watch = () => {
                   selectedServer={selectedServer}
                   onServerChange={(server) => {
                     setSelectedServer(server);
+                    setUserPickedServer(true);
                     setServerRetryCount(0);
                   }}
                   serversLoading={serversLoading}

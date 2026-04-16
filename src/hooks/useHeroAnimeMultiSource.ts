@@ -54,9 +54,9 @@ interface CachedHeroData {
   version: number;
 }
 
-const CACHE_KEY = 'anistream_hero_v7';
-const CACHE_TTL = 30 * 60 * 1000;
-const CACHE_VERSION = 7;
+const CACHE_KEY = 'anistream_hero_v8';
+const CACHE_TTL = 20 * 60 * 1000;
+const CACHE_VERSION = 8;
 
 // Clear legacy cache keys on load
 try {
@@ -64,7 +64,29 @@ try {
   localStorage.removeItem('anistream_hero_cache_v2');
   localStorage.removeItem('anistream_hero_v3');
   localStorage.removeItem('anistream_hero_v6');
+  localStorage.removeItem('anistream_hero_v7');
 } catch { /* ignore */ }
+
+function getCurrentSeason(): { season: string; year: number } {
+  const now = new Date();
+  const m = now.getMonth();
+  const y = now.getFullYear();
+  if (m <= 1) return { season: 'WINTER', year: y };
+  if (m <= 4) return { season: 'SPRING', year: y };
+  if (m <= 7) return { season: 'SUMMER', year: y };
+  if (m <= 10) return { season: 'FALL', year: y };
+  return { season: 'WINTER', year: y + 1 };
+}
+
+/** Fisher-Yates shuffle — keeps diversity across visits */
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
 
 function getCachedData(): HeroAnime[] | null {
   try {
@@ -180,13 +202,16 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
   const currentYear = new Date().getFullYear();
   const recentYear = currentYear - 1;
   const formats = '[TV,MOVIE,ONA]';
+  const { season, year: seasonYear } = getCurrentSeason();
 
   const raw: Record<string, unknown>[] = [];
 
   const queries = [
+    // Current season first — most relevant for right now (e.g. Spring 2026)
+    buildAniListQuery('TRENDING_DESC', `,season:${season},seasonYear:${seasonYear},format_in:${formats}`),
+    buildAniListQuery('POPULARITY_DESC', `,season:${season},seasonYear:${seasonYear},format_in:${formats}`),
     buildAniListQuery('TRENDING_DESC', `,status:RELEASING,format_in:${formats}`),
     buildAniListQuery('TRENDING_DESC', `,startDate_greater:${recentYear}0000,format_in:${formats}`),
-    buildAniListQuery('POPULARITY_DESC', `,startDate_greater:${recentYear}0000,format_in:${formats}`),
     buildAniListQuery('TRENDING_DESC', ``), // global fallback
   ];
 
@@ -211,10 +236,15 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
   const candidates = deduped.filter(hasHttpBanner);
   candidates.sort((a, b) => clientRecencyScore(b) - clientRecencyScore(a));
 
+  // Shuffle within tiers so repeat visitors see a fresh rotation
+  const top = candidates.slice(0, 10);
+  const rest = candidates.slice(10);
+  const shuffled = [...shuffleArray(top), ...shuffleArray(rest)];
+
   const out: HeroAnime[] = [];
   let jikanCalls = 0;
 
-  for (const m of candidates) {
+  for (const m of shuffled) {
     if (out.length >= 20) break;
 
     let desc = cleanDescription((m.description as string) || '');

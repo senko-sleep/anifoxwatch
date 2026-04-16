@@ -202,7 +202,7 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
                 options
             );
             const eps: Episode[] = (data.episodes || []).map((ep) => ({
-                id: ep.id,
+                id: ep.id.split('?')[0], // Strip query params like ?ep=123
                 number: ep.number || ep.episodeNumber || 1,
                 title: ep.title || `Episode ${ep.number || ep.episodeNumber || 1}`,
                 isFiller: ep.isFiller || false,

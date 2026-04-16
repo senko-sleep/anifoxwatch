@@ -3,6 +3,89 @@ import { apiClient, SourceHealth, StreamingData, EpisodeServer, ScheduleResponse
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { enrichWithAniListCovers } from '@/lib/anilist-covers';
 
+// ─── Direct AniList seasonal fallback ────────────────────────────────────────
+// Used when the server-side /api/anime/seasonal returns empty (e.g. AniList
+// rate-limits the Cloudflare Worker). Queries AniList directly from the browser.
+
+async function fetchSeasonalFromAniList(year: number, season: string): Promise<SeasonalResponse> {
+    const query = `{
+      Page(page:1,perPage:40){
+        media(type:ANIME,season:${season},seasonYear:${year},sort:POPULARITY_DESC,isAdult:false,format_in:[TV,MOVIE,ONA]){
+          id title{romaji english} coverImage{extraLarge large} bannerImage
+          description genres episodes duration format status averageScore popularity
+          seasonYear season studios(isMain:true){nodes{name}}
+        }
+        pageInfo{hasNextPage currentPage total}
+      }
+    }`;
+
+    const res = await fetch('https://graphql.anilist.co', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ query }),
+    });
+    const json = await res.json();
+    const page = json?.data?.Page;
+    const media: Record<string, unknown>[] = page?.media || [];
+
+    const statusMap: Record<string, Anime['status']> = {
+        RELEASING: 'Ongoing', FINISHED: 'Completed', NOT_YET_RELEASED: 'Upcoming',
+        CANCELLED: 'Completed', HIATUS: 'Ongoing',
+    };
+    const formatMap: Record<string, Anime['type']> = {
+        TV: 'TV', MOVIE: 'Movie', OVA: 'OVA', ONA: 'ONA', SPECIAL: 'Special',
+    };
+
+    interface AniListSeasonMedia {
+        id: number;
+        title: { english: string | null; romaji: string };
+        coverImage: { extraLarge: string; large: string };
+        bannerImage: string | null;
+        description: string | null;
+        genres: string[];
+        episodes: number | null;
+        duration: number | null;
+        format: string | null;
+        status: string | null;
+        averageScore: number | null;
+        seasonYear: number | null;
+        season: string | null;
+        studios: { nodes: { name: string }[] };
+    }
+
+    const results: Anime[] = (media as unknown as AniListSeasonMedia[]).map((m) => ({
+        id: `anilist-${m.id}`,
+        title: m.title.english || m.title.romaji || 'Unknown',
+        titleJapanese: m.title.romaji || undefined,
+        image: m.coverImage.extraLarge || m.coverImage.large || '',
+        cover: m.coverImage.extraLarge || m.coverImage.large || '',
+        banner: m.bannerImage || undefined,
+        description: (m.description || '').replace(/<[^>]+>/g, '').trim(),
+        type: formatMap[m.format || ''] ?? 'TV',
+        status: statusMap[m.status || ''] ?? 'Ongoing',
+        rating: m.averageScore ? m.averageScore / 10 : undefined,
+        episodes: m.episodes || 0,
+        genres: m.genres || [],
+        studios: m.studios.nodes.map((s) => s.name),
+        year: m.seasonYear || year,
+        season: m.season || season,
+        isMature: false,
+        source: 'anilist',
+    }));
+
+    return {
+        results,
+        pageInfo: {
+            hasNextPage: page?.pageInfo?.hasNextPage ?? false,
+            currentPage: page?.pageInfo?.currentPage ?? 1,
+            totalPages: 1,
+            totalItems: page?.pageInfo?.total ?? results.length,
+        },
+        seasonInfo: { year, season: season.toLowerCase() },
+        source: 'AniList-direct',
+    };
+}
+
 // Query keys for caching and invalidation
 export const queryKeys = {
     trending: (page: number, source?: string) => ['trending', page, source] as const,
@@ -201,15 +284,34 @@ export function useSeasonal(year?: number, season?: string, page: number = 1, en
     return useQuery<import('@/lib/api-client').SeasonalResponse, Error>({
         queryKey: queryKeys.seasonal(year, season, page),
         queryFn: async () => {
-            const response = await apiClient.getSeasonal(year, season, page);
-            // Enrich with AniList HD covers (include adult content for adult mode)
             const includeAdult = mode === 'adult' || mode === 'mixed';
-            const enrichedResults = await enrichWithAniListCovers(response.results, includeAdult);
-            return { ...response, results: enrichedResults };
+
+            // Try server first
+            try {
+                const response = await apiClient.getSeasonal(year, season, page);
+                if (response.results && response.results.length > 0) {
+                    const enrichedResults = await enrichWithAniListCovers(response.results, includeAdult);
+                    return { ...response, results: enrichedResults };
+                }
+            } catch { /* fall through to AniList direct */ }
+
+            // Server returned empty or failed — query AniList directly from the browser
+            if (year && season) {
+                const direct = await fetchSeasonalFromAniList(year, season);
+                return direct;
+            }
+
+            // Last resort: empty response
+            return {
+                results: [],
+                pageInfo: { hasNextPage: false, currentPage: 1, totalPages: 1, totalItems: 0 },
+                seasonInfo: { year: year ?? new Date().getFullYear(), season: season ?? '' },
+                source: 'empty',
+            };
         },
         enabled,
-        staleTime: 30 * 60 * 1000, // 30 minutes - seasonal data is fairly static
-        gcTime: 60 * 60 * 1000,
+        staleTime: 15 * 60 * 1000,
+        gcTime: 30 * 60 * 1000,
     });
 }
 
@@ -250,8 +352,8 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
         queryKey: queryKeys.stream(episodeId, server, category),
         queryFn: () => apiClient.getStreamingLinks(episodeId, server, category),
         enabled: enabled && episodeId.length > 0,
-        staleTime: 0,
-        gcTime: 3 * 60 * 1000,
+        staleTime: 2 * 60 * 1000,   // 2 min — reuse when toggling sub/dub or returning quickly
+        gcTime: 5 * 60 * 1000,
         retry: 0,
         refetchOnWindowFocus: false,
     });
@@ -336,7 +438,7 @@ export function useRecommendedSource() {
 export function usePrefetchNextEpisode() {
     const queryClient = useQueryClient();
     
-    return (animeId: string, episodeId: string) => {
+    return (animeId: string, episodeId: string, category?: string) => {
         // Prefetch episodes if not already cached
         if (!queryClient.getQueryData(queryKeys.episodes(animeId))) {
             queryClient.prefetchQuery({
@@ -351,6 +453,15 @@ export function usePrefetchNextEpisode() {
                 queryKey: queryKeys.servers(episodeId),
                 queryFn: () => apiClient.getEpisodeServers(episodeId),
                 staleTime: 60 * 60 * 1000,
+            });
+        }
+        // Prefetch streaming links (auto server) so video loads instantly on episode switch
+        const streamKey = queryKeys.stream(episodeId, undefined, category);
+        if (!queryClient.getQueryData(streamKey)) {
+            queryClient.prefetchQuery({
+                queryKey: streamKey,
+                queryFn: () => apiClient.getStreamingLinks(episodeId, undefined, category),
+                staleTime: 2 * 60 * 1000,
             });
         }
     };

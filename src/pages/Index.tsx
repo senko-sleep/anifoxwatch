@@ -31,7 +31,17 @@ const Index = () => {
   useDocumentTitle('Home');
 
   const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useTrending(1, 24, 'safe');
-  const { data: seasonalData,  isLoading: seasonalLoading,  refetch: refetchSeasonal  } = useSeasonal(undefined, undefined, 1, true, 'safe');
+  const { currentSeasonLabel, currentSeasonApi, currentSeasonYear } = useMemo(() => {
+    const now = new Date();
+    const m = now.getMonth();
+    const y = now.getFullYear();
+    if (m <= 1)  return { currentSeasonLabel: `Winter ${y}`,     currentSeasonApi: 'WINTER', currentSeasonYear: y };
+    if (m <= 4)  return { currentSeasonLabel: `Spring ${y}`,     currentSeasonApi: 'SPRING', currentSeasonYear: y };
+    if (m <= 7)  return { currentSeasonLabel: `Summer ${y}`,     currentSeasonApi: 'SUMMER', currentSeasonYear: y };
+    if (m <= 10) return { currentSeasonLabel: `Fall ${y}`,       currentSeasonApi: 'FALL',   currentSeasonYear: y };
+    return       { currentSeasonLabel: `Winter ${y + 1}`, currentSeasonApi: 'WINTER', currentSeasonYear: y + 1 };
+  }, []);
+  const { data: seasonalData,  isLoading: seasonalLoading,  refetch: refetchSeasonal  } = useSeasonal(currentSeasonYear, currentSeasonApi, 1, true, 'safe');
   const { data: upcomingData }                                = useUpcoming();
   const { data: latestAnime,   isLoading: latestLoading,    refetch: refetchLatest   } = useLatest(1, undefined, 'safe');
   const { data: moviesData,    isLoading: moviesLoading,    refetch: refetchMovies   } = useBrowse({ type: 'Movie', sort: 'popularity', mode: 'safe' }, 1, true, false, 20);
@@ -90,18 +100,6 @@ const Index = () => {
       dedupAction:   unique(safe(actionData?.results ?? [])),
     };
   }, [trendingAnime, seasonalData?.results, upcomingData?.results, latestAnime, moviesData?.results, actionData?.results]);
-
-  const currentSeasonLabel = useMemo(() => {
-    const now = new Date();
-    const m = now.getMonth(); // 0-indexed
-    const y = now.getFullYear();
-    // Dec-Feb = Winter, Mar-May = Spring, Jun-Aug = Summer, Sep-Nov = Fall
-    if (m <= 1) return `Winter ${y}`;
-    if (m <= 4) return `Spring ${y}`;
-    if (m <= 7) return `Summer ${y}`;
-    if (m <= 10) return `Fall ${y}`;
-    return `Winter ${y + 1}`;
-  }, []);
 
   const isLoading      = trendingLoading || heroLoading;
   const handleRefresh  = () => { refetchTrending(); };
