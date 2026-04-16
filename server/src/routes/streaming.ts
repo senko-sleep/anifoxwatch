@@ -391,7 +391,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         // Always proxy owocdn/vault through this API so HLS loads same-origin.
         const DIRECT_PLAY_DOMAINS = ['kwik.si', 'kwik.cx'];
         // Skip proxy for unreliable/rate-limited domains - let browser try direct
-        const UNRELIABLE_DOMAINS = ['rrr.', 'megaup.', 'streamtape.', 'dood.'];
+        const UNRELIABLE_DOMAINS = ['rrr.', 'megaup.', 'dood.'];
         const isDirect = (url: string) => {
             try {
                 const h = new URL(url).hostname.toLowerCase();
