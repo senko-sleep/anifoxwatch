@@ -186,13 +186,13 @@ const Watch = () => {
       const epNum = parseInt(epParam, 10);
       const ep = episodes.find(e => e.number === epNum);
       if (ep) {
-        setSelectedEpisode(ep.id.split('?')[0]); // Strip query params
+        setSelectedEpisode(ep.id);
         setSelectedEpisodeNum(ep.number);
         return;
       }
     }
     // Default to first episode if no URL param
-    setSelectedEpisode(episodes[0].id.split('?')[0]); // Strip query params
+    setSelectedEpisode(episodes[0].id);
     setSelectedEpisodeNum(episodes[0].number);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodes]);
@@ -351,7 +351,7 @@ const Watch = () => {
       }, { replace: true, state: location.state });
     }
 
-    setSelectedEpisode(episodeId.split('?')[0]); // Strip query params
+    setSelectedEpisode(episodeId);
     setSelectedEpisodeNum(episodeNum);
     setSelectedServer(''); // Reset server for new episode
     setUserPickedServer(false); // Use auto server until user explicitly picks
