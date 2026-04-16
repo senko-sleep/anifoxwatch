@@ -240,7 +240,11 @@ export function useAnime(id: string, enabled: boolean = true, source?: string) {
 export function useEpisodes(animeId: string, enabled: boolean = true, source?: string) {
     return useQuery<Episode[], Error>({
         queryKey: [...queryKeys.episodes(animeId), source],
-        queryFn: () => apiClient.getEpisodes(animeId, source),
+        queryFn: async () => {
+            const episodes = await apiClient.getEpisodes(animeId, source);
+            // Strip query params from episode IDs (e.g., 'anime-id?ep=123' -> 'anime-id')
+            return episodes.map(ep => ({ ...ep, id: ep.id.split('?')[0] }));
+        },
         enabled: enabled && animeId.length > 0,
         staleTime: 10 * 60 * 1000,
     });
