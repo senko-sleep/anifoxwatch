@@ -2757,13 +2757,21 @@ export class SourceManager {
                 if (resolved) return;
                 const ok = allResults.filter(r => r.success);
                 if (ok.length === 0) return false;
+                // Prefer sources with real M3U8/MP4 streams over embed-only fallbacks
+                const hasRealStream = (r: RaceResult) =>
+                    r.data.sources.some((s) => {
+                        const u = (s as { originalUrl?: string }).originalUrl || s.url || '';
+                        return u.includes('.m3u8') || u.includes('.mp4') || u.includes('.mpd');
+                    });
+                const realOk = ok.filter(hasRealStream);
+                const candidates = realOk.length > 0 ? realOk : ok;
                 // Pick the highest-priority successful source
                 let best: RaceResult | null = null;
                 for (const name of pickOrder) {
-                    const match = ok.find(r => r.source === name);
+                    const match = candidates.find(r => r.source === name);
                     if (match) { best = match; break; }
                 }
-                if (!best) best = ok[0];
+                if (!best) best = candidates[0];
                 resolved = true;
                 if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
                 const duration = Date.now() - startTime;

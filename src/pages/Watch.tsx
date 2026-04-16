@@ -31,6 +31,12 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { toast } from 'sonner';
 
 type AudioType = 'sub' | 'dub';
+
+const EMBED_DOMAINS = ['streamwish', 'mega.nz', 'hqq.tv', 'streamtape', 'doodstream', 'mp4upload', 'sendvid', 'ok.ru'];
+const isEmbedUrl = (url: string) =>
+  EMBED_DOMAINS.some((d) => url.toLowerCase().includes(d)) &&
+  !url.toLowerCase().includes('.m3u8') &&
+  !url.toLowerCase().includes('.mp4');
 type QualityType = '1080p' | '720p' | '480p' | '360p' | 'auto';
 
 function plainDescription(raw: string | undefined): string {
@@ -126,12 +132,17 @@ const Watch = () => {
     () => servers?.some((s) => s.type === 'dub') ?? false,
     [servers]
   );
+  // Fire stream fetch immediately — don't wait for server list to load.
+  // The backend defaults to 'auto' when no server is specified.
+  // Only pass a server param when the user has explicitly chosen one.
+  const [userPickedServer, setUserPickedServer] = useState(false);
+  const streamServer = userPickedServer ? (selectedServer || undefined) : undefined;
   const {
     data: streamData,
     isLoading: streamLoading,
     error: streamError,
     refetch: refetchStream
-  } = useStreamingLinks(selectedEpisode || '', selectedServer || undefined, audioType, !!selectedEpisode);
+  } = useStreamingLinks(selectedEpisode || '', streamServer, audioType, !!selectedEpisode);
 
   /** Dub is available if: server list has dub, metadata says dub, active dub playback returned sources, or dub probe (while on SUB) succeeded. */
   const metadataIndicatesDub = useMemo(
@@ -317,25 +328,22 @@ const Watch = () => {
 
     // Filter out sources that previously had errors (simple retry tracking)
     const sources = streamData.sources.filter((_, idx) => idx >= sourceRetryIndex);
-    
+
     if (!sources.length) return null;
 
-    // If the current URL failed, rotate through available sources
-    const fallbackSource = sources[0];
-    if (fallbackSource) return fallbackSource;
+    // Prefer sources that are actually playable (M3U8 / direct MP4)
+    const playable = sources.filter((s) => {
+      const raw = (s as { originalUrl?: string }).originalUrl || s.url || '';
+      const lower = raw.toLowerCase();
+      return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd') ||
+             !EMBED_DOMAINS.some((d) => lower.includes(d));
+    });
+    if (playable.length > 0) return playable[0];
 
-    // Find matching quality or best available
-    const qualityOrder: QualityType[] = ['1080p', '720p', '480p', '360p', 'auto'];
-    const startIndex = qualityOrder.indexOf(quality);
-
-    for (let i = startIndex; i < qualityOrder.length; i++) {
-      const source = streamData.sources.find(s => s.quality === qualityOrder[i]);
-      if (source) return source;
-    }
-
-    // Fallback to first available
-    return streamData.sources[0];
+    // No playable sources — fall back to first source (will trigger embed fallback)
+    return sources[0];
   }, [streamData, quality, sourceRetryIndex]);
+
 
   // Episode navigation with smooth transitions
   const handleEpisodeSelect = useCallback((episodeId: string, episodeNum: number) => {
@@ -360,6 +368,7 @@ const Watch = () => {
     setSelectedEpisode(episodeId);
     setSelectedEpisodeNum(episodeNum);
     setSelectedServer(''); // Reset server for new episode
+    setUserPickedServer(false); // Use auto server until user explicitly picks
     playerRef.current?.scrollIntoView({ behavior: 'smooth' });
 
     // Clear switching state after a delay
@@ -601,6 +610,22 @@ const Watch = () => {
 
   const videoSource = getVideoSource();
 
+  // If the best available source is an embed page (HTML), show an iframe instead of VideoPlayer
+  const embedFallbackUrl = (() => {
+    if (!videoSource) return null;
+    // Server-side flagged as embed fallback — use raw originalUrl so iframe JS works
+    if ((videoSource as { isEmbed?: boolean }).isEmbed) {
+      return (videoSource as { originalUrl?: string }).originalUrl || videoSource.url || null;
+    }
+    const raw = (videoSource as { originalUrl?: string }).originalUrl || videoSource.url || '';
+    if (isEmbedUrl(raw)) return raw;
+    if (videoSource.url?.includes('/api/stream/proxy?url=')) {
+      const inner = decodeURIComponent(videoSource.url.split('/api/stream/proxy?url=')[1]?.split('&')[0] || '');
+      if (isEmbedUrl(inner)) return inner;
+    }
+    return null;
+  })();
+
   // Mobile: Normal scrollable page layout (not forced fullscreen)
   if (isMobile()) {
     return (
@@ -630,6 +655,14 @@ const Watch = () => {
                     <p className="text-white/80 text-sm">Loading stream...</p>
                   </div>
                 </div>
+              ) : embedFallbackUrl ? (
+                <iframe
+                  src={embedFallbackUrl}
+                  className="absolute inset-0 w-full h-full border-0"
+                  allowFullScreen
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  referrerPolicy="no-referrer"
+                />
               ) : videoSource ? (
                 <VideoPlayer
                   src={videoSource?.url || ''}
@@ -718,6 +751,7 @@ const Watch = () => {
               selectedServer={selectedServer}
               onServerChange={(server) => {
                 setSelectedServer(server);
+                setUserPickedServer(true);
                 setServerRetryCount(0);
               }}
               serversLoading={serversLoading}
@@ -940,6 +974,14 @@ const Watch = () => {
                         </div>
                       </div>
                     </div>
+                  ) : embedFallbackUrl ? (
+                    <iframe
+                      src={embedFallbackUrl}
+                      className="absolute inset-0 w-full h-full border-0"
+                      allowFullScreen
+                      allow="autoplay; encrypted-media; picture-in-picture"
+                      referrerPolicy="no-referrer"
+                    />
                   ) : videoSource ? (
                     <VideoPlayer
                       src={videoSource?.url || ''}

@@ -296,12 +296,41 @@ export class AnimeFLVSource extends BaseAnimeSource {
             const $ = cheerio.load(response.data);
             const servers: EpisodeServer[] = [];
 
-            $('.RTbl .Optns li').each((i, el) => {
-                const serverName = $(el).find('.Stmvideo').text().trim();
-                if (serverName) {
-                    servers.push({ name: serverName, url: '', type: 'sub' });
+            // Parse var videos JSON to detect sub/dub (LAT) availability
+            const scriptContent = $('script:contains("var videos")').html() || '';
+            const videosMatch = scriptContent.match(/var videos\s*=\s*(\{[\s\S]*?\});/);
+            if (videosMatch) {
+                try {
+                    const videos = JSON.parse(videosMatch[1]);
+                    const hasSub = Array.isArray(videos.SUB) && videos.SUB.length > 0;
+                    const hasDub = Array.isArray(videos.LAT) && videos.LAT.length > 0;
+
+                    if (hasSub) {
+                        for (const v of videos.SUB) {
+                            const name = v.title || v.server || 'Default';
+                            servers.push({ name, url: '', type: 'sub' });
+                        }
+                    }
+                    if (hasDub) {
+                        for (const v of videos.LAT) {
+                            const name = v.title || v.server || 'Default';
+                            servers.push({ name: `${name} (Latino)`, url: '', type: 'dub' });
+                        }
+                    }
+                } catch {
+                    // JSON parse failed, fall through to DOM scraping
                 }
-            });
+            }
+
+            // Fallback: scrape DOM if var videos parsing failed
+            if (servers.length === 0) {
+                $('.RTbl .Optns li').each((_, el) => {
+                    const serverName = $(el).find('.Stmvideo').text().trim();
+                    if (serverName) {
+                        servers.push({ name: serverName, url: '', type: 'sub' });
+                    }
+                });
+            }
 
             return servers.length > 0 ? servers : [{ name: 'Default', url: '', type: 'sub' }];
         } catch (error) {
@@ -424,6 +453,24 @@ export class AnimeFLVSource extends BaseAnimeSource {
             for (const result of extractedResults) {
                 if (result.status === 'fulfilled' && result.value) {
                     sources.push(result.value);
+                }
+            }
+
+            // If all extraction attempts failed, include the best embed URL as a last-resort
+            // iframe fallback (preferred: streamwish > streamtape > first available).
+            // Marked with isEmbed:true so the client can render it in an <iframe> instead of VideoPlayer.
+            if (sources.length === 0 && rawEmbeds.length > 0) {
+                const pick =
+                    rawEmbeds.find(e => e.serverName.includes('sw') || e.serverName.includes('streamwish')) ||
+                    rawEmbeds.find(e => e.serverName.includes('streamtape')) ||
+                    rawEmbeds[0];
+                if (pick) {
+                    (sources as Array<VideoSource & { isEmbed?: boolean }>).push({
+                        url: pick.url,
+                        quality: 'auto',
+                        isM3U8: false,
+                        isEmbed: true,
+                    });
                 }
             }
 
