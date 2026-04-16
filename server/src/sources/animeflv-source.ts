@@ -341,7 +341,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         try {
-            const epId = episodeId.replace('animeflv-', '');
+            const epId = episodeId.replace('animeflv-', '').split('?')[0]; // Strip query params
             const response = await axios.get(`${this.baseUrl}/ver/${epId}`, {
                 signal: options?.signal,
                 timeout: options?.timeout || 10000,

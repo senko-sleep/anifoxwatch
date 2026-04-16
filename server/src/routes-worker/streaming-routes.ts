@@ -233,7 +233,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
 
     // Get episode servers
     app.get('/servers/:episodeId', async (c) => {
-        const episodeId = decodeURIComponent(c.req.param('episodeId'));
+        const episodeId = decodeURIComponent(c.req.param('episodeId')).split('?')[0]; // Strip query params
 
         if (typeof sourceManager.getEpisodeServers === 'function') {
             try {
@@ -252,7 +252,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
 
     // Get streaming links — try local sources first, then proxy to Render for Puppeteer
     app.get('/watch/:episodeId', async (c) => {
-        const episodeId = decodeURIComponent(c.req.param('episodeId'));
+        const episodeId = decodeURIComponent(c.req.param('episodeId')).split('?')[0]; // Strip query params
         const explicitServer = normalizeStreamServerQuery(c.req.query('server'));
         const category = c.req.query('category') as 'sub' | 'dub' | undefined;
         const useProxy = c.req.query('proxy') !== 'false';

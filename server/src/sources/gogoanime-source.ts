@@ -209,7 +209,7 @@ export class GogoanimeSource extends BaseAnimeSource {
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
-        const epId = episodeId.replace(/^gogoanime-/i, '');
+        const epId = episodeId.replace(/^gogoanime-/i, '').split('?')[0]; // Strip query params
         try {
             const response = await axios.get(`${this.baseUrl}/${epId}`, {
                 signal: options?.signal,
