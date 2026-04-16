@@ -37,6 +37,71 @@ const getProxyBaseUrl = (c: { req: { url: string } }): string => {
 };
 
 /**
+ * Extract direct video URL from Streamtape embed page using CF Worker fetch.
+ * The token is IP-bound, so extraction must happen on the same server that will proxy the video.
+ */
+async function extractStreamtapeVideoUrl(embedUrl: string): Promise<string | null> {
+    try {
+        const resp = await fetch(embedUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            },
+        });
+        if (!resp.ok) return null;
+        const html = await resp.text();
+
+        // Parse ALL JS assignments to robotlink/ideoolink/botlink — the LAST one wins.
+        const jsPattern = /getElementById\(['"](?:robotlink|ideoolink|botlink)['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*(?:['"]['"]\s*\+\s*)?\(?['"]([^'"]+)['"]\)?\.substring\((\d+)\)(?:\.substring\((\d+)\))?/g;
+        let lastMatch: RegExpExecArray | null = null;
+        let m: RegExpExecArray | null;
+        while ((m = jsPattern.exec(html)) !== null) {
+            lastMatch = m;
+        }
+
+        if (lastMatch) {
+            const prefix = lastMatch[1];
+            let suffix = lastMatch[2];
+            const sub1 = parseInt(lastMatch[3], 10);
+            const sub2 = lastMatch[4] ? parseInt(lastMatch[4], 10) : undefined;
+            suffix = suffix.substring(sub1);
+            if (sub2 !== undefined) suffix = suffix.substring(sub2);
+            const videoUrl = `https:${prefix}${suffix}`;
+            if (videoUrl.includes('/get_video?') || videoUrl.includes('streamtape.com')) {
+                return videoUrl;
+            }
+        }
+
+        // Fallback: robotlink div content
+        const divMatch = html.match(/<div id="robotlink"[^>]*>([^<]+)<\/div>/);
+        if (divMatch) {
+            const partial = divMatch[1].trim();
+            if (partial.includes('/get_video?')) {
+                return partial.startsWith('http') ? partial : `https:${partial}`;
+            }
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Given a streamtape get_video URL (with potentially wrong IP-bound token),
+ * find the embed URL from the video ID and re-extract with CF Worker IP.
+ */
+async function reExtractStreamtapeForWorkerIp(getVideoUrl: string): Promise<string | null> {
+    try {
+        const u = new URL(getVideoUrl);
+        const videoId = u.searchParams.get('id');
+        if (!videoId) return null;
+        const embedUrl = `https://streamtape.com/e/${videoId}/`;
+        return await extractStreamtapeVideoUrl(embedUrl);
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Check if a URL's domain is on the dead domains list
  */
 function isDeadDomain(url: string): boolean {
@@ -153,6 +218,19 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
         return u;
     }
 
+    /** True only when a source URL points to an actual video/playlist, not an embed HTML page */
+    const EMBED_DOMAINS = ['streamwish', 'mega.nz', 'hqq.tv', 'streamtape', 'doodstream', 'mp4upload', 'sendvid', 'ok.ru'];
+    function isPlayableSource(url: string): boolean {
+        if (!url) return false;
+        const lower = url.toLowerCase();
+        if (lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd')) return true;
+        if (EMBED_DOMAINS.some((d) => lower.includes(d))) return false;
+        return true; // assume playable if unknown
+    }
+    function hasPlayableSources(sources: StreamSource[]): boolean {
+        return sources.some((s) => isPlayableSource(unwrapProxied(s.originalUrl || s.url || '')));
+    }
+
     // Get episode servers
     app.get('/servers/:episodeId', async (c) => {
         const episodeId = decodeURIComponent(c.req.param('episodeId'));
@@ -193,7 +271,8 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
         }
 
         // 2) Fall back to Render (Puppeteer sources)
-        if (!streamData.sources || streamData.sources.length === 0) {
+        // Trigger if: no sources at all, OR all sources are embed pages that can't be played directly
+        if (!streamData.sources || streamData.sources.length === 0 || !hasPlayableSources(streamData.sources)) {
             try {
                 const qs = new URLSearchParams();
                 if (explicitServer) qs.set('server', explicitServer);
@@ -204,13 +283,30 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
                     const renderData = await renderResp.json() as StreamPayload;
                     if (renderData.sources && renderData.sources.length > 0) {
                         streamData = renderData;
+
                         if (useProxy) {
                             const referer = streamData.headers?.Referer || streamData.headers?.referer;
-                            streamData.sources = streamData.sources.map(s => ({
-                                ...s,
-                                url: proxyUrl(unwrapProxied(s.originalUrl || s.url), proxyBase, referer),
-                                originalUrl: unwrapProxied(s.originalUrl || s.url),
-                            }));
+                            streamData.sources = streamData.sources.map(s => {
+                                const rawUrl = unwrapProxied(s.originalUrl || s.url);
+                                // Streamtape get_video tokens are IP-bound to Render's IP.
+                                // Keep Render's proxy URL for streamtape sources so the browser
+                                // fetches via Render (same IP as extraction).
+                                try {
+                                    const h = new URL(rawUrl).hostname;
+                                    if (h.includes('streamtape') && rawUrl.includes('/get_video')) {
+                                        // s.url is already Render-proxied — pass it through
+                                        return {
+                                            ...s,
+                                            originalUrl: rawUrl,
+                                        };
+                                    }
+                                } catch { /* fall through to CF Worker proxy */ }
+                                return {
+                                    ...s,
+                                    url: proxyUrl(rawUrl, proxyBase, referer),
+                                    originalUrl: rawUrl,
+                                };
+                            });
                             if (streamData.subtitles) {
                                 streamData.subtitles = streamData.subtitles.map(sub => ({
                                     ...sub,
