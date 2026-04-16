@@ -19,7 +19,7 @@ services:
         value: 8080
       # Canonical public URL (matches Render dashboard URL; used if RENDER_EXTERNAL_URL is unset)
       - key: BASE_URL
-        value: https://anifoxwatch-sm7s.onrender.com
+        value: https://anifoxwatch-ci33.onrender.com
       - key: CORS_ORIGIN
         value: "*"
       # Optional — enriches hero section banners/synopsis:
@@ -30,7 +30,7 @@ services:
   - type: cron
     name: anifoxwatch-keepalive
     schedule: "*/14 * * * *"
-    command: curl -fsS https://anifoxwatch-sm7s.onrender.com/health
+    command: curl -fsS https://anifoxwatch-ci33.onrender.com/health
     region: oregon
     plan: free
 
@@ -46,4 +46,4 @@ services:
       # Primary API: Cloudflare Workers (no cold starts, global edge).
       # Render backend is used as fallback for Puppeteer-dependent routes.
       - key: VITE_API_URL
-        value: https://anifoxwatch-api.anya-bot.workers.dev
+        value: https://anifoxwatch-ci33.onrender.com

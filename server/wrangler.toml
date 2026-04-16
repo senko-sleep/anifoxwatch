@@ -8,7 +8,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 NODE_ENV = "production"
-RENDER_BACKEND_URL = "https://anifoxwatch-sm7s.onrender.com"
+RENDER_BACKEND_URL = "https://anifoxwatch-ci33.onrender.com"
 
 # Use serverless-http/express adapter behavior
 [observability]

@@ -23,7 +23,7 @@ export interface ApiConfig {
 export const API_DEPLOYMENTS = {
     local: 'http://localhost:3001',
     cloudflare: 'https://anifoxwatch-api.anya-bot.workers.dev',
-    render: 'https://anifoxwatch-sm7s.onrender.com',
+    render: 'https://anifoxwatch-ci33.onrender.com',
     firebase: '/api', // Firebase Functions proxy endpoint
     custom: '' // Will be set from environment variable
 } as const;
@@ -59,7 +59,7 @@ function configFromUrl(envApiUrl: string): ApiConfig {
  * - **`VITE_DEV_API_URL`:** absolute override (e.g. another port).
  *
  * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then Render default
- * (`https://anifoxwatch-sm7s.onrender.com` unless overridden).
+ * (`https://anifoxwatch-ci33.onrender.com` unless overridden).
  */
 /**
  * Build the URL for an API path. When `baseUrl` is empty (local dev + Vite proxy),

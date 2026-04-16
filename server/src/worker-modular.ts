@@ -54,7 +54,7 @@ app.use('*', async (c, next) => {
 // ============================================
 // Render backend URL for Puppeteer-dependent fallbacks
 // ============================================
-const RENDER_BACKEND_URL = 'https://anifoxwatch-sm7s.onrender.com';
+const RENDER_BACKEND_URL = 'https://anifoxwatch-ci33.onrender.com';
 
 // ============================================
 // Health Check
