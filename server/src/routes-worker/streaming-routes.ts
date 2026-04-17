@@ -205,8 +205,23 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
         let streamData: StreamPayload = { sources: [], subtitles: [] };
         let lastError: string | null = null;
 
-        // 1) Try local CF Worker sources
-        if (typeof sourceManager.getStreamingLinks === 'function') {
+        // IDs that require Render's full SourceManager (AnimeKai, HiAnime/aniwatch-style, etc.)
+        // The CF Worker's CloudflareSourceManager only handles gogoanime/consumet/adult IDs.
+        // Sending these to the local manager wastes 30s before it falls through to Render.
+        const RENDER_ONLY_PREFIXES = ['animekai-', 'kaido-', 'miruro-', '9anime-', 'zoro-', 'aniwave-',
+            'allanime-', 'animepahe-', 'gogoanime-', 'animefox-', 'animeflv-', 'anix-', 'consumet-'];
+        const isRenderOnlyId = (id: string): boolean => {
+            const low = id.toLowerCase();
+            if (RENDER_ONLY_PREFIXES.some(p => low.startsWith(p))) return true;
+            // AnimeKai episode format: slug$ep=N$token=KEY
+            if (/\$ep=\d+(\$token=|\$)/.test(id)) return true;
+            // aniwatch/HiAnime episode format: slug?ep=NNNNN
+            if (/^[^?]+\?ep=\d+$/.test(id)) return true;
+            return false;
+        };
+
+        // 1) Try local CF Worker sources (only for IDs it can actually handle)
+        if (!isRenderOnlyId(episodeId) && typeof sourceManager.getStreamingLinks === 'function') {
             try {
                 streamData = await sourceManager.getStreamingLinks(episodeId, explicitServer, category || 'sub') as StreamPayload;
             } catch (e: unknown) {
