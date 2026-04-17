@@ -22,12 +22,13 @@ async function ping() {
   if (!isTabVisible) return;
 
   try {
-    await fetch(apiUrl('/health'), { 
-      method: 'HEAD',
+    // GET (not HEAD): Express exposes GET /health; some proxies handle GET more reliably than HEAD.
+    await fetch(apiUrl('/health'), {
+      method: 'GET',
       mode: 'cors',
       cache: 'no-cache',
       referrerPolicy: 'no-referrer',
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(10000),
     });
     consecutiveFailures = 0;
   } catch {

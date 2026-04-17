@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiUrl } from '@/lib/api-config';
+import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
 import { isPlaceholderAnimeDescription } from '@/lib/utils';
 
 /**
@@ -188,11 +189,7 @@ function clientRecencyScore(m: Record<string, unknown>): number {
 }
 
 async function fetchAniListPage(query: string): Promise<Record<string, unknown>[]> {
-  const response = await fetch('https://graphql.anilist.co', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ query }),
-  });
+  const response = await fetchAniListGraphQL({ query });
   const json = await response.json();
   if (json.errors) throw new Error(json.errors[0]?.message || 'AniList query failed');
   return json?.data?.Page?.media || [];

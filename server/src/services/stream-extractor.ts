@@ -99,11 +99,21 @@ class StreamExtractor {
             const capturedM3u8s = new Set<string>();
             const capturedSubtitles = new Set<string>();
 
+            const looksLikeHls = (reqUrl: string) => {
+                const u = reqUrl.toLowerCase();
+                if (u.includes('subtitle') || u.includes('thumb')) return false;
+                return (
+                    u.includes('.m3u8') ||
+                    u.includes('/hls/') ||
+                    u.includes('application/x-mpegurl') ||
+                    /\/playlist\.?[a-z0-9]*$/i.test(reqUrl)
+                );
+            };
+
             page.on('request', (request) => {
                 const reqUrl = request.url();
 
-                // Capture m3u8 requests
-                if (reqUrl.includes('.m3u8') && !reqUrl.includes('subtitles')) {
+                if (looksLikeHls(reqUrl)) {
                     capturedM3u8s.add(reqUrl);
                     logger.info(`[StreamExtractor] Captured m3u8: ${reqUrl.substring(0, 100)}...`);
                 }
@@ -132,17 +142,19 @@ class StreamExtractor {
                 }
             });
 
-            // Navigate to the page
+            const isHiAnimeFamily =
+                /aniwatchtv\.to|hianime|zoro\.to|9anime/i.test(watchBaseUrl) ||
+                /aniwatchtv\.to|hianime/i.test(url);
+
+            // HiAnime pages keep long-polling; networkidle2 often never resolves. Use DOM + extra soak time.
             await page.goto(url, {
-                waitUntil: 'networkidle2',
-                timeout: 45000
+                waitUntil: isHiAnimeFamily ? 'domcontentloaded' : 'networkidle2',
+                timeout: isHiAnimeFamily ? 60_000 : 45_000,
             });
 
-            // Wait for the video player iframe to load
-            await page.waitForSelector('iframe', { timeout: 15000 }).catch(() => { });
+            await page.waitForSelector('iframe', { timeout: 20_000 }).catch(() => {});
 
-            // Wait a bit for streams to start loading
-            await this.delay(5000);
+            await this.delay(isHiAnimeFamily ? 14_000 : 5000);
 
             // Try clicking play button if video is paused
             try {
@@ -166,7 +178,7 @@ class StreamExtractor {
 
                 embedPage.on('request', (request) => {
                     const reqUrl = request.url();
-                    if (reqUrl.includes('.m3u8') && !reqUrl.includes('subtitles')) {
+                    if (looksLikeHls(reqUrl)) {
                         capturedM3u8s.add(reqUrl);
                         logger.info(`[StreamExtractor] Captured from embed: ${reqUrl.substring(0, 100)}...`);
                     }
@@ -175,12 +187,11 @@ class StreamExtractor {
 
                 try {
                     await embedPage.goto(iframeSrc, {
-                        waitUntil: 'networkidle0',
-                        timeout: 30000
+                        waitUntil: isHiAnimeFamily ? 'domcontentloaded' : 'networkidle0',
+                        timeout: isHiAnimeFamily ? 45_000 : 30_000,
                     });
 
-                    // Wait for video to potentially load
-                    await this.delay(8000);
+                    await this.delay(isHiAnimeFamily ? 15_000 : 8000);
 
                     // Try to get video src directly
                     const videoSrc = await embedPage.evaluate(() => {

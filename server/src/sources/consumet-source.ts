@@ -240,15 +240,38 @@ export class ConsumetSource extends BaseAnimeSource {
     /**
      * Get available streaming servers for an episode
      */
+    /** Strip `consumet-` / `consumet-{provider}-` prefix from episode ids passed from SourceManager. */
+    private stripConsumetEpisodePrefix(id: string): string {
+        return id
+            .replace(/^consumet-gogoanime-/i, '')
+            .replace(/^consumet-zoro-/i, '')
+            .replace(/^consumet-/i, '');
+    }
+
+    /** HiAnime / aniwatch watch URLs use `slug?ep=KEY` — the Consumet API expects the `zoro` routes, not `gogoanime`. */
+    private effectiveProviderForEpisodeId(strippedId: string): 'gogoanime' | 'zoro' | '9anime' {
+        if (this.provider === '9anime') return '9anime';
+        if (this.provider === 'zoro') return 'zoro';
+        return /^[^/?]+\?ep=\d+$/i.test(strippedId) ? 'zoro' : 'gogoanime';
+    }
+
+    private consumetWatchBase(provider: 'gogoanime' | 'zoro' | '9anime'): string {
+        return `${this.baseUrl}/anime/${provider}`;
+    }
+
     async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         const cacheKey = `servers:${episodeId}`;
         const cached = this.getCached<EpisodeServer[]>(cacheKey);
         if (cached) return cached;
 
         try {
-            const response = await this.client.get(`/servers/${episodeId}`, {
+            const raw = this.stripConsumetEpisodePrefix(episodeId);
+            const prv = this.effectiveProviderForEpisodeId(raw);
+            const enc = encodeURIComponent(raw);
+            const response = await axios.get(`${this.consumetWatchBase(prv)}/servers/${enc}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000
+                timeout: options?.timeout || 5000,
+                headers: this.client.defaults.headers as any,
             });
             const servers: EpisodeServer[] = (response.data || []).map((s: { name: string; url: string; type?: string }) => ({
                 name: s.name,
@@ -277,10 +300,14 @@ export class ConsumetSource extends BaseAnimeSource {
             if (server) params.server = server;
             // Add category if server/provider supports it
 
-            const response = await this.client.get(`/watch/${episodeId}`, {
+            const raw = this.stripConsumetEpisodePrefix(episodeId);
+            const prv = this.effectiveProviderForEpisodeId(raw);
+            const enc = encodeURIComponent(raw);
+            const response = await axios.get(`${this.consumetWatchBase(prv)}/watch/${enc}`, {
                 params,
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: options?.timeout || 15000,
+                headers: this.client.defaults.headers as any,
             });
 
             const streamData: StreamingData = {

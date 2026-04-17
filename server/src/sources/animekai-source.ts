@@ -3,10 +3,61 @@
  * Reliable backup streaming provider
  */
 
+import axios, { AxiosError } from 'axios';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
+
+function axiosConfigFullUrl(cfg: AxiosError['config']): string {
+    if (!cfg) return '';
+    const u = cfg.url || '';
+    if (u.startsWith('http')) return u;
+    const base = (cfg.baseURL || '').replace(/\/$/, '');
+    const path = u.startsWith('/') ? u : `/${u}`;
+    return `${base}${path}`;
+}
+
+/** Consumet AnimeKai → MegaUp posts to enc-dec.app/api/dec-mega; often 400 "please do not deploy at scale" or "queue full". */
+function isConsumetEmbedDecoderRejected(err: unknown): boolean {
+    const bodyContainsDeploy = (raw: unknown): boolean => {
+        const bodyStr =
+            typeof raw === 'string'
+                ? raw
+                : raw && typeof raw === 'object'
+                  ? JSON.stringify(raw) +
+                    ('error' in (raw as object) ? String((raw as { error?: string }).error || '') : '')
+                  : '';
+        return /please do not deploy at scale|queue full|decrypt failure/i.test(bodyStr);
+    };
+
+    const inspect = (e: unknown): boolean => {
+        if (axios.isAxiosError(e)) {
+            const status = e.response?.status;
+            const fullUrl = axiosConfigFullUrl(e.config);
+            const raw = e.response?.data;
+            if (bodyContainsDeploy(raw)) return true;
+            if (status === 400 && /enc-dec\.app|\/dec-mega\b/i.test(fullUrl)) return true;
+            if (status === 400 && /\/dec-mega\b/i.test(String(e.config?.url || ''))) return true;
+        }
+        // Some builds lose `axios.isAxiosError` identity — duck-type 400 + dec endpoint
+        if (e && typeof e === 'object' && 'response' in e && 'config' in e) {
+            const ex = e as { response?: { status?: number; data?: unknown }; config?: AxiosError['config'] };
+            if (ex.response?.status === 400) {
+                const fullUrl = axiosConfigFullUrl(ex.config);
+                if (/enc-dec\.app|\/dec-mega\b/i.test(fullUrl)) return true;
+                if (bodyContainsDeploy(ex.response.data)) return true;
+            }
+        }
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/please do not deploy at scale|queue full|decrypt failure/i.test(msg)) return true;
+        return false;
+    };
+    if (inspect(err)) return true;
+    const cause = err && typeof err === 'object' && 'cause' in err ? (err as { cause?: unknown }).cause : undefined;
+    if (cause !== undefined) return isConsumetEmbedDecoderRejected(cause);
+    return false;
+}
 
 let ANIME: any = null;
 async function getConsumet() {
@@ -204,17 +255,21 @@ export class AnimeKaiSource extends BaseAnimeSource {
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached && !cached.sources.some(s => this.isBrokenCdn(s.url))) return cached;
 
+        // Strip source prefix added by SourceManager when AnimeKai is a fallback for other sources.
+        // The consumet AnimeKai provider expects its native episode ID (e.g. slug$ep=N$token=KEY).
+        const rawEpisodeId = episodeId.replace(/^animekai-/i, '');
+
         try {
             const p = await this.getProvider();
             const mod = await import('@consumet/extensions');
             const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
-            logger.info(`Fetching ${category} stream from AnimeKai for ${episodeId}`, undefined, this.name);
+            logger.info(`Fetching ${category} stream from AnimeKai for ${rawEpisodeId}`, undefined, this.name);
 
-            // Try up to 3 times — CDN assignment is load-balanced, retries often get a working domain
-            for (let attempt = 0; attempt < 3; attempt++) {
+            // Try twice — keep total time under SourceManager executeReliably budget
+            for (let attempt = 0; attempt < 2; attempt++) {
                 const data = await Promise.race([
-                    p.fetchEpisodeSources(episodeId, undefined, subOrDub),
-                    new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
+                    p.fetchEpisodeSources(rawEpisodeId, undefined, subOrDub),
+                    new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 10_000))
                 ]);
 
                 if (!data.sources?.length) {
@@ -222,7 +277,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
                 }
 
                 const hasBrokenUrl = data.sources.some((s: any) => this.isBrokenCdn(s.url));
-                if (hasBrokenUrl && attempt < 2) {
+                if (hasBrokenUrl && attempt < 1) {
                     logger.warn(`AnimeKai: Got broken CDN domain on attempt ${attempt + 1}, retrying...`, undefined, this.name);
                     await new Promise(r => setTimeout(r, 500));
                     continue;
@@ -257,6 +312,14 @@ export class AnimeKaiSource extends BaseAnimeSource {
             // is still online, it just can't serve this episode via that server. Returning empty
             // sources here avoids incrementing the consecutive-failure counter and prevents the
             // source from being incorrectly marked offline.
+            if (isConsumetEmbedDecoderRejected(error)) {
+                logger.warn(
+                    `AnimeKai: remote embed decoder unavailable or rate-limited (Consumet enc-dec); skipping`,
+                    undefined,
+                    this.name,
+                );
+                return { sources: [], subtitles: [] };
+            }
             if (/server .* not found/i.test(err.message)) {
                 logger.warn(`AnimeKai: CDN server unavailable for ${episodeId} — ${err.message}`, undefined, this.name);
                 return { sources: [], subtitles: [] };

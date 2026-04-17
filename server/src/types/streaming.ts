@@ -7,6 +7,8 @@ export interface VideoSource {
     quality: '360p' | '480p' | '720p' | '1080p' | 'auto' | 'default';
     isM3U8: boolean;
     isDASH?: boolean;
+    isDirect?: boolean;
+    originalUrl?: string;
     size?: number;
 }
 

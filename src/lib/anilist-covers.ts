@@ -7,6 +7,7 @@
  */
 
 import { Anime } from '@/types/anime';
+import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -76,8 +77,8 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
   const result = new Map<string, AniListCoverMedia>();
   if (titles.length === 0) return result;
 
-  // AniList complexity limit: batch max 25 at a time
-  const BATCH_SIZE = 25;
+  // Smaller batches = lower per-request complexity (helps avoid 429s with public limits).
+  const BATCH_SIZE = 12;
 
   // For adult content, skip non-adult filter query and use adult filter instead
   // This avoids 25 wasted API calls that would miss hentai anyway
@@ -92,11 +93,7 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
       const query = `{ ${fragments.join(' ')} }`;
 
       try {
-        const response = await fetch('https://graphql.anilist.co', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ query }),
-        });
+        const response = await fetchAniListGraphQL({ query });
 
         if (!response.ok) continue;
 
@@ -121,20 +118,20 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
     const query = buildBatchQuery(batch, false);
 
     try {
-      const response = await fetch('https://graphql.anilist.co', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ query }),
-      });
+      const response = await fetchAniListGraphQL({ query });
 
       if (!response.ok) {
-        console.warn(`[AniList covers] HTTP ${response.status}`);
+        if (import.meta.env.DEV) {
+          console.debug('[AniList covers] HTTP', response.status);
+        }
         continue;
       }
 
       const json = await response.json();
       if (json.errors) {
-        console.warn('[AniList covers] Query errors:', json.errors[0]?.message);
+        if (import.meta.env.DEV) {
+          console.debug('[AniList covers] GraphQL:', json.errors[0]?.message);
+        }
         continue;
       }
 
@@ -146,8 +143,8 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
           result.set(key, media);
         }
       }
-    } catch (err) {
-      console.warn('[AniList covers] Batch fetch failed:', err);
+    } catch {
+      /* network / abort — covers stay as-is */
     }
   }
 
@@ -217,8 +214,13 @@ export async function enrichWithAniListCovers(anime: Anime[], includeAdult: bool
   const uniqueNeeded = [...new Set(needsFetch)];
 
   if (uniqueNeeded.length > 0) {
-    // Dedup inflight by sorted batch key
-    const batchKey = uniqueNeeded.slice(0, 5).map(normTitle).sort().join('|');
+    const joined = uniqueNeeded.map(normTitle).sort().join('\u241e');
+    let h = 2166136261;
+    for (let i = 0; i < joined.length; i++) {
+      h ^= joined.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    const batchKey = `${uniqueNeeded.length}:${(h >>> 0).toString(16)}`;
     const existing = inflight.get(batchKey);
     if (existing) return existing;
 
@@ -232,8 +234,8 @@ export async function enrichWithAniListCovers(anime: Anime[], includeAdult: bool
           if (coverUrl) cache.set(key, coverUrl);
         }
         persistCache();
-      } catch (err) {
-        console.warn('[AniList covers] enrichment failed:', err);
+      } catch {
+        /* enrichment is best-effort */
       } finally {
         inflight.delete(batchKey);
       }

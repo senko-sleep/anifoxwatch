@@ -1,14 +1,17 @@
 /**
  * MiruroSource — scrapes miruro.in for episode metadata, then resolves streams
- * via @consumet/extensions Zoro (aniwatchtv.to mirror).
+ * via the official `aniwatch` scraper (aniwatchtv / hianime embeds) and @consumet/extensions Hianime as fallback.
+ * (Consumet v1.8+ removed ANIME.Zoro — use Hianime + aniwatch package instead.)
  */
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { HiAnime } from 'aniwatch';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
+import { streamExtractor } from '../services/stream-extractor.js';
 
 let CONSUMET_MOD: any = null;
 async function getConsumetMod() {
@@ -16,26 +19,141 @@ async function getConsumetMod() {
     return CONSUMET_MOD;
 }
 
+let aniwatchScraper: InstanceType<typeof HiAnime.Scraper> | null = null;
+function getAniwatchScraper(): InstanceType<typeof HiAnime.Scraper> {
+    if (!aniwatchScraper) aniwatchScraper = new HiAnime.Scraper();
+    return aniwatchScraper;
+}
+
 export class MiruroSource extends BaseAnimeSource {
     name = 'Miruro';
     baseUrl = 'https://www.miruro.in';
     private consumetProvider: any = null;
 
+    /**
+     * Timestamp until which we skip the aniwatch scraper and puppeteer because
+     * aniwatchtv.to is returning a Cloudflare challenge page (non-HTML) for all
+     * server-side requests. Set when we see "cheerio.load() expects a string".
+     */
+    private aniwatchSiteBlockedUntil = 0;
+    private readonly SITE_BLOCK_TTL_MS = 5 * 60 * 1000;
+
     private async getConsumetProvider() {
         if (!this.consumetProvider) {
             const mod = await getConsumetMod();
-            this.consumetProvider = new mod.ANIME.Zoro();
+            this.consumetProvider = new mod.ANIME.Hianime();
             (this.consumetProvider as { baseUrl: string }).baseUrl = 'https://aniwatchtv.to';
         }
         return this.consumetProvider;
     }
 
     private stripPrefix(id: string): string {
-        return id.replace(/^miruro-/i, '');
+        return id.replace(/^miruro-/i, '').replace(/^kaido-/i, '');
     }
 
+    /** `aniwatch` package expects `slug?ep=EPISODE_KEY` (same as the watch URL). */
+    private toAniwatchEpisodeQuery(id: string): string {
+        let s = this.stripPrefix(id);
+        const tokenForm = /^(.+)\$ep=\d+\$token=(.+)$/i.exec(s);
+        if (tokenForm) return `${tokenForm[1]}?ep=${tokenForm[2]}`;
+        const dollarEp = /^(.+)\$ep=(\d+)$/i.exec(s);
+        if (dollarEp) return `${dollarEp[1]}?ep=${dollarEp[2]}`;
+        if (s.includes('?ep=')) return s;
+        if (s.includes('$episode$')) return s.replace('$episode$', '?ep=');
+        return s;
+    }
+
+    /** Consumet Hianime expects `slug$episode$KEY` with literal `$episode$`. */
     private toConsumetEpId(id: string): string {
-        return id.replace('?ep=', '$episode$');
+        let s = this.stripPrefix(id);
+        const tokenForm = /^(.+)\$ep=\d+\$token=(.+)$/i.exec(s);
+        if (tokenForm) return `${tokenForm[1]}$episode$${tokenForm[2]}`;
+        const dollarEp = /^(.+)\$ep=(\d+)$/i.exec(s);
+        if (dollarEp) return `${dollarEp[1]}$episode$${dollarEp[2]}`;
+        return s.replace('?ep=', '$episode$');
+    }
+
+    /**
+     * For `slug$ep=N$token=KEY` embeds, sites sometimes resolve streams with either the token or the display ep#.
+     * Try both so at least one matches the upstream episode table.
+     */
+    private episodeIdVariantsForStreaming(id: string): { aniwatch: string[]; consumet: string[] } {
+        const raw = this.stripPrefix(id);
+        const tok = /^(.+)\$ep=(\d+)\$token=(.+)$/i.exec(raw);
+        if (tok) {
+            const slug = tok[1];
+            const epNum = tok[2];
+            const tokenKey = tok[3];
+            const aw = [`${slug}?ep=${tokenKey}`, `${slug}?ep=${epNum}`];
+            const cc = [`${slug}$episode$${tokenKey}`, `${slug}$episode$${epNum}`];
+            return {
+                aniwatch: [...new Set(aw)],
+                consumet: [...new Set(cc)],
+            };
+        }
+        return {
+            aniwatch: [this.toAniwatchEpisodeQuery(id)],
+            consumet: [this.toConsumetEpId(id)],
+        };
+    }
+
+    /** `HiAnime.Scraper().getEpisodeSources` expects `slug?ep=INTERNAL_ID` (watch page shape). Skip malformed IDs. */
+    private isValidAniwatchEpQuery(q: string): boolean {
+        const idx = q.indexOf('?ep=');
+        if (idx < 1) return false;
+        const slug = q.slice(0, idx).trim();
+        const epVal = q.slice(idx + 4).trim();
+        return slug.length >= 3 && epVal.length >= 1 && !slug.includes('/');
+    }
+
+    /**
+     * Watch URLs use `?ep=<internal id>`. Users often pass `?ep=1` for episode 1.
+     * Only values in 1…MAX are treated as display episode numbers; HiAnime internal keys are usually
+     * much larger (e.g. 94388) and must not trigger a full episode-list fetch before every stream.
+     */
+    private static readonly DISPLAY_EPISODE_RESOLVE_MAX = 3000;
+
+    private async resolveDisplayEpisodeIfNeeded(id: string): Promise<string> {
+        if (Date.now() < this.aniwatchSiteBlockedUntil) return id;
+
+        const aw = this.toAniwatchEpisodeQuery(id);
+        const m = /^([^?]+)\?ep=(\d+)$/.exec(aw);
+        if (!m) return id;
+        const slug = m[1];
+        const epNum = parseInt(m[2], 10);
+        const max = MiruroSource.DISPLAY_EPISODE_RESOLVE_MAX;
+        if (!Number.isFinite(epNum) || epNum < 1 || epNum > max) return id;
+
+        try {
+            const scraper = getAniwatchScraper();
+            const list = await Promise.race([
+                scraper.getEpisodes(slug),
+                new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 12_000)),
+            ]);
+            const hit = list.episodes?.find((e: { number: number }) => e.number === epNum);
+            if (!hit?.episodeId?.includes('?ep=')) return id;
+
+            const internal = hit.episodeId;
+            logger.info(
+                `[Miruro] resolved display episode ${epNum} → ${internal.split('?ep=')[1]} (HiAnime internal ?ep=)`,
+                undefined,
+                this.name,
+            );
+            if (/^miruro-/i.test(id)) return `miruro-${internal}`;
+            if (/^kaido-/i.test(id)) return `kaido-${internal}`;
+            return internal;
+        } catch {
+            return id;
+        }
+    }
+
+    private normalizeAniwatchServer(server?: string): 'hd-1' | 'hd-2' | 'megacloud' | 'streamsb' | 'streamtape' {
+        const s = (server || 'hd-1').toLowerCase();
+        if (s.includes('hd-2') || s.includes('vidcloud')) return 'hd-2';
+        if (s.includes('mega')) return 'megacloud';
+        if (s.includes('sb')) return 'streamsb';
+        if (s.includes('tape')) return 'streamtape';
+        return 'hd-1';
     }
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
@@ -231,45 +349,210 @@ export class MiruroSource extends BaseAnimeSource {
         category: 'sub' | 'dub' = 'sub',
         options?: SourceRequestOptions,
     ): Promise<StreamingData> {
-        return this.tryZoroStreaming(episodeId, server, category, options);
+        const resolvedEpisodeId = await this.resolveDisplayEpisodeIfNeeded(episodeId);
+        let data = await this.runMiruroStack(resolvedEpisodeId, server, category, options);
+        if (data.sources.length > 0) return data;
+        if (category === 'dub') {
+            logger.info(`[Miruro] no dub sources, trying sub for same episode`, undefined, this.name);
+            data = await this.runMiruroStack(resolvedEpisodeId, server, 'sub', options);
+        }
+        return data;
     }
 
-    private async tryZoroStreaming(
-        episodeId: string,
-        server?: string,
-        category: 'sub' | 'dub' = 'sub',
+    private async runMiruroStack(
+        resolvedEpisodeId: string,
+        server: string | undefined,
+        category: 'sub' | 'dub',
         options?: SourceRequestOptions,
     ): Promise<StreamingData> {
+        const fromAniwatch = await this.tryAniwatchPackage(resolvedEpisodeId, server, category, options);
+        if (fromAniwatch.sources.length > 0) return fromAniwatch;
+        const fromConsumet = await this.tryConsumetHianime(resolvedEpisodeId, server, category, options);
+        if (fromConsumet.sources.length > 0) return fromConsumet;
+        return this.tryPuppeteerAniwatchTv(resolvedEpisodeId, category);
+    }
+
+    /**
+     * When `aniwatch` npm + in-process Consumet fail (TLS / decoder / API quirks), load the real
+     * watch page on aniwatchtv.to and capture HLS the same way Kaido does for 9animetv.
+     */
+    private async tryPuppeteerAniwatchTv(
+        episodeId: string,
+        category: 'sub' | 'dub',
+    ): Promise<StreamingData> {
+        if (Date.now() < this.aniwatchSiteBlockedUntil) {
+            logger.warn(`[Miruro/puppeteer] skipping — aniwatchtv.to Cloudflare-blocked`, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        }
+
+        const raw = this.stripPrefix(episodeId);
+        const m = /^([^?]+)\?ep=(.+)$/.exec(raw);
+        if (!m) return { sources: [], subtitles: [] };
+
+        const slug = m[1];
+        const epKey = m[2].trim();
+        if (!slug || !epKey) return { sources: [], subtitles: [] };
+
         try {
-            const mod = await getConsumetMod();
-            const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
-            const consumetId = this.toConsumetEpId(episodeId);
+            logger.info(`[Miruro/puppeteer] ${category} aniwatchtv.to/${slug}?ep=${epKey}`, undefined, this.name);
+            const result = await streamExtractor.extractFrom9Anime(slug, epKey, 'https://aniwatchtv.to');
+            if (!result.success || result.streams.length === 0) {
+                return { sources: [], subtitles: [] };
+            }
+            this.handleSuccess();
+            return {
+                sources: result.streams.map(
+                    (s): VideoSource => ({
+                        url: s.url,
+                        quality: (s.quality as VideoSource['quality']) || 'auto',
+                        isM3U8: s.type === 'hls',
+                    }),
+                ),
+                subtitles: result.subtitles.map((t) => ({
+                    url: t.url,
+                    lang: t.lang,
+                    label: t.lang,
+                })),
+                headers: { Referer: 'https://aniwatchtv.to/' },
+                source: this.name,
+            };
+        } catch (e) {
+            logger.warn(`[Miruro/puppeteer] ${(e as Error).message?.slice(0, 120)}`, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        }
+    }
 
-            const serversToTry = server ? [server] : [mod.StreamingServers.MegaCloud, mod.StreamingServers.VidCloud];
+    /** Primary: `aniwatch` npm (maintained for aniwatchtv.to / hianime-style IDs). */
+    private async tryAniwatchPackage(
+        episodeId: string,
+        server: string | undefined,
+        category: 'sub' | 'dub',
+        options?: SourceRequestOptions,
+    ): Promise<StreamingData> {
+        if (Date.now() < this.aniwatchSiteBlockedUntil) {
+            logger.warn(`[Miruro/aniwatch] skipping — site blocked until cache expires`, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        }
 
+        const { aniwatch: epQueries } = this.episodeIdVariantsForStreaming(episodeId);
+        const cat: 'sub' | 'dub' | 'raw' = category === 'dub' ? 'dub' : 'sub';
+        const prefer = this.normalizeAniwatchServer(server);
+        const serversToTry = server ? [prefer] : (['hd-1', 'hd-2', 'megacloud'] as const);
+
+        for (const epQuery of epQueries) {
+            if (!this.isValidAniwatchEpQuery(epQuery)) {
+                logger.warn(`[Miruro/aniwatch] skip invalid episode query shape`, { epQuery }, this.name);
+                continue;
+            }
             for (const srv of serversToTry) {
                 try {
-                    logger.info(`[Miruro/zoro] ${category} ${consumetId} → ${srv}`, undefined, this.name);
-                    const p = await this.getConsumetProvider();
+                    logger.info(`[Miruro/aniwatch] ${category} ${epQuery} → ${srv}`, undefined, this.name);
+                    const scraper = getAniwatchScraper();
                     const data = await Promise.race([
-                        p.fetchEpisodeSources(consumetId, srv, subOrDub),
-                        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000)),
+                        scraper.getEpisodeSources(epQuery, srv, cat),
+                        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 14_000)),
                     ]);
 
-                    if (data.sources?.length > 0) {
-                        const sd = this.mapStreamingData(data);
-                        logger.info(`[Miruro/zoro] ✅ ${sd.sources.length} ${category} sources via ${srv}`, undefined, this.name);
+                    if (data.sources?.length) {
+                        const sd = this.mapAniwatchToStreaming(data);
+                        logger.info(`[Miruro/aniwatch] ✅ ${sd.sources.length} ${category} sources (${srv})`, undefined, this.name);
                         this.handleSuccess();
                         return sd;
                     }
                 } catch (err) {
-                    logger.warn(`[Miruro/zoro] ${srv} fail: ${(err as Error).message?.substring(0, 80)}`, undefined, this.name);
+                    const msg = (err as Error).message || '';
+                    // "cheerio.load() expects a string" means aniwatchtv.to returned a non-HTML
+                    // Cloudflare challenge page. Puppeteer (headless Chrome) is also blocked, so
+                    // skip both for the next 5 minutes.
+                    if (msg.includes('cheerio.load() expects a string')) {
+                        this.aniwatchSiteBlockedUntil = Date.now() + this.SITE_BLOCK_TTL_MS;
+                        logger.warn(`[Miruro/aniwatch] Cloudflare block detected — suppressing puppeteer for ${this.SITE_BLOCK_TTL_MS / 60000} min`, undefined, this.name);
+                        return { sources: [], subtitles: [] };
+                    }
+                    logger.warn(`[Miruro/aniwatch] ${srv} fail: ${msg.substring(0, 100)}`, undefined, this.name);
+                }
+            }
+        }
+        return { sources: [], subtitles: [] };
+    }
+
+    private mapAniwatchToStreaming(data: {
+        sources?: Array<{ url: string; quality?: string; isM3U8?: boolean }>;
+        subtitles?: Array<{ url: string; lang?: string }>;
+        headers?: Record<string, string>;
+        intro?: StreamingData['intro'];
+    }): StreamingData {
+        const sources = data.sources || [];
+        const subtitles = data.subtitles || [];
+        return {
+            sources: sources.map(
+                (s): VideoSource => ({
+                    url: s.url,
+                    quality: (s.quality as VideoSource['quality']) || 'auto',
+                    isM3U8: !!(s.isM3U8 || s.url?.includes?.('.m3u8')),
+                }),
+            ),
+            subtitles: subtitles.map((t) => ({
+                url: t.url,
+                lang: t.lang || 'Unknown',
+                label: t.lang || 'Unknown',
+            })),
+            headers: data.headers || { Referer: 'https://aniwatchtv.to/' },
+            intro: data.intro,
+            source: this.name,
+        };
+    }
+
+    /** Fallback: @consumet/extensions Hianime (same site family; useful if aniwatch pkg hits extractor edge cases). */
+    private async tryConsumetHianime(
+        episodeId: string,
+        server: string | undefined,
+        category: 'sub' | 'dub' = 'sub',
+        _options?: SourceRequestOptions,
+    ): Promise<StreamingData> {
+        try {
+            const mod = await getConsumetMod();
+            const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
+            const { consumet: consumetIds } = this.episodeIdVariantsForStreaming(episodeId);
+
+            const serversToTry = server
+                ? [this.mapStreamServerToConsumet(server, mod)]
+                : [mod.StreamingServers.MegaCloud, mod.StreamingServers.VidCloud, mod.StreamingServers.VidStreaming];
+
+            for (const consumetId of consumetIds) {
+                for (const srv of serversToTry) {
+                    if (srv === undefined) continue;
+                    try {
+                        logger.info(`[Miruro/consumet] ${category} ${consumetId} → ${srv}`, undefined, this.name);
+                        const p = await this.getConsumetProvider();
+                        const data = await Promise.race([
+                            p.fetchEpisodeSources(consumetId, srv, subOrDub),
+                            new Promise<never>((_, rej) => setTimeout(() => rej(new Error('timeout')), 11_000)),
+                        ]);
+
+                        if (data.sources?.length > 0) {
+                            const sd = this.mapStreamingData(data);
+                            logger.info(`[Miruro/consumet] ✅ ${sd.sources.length} ${category} sources via ${srv}`, undefined, this.name);
+                            this.handleSuccess();
+                            return sd;
+                        }
+                    } catch (err) {
+                        logger.warn(`[Miruro/consumet] ${srv} fail: ${(err as Error).message?.substring(0, 80)}`, undefined, this.name);
+                    }
                 }
             }
         } catch (err) {
-            logger.warn(`[Miruro/zoro] init fail: ${(err as Error).message?.substring(0, 60)}`, undefined, this.name);
+            logger.warn(`[Miruro/consumet] init fail: ${(err as Error).message?.substring(0, 60)}`, undefined, this.name);
         }
         return { sources: [], subtitles: [] };
+    }
+
+    private mapStreamServerToConsumet(server: string, mod: any) {
+        const s = server.toLowerCase();
+        if (s.includes('vid') && s.includes('stream')) return mod.StreamingServers.VidStreaming;
+        if (s.includes('vid') || s.includes('hd-2')) return mod.StreamingServers.VidCloud;
+        if (s.includes('mega')) return mod.StreamingServers.MegaCloud;
+        return mod.StreamingServers.VidCloud;
     }
 
     private mapStreamingData(data: {

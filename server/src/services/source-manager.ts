@@ -136,6 +136,9 @@ export class SourceManager {
         // PRODUCTION: AllAnime — GraphQL API + fast4speed.rsvp CDN (accessible from cloud IPs)
         this.registerSource(new AllAnimeSource());
 
+        // Miruro / aniwatch-style episode IDs (see getStreamingSource $token= routing)
+        this.registerSource(new MiruroSource());
+
         // BACKUP: Kaido (kaido.to) — used for enrichment + streaming fallback
         this.registerSource(new KaidoSource());
 
@@ -143,7 +146,6 @@ export class SourceManager {
         this.registerSource(new ZoroSource());
 
         // New expansions
-        this.registerSource(new MiruroSource());
         this.registerSource(new AniwaveSource());
         this.registerSource(new AnixSource());
 
@@ -797,7 +799,7 @@ export class SourceManager {
         'animekai-', 'animepahe-',
         '9anime-', 'gogoanime-', 'consumet-',
         'animeflv-', 'anilist-', 'watchhentai-', 'hanime-', 'akih-',
-        'aniwave-', 'aniwatch-', 'allanime-'
+            'aniwave-', 'aniwatch-', 'allanime-', 'miruro-'
     ];
 
     /**
@@ -877,7 +879,8 @@ export class SourceManager {
             'AnimeLand': 'animeland-',
             'AnimeFreak': 'animefreak-',
             'WatchHentai': 'watchhentai-',
-            'Hanime': 'hanime-'
+            'Hanime': 'hanime-',
+            'Miruro': 'miruro-'
         };
         
         const prefix = prefixMap[sourceName] || '';
@@ -921,6 +924,7 @@ export class SourceManager {
         }
 
         const prefixes = [
+            { prefix: 'miruro-', source: 'Miruro' },
             { prefix: 'kaido-', source: 'Kaido' },
             { prefix: 'aniwave-', source: '9Anime' },
             { prefix: 'aniwatch-', source: '9Anime' },
@@ -948,16 +952,23 @@ export class SourceManager {
             }
         }
 
+        // Miruro / aniwatch embed shape: "slug$ep=N$token=..." (server-side episode key — not plain ?ep=N on hi.anime).
+        if (/\$ep=\d+\$token=/i.test(id)) {
+            const miruro = this.sources.get('Miruro');
+            if (miruro?.isAvailable) return miruro;
+        }
+
         // Raw Consumet AnimeKai episode IDs have no "animekai-" prefix (see mapAnime vs episode id: ep.id).
         if (this.isAnimeKaiConsumetEpisodeId(id)) {
             const kai = this.sources.get('AnimeKai');
             if (kai?.isAvailable) return kai;
         }
 
-        // NineAnimeSource episode IDs omit the `9anime-` prefix: "{animeSlug}?ep={numericEpisodeKey}"
-        // (same watch URL shape as kaido.to). Without this, getStreamingSource() picks AnimeKai first,
-        // and executeReliably's default stream timeout is shorter than Puppeteer extraction.
+        // "{animeSlug}?ep={numericEpisodeKey}" — same watch URL as aniwatchtv / kaido.
+        // Prefer Miruro (aniwatch npm + Consumet hianime) before 9Anime (slow Puppeteer) or Kaido.
         if (/^[^?]+\?ep=\d+$/i.test(id)) {
+            const miruro = this.sources.get('Miruro');
+            if (miruro?.isAvailable) return miruro;
             const nine = this.sources.get('9Anime');
             if (nine?.isAvailable) return nine;
             const kaido = this.sources.get('Kaido');
@@ -2733,6 +2744,45 @@ export class SourceManager {
 
         console.log(`   📋 Sources to try (priority-ordered): ${finalSources.map(s => s.name).join(', ')}`);
 
+        /** Prefer Miruro + API mirrors for aniwatch-shaped IDs so we do not wait on Puppeteer first. */
+        const buildStreamingPickOrder = (epId: string): string[] => {
+            const watchShape = /^[^/?]+\?ep=\d+$/i.test(epId);
+            if (!watchShape) return [...STREAM_PRIORITY, 'cross-source'];
+            const preferred = [
+                'Miruro',
+                'Consumet',
+                'Kaido',
+                'AllAnime',
+                'Gogoanime',
+                'AnimePahe',
+                'AnimeKai',
+                'Zoro',
+                '9Anime',
+                'AnimeFLV',
+                'Aniwave',
+                'Anix',
+                'AkiH',
+                'WatchHentai',
+                'Hanime',
+            ];
+            const seen = new Set<string>();
+            const out: string[] = [];
+            for (const n of preferred) {
+                if (STREAM_PRIORITY.includes(n) && !seen.has(n)) {
+                    out.push(n);
+                    seen.add(n);
+                }
+            }
+            for (const n of STREAM_PRIORITY) {
+                if (!seen.has(n)) {
+                    out.push(n);
+                    seen.add(n);
+                }
+            }
+            out.push('cross-source');
+            return out;
+        };
+
         if (finalSources.length === 0) {
             console.log(`   ❌ No available sources for streaming`);
             logger.warn(`No available sources for streaming: ${episodeId}`, { episodeId }, 'SourceManager');
@@ -2744,13 +2794,17 @@ export class SourceManager {
         // source succeeds instead of waiting for every source to finish/timeout.
         type RaceResult = { source: string; data: StreamingData; success: boolean };
 
-        const pickOrder = [...STREAM_PRIORITY, 'cross-source'];
+        const pickOrder = buildStreamingPickOrder(episodeId);
         const allResults: RaceResult[] = [];
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
-        const GRACE_PERIOD = 3000; // Wait up to 3s for a higher-priority source after first success
+            const GRACE_PERIOD = 3000; // Wait up to 3s for a higher-priority source after first success
+            /** Cross-source does search + episodes + stream per provider (~40s worst case). Cap so watch API does not hang ~40s when primaries fail. */
+            const CROSS_SOURCE_FALLBACK_MAX_MS = 20_000;
+            /** Must exceed Miruro (aniwatch + Consumet + Puppeteer fallback) and 9Anime/Kaido Puppeteer budgets */
+            const STREAM_GLOBAL_MAX_MS = 55_000;
 
-        const result = await new Promise<StreamingData>((resolveStream) => {
+            const result = await new Promise<StreamingData>((resolveStream) => {
             let pending = 0;
 
             const pickBestAndResolve = () => {
@@ -2825,10 +2879,10 @@ export class SourceManager {
                 }
             };
 
-            // Global safety timeout — never wait more than 50s total
+            // Global safety — return 404 before the client feels stuck forever (~60s fetches)
             setTimeout(() => {
                 if (!resolved) {
-                    console.log(`   ⏰ Global streaming timeout (50s) — resolving with best available`);
+                    console.log(`   ⏰ Global streaming timeout (${STREAM_GLOBAL_MAX_MS}ms) — resolving with best available`);
                     if (!pickBestAndResolve()) {
                         resolved = true;
                         if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
@@ -2837,20 +2891,23 @@ export class SourceManager {
                         resolveStream({ sources: [], subtitles: [] });
                     }
                 }
-            }, 50_000);
+            }, STREAM_GLOBAL_MAX_MS);
 
             for (const source of finalSources) {
                 pending++;
                 const idToUse = this.resolveStreamingEpisodeId(episodeId, source, primarySource, hasSourcePrefix, rawId);
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
 
-                const usesPuppeteerStream = source.name === '9Anime';
+                const usesPuppeteerStream = source.name === '9Anime' || source.name === 'Kaido';
+                const usesMiruroStack = source.name === 'Miruro';
                 const usesSlowConsumetStream = source.name === 'AnimeKai';
                 const streamReliabilityOpts = usesPuppeteerStream
                     ? { timeout: 45_000, maxAttempts: 1 }
-                    : usesSlowConsumetStream
-                        ? { timeout: 30_000, maxAttempts: 1 }
-                        : { timeout: 22_000, maxAttempts: 1 };
+                    : usesMiruroStack
+                        ? { timeout: 52_000, maxAttempts: 1 }
+                        : usesSlowConsumetStream
+                            ? { timeout: 16_000, maxAttempts: 1 }
+                            : { timeout: 16_000, maxAttempts: 1 };
                 this.executeReliably(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal }),
                     streamReliabilityOpts
@@ -2870,15 +2927,24 @@ export class SourceManager {
                 .finally(onDone);
             }
 
-            // Cross-source title-based fallback (lower priority, runs in parallel)
+            // Cross-source title-based fallback (lower priority, runs in parallel; time-boxed — full uncapped run can exceed 35s)
             pending++;
-            this.crossSourceStreamingFallback(episodeId, server, category)
+            Promise.race([
+                this.crossSourceStreamingFallback(episodeId, server, category),
+                new Promise<StreamingData | null>((resolve) =>
+                    setTimeout(() => resolve(null), CROSS_SOURCE_FALLBACK_MAX_MS),
+                ),
+            ])
                 .then(data => {
                     if (data && data.sources.length > 0) {
                         console.log(`   ✅ Cross-source fallback got ${data.sources.length} sources`);
                         allResults.push({ source: 'cross-source', data, success: true });
                     } else {
-                        allResults.push({ source: 'cross-source', data: { sources: [], subtitles: [] } as StreamingData, success: false });
+                        allResults.push({
+                            source: 'cross-source',
+                            data: { sources: [], subtitles: [] } as StreamingData,
+                            success: false,
+                        });
                     }
                 })
                 .catch(err => {
@@ -2979,7 +3045,7 @@ export class SourceManager {
                 console.log(`   📡 ${srcName} title-search for "${searchTitle}"`);
                 const searchResult = await Promise.race([
                     src.search(searchTitle, 1),
-                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 12000))
+                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 7000))
                 ]);
                 if (!searchResult.results?.length) throw new Error('no results');
 
@@ -2987,8 +3053,8 @@ export class SourceManager {
                 console.log(`   📺 ${srcName} found: "${bestMatch.title}" (${bestMatch.id})`);
 
                 const episodes = await Promise.race([
-                    src.getEpisodes!(bestMatch.id, { timeout: 12000 }),
-                    new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 12000))
+                    src.getEpisodes!(bestMatch.id, { timeout: 8000 }),
+                    new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
                 ]);
                 if (!episodes?.length) throw new Error('no episodes');
 
@@ -2997,8 +3063,8 @@ export class SourceManager {
 
                 console.log(`   ⏳ ${srcName}: streaming ep ${targetEpNum} (ID: ${targetEp.id})`);
                 const streamData = await Promise.race([
-                    src.getStreamingLinks!(targetEp.id, server, category, { timeout: 15000 }),
-                    new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
+                    src.getStreamingLinks!(targetEp.id, server, category, { timeout: 10000 }),
+                    new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 10000))
                 ]);
                 if (!streamData.sources.length) throw new Error('no sources');
 

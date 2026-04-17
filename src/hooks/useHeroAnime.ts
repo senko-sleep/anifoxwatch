@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
 
 /**
  * Hero anime data fetched directly from AniList GraphQL API.
@@ -64,7 +65,6 @@ interface CachedHeroData {
   timestamp: number;
 }
 
-const ANILIST_API = 'https://graphql.anilist.co';
 const CACHE_KEY = 'anistream_hero_cache';
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
@@ -176,20 +176,11 @@ function setCachedData(anime: HeroAnime[]): void {
 
 async function fetchHeroAnime(): Promise<HeroAnime[]> {
   try {
-    const body = JSON.stringify({
-      query: HERO_QUERY,
-      variables: { page: 1, perPage: 12 }
-    });
-    
     console.log('[useHeroAnime] Fetching from AniList...');
-    
-    const response = await fetch(ANILIST_API, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body
+
+    const response = await fetchAniListGraphQL({
+      query: HERO_QUERY,
+      variables: { page: 1, perPage: 12 },
     });
 
     const json = await response.json();

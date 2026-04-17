@@ -1,5 +1,6 @@
 // AniList API client for fetching high-quality anime images and metadata
 
+import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
 import { Anime } from '@/types/anime';
 
 export interface AniListMedia {
@@ -25,8 +26,6 @@ export interface AniListResponse {
 }
 
 export class AniListClient {
-  private static readonly API_URL = 'https://graphql.anilist.co';
-
   static async searchAnime(search: string): Promise<AniListMedia | null> {
     try {
       const query = `
@@ -51,16 +50,9 @@ export class AniListClient {
         }
       `;
 
-      const response = await fetch(this.API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({
-          query,
-          variables: { search }
-        })
+      const response = await fetchAniListGraphQL({
+        query,
+        variables: { search },
       });
 
       if (!response.ok) {

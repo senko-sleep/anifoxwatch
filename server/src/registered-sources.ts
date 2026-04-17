@@ -12,12 +12,12 @@ export const REGISTERED_SOURCE_NAMES: readonly string[] = [
     'AnimeFLV',
     'Gogoanime',
     'AllAnime',
+    'Miruro',
     'Kaido',
     'Zoro',
     'WatchHentai',
     'Hanime',
     'AkiH',
-    'Miruro',
     'Aniwave',
     'Anix',
 ];

@@ -549,7 +549,8 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            const streamTimeoutMs = base.includes('onrender.com') ? 120_000 : 60_000;
+            // Keep below server stream global cap (~26s) + buffer so the UI fails fast with 404 instead of "loading forever"
+            const streamTimeoutMs = base.includes('onrender.com') ? 120_000 : 58_000;
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), streamTimeoutMs);
             try {

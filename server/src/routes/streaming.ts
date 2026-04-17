@@ -3,6 +3,7 @@ import { sourceManager } from '../services/source-manager.js';
 import { logger } from '../utils/logger.js';
 import axios, { type AxiosResponse } from 'axios';
 import { lookup } from 'dns/promises';
+import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streaming.js';
 
 const router = Router();
 
@@ -383,54 +384,57 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     });
 
     // Proxy the stream URLs if requested
+    // Clone before mutating — sources may come from a shared in-memory cache object.
+    // Mutating in-place would poison the cache with proxy-wrapped URLs on subsequent calls.
+    const response: StreamingData & { server?: string; triedServers?: string[] } = { ...streamData };
+
     if (shouldProxy) {
         const streamReferer = streamData.headers?.Referer || streamData.headers?.referer || 'https://megacloud.blog/';
 
         // Some kwik hosts work better as direct browser fetches; vault-*.owocdn.top must NOT
         // be direct — browsers often hit ERR_SSL_PROTOCOL_ERROR on raw HTTPS to owocdn.
         // Always proxy owocdn/vault through this API so HLS loads same-origin.
+        // NOTE: megaup/rrr domains need a Referer header — must go through proxy.
         const DIRECT_PLAY_DOMAINS = ['kwik.si', 'kwik.cx'];
-        // Skip proxy for unreliable/rate-limited domains - let browser try direct
-        const UNRELIABLE_DOMAINS = ['rrr.', 'megaup.', 'dood.'];
-        const isDirect = (url: string) => {
+        const isDirectPlay = (url: string) => {
             try {
                 const h = new URL(url).hostname.toLowerCase();
-                return DIRECT_PLAY_DOMAINS.some((d) => h.includes(d)) || 
-                       UNRELIABLE_DOMAINS.some((d) => h.includes(d));
+                return DIRECT_PLAY_DOMAINS.some((d) => h.includes(d));
             } catch { return false; }
         };
 
-        streamData.sources = streamData.sources.map((source: any) => {
-            if (isDirect(source.url)) {
-                return { ...source, isDirect: true, originalUrl: source.url };
+        response.sources = streamData.sources.map((source: VideoSource): VideoSource => {
+            const rawUrl = source.originalUrl || source.url;
+            if (isDirectPlay(rawUrl)) {
+                return { ...source, isDirect: true, originalUrl: rawUrl };
             }
             return {
                 ...source,
-                url: proxyUrl(source.url, proxyBase, streamReferer),
-                originalUrl: source.url
+                url: proxyUrl(rawUrl, proxyBase, streamReferer),
+                originalUrl: rawUrl
             };
         });
 
         if (streamData.subtitles) {
-            streamData.subtitles = streamData.subtitles.map((sub: any) => ({
+            response.subtitles = streamData.subtitles.map((sub: VideoSubtitle): VideoSubtitle => ({
                 ...sub,
-                url: isDirect(sub.url) ? sub.url : proxyUrl(sub.url, proxyBase, streamReferer)
+                url: isDirectPlay(sub.url) ? sub.url : proxyUrl(sub.url, proxyBase, streamReferer)
             }));
         }
 
-        logger.info(`[STREAM] Processed ${streamData.sources.length} sources (direct: ${streamData.sources.filter((s: any) => s.isDirect).length})`, {
+        logger.info(`[STREAM] Processed ${response.sources.length} sources (direct: ${response.sources.filter((s: VideoSource) => s.isDirect).length})`, {
             episodeId,
             requestId
         });
     }
 
     // Add server info to response
-    streamData.server = successServer;
-    streamData.triedServers = explicitServer ? [explicitServer] : ['auto'];
+    response.server = successServer;
+    response.triedServers = explicitServer ? [explicitServer] : ['auto'];
 
     // Short cache - streams expire quickly
     res.set('Cache-Control', 'private, max-age=300'); // 5 minutes
-    res.json(streamData);
+    res.json(response);
 });
 
 /**

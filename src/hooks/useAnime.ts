@@ -2,6 +2,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiClient, SourceHealth, StreamingData, EpisodeServer, ScheduleResponse, LeaderboardResponse, SeasonalResponse } from '@/lib/api-client';
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { enrichWithAniListCovers } from '@/lib/anilist-covers';
+import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
 
 // ─── Direct AniList seasonal fallback ────────────────────────────────────────
 // Used when the server-side /api/anime/seasonal returns empty (e.g. AniList
@@ -19,11 +20,7 @@ async function fetchSeasonalFromAniList(year: number, season: string): Promise<S
       }
     }`;
 
-    const res = await fetch('https://graphql.anilist.co', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ query }),
-    });
+    const res = await fetchAniListGraphQL({ query });
     const json = await res.json();
     const page = json?.data?.Page;
     const media: Record<string, unknown>[] = page?.media || [];
