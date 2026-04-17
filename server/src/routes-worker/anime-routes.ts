@@ -6,7 +6,7 @@ import { getHeroSpotlightCached } from '../services/hero-spotlight-service.js';
  * Render backend URL for fallback when CF Worker sources can't handle the request.
  * Source-prefixed IDs (allanime-*, animekai-*, 9anime-*, kaido-*, akih-*) need Puppeteer.
  */
-const RENDER_BACKEND_URL = 'https://anifoxwatch-ci33.onrender.com';
+const RENDER_BACKEND_URL = 'https://anifoxwatch-sm7s.onrender.com';
 
 async function proxyToRender(path: string, timeoutMs = 50_000): Promise<Response> {
     const controller = new AbortController();

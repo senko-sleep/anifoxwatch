@@ -92,7 +92,7 @@ function normalizeStreamServerQuery(raw: string | string[] | undefined): string 
  * Render backend URL for Puppeteer-dependent requests.
  * CF Worker handles metadata (AniList) and proxy; Render handles stream extraction.
  */
-const RENDER_BACKEND_URL = 'https://anifoxwatch-ci33.onrender.com';
+const RENDER_BACKEND_URL = 'https://anifoxwatch-sm7s.onrender.com';
 
 /**
  * Proxy a request to the Render backend (for routes that need Puppeteer/heavy scraping).
