@@ -2766,10 +2766,10 @@ export class SourceManager {
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
             const GRACE_PERIOD = 3000; // Wait up to 3s for a higher-priority source after first success
-            /** Cross-source does search + episodes + stream per provider (~40s worst case). Cap so watch API does not hang ~40s when primaries fail. */
-            const CROSS_SOURCE_FALLBACK_MAX_MS = 20_000;
-            /** Must exceed Miruro (aniwatch + Consumet + Puppeteer fallback) and 9Anime/Kaido Puppeteer budgets */
-            const STREAM_GLOBAL_MAX_MS = 55_000;
+            /** Cross-source does search + episodes + stream per provider (~40s worst case). Cap so watch API does not hang. */
+            const CROSS_SOURCE_FALLBACK_MAX_MS = 25_000;
+            /** Must exceed Puppeteer budgets (9Anime/Kaido 45s) but keep total latency reasonable */
+            const STREAM_GLOBAL_MAX_MS = 50_000;
 
             const result = await new Promise<StreamingData>((resolveStream) => {
             let pending = 0;
@@ -2871,7 +2871,7 @@ export class SourceManager {
                 const streamReliabilityOpts = usesPuppeteerStream
                     ? { timeout: 45_000, maxAttempts: 1 }
                     : usesMiruroStack
-                        ? { timeout: 52_000, maxAttempts: 1 }
+                        ? { timeout: 20_000, maxAttempts: 1 }
                         : usesSlowConsumetStream
                             ? { timeout: 16_000, maxAttempts: 1 }
                             : { timeout: 16_000, maxAttempts: 1 };
