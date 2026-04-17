@@ -538,10 +538,11 @@ class AnimeApiClient {
         return response.servers || [];
     }
 
-    async getStreamingLinks(episodeId: string, server?: string, category?: string): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number): Promise<StreamingData> {
         const params = new URLSearchParams();
         if (server) params.append('server', server);
         if (category) params.append('category', category);
+        if (episodeNum != null) params.append('ep_num', String(episodeNum));
 
         const queryString = params.toString() ? `?${params.toString()}` : '';
         const streamPath = `/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`;
