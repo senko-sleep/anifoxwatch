@@ -80,6 +80,13 @@ const CDN_CONFIGS: Array<{
             { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             { referer: 'https://hentai19.net/', origin: 'https://hentai19.net' }
         ]
+    },
+    {
+        pattern: /megaup|tech20hub|lab27core|code29wave|net22lab|pro25zone/i,
+        configs: [
+            { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+            { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }
+        ]
     }
 ];
 
@@ -499,6 +506,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'code29wave': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'net22lab': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'pro25zone': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+            'tech20hub': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'gogocdn': { referer: 'https://gogoanime.run/' },
             'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
             'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
@@ -520,19 +528,29 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         const matchedConfig = Object.entries(cdnConfig).find(([key]) => key !== 'default' && domain.includes(key));
         const config = matchedConfig ? matchedConfig[1] : cdnConfig.default;
 
-        // For known CDN domains, ALWAYS use the CDN config referer first
-        // (client-supplied referer is often stale, e.g. kwik.cx vs kwik.si)
+        // MegaUp CDN domains need the specific embed page URL as referer, not root.
+        // Detect by CDN config referer being megaup.nl.
+        const isMegaupCdn = config.referer.includes('megaup.nl');
+
         const refererCombos: Array<{ referer: string; origin: string }> = [];
 
         if (matchedConfig) {
-            refererCombos.push({
-                referer: config.referer,
-                origin: config.origin || config.referer.replace(/\/$/, '')
-            });
-            if (refererParam && refererParam !== config.referer) {
+            // For MegaUp CDNs: try the embed page URL first, then root megaup.nl
+            if (isMegaupCdn && refererParam) {
                 let paramOrigin: string;
-                try { paramOrigin = new URL(refererParam).origin; } catch { paramOrigin = config.origin || 'https://megacloud.blog'; }
+                try { paramOrigin = new URL(refererParam).origin; } catch { paramOrigin = 'https://megaup.nl'; }
                 refererCombos.push({ referer: refererParam, origin: paramOrigin });
+                refererCombos.push({ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' });
+            } else {
+                refererCombos.push({
+                    referer: config.referer,
+                    origin: config.origin || config.referer.replace(/\/$/, '')
+                });
+                if (refererParam && refererParam !== config.referer) {
+                    let paramOrigin: string;
+                    try { paramOrigin = new URL(refererParam).origin; } catch { paramOrigin = config.origin || 'https://megacloud.blog'; }
+                    refererCombos.push({ referer: refererParam, origin: paramOrigin });
+                }
             }
         } else if (refererParam) {
             let paramOrigin: string;

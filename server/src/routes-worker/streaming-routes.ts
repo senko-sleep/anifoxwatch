@@ -405,6 +405,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
                 'net22lab':     { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'megaup':       { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'lab27core':    { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
+                'tech20hub':    { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'vidcloud':     { referer: 'https://vidcloud9.com/',     origin: 'https://vidcloud9.com' },
                 'rapid-cloud':  { referer: 'https://rapid-cloud.co/',    origin: 'https://rapid-cloud.co' },
                 'netmagcdn':    { referer: 'https://aniwatchtv.to/',     origin: 'https://aniwatchtv.to' },
@@ -424,37 +425,60 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
             };
 
             const matched = Object.entries(cdnConfig).find(([key]) => domain.includes(key));
-            let referer: string;
-            let origin: string;
+
+            // Build ordered list of referer/origin combos to try
+            type RefererCombo = { referer: string; origin: string };
+            const refererCombos: RefererCombo[] = [];
 
             if (matched) {
-                referer = matched[1].referer;
-                origin  = matched[1].origin;
+                const isMegaupCdn = matched[1].referer.includes('megaup.nl');
+                if (isMegaupCdn && refererParam) {
+                    // MegaUp CDNs need the embed page URL first, then root
+                    let paramOrigin: string;
+                    try { paramOrigin = new URL(refererParam).origin; } catch { paramOrigin = 'https://megaup.nl'; }
+                    refererCombos.push({ referer: refererParam, origin: paramOrigin });
+                    refererCombos.push({ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' });
+                } else {
+                    refererCombos.push({ referer: matched[1].referer, origin: matched[1].origin });
+                    if (refererParam && refererParam !== matched[1].referer) {
+                        let paramOrigin: string;
+                        try { paramOrigin = new URL(refererParam).origin; } catch { paramOrigin = matched[1].origin; }
+                        refererCombos.push({ referer: refererParam, origin: paramOrigin });
+                    }
+                }
             } else if (refererParam) {
-                // Use caller-supplied referer when no CDN rule matches
-                referer = refererParam;
-                try { origin = new URL(refererParam).origin; } catch { origin = 'https://megacloud.blog'; }
+                let paramOrigin: string;
+                try { paramOrigin = new URL(refererParam).origin; } catch { paramOrigin = 'https://megacloud.blog'; }
+                refererCombos.push({ referer: refererParam, origin: paramOrigin });
+                refererCombos.push({ referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' });
             } else {
-                referer = 'https://megacloud.blog/';
-                origin  = 'https://megacloud.blog';
+                refererCombos.push({ referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' });
             }
 
-            const headers: Record<string, string> = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                'Accept': '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Referer': referer,
-                'Origin': origin,
-                'Connection': 'keep-alive',
-            };
-
             const rangeHeader = c.req.header('range');
-            if (rangeHeader) headers['Range'] = rangeHeader;
 
-            const response = await fetch(url, { headers, redirect: 'follow' });
+            // Try each referer combo until one succeeds
+            let response: Response | null = null;
+            for (const combo of refererCombos) {
+                const headers: Record<string, string> = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                    'Accept': '*/*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Referer': combo.referer,
+                    'Origin': combo.origin,
+                    'Connection': 'keep-alive',
+                };
+                if (rangeHeader) headers['Range'] = rangeHeader;
+                try {
+                    const res = await fetch(url, { headers, redirect: 'follow' });
+                    if (res.ok) { response = res; break; }
+                } catch { /* try next combo */ }
+            }
 
-            if (!response.ok) {
-                return c.json({ error: 'Upstream error', status: response.status, domain }, response.status as 400 | 401 | 403 | 404 | 500 | 502 | 503);
+            const activeReferer = refererCombos[0]?.referer || 'https://megacloud.blog/';
+
+            if (!response) {
+                return c.json({ error: 'Upstream error', domain }, 502 as 502);
             }
 
             const upstreamContentType = response.headers.get('content-type') || '';
@@ -464,7 +488,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
 
             if (isUpstreamM3u8) {
                 const content = await response.text();
-                const rewrittenContent = rewriteM3u8Content(content, url, proxyBase, referer);
+                const rewrittenContent = rewriteM3u8Content(content, url, proxyBase, activeReferer);
                 return c.body(rewrittenContent, 200, {
                     'Content-Type': 'application/vnd.apple.mpegurl',
                     'Cache-Control': 'private, max-age=5',
