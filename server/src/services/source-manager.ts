@@ -93,7 +93,7 @@ export class SourceManager {
 
     // Concurrency control for API requests with better reliability
     private globalActiveRequests = 0;
-    private maxGlobalConcurrent = 8;
+    private maxGlobalConcurrent = 20;
     private requestQueue: Array<{
         fn: (signal: AbortSignal) => Promise<unknown>;
         resolve: (value: unknown) => void;
@@ -842,8 +842,8 @@ export class SourceManager {
         const dollar = slug.indexOf('$');
         if (dollar !== -1) slug = slug.slice(0, dollar);
         slug = this.extractRawId(slug);
-        slug = slug.replace(/-(?=[a-z]*\d)[a-z\d]{3,5}$/i, '');
-        const rawSlug = slug.replace(/-\d+$/, '');
+        slug = slug.replace(/-(?=[a-z]*\d)[a-z\d]{3,6}$/i, '');
+        const rawSlug = slug.replace(/-\d{4,}$/, '');
         return rawSlug.replace(/[-_]/g, ' ').trim();
     }
 
@@ -1119,7 +1119,7 @@ export class SourceManager {
             .filter(name => name !== 'WatchHentai')
             .map(name => this.sources.get(name))
             .filter(source => source && source.isAvailable)
-            .slice(0, 6) as StreamingSource[]; // Increased from 3 to 6 sources for better coverage
+            .slice(0, 3) as StreamingSource[];
         
         console.log(`📡 [SourceManager] Available sources for search: ${sourcesToTry.map(s => s.name).join(', ')}`);
 
@@ -1776,80 +1776,66 @@ export class SourceManager {
             }
         }
 
-        // Multi-source aggregation mode - query MORE sources for better diversity
-        // Exclude adult sources (WatchHentai, Hanime) and Consumet from trending
+        // FAST PATH: bypass executeReliably queue entirely for homepage data.
+        // Call sources directly with hard Promise.race timeouts.
+        // Race scrapers against AniList — first with results wins.
+        const HOMEPAGE_TIMEOUT = 5000;
+        const startTime = Date.now();
+
         const availableSources = this.sourceOrder
-            .filter(name => name !== 'WatchHentai' && name !== 'Hanime' && name !== 'Consumet')
+            .filter(name => name !== 'WatchHentai' && name !== 'Hanime' && name !== 'Consumet' && name !== 'AkiH')
             .map(name => this.sources.get(name))
             .filter(source => source && source.isAvailable)
-            .slice(0, 6) as StreamingSource[]; // Increased from 3 to 6
+            .slice(0, 2) as StreamingSource[];
 
-        if (availableSources.length === 0) {
-            logger.warn(`No available sources for getTrending`, { page }, 'SourceManager');
-            return [];
-        }
+        console.log(`🔍 [SourceManager] getTrending: racing [${availableSources.map(s => s.name).join(', ')}, AniList]`);
 
-        logger.sourceAggregation('getTrending', availableSources.map(s => s.name), { page });
-
-        const startTime = Date.now();
-        const results = await Promise.allSettled(
-            availableSources.map(source =>
-                this.executeReliably(source.name, 'getTrending', (signal) => source.getTrending(page, { signal }), { timeout: 8000 })
-                    .then(res => {
-                        const duration = Date.now() - startTime;
-                        logger.sourceResult(source.name, 'getTrending', res?.length || 0, duration);
-                        return { source: source.name, results: res || [] };
-                    })
-                    .catch(err => {
-                        logger.warn(`getTrending failed on ${source.name}: ${err.message}`, { page }, source.name);
-                        return { source: source.name, results: [] };
-                    })
-            )
+        // Direct source calls with hard timeout — no queue, no retries
+        const sourcePromises = availableSources.map(source =>
+            Promise.race([
+                source.getTrending(page).then(res => ({ source: source.name, results: res || [] })),
+                new Promise<{ source: string; results: AnimeBase[] }>(r => setTimeout(() => r({ source: source.name, results: [] }), HOMEPAGE_TIMEOUT))
+            ]).catch(() => ({ source: source.name, results: [] as AnimeBase[] }))
         );
 
-        // Collect results by source for interleaving
-        const sourceResults: Map<string, AnimeBase[]> = new Map();
-        const successfulSources: string[] = [];
+        // AniList as parallel racer
+        const anilistPromise = Promise.race([
+            anilistService.advancedSearch({ sort: ['TRENDING_DESC'], perPage: 24, page })
+                .then(res => ({ source: 'AniList', results: res.results || [] as AnimeBase[] })),
+            new Promise<{ source: string; results: AnimeBase[] }>(r => setTimeout(() => r({ source: 'AniList', results: [] }), HOMEPAGE_TIMEOUT))
+        ]).catch(() => ({ source: 'AniList', results: [] as AnimeBase[] }));
 
-        for (const result of results) {
-            if (result.status === 'fulfilled' && result.value.results.length > 0) {
-                sourceResults.set(result.value.source, result.value.results);
-                successfulSources.push(result.value.source);
-            }
-        }
+        const allPromises = [...sourcePromises, anilistPromise];
 
-        // INTERLEAVE results from different sources for better diversity
-        // Instead of just concatenating, take items round-robin from each source
-        const allResults: AnimeBase[] = [];
-        const maxItems = Math.max(...Array.from(sourceResults.values()).map(r => r.length), 0);
-        
-        for (let i = 0; i < maxItems; i++) {
-            for (const [sourceName, items] of sourceResults) {
-                if (i < items.length) {
-                    allResults.push(items[i]);
+        // Return the first one that has results
+        const result = await new Promise<AnimeBase[]>((resolve) => {
+            let done = false;
+            let remaining = allPromises.length;
+
+            allPromises.forEach(p => p.then(r => {
+                remaining--;
+                if (r.results.length > 0 && !done) {
+                    done = true;
+                    const duration = Date.now() - startTime;
+                    console.log(`   ✅ getTrending: ${r.source} won race with ${r.results.length} results in ${duration}ms`);
+                    timer.end();
+                    resolve(r.results);
                 }
-            }
-        }
+                if (remaining <= 0 && !done) {
+                    done = true;
+                    timer.end();
+                    console.log(`   ❌ getTrending: all sources empty`);
+                    resolve([]);
+                }
+            }));
 
-        // Deduplicate (but now results are interleaved so we get better diversity)
-        const uniqueResults = this.deduplicateResults(allResults);
-        const duration = Date.now() - startTime;
+            // Hard safety net
+            setTimeout(() => {
+                if (!done) { done = true; timer.end(); resolve([]); }
+            }, HOMEPAGE_TIMEOUT + 1000);
+        });
 
-        logger.aggregationComplete('getTrending', availableSources.map(s => s.name), successfulSources, uniqueResults.length, duration, { page });
-        timer.end();
-
-        if (uniqueResults.length > 0) return uniqueResults;
-
-        // AniList fallback when all scrapers fail
-        try {
-            console.log(`[SourceManager] getTrending: scrapers empty, falling back to AniList`);
-            const anilistResult = await anilistService.advancedSearch({ sort: ['TRENDING_DESC'], perPage: 24, page });
-            if (anilistResult.results.length > 0) return anilistResult.results;
-        } catch (e) {
-            console.warn(`[SourceManager] AniList trending fallback failed:`, (e as Error).message);
-        }
-
-        return [];
+        return result;
     }
 
     async getLatest(page: number = 1, sourceName?: string): Promise<AnimeBase[]> {
@@ -1872,79 +1858,60 @@ export class SourceManager {
             }
         }
 
-        // Multi-source aggregation mode - query MORE sources for better diversity
-        // Exclude adult sources (WatchHentai, Hanime) and Consumet from latest
+        // FAST PATH: bypass executeReliably queue entirely for homepage data.
+        const HOMEPAGE_TIMEOUT = 5000;
+        const startTime = Date.now();
+
         const availableSources = this.sourceOrder
-            .filter(name => name !== 'WatchHentai' && name !== 'Hanime' && name !== 'Consumet')
+            .filter(name => name !== 'WatchHentai' && name !== 'Hanime' && name !== 'Consumet' && name !== 'AkiH')
             .map(name => this.sources.get(name))
             .filter(source => source && source.isAvailable)
-            .slice(0, 6) as StreamingSource[]; // Increased from 3 to 6
+            .slice(0, 2) as StreamingSource[];
 
-        if (availableSources.length === 0) {
-            logger.warn(`No available sources for getLatest`, { page }, 'SourceManager');
-            return [];
-        }
+        console.log(`🔍 [SourceManager] getLatest: racing [${availableSources.map(s => s.name).join(', ')}, AniList]`);
 
-        logger.sourceAggregation('getLatest', availableSources.map(s => s.name), { page });
-
-        const startTime = Date.now();
-        const results = await Promise.allSettled(
-            availableSources.map(source =>
-                this.executeReliably(source.name, 'getLatest', (signal) => source.getLatest(page, { signal }), { timeout: 8000 })
-                    .then(res => {
-                        const duration = Date.now() - startTime;
-                        logger.sourceResult(source.name, 'getLatest', res?.length || 0, duration);
-                        return { source: source.name, results: res || [] };
-                    })
-                    .catch(err => {
-                        logger.warn(`getLatest failed on ${source.name}: ${err.message}`, { page }, source.name);
-                        return { source: source.name, results: [] };
-                    })
-            )
+        const sourcePromises = availableSources.map(source =>
+            Promise.race([
+                source.getLatest(page).then(res => ({ source: source.name, results: res || [] })),
+                new Promise<{ source: string; results: AnimeBase[] }>(r => setTimeout(() => r({ source: source.name, results: [] }), HOMEPAGE_TIMEOUT))
+            ]).catch(() => ({ source: source.name, results: [] as AnimeBase[] }))
         );
 
-        // Collect results by source for interleaving
-        const sourceResults: Map<string, AnimeBase[]> = new Map();
-        const successfulSources: string[] = [];
+        const anilistPromise = Promise.race([
+            anilistService.advancedSearch({ sort: ['START_DATE_DESC'], status: 'RELEASING', perPage: 24, page })
+                .then(res => ({ source: 'AniList', results: res.results || [] as AnimeBase[] })),
+            new Promise<{ source: string; results: AnimeBase[] }>(r => setTimeout(() => r({ source: 'AniList', results: [] }), HOMEPAGE_TIMEOUT))
+        ]).catch(() => ({ source: 'AniList', results: [] as AnimeBase[] }));
 
-        for (const result of results) {
-            if (result.status === 'fulfilled' && result.value.results.length > 0) {
-                sourceResults.set(result.value.source, result.value.results);
-                successfulSources.push(result.value.source);
-            }
-        }
+        const allPromises = [...sourcePromises, anilistPromise];
 
-        // INTERLEAVE results from different sources for better diversity
-        const allResults: AnimeBase[] = [];
-        const maxItems = Math.max(...Array.from(sourceResults.values()).map(r => r.length), 0);
-        
-        for (let i = 0; i < maxItems; i++) {
-            for (const [sourceName, items] of sourceResults) {
-                if (i < items.length) {
-                    allResults.push(items[i]);
+        const result = await new Promise<AnimeBase[]>((resolve) => {
+            let done = false;
+            let remaining = allPromises.length;
+
+            allPromises.forEach(p => p.then(r => {
+                remaining--;
+                if (r.results.length > 0 && !done) {
+                    done = true;
+                    const duration = Date.now() - startTime;
+                    console.log(`   ✅ getLatest: ${r.source} won race with ${r.results.length} results in ${duration}ms`);
+                    timer.end();
+                    resolve(r.results);
                 }
-            }
-        }
+                if (remaining <= 0 && !done) {
+                    done = true;
+                    timer.end();
+                    console.log(`   ❌ getLatest: all sources empty`);
+                    resolve([]);
+                }
+            }));
 
-        // Deduplicate (but now results are interleaved so we get better diversity)
-        const uniqueResults = this.deduplicateResults(allResults);
-        const duration = Date.now() - startTime;
+            setTimeout(() => {
+                if (!done) { done = true; timer.end(); resolve([]); }
+            }, HOMEPAGE_TIMEOUT + 1000);
+        });
 
-        logger.aggregationComplete('getLatest', availableSources.map(s => s.name), successfulSources, uniqueResults.length, duration, { page });
-        timer.end();
-
-        if (uniqueResults.length > 0) return uniqueResults;
-
-        // AniList fallback when all scrapers fail
-        try {
-            console.log(`[SourceManager] getLatest: scrapers empty, falling back to AniList`);
-            const anilistResult = await anilistService.advancedSearch({ sort: ['START_DATE_DESC'], status: 'RELEASING', perPage: 24, page });
-            if (anilistResult.results.length > 0) return anilistResult.results;
-        } catch (e) {
-            console.warn(`[SourceManager] AniList latest fallback failed:`, (e as Error).message);
-        }
-
-        return [];
+        return result;
     }
 
     async getTopRated(page: number = 1, limit: number = 10, sourceName?: string): Promise<TopAnime[]> {
@@ -2687,7 +2654,7 @@ export class SourceManager {
      * Uses PARALLEL multi-source querying for maximum reliability
      * Queries multiple sources simultaneously and returns the first successful result
      */
-    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', episodeNum?: number): Promise<StreamingData> {
         const timer = new PerformanceTimer(`Get streaming links: ${episodeId}`, { episodeId, server, category });
         const startTime = Date.now();
         
@@ -2930,7 +2897,7 @@ export class SourceManager {
             // Cross-source title-based fallback (lower priority, runs in parallel; time-boxed — full uncapped run can exceed 35s)
             pending++;
             Promise.race([
-                this.crossSourceStreamingFallback(episodeId, server, category),
+                this.crossSourceStreamingFallback(episodeId, server, category, episodeNum),
                 new Promise<StreamingData | null>((resolve) =>
                     setTimeout(() => resolve(null), CROSS_SOURCE_FALLBACK_MAX_MS),
                 ),
@@ -2965,7 +2932,8 @@ export class SourceManager {
     private async crossSourceStreamingFallback(
         episodeId: string,
         server?: string,
-        category: 'sub' | 'dub' = 'sub'
+        category: 'sub' | 'dub' = 'sub',
+        hintEpisodeNum?: number
     ): Promise<StreamingData | null> {
         const title = this.episodeIdToFallbackSearchTitle(episodeId);
         if (!title) return null;
@@ -3020,10 +2988,10 @@ export class SourceManager {
             }
         }
 
-        // Method 3: if all else fails, default to 1
+        // Method 3: use the frontend-provided hint, else default to 1
         if (!targetEpNum) {
-            targetEpNum = 1;
-            console.log(`   ⚠️ Could not determine episode number, defaulting to 1`);
+            targetEpNum = hintEpisodeNum ?? 1;
+            console.log(`   ⚠️ Could not determine episode number, using ${hintEpisodeNum ? `hint=${hintEpisodeNum}` : 'default=1'}`);
         }
 
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
