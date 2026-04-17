@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
 import { logger } from '../utils/logger.js';
 import axios, { type AxiosResponse } from 'axios';
+import https from 'https';
 import { lookup } from 'dns/promises';
 import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streaming.js';
 
@@ -323,6 +324,8 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 
     const { category, proxy: useProxy = 'true' } = req.query;
     const explicitServer = normalizeStreamServerQuery(req.query.server);
+    const epNumRaw = req.query.ep_num;
+    const episodeNum = epNumRaw ? parseInt(String(epNumRaw), 10) || undefined : undefined;
     const requestId = (req as any).id;
     const shouldProxy = useProxy !== 'false';
     const proxyBase = getProxyBaseUrl(req);
@@ -333,6 +336,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         episodeId,
         server: triedLabel,
         category,
+        episodeNum,
         shouldProxy,
         requestId
     });
@@ -344,7 +348,8 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         streamData = await sourceManager.getStreamingLinks(
             episodeId,
             explicitServer,
-            (category as 'sub' | 'dub') || 'sub'
+            (category as 'sub' | 'dub') || 'sub',
+            episodeNum
         );
     } catch (error: any) {
         lastError = error.message;
@@ -491,14 +496,15 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'anicdnstream': { referer: 'https://aniwatchtv.to/' },
             'megaup': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'lab27core': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+            'code29wave': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+            'net22lab': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+            'pro25zone': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'gogocdn': { referer: 'https://gogoanime.run/' },
             'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
             'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'hstorage.xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'xyz': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
             'googlevideo': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
-            'pro25zone': { referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' },
-            'code29wave': { referer: 'https://megacloud.blog/', origin: 'https://megacloud.blog' },
             'owocdn': { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
             'vault': { referer: 'https://kwik.cx/', origin: 'https://kwik.cx' },
             'kwik': { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
@@ -606,27 +612,41 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 headers['Range'] = req.headers.range;
             }
 
-            try {
-                response = await axios({
-                    method: 'get',
-                    url: url,
-                    responseType: 'stream',
-                    headers,
-                    timeout: 22000,
-                    maxRedirects: 5,
-                    validateStatus: (status) => status < 400
-                });
+            const makeProxyRequest = (relaxedTls: boolean) => axios({
+                method: 'get',
+                url: url,
+                responseType: 'stream',
+                headers,
+                timeout: 22000,
+                maxRedirects: 5,
+                validateStatus: (status) => status < 400,
+                ...(relaxedTls ? {
+                    httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1' })
+                } : {})
+            });
 
+            try {
+                response = await makeProxyRequest(false);
                 logger.info(`[PROXY] Success on attempt ${attempt + 1} with referer ${combo.referer}`, { domain, requestId });
                 break;
-            } catch (err: any) {
+            } catch (err: unknown) {
                 lastProxyError = err;
-                const isEproto = err.message?.includes('EPROTO') || err.code === 'EPROTO';
+                const errMsg = err instanceof Error ? err.message : String(err);
+                const errCode = (err as NodeJS.ErrnoException).code;
+                const isEproto = errMsg.includes('EPROTO') || errCode === 'EPROTO';
                 if (isEproto) {
-                    logger.warn(`[PROXY] TLS/EPROTO failure for ${domain} — skipping retries (broken TLS)`, { requestId });
-                    break;
+                    logger.warn(`[PROXY] TLS/EPROTO for ${domain} — retrying with relaxed TLS`, { requestId });
+                    try {
+                        response = await makeProxyRequest(true);
+                        logger.info(`[PROXY] Relaxed TLS success for ${domain}`, { domain, requestId });
+                        break;
+                    } catch (tlsErr: unknown) {
+                        lastProxyError = tlsErr;
+                        logger.warn(`[PROXY] Relaxed TLS also failed for ${domain}: ${tlsErr instanceof Error ? tlsErr.message : String(tlsErr)}`, { requestId });
+                        break;
+                    }
                 }
-                logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed for ${domain} (referer: ${combo.referer}): ${err.message}`, { requestId });
+                logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed for ${domain} (referer: ${combo.referer}): ${errMsg}`, { requestId });
                 if (attempt < refererCombos.length - 1) {
                     await new Promise(resolve => setTimeout(resolve, 300));
                 }
@@ -740,13 +760,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             }
         });
 
-    } catch (error: any) {
-        const errorMessage = error.message || 'Unknown error';
-        const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT';
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errCode = (error as NodeJS.ErrnoException).code;
+        const isTimeout = errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT';
         const isBlocked = errorMessage.includes('blocked') || errorMessage.includes('forbidden');
-        const isEproto = errorMessage.includes('EPROTO') || error.code === 'EPROTO';
+        const isEproto = errorMessage.includes('EPROTO') || errCode === 'EPROTO';
 
-        logger.error(`[PROXY] Failed to proxy from ${domain}`, error, {
+        logger.error(`[PROXY] Failed to proxy from ${domain}`, error instanceof Error ? error : undefined, {
             domain,
             errorMessage,
             isTimeout,
