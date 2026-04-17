@@ -226,16 +226,21 @@ export class CloudflareSourceManager {
                 try {
                     const anilistData = await anilistService.getAnimeById(numericId);
                     if (anilistData?.title) {
-                        // Search Consumet by title to get streaming episodes
-                        const consumet = this.sources.get('CloudflareConsumet');
-                        if (consumet) {
-                            const searchResult = await consumet.search(anilistData.title, 1).catch(() => null);
+                        // Parallel search on multiple sources
+                        const sourcesToTry = ['GogoPlayDirect', 'CloudflareConsumet'];
+                        const results = await Promise.allSettled(sourcesToTry.map(async (name) => {
+                            const source = this.sources.get(name);
+                            if (!source) return [];
+                            const searchResult = await source.search(anilistData.title!, 1).catch(() => null);
                             if (searchResult?.results?.length) {
-                                const streamingId = searchResult.results[0].id;
-                                if (streamingId && !streamingId.startsWith('anilist-')) {
-                                    const episodes = await consumet.getEpisodes(streamingId).catch(() => []);
-                                    if (episodes.length > 0) return episodes;
-                                }
+                                return source.getEpisodes(searchResult.results[0].id).catch(() => []);
+                            }
+                            return [];
+                        }));
+
+                        for (const res of results) {
+                            if (res.status === 'fulfilled' && res.value.length > 0) {
+                                return res.value;
                             }
                         }
                     }
@@ -481,9 +486,16 @@ export class CloudflareSourceManager {
             if (streamData.sources.length > 0) {
                 logger.info(`Found ${streamData.sources.length} sources for ${episodeId}`, undefined, 'CloudflareSourceManager');
                 recordSuccess(source.name);
+                return streamData;
             } else {
-                logger.warn(`No sources found for ${episodeId}`, undefined, 'CloudflareSourceManager');
+                logger.warn(`No sources found for ${episodeId}, trying cross-source fallback`, undefined, 'CloudflareSourceManager');
                 recordFailure(source.name);
+                
+                // Try cross-source fallback before giving up
+                const fallbackData = await this.crossSourceStreamingFallback(episodeId, server, category);
+                if (fallbackData && fallbackData.sources.length > 0) {
+                    return fallbackData;
+                }
             }
 
             return streamData;
@@ -491,31 +503,95 @@ export class CloudflareSourceManager {
             logger.error(`getStreamingLinks failed`, error as Error, { episodeId, server }, 'CloudflareSourceManager');
             recordFailure(source.name);
 
-            // Try fallback to other sources if primary fails
-            if (source.name !== 'CloudflareConsumet') {
-                logger.info(`Trying fallback to CloudflareConsumet for ${episodeId}`, undefined, 'CloudflareSourceManager');
-                try {
-                    const fallbackSource = this.sources.get('CloudflareConsumet');
-                    if (fallbackSource?.getStreamingLinks && !isCircuitBreakerOpen('CloudflareConsumet')) {
-                        const fallbackData = await Promise.race([
-                            fallbackSource.getStreamingLinks(episodeId, server, category),
-                            new Promise<StreamingData>((_, reject) =>
-                                setTimeout(() => reject(new Error('Fallback timeout (15s)')), 15000)
-                            )
-                        ]);
-                        if (fallbackData.sources.length > 0) {
-                            logger.info(`Fallback succeeded for ${episodeId}`, undefined, 'CloudflareSourceManager');
-                            recordSuccess('CloudflareConsumet');
-                            return fallbackData;
-                        }
-                    }
-                } catch (fallbackError) {
-                    recordFailure('CloudflareConsumet');
-                    logger.error(`Fallback also failed`, fallbackError as Error, { episodeId }, 'CloudflareSourceManager');
-                }
+            // Try title-based fallback on error
+            const fallbackData = await this.crossSourceStreamingFallback(episodeId, server, category).catch(() => null);
+            if (fallbackData && fallbackData.sources.length > 0) {
+                return fallbackData;
             }
 
             return { sources: [], subtitles: [] };
         }
+    }
+
+    /**
+     * Extracts a searchable title from an internal episode ID.
+     * Examples: 
+     * - classroom-of-the-elite-2nd-season-18076?ep=92595 -> "classroom of the elite 2nd season"
+     * - frieren-beyond-journeys-end-season-2-20409?ep=163517 -> "frieren beyond journeys end season 2"
+     */
+    private episodeIdToFallbackSearchTitle(episodeId: string): string | null {
+        // Strip parameters: handle both ? and $ separators
+        let slug = episodeId.split(/[?$]/)[0];
+        
+        // Strip common ID suffixes like -18076 or -20409 (HiAnime/Consumet style)
+        // First try to strip HiAnime alphanumeric 3-6 char IDs (e.g. -z8u7d)
+        slug = slug.replace(/-(?=[a-z]*\d)[a-z\d]{3,6}$/i, '');
+        // Then strip pure numeric IDs of 4 or more digits (leaving -2 etc. alone as seasons)
+        const rawSlug = slug.replace(/-\d{4,}$/, '');
+        return rawSlug.replace(/[-_]/g, ' ').trim() || null;
+    }
+
+    /**
+     * Cross-source fallback: search by title on other sources if primary ID fails.
+     */
+    private async crossSourceStreamingFallback(
+        episodeId: string,
+        server?: string,
+        category: 'sub' | 'dub' = 'sub',
+        hintEpisodeNum?: number
+    ): Promise<StreamingData | null> {
+        const title = this.episodeIdToFallbackSearchTitle(episodeId);
+        if (!title) return null;
+
+        // Determine episode number from ID if not hinted
+        let episodeNum = hintEpisodeNum;
+        if (!episodeNum) {
+            const numMatch = episodeId.match(/[/-]episode-(\d+)/i) || episodeId.match(/[/-](\d+)$/);
+            if (numMatch) episodeNum = parseInt(numMatch[1], 10);
+            else if (episodeId.includes('?ep=') || episodeId.includes('$ep=')) {
+                // For HiAnime/AnimeKai IDs
+                const epMatch = episodeId.match(/[?$]ep=(\d+)/i);
+                if (epMatch) {
+                    episodeNum = parseInt(epMatch[1], 10);
+                } else {
+                    const dashMatch = episodeId.split(/[?$]/)[0].match(/-(\d+)$/);
+                    if (dashMatch) episodeNum = parseInt(dashMatch[1], 10);
+                }
+            }
+        }
+        if (!episodeNum) episodeNum = 1;
+
+        logger.info(`[CloudflareSourceManager] Attempting cross-source fallback for "${title}" Ep ${episodeNum}`, undefined, 'CloudflareSourceManager');
+
+        // Parallel search on GogoPlayDirect and CloudflareConsumet (gogoanime)
+        const sourcesToTry = ['GogoPlayDirect', 'CloudflareConsumet'];
+        
+        const results = await Promise.allSettled(sourcesToTry.map(async (sourceName) => {
+            const source = this.sources.get(sourceName);
+            if (!source) return null;
+
+            // 1) Search
+            const searchResult = await source.search(title, 1).catch(() => null);
+            if (!searchResult?.results?.length) return null;
+
+            // 2) Get top result episodes
+            const animeId = searchResult.results[0].id;
+            const episodes = await source.getEpisodes(animeId).catch(() => []);
+            
+            // 3) Find matching episode
+            const ep = episodes.find(e => e.number === episodeNum);
+            if (!ep) return null;
+
+            // 4) Get stream
+            return source.getStreamingLinks!(ep.id, server, category);
+        }));
+
+        for (const res of results) {
+            if (res.status === 'fulfilled' && res.value && res.value.sources.length > 0) {
+                return res.value;
+            }
+        }
+
+        return null;
     }
 }

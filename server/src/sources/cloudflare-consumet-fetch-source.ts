@@ -41,7 +41,6 @@ interface ConsumetEpisodeResponse {
 export class CloudflareConsumetFetchSource extends BaseAnimeSource {
     name = 'CloudflareConsumet';
     baseUrl: string;
-    private readonly provider: 'gogoanime' = 'gogoanime';
     private cache: Map<string, { data: unknown; expires: number }> = new Map();
     private cacheTTL = 5 * 60 * 1000;
 
@@ -50,8 +49,8 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
         this.baseUrl = apiUrl.replace(/\/$/, '');
     }
 
-    private apiPath(suffix: string): string {
-        return `${this.baseUrl}/anime/${this.provider}${suffix}`;
+    private apiPath(provider: string, suffix: string): string {
+        return `${this.baseUrl}/anime/${provider}${suffix}`;
     }
 
     private getCached<T>(key: string): T | null {
@@ -65,8 +64,8 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
-    private async fetchJson<T>(path: string, query?: Record<string, string>, options?: SourceRequestOptions): Promise<T> {
-        const u = new URL(this.apiPath(path));
+    private async fetchJson<T>(provider: string, path: string, query?: Record<string, string>, options?: SourceRequestOptions): Promise<T> {
+        const u = new URL(this.apiPath(provider, path));
         if (query) {
             for (const [k, v] of Object.entries(query)) {
                 if (v !== undefined && v !== null) u.searchParams.set(k, String(v));
@@ -93,7 +92,7 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            await this.fetchJson<{ results?: unknown[] }>('/recent-episodes', { page: '1' }, { ...options, timeout: 5000 });
+            await this.fetchJson<{ results?: unknown[] }>('gogoanime', '/recent-episodes', { page: '1' }, { ...options, timeout: 5000 });
             this.isAvailable = true;
             return true;
         } catch {
@@ -101,9 +100,9 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
         }
     }
 
-    private mapAnime(data: ConsumetAnimeResponse): AnimeBase {
+    private mapAnime(data: ConsumetAnimeResponse, provider: string): AnimeBase {
         return {
-            id: `consumet-${this.provider}-${data.id}`,
+            id: `consumet-${provider}-${data.id}`,
             title: data.title?.english || data.title?.romaji || 'Unknown',
             titleJapanese: data.title?.native || data.title?.japanese,
             image: data.image || data.poster || '',
@@ -120,7 +119,7 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
             subCount: data.totalEpisodes,
             dubCount: data.subOrDub === 'dub' || data.hasDub ? data.totalEpisodes : 0,
             isMature: data.isAdult || false,
-            source: `${this.name}:${this.provider}`,
+            source: `${this.name}:${provider}`,
         };
     }
 
@@ -150,6 +149,7 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
     }
 
     async search(query: string, page: number = 1, _filters?: unknown, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
+        const provider = 'gogoanime'; // Default search uses gogoanime
         const key = `search:${query}:${page}`;
         const hit = this.getCached<AnimeSearchResult>(key);
         if (hit) return hit;
@@ -158,13 +158,13 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
                 results?: ConsumetAnimeResponse[];
                 totalPages?: number;
                 hasNextPage?: boolean;
-            }>(`/${encodeURIComponent(query)}`, { page: String(page) }, options);
+            }>(provider, `/${encodeURIComponent(query)}`, { page: String(page) }, options);
             const result: AnimeSearchResult = {
-                results: (data.results || []).map((a) => this.mapAnime(a)),
+                results: (data.results || []).map((a) => this.mapAnime(a, provider)),
                 totalPages: data.totalPages || 1,
                 currentPage: page,
                 hasNextPage: data.hasNextPage || false,
-                source: `${this.name}:${this.provider}`,
+                source: `${this.name}:${provider}`,
             };
             this.setCache(key, result);
             return result;
@@ -175,13 +175,14 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
     }
 
     async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
+        const provider = id.includes('-zoro-') ? 'zoro' : 'gogoanime';
         const key = `anime:${id}`;
         const hit = this.getCached<AnimeBase>(key);
         if (hit) return hit;
         try {
-            const raw = id.replace(`consumet-${this.provider}-`, '');
-            const data = await this.fetchJson<ConsumetAnimeResponse>(`/info/${encodeURIComponent(raw)}`, undefined, options);
-            const anime = this.mapAnime(data);
+            const raw = id.replace(`consumet-${provider}-`, '');
+            const data = await this.fetchJson<ConsumetAnimeResponse>(provider, `/info/${encodeURIComponent(raw)}`, undefined, options);
+            const anime = this.mapAnime(data, provider);
             this.setCache(key, anime, 10 * 60 * 1000);
             return anime;
         } catch (e) {
@@ -190,13 +191,26 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
         }
     }
 
+    private stripConsumetEpisodePrefix(id: string): string {
+        return id
+            .replace(/^consumet-gogoanime-/i, '')
+            .replace(/^consumet-zoro-/i, '')
+            .replace(/^consumet-/i, '');
+    }
+
+    private effectiveProviderForEpisodeId(strippedId: string): 'gogoanime' | 'zoro' {
+        return (/[?&]ep=/i.test(strippedId) || /\$ep=/i.test(strippedId)) ? 'zoro' : 'gogoanime';
+    }
+
     async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
+        const provider = animeId.includes('-zoro-') ? 'zoro' : 'gogoanime';
         const key = `ep:${animeId}`;
         const hit = this.getCached<Episode[]>(key);
         if (hit) return hit;
         try {
-            const id = animeId.replace(`consumet-${this.provider}-`, '');
+            const id = animeId.replace(`consumet-${provider}-`, '');
             const data = await this.fetchJson<ConsumetAnimeResponse & { episodes?: ConsumetEpisodeResponse[] }>(
+                provider,
                 `/info/${encodeURIComponent(id)}`,
                 undefined,
                 options
@@ -223,12 +237,15 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
         const hit = this.getCached<EpisodeServer[]>(key);
         if (hit) return hit;
         try {
-            const raw = await this.fetchJson<Array<{ name: string; url: string; type?: string }>>(
-                `/servers/${encodeURIComponent(episodeId)}`,
+            const raw = this.stripConsumetEpisodePrefix(episodeId);
+            const provider = this.effectiveProviderForEpisodeId(raw);
+            const data = await this.fetchJson<Array<{ name: string; url: string; type?: string }>>(
+                provider,
+                `/servers/${encodeURIComponent(raw)}`,
                 undefined,
                 options
             );
-            const servers: EpisodeServer[] = (Array.isArray(raw) ? raw : []).map((s) => ({
+            const servers: EpisodeServer[] = (Array.isArray(data) ? data : []).map((s) => ({
                 name: s.name,
                 url: s.url,
                 type: (s.type || 'sub') as 'sub' | 'dub' | 'raw',
@@ -250,6 +267,8 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
         const hit = this.getCached<StreamingData>(key);
         if (hit) return hit;
         try {
+            const raw = this.stripConsumetEpisodePrefix(episodeId);
+            const provider = this.effectiveProviderForEpisodeId(raw);
             const q: Record<string, string> = {};
             if (server) q.server = server;
             const data = await this.fetchJson<{
@@ -259,7 +278,7 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
                 intro?: { start: number; end: number };
                 outro?: { start: number; end: number };
                 download?: string;
-            }>(`/watch/${encodeURIComponent(episodeId)}`, q, options);
+            }>(provider, `/watch/${encodeURIComponent(raw)}`, q, options);
 
             const streamData: StreamingData = {
                 sources: (data.sources || []).map(
@@ -289,16 +308,18 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
     }
 
     async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
+        const provider = 'gogoanime';
         const key = `tr:${page}`;
         const hit = this.getCached<AnimeBase[]>(key);
         if (hit) return hit;
         try {
             const data = await this.fetchJson<{ results?: ConsumetAnimeResponse[] }>(
+                provider,
                 '/top-airing',
                 { page: String(page) },
                 options
             );
-            const list = (data.results || []).map((a) => this.mapAnime(a));
+            const list = (data.results || []).map((a) => this.mapAnime(a, provider));
             this.setCache(key, list);
             return list;
         } catch {
@@ -307,16 +328,18 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
     }
 
     async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
+        const provider = 'gogoanime';
         const key = `la:${page}`;
         const hit = this.getCached<AnimeBase[]>(key);
         if (hit) return hit;
         try {
             const data = await this.fetchJson<{ results?: ConsumetAnimeResponse[] }>(
+                provider,
                 '/recent-episodes',
                 { page: String(page) },
                 options
             );
-            const list = (data.results || []).map((a) => this.mapAnime(a));
+            const list = (data.results || []).map((a) => this.mapAnime(a, provider));
             this.setCache(key, list);
             return list;
         } catch {
