@@ -22,8 +22,8 @@ export interface ApiConfig {
  */
 export const API_DEPLOYMENTS = {
     local: 'http://localhost:3001',
-    cloudflare: 'https://anifoxwatch-api.anya-bot.workers.dev',
-    render: 'https://anifoxwatch-sm7s.onrender.com',
+    cloudflare: 'https://anifoxwatch-api.anifoxwatch.workers.dev',
+    render: 'https://anifoxwatch-ci33.onrender.com',
     firebase: '/api', // Firebase Functions proxy endpoint
     custom: '' // Will be set from environment variable
 } as const;
@@ -59,7 +59,7 @@ function configFromUrl(envApiUrl: string): ApiConfig {
  * - **`VITE_DEV_API_URL`:** absolute override (e.g. another port).
  *
  * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then Render default
- * (`https://anifoxwatch-sm7s.onrender.com` unless overridden).
+ * (`https://anifoxwatch-ci33.onrender.com` unless overridden).
  */
 /**
  * Build the URL for an API path. When `baseUrl` is empty (local dev + Vite proxy),
@@ -192,7 +192,7 @@ export async function getApiStatus(baseUrl: string): Promise<{
 /**
  * Test all API deployments and return their status
  */
-export async function testAllDeployments(): Promise<Record<ApiDeployment, any>> {
+export async function testAllDeployments(): Promise<Record<ApiDeployment, { online: boolean; deployment: string; latency: number; version: string; error?: boolean }>> {
     const results = await Promise.allSettled([
         getApiStatus(API_DEPLOYMENTS.local),
         getApiStatus(API_DEPLOYMENTS.cloudflare),
@@ -200,11 +200,12 @@ export async function testAllDeployments(): Promise<Record<ApiDeployment, any>> 
         getApiStatus(API_DEPLOYMENTS.firebase)
     ]);
 
+    const offline = { online: false, deployment: 'offline', latency: -1, version: 'unknown', error: true };
     return {
-        local: results[0].status === 'fulfilled' ? results[0].value : { online: false, error: true },
-        cloudflare: results[1].status === 'fulfilled' ? results[1].value : { online: false, error: true },
-        render: results[2].status === 'fulfilled' ? results[2].value : { online: false, error: true },
-        firebase: results[3].status === 'fulfilled' ? results[3].value : { online: false, error: true },
-        custom: { online: false, error: true }
+        local:      results[0].status === 'fulfilled' ? results[0].value : offline,
+        cloudflare: results[1].status === 'fulfilled' ? results[1].value : offline,
+        render:     results[2].status === 'fulfilled' ? results[2].value : offline,
+        firebase:   results[3].status === 'fulfilled' ? results[3].value : offline,
+        custom:     offline,
     };
 }

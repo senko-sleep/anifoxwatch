@@ -7,7 +7,7 @@ import { AnimeBase, AnimeSearchResult, Episode, BrowseFilters } from '../types/a
  * Render backend URL for fallback when CF Worker sources can't handle the request.
  * Source-prefixed IDs (allanime-*, animekai-*, 9anime-*, kaido-*, akih-*) need Puppeteer.
  */
-const RENDER_BACKEND_URL = 'https://anifoxwatch-sm7s.onrender.com';
+const RENDER_BACKEND_URL = 'https://anifoxwatch-ci33.onrender.com';
 
 async function proxyToRender(path: string, timeoutMs = 50_000): Promise<Response> {
     const controller = new AbortController();
@@ -84,8 +84,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
 
         // Render-only source → proxy
         if (sourceNeedsRender(source)) {
-            try { return await proxyToRender(`/api/anime/search?${qs}`); } catch (e: any) {
-                return c.json({ error: e.message, results: [] }, 502);
+            try { return await proxyToRender(`/api/anime/search?${qs}`); } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage, results: [] }, 502);
             }
         }
 
@@ -107,8 +108,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         } catch (_) { void _; }
 
         // Local returned nothing — proxy to Render
-        try { return await proxyToRender(`/api/anime/search?${qs}`, 45_000); } catch (e: any) {
-            return c.json({ error: e.message, results: [] }, 502);
+        try { return await proxyToRender(`/api/anime/search?${qs}`, 45_000); } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage, results: [] }, 502);
         }
     });
 
@@ -116,7 +118,7 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     app.get('/hero-spotlight', async (c) => {
         try {
             const results = await getHeroSpotlightCached();
-            if (results && ((Array.isArray(results) && results.length > 0) || (results as { results?: unknown[] }).results?.length > 0)) {
+            if (results && ((Array.isArray(results) && results.length > 0) || ((results as { results?: unknown[] }).results && (results as { results?: unknown[] }).results!.length > 0))) {
                 return c.json(results);
             }
             // Empty result — fall through to Render
@@ -143,8 +145,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         try {
             const data = await sourceManager.search(q, page, undefined, { mode: 'safe' });
             return c.json(data);
-        } catch (e: any) {
-            return c.json({ error: e.message, results: [] }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage, results: [] }, 500);
         }
     });
 
@@ -160,13 +163,14 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             }
             // Empty — fall through to Render
             throw new Error('Empty trending result');
-        } catch (e: any) {
+        } catch (e: unknown) {
             // Fallback to Render
             try {
                 const qs = c.req.url.split('?')[1] || '';
                 return await proxyToRender(`/api/anime/trending?${qs}`, 50_000);
-            } catch (renderErr: any) {
-                return c.json({ error: e.message, results: [] }, 500);
+            } catch (renderErr: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage, results: [] }, 500);
             }
         }
     });
@@ -182,13 +186,14 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 return c.json({ results: data, source: source || 'default' });
             }
             throw new Error('Empty latest result');
-        } catch (e: any) {
+        } catch (e: unknown) {
             // Fallback to Render
             try {
                 const qs = c.req.url.split('?')[1] || '';
                 return await proxyToRender(`/api/anime/latest?${qs}`, 50_000);
-            } catch (renderErr: any) {
-                return c.json({ error: e.message, results: [] }, 500);
+            } catch (renderErr: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage, results: [] }, 500);
             }
         }
     });
@@ -205,13 +210,14 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 return c.json({ results: data });
             }
             throw new Error('Empty top-rated result');
-        } catch (e: any) {
+        } catch (e: unknown) {
             // Fallback to Render
             try {
                 const qs = c.req.url.split('?')[1] || '';
                 return await proxyToRender(`/api/anime/top-rated?${qs}`, 50_000);
-            } catch (renderErr: any) {
-                return c.json({ error: e.message, results: [] }, 500);
+            } catch (renderErr: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage, results: [] }, 500);
             }
         }
     });
@@ -263,8 +269,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 hasNextPage: result.hasNextPage,
                 currentPage: page
             });
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
@@ -296,8 +303,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 },
                 type, source: 'AniList'
             });
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
@@ -309,7 +317,7 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
 
         try {
             const result = await anilistService.getSeasonalAnime(year, season, page, 25);
-            const seasonalResult = result as any;
+            const seasonalResult = result as { results?: unknown[]; pageInfo?: { hasNextPage?: boolean; currentPage?: number; totalCount?: number }; hasNextPage?: boolean; currentPage?: number; totalPages?: number; seasonInfo?: { year: number; season: string } };
 
             return c.json({
                 results: seasonalResult.results,
@@ -322,8 +330,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 seasonInfo: seasonalResult.seasonInfo ?? { year: year ?? new Date().getFullYear(), season: season ?? 'current' },
                 source: 'AniList'
             });
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
@@ -339,8 +348,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             }
             const data = await sourceManager.getAnimeByGenre(genre, page, source);
             return c.json(data);
-        } catch (e: any) {
-            return c.json({ error: e.message, results: [] }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage, results: [] }, 500);
         }
     });
 
@@ -359,8 +369,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             }
             const result = await sourceManager.getAnimeByGenreAniList(genre, page);
             return c.json(result);
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
@@ -373,12 +384,13 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
 
         // Render-only source → proxy
         if (sourceNeedsRender(query.source as string)) {
-            try { return await proxyToRender(`/api/anime/filter?${c.req.url.split('?')[1] || ''}`); } catch (e: any) {
-                return c.json({ error: e.message }, 502);
+            try { return await proxyToRender(`/api/anime/filter?${c.req.url.split('?')[1] || ''}`); } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage }, 502);
             }
         }
 
-        const filters: any = {
+        const filters: Record<string, string | number | string[] | undefined> = {
             type: query.type,
             genres: genres.length > 0 ? genres : undefined,
             status: query.status,
@@ -408,16 +420,18 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 });
             }
             const result = await sourceManager.getFilteredAnime(filters);
+            const filteredResult = result as { anime?: unknown[]; totalPages?: number; hasNextPage?: boolean; totalResults?: number };
             return c.json({
-                results: result.anime || [],
+                results: filteredResult.anime || [],
                 currentPage: page,
-                totalPages: result.totalPages || 1,
-                hasNextPage: result.hasNextPage || false,
-                totalResults: result.totalResults || 0,
+                totalPages: filteredResult.totalPages || 1,
+                hasNextPage: filteredResult.hasNextPage || false,
+                totalResults: filteredResult.totalResults || 0,
                 filters, source: query.source || 'default'
             });
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
@@ -431,12 +445,13 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
 
         // Render-only source → proxy entire request to Render
         if (sourceNeedsRender(query.source as string)) {
-            try { return await proxyToRender(`/api/anime/browse?${c.req.url.split('?')[1] || ''}`); } catch (e: any) {
-                return c.json({ error: e.message, results: [] }, 502);
+            try { return await proxyToRender(`/api/anime/browse?${c.req.url.split('?')[1] || ''}`); } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage, results: [] }, 502);
             }
         }
 
-        const filters: any = {
+        const filters: Record<string, string | number | string[] | undefined> = {
             type: query.type,
             genres: parsedGenres.length > 0 ? parsedGenres : undefined,
             status: query.status,
@@ -482,9 +497,10 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
             }
             return c.json({ results: result.results || [], currentPage: page, totalPages: result.totalPages || 1, hasNextPage: result.hasNextPage || false, totalResults: result.results?.length || 0, source: query.source || result.source || 'default' });
-        } catch (e: any) {
+        } catch (e: unknown) {
             try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
-            return c.json({ error: e.message, results: [] }, 500);
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage, results: [] }, 500);
         }
     });
 
@@ -505,8 +521,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             const data = await sourceManager.getRandomAnime(source);
             if (!data) return c.json({ error: 'No random anime found' }, 404);
             return c.json(data);
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
@@ -521,8 +538,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             const qs = source ? `id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}` : `id=${encodeURIComponent(id)}`;
             try {
                 return await proxyToRender(`/api/anime?${qs}`);
-            } catch (e: any) {
-                return c.json({ error: e.message }, 502);
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage }, 502);
             }
         }
 
@@ -532,12 +550,13 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 // Fallback to Render if local source returned null
                 try {
                     return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`);
-                } catch {}
+                } catch (_) { void _; }
                 return c.json({ error: 'Anime not found' }, 404);
             }
             return c.json(result);
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
@@ -552,8 +571,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             const qs = source ? `id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}` : `id=${encodeURIComponent(id)}`;
             try {
                 return await proxyToRender(`/api/anime/episodes?${qs}`);
-            } catch (e: any) {
-                return c.json({ error: e.message, episodes: [] }, 502);
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage, episodes: [] }, 502);
             }
         }
 
@@ -563,11 +583,12 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 // Fallback to Render if local returned empty
                 try {
                     return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`);
-                } catch {}
+                } catch (_) { void _; }
             }
             return c.json({ episodes: result });
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
@@ -630,20 +651,22 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         if (needsRender(id)) {
             try {
                 return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`);
-            } catch (e: any) {
-                return c.json({ error: e.message }, 502);
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage }, 502);
             }
         }
         
         try {
             const data = await sourceManager.getAnime(id);
             if (!data) {
-                try { return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`); } catch {}
+                try { return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`); } catch (_) { void _; }
                 return c.json({ error: 'Anime not found' }, 404);
             }
             return c.json(data);
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
@@ -654,19 +677,21 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         if (needsRender(id)) {
             try {
                 return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`);
-            } catch (e: any) {
-                return c.json({ error: e.message, episodes: [] }, 502);
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage, episodes: [] }, 502);
             }
         }
         
         try {
             const data = await sourceManager.getEpisodes(id);
             if (!data || data.length === 0) {
-                try { return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`); } catch {}
+                try { return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`); } catch (_) { void _; }
             }
             return c.json({ episodes: data });
-        } catch (e: any) {
-            return c.json({ error: e.message }, 500);
+        } catch (e: unknown) {
+            const errorMessage = e instanceof Error ? e.message : String(e);
+            return c.json({ error: errorMessage }, 500);
         }
     });
 
