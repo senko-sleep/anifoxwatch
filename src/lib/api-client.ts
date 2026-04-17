@@ -187,9 +187,13 @@ class AnimeApiClient {
 
         const promise = this._doFetch<T>(endpoint, options, retries);
 
-        // Track in-flight GET requests for deduplication
+        // Track in-flight GET requests for deduplication.
+        // The noop .catch() prevents Node's "unhandled rejection" event from firing on the
+        // stored reference before a consumer attaches their own handler — callers still see
+        // the rejection via their own await/catch chain.
         if (isGet) {
             this.inflight.set(endpoint, promise);
+            promise.catch(() => {});
             promise.finally(() => this.inflight.delete(endpoint));
         }
 

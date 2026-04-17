@@ -37,7 +37,7 @@ export class CloudflareSourceManager {
     private sources: Map<string, StreamingSource> = new Map();
     private primarySource: string = 'CloudflareConsumet';
     private healthStatus: Map<string, SourceHealth> = new Map();
-    private sourceOrder: string[] = ['GogoPlayDirect', 'CloudflareConsumet', 'WatchHentai', 'Hanime'];
+    private sourceOrder: string[] = ['CloudflareConsumet', 'WatchHentai', 'Hanime'];
 
     constructor() {
         this.registerSource(new CloudflareConsumetFetchSource());
@@ -563,8 +563,8 @@ export class CloudflareSourceManager {
 
         logger.info(`[CloudflareSourceManager] Attempting cross-source fallback for "${title}" Ep ${episodeNum}`, undefined, 'CloudflareSourceManager');
 
-        // Parallel search on GogoPlayDirect and CloudflareConsumet (gogoanime)
-        const sourcesToTry = ['GogoPlayDirect', 'CloudflareConsumet'];
+        // Use CloudflareConsumet (Gogoanime API) only — GogoPlayDirect returns embed URLs, not real HLS streams
+        const sourcesToTry = ['CloudflareConsumet'];
         
         const results = await Promise.allSettled(sourcesToTry.map(async (sourceName) => {
             const source = this.sources.get(sourceName);

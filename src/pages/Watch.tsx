@@ -108,6 +108,7 @@ const Watch = () => {
   const [serverRetryCount, setServerRetryCount] = useState(0);
   const [sourceRetryIndex, setSourceRetryIndex] = useState(0);
   const [isSwitchingEpisode, setIsSwitchingEpisode] = useState(false);
+  const [streamSlowWarning, setStreamSlowWarning] = useState(false);
 
   // Refs
   const playerRef = useRef<HTMLDivElement>(null);
@@ -142,7 +143,7 @@ const Watch = () => {
     isLoading: streamLoading,
     error: streamError,
     refetch: refetchStream
-  } = useStreamingLinks(selectedEpisode || '', streamServer, audioType, !!selectedEpisode);
+  } = useStreamingLinks(selectedEpisode || '', streamServer, audioType, !!selectedEpisode, selectedEpisodeNum);
 
   /** Dub is available if: server list has dub, metadata says dub, active dub playback returned sources, or dub probe (while on SUB) succeeded. */
   const metadataIndicatesDub = useMemo(
@@ -200,20 +201,21 @@ const Watch = () => {
 
 
 
-  // Auto-failover on stream error
+  // Auto-failover on stream error — skip placeholder "default" servers
   useEffect(() => {
-    if (streamError && servers?.length && serverRetryCount < servers.length) {
-      const currentIndex = servers.findIndex(s => s.name === selectedServer);
-      const nextServer = servers[(currentIndex + 1) % servers.length];
-      console.log(`[Watch] 🔄 Failover to server: ${nextServer.name} (attempt ${serverRetryCount + 1}/${servers.length})`);
-      toast.info(`Switching to server ${nextServer.name}...`, {
-        description: `Attempt ${serverRetryCount + 1} of ${servers.length}`,
-        duration: 3000,
-      });
-      setSelectedServer(nextServer.name);
-      setUserPickedServer(true);
-      setServerRetryCount(prev => prev + 1);
-    }
+    if (!streamError || !servers?.length) return;
+    const realServers = servers.filter(s => s.name.toLowerCase() !== 'default');
+    if (realServers.length === 0 || serverRetryCount >= realServers.length) return;
+    const currentIndex = realServers.findIndex(s => s.name === selectedServer);
+    const nextServer = realServers[(currentIndex + 1) % realServers.length];
+    console.log(`[Watch] 🔄 Failover to server: ${nextServer.name} (attempt ${serverRetryCount + 1}/${realServers.length})`);
+    toast.info(`Switching to server ${nextServer.name}...`, {
+      description: `Attempt ${serverRetryCount + 1} of ${realServers.length}`,
+      duration: 3000,
+    });
+    setSelectedServer(nextServer.name);
+    setUserPickedServer(true);
+    setServerRetryCount(prev => prev + 1);
   }, [streamError, servers, selectedServer, serverRetryCount]);
 
   // Log stream data when received
@@ -297,6 +299,13 @@ const Watch = () => {
   useEffect(() => {
     setSourceRetryIndex(0);
   }, [streamData, selectedServer, audioType, quality]);
+
+  // Show "server warming up" hint after 12s of loading
+  useEffect(() => {
+    if (!streamLoading) { setStreamSlowWarning(false); return; }
+    const t = setTimeout(() => setStreamSlowWarning(true), 12000);
+    return () => clearTimeout(t);
+  }, [streamLoading, selectedEpisode]);
 
   // Auto-fallback: if dub stream returned no sources, silently switch to sub
   useEffect(() => {
@@ -650,6 +659,9 @@ const Watch = () => {
                   <div className="flex flex-col items-center gap-3">
                     <Loader2 className="w-10 h-10 animate-spin text-fox-orange" />
                     <p className="text-white/80 text-sm">Loading stream...</p>
+                    {streamSlowWarning && (
+                      <p className="text-white/50 text-xs text-center max-w-[220px]">Server is waking up — this can take 30–60 s on first load</p>
+                    )}
                   </div>
                 </div>
               ) : embedFallbackUrl ? (

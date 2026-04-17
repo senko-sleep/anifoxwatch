@@ -46,4 +46,4 @@ services:
       # Primary API: Cloudflare Workers (no cold starts, global edge).
       # Render backend is used as fallback for Puppeteer-dependent routes.
       - key: VITE_API_URL
-        value: https://anifoxwatch-ci33.onrender.com
+        value: https://anifoxwatch-api.anya-bot.workers.dev

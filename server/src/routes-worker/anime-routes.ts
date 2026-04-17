@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { anilistService } from '../services/anilist-service.js';
 import { getHeroSpotlightCached } from '../services/hero-spotlight-service.js';
+import { AnimeBase, AnimeSearchResult, Episode, BrowseFilters } from '../types/anime.js';
 
 /**
  * Render backend URL for fallback when CF Worker sources can't handle the request.
@@ -47,20 +48,20 @@ function sourceNeedsRender(source?: string): boolean {
 
 // Use a flexible interface that works with both SourceManager and CloudflareSourceManager
 interface SourceManagerLike {
-    search(query: string, page?: number, sourceName?: string, options?: { mode?: string }): Promise<any>;
-    getAnime(id: string): Promise<any>;
-    getEpisodes(animeId: string): Promise<any[]>;
-    getTrending(page?: number, sourceName?: string): Promise<any[]>;
-    getLatest(page?: number, sourceName?: string): Promise<any[]>;
-    getTopRated(page?: number, limit?: number, sourceName?: string): Promise<any[]>;
-    getStreamingLinks?(episodeId: string, server?: string, category?: string): Promise<any>;
-    getEpisodeServers?(episodeId: string): Promise<any[]>;
+    search(query: string, page?: number, sourceName?: string, options?: { mode?: string }): Promise<AnimeSearchResult>;
+    getAnime(id: string): Promise<AnimeBase | null>;
+    getEpisodes(animeId: string): Promise<Episode[]>;
+    getTrending(page?: number, sourceName?: string): Promise<AnimeBase[]>;
+    getLatest(page?: number, sourceName?: string): Promise<AnimeBase[]>;
+    getTopRated(page?: number, limit?: number, sourceName?: string): Promise<AnimeBase[]>;
+    getStreamingLinks?(episodeId: string, server?: string, category?: string): Promise<Record<string, unknown>>;
+    getEpisodeServers?(episodeId: string): Promise<Record<string, unknown>[]>;
     // Optional methods that may not exist in CloudflareSourceManager
-    getAnimeByGenre?(genre: string, page?: number, source?: string): Promise<any>;
-    getAnimeByGenreAniList?(genre: string, page?: number): Promise<any>;
-    getFilteredAnime?(filters: any): Promise<any>;
-    browseAnime?(filters: any): Promise<any>;
-    getRandomAnime?(source?: string): Promise<any>;
+    getAnimeByGenre?(genre: string, page?: number, source?: string): Promise<AnimeSearchResult>;
+    getAnimeByGenreAniList?(genre: string, page?: number): Promise<AnimeSearchResult>;
+    getFilteredAnime?(filters: BrowseFilters): Promise<AnimeSearchResult>;
+    browseAnime?(filters: BrowseFilters): Promise<AnimeSearchResult>;
+    getRandomAnime?(source?: string): Promise<AnimeBase | null>;
 }
 
 /**
@@ -115,18 +116,19 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     app.get('/hero-spotlight', async (c) => {
         try {
             const results = await getHeroSpotlightCached();
-            if (results && ((Array.isArray(results) && results.length > 0) || (results as any).results?.length > 0)) {
+            if (results && ((Array.isArray(results) && results.length > 0) || (results as { results?: unknown[] }).results?.length > 0)) {
                 return c.json(results);
             }
             // Empty result — fall through to Render
             throw new Error('Empty hero-spotlight result');
-        } catch (error: any) {
+        } catch (error: unknown) {
             // Fallback: proxy hero-spotlight to Render (AniList from CF Worker IPs often fails)
             try {
                 const qs = c.req.url.includes('?') ? `?${c.req.url.split('?')[1]}` : '';
                 return await proxyToRender(`/api/anime/hero-spotlight${qs}`, 45_000);
-            } catch (renderErr: any) {
-                return c.json({ error: `CF + Render both failed: ${error.message}`, results: [], count: 0 }, 500);
+            } catch (renderErr: unknown) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                return c.json({ error: `CF + Render both failed: ${errorMessage}`, results: [], count: 0 }, 500);
             }
         }
     });

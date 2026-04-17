@@ -87,7 +87,7 @@ const ADULT_GENRES = [
   'Tsundere', 'Uncensored', 'Urination', 'Vanilla', 'Virgins', 'Widow', 'X-Ray',
 
   // Hanime specific genres
-  'Blow Job', 'Boob Job', 'Glasses', 'Hand Job', 'Horror', 'Inflation', 'Loli',
+  'Blow Job', 'Boob Job', 'Glasses', 'Hand Job', 'Horror', 'Loli',
   'Masturbation', 'Mind Control', 'Monster', 'Nekomimi', 'Orgy', 'Plot',
   'Reverse Rape', 'Shota', 'Softcore', 'Teacher', 'Threesome', 'Trap',
   'Ugly Bastard',
@@ -96,7 +96,7 @@ const ADULT_GENRES = [
   'Female Doctor', 'Female Teacher'
 ];
 
-const MIXED_GENRES = [...SAFE_GENRES, ...ADULT_GENRES].sort();
+const MIXED_GENRES = [...new Set([...SAFE_GENRES, ...ADULT_GENRES])].sort();
 
 /** One-tap discovery on empty browse / no-results */
 const QUICK_EXPLORE_GENRES = ['Action', 'Romance', 'Isekai', 'Sci-Fi', 'Fantasy', 'Comedy'] as const;

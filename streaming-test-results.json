@@ -1,0 +1,338 @@
+{
+  "timestamp": "2026-04-16T21:15:05.551Z",
+  "apiBase": "http://localhost:3001",
+  "testAnime": "naruto",
+  "summary": {
+    "total": 27,
+    "fullyWorking": 0,
+    "partiallyWorking": 0,
+    "notWorking": 27,
+    "successRate": 0
+  },
+  "results": [
+    {
+      "source": "AnimeKai",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 98
+    },
+    {
+      "source": "Zoro",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 10
+    },
+    {
+      "source": "AnimePahe",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 9
+    },
+    {
+      "source": "AnimeSuge",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 7
+    },
+    {
+      "source": "Kaido",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 8
+    },
+    {
+      "source": "Anix",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 5
+    },
+    {
+      "source": "Gogoanime",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "9Anime",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 5
+    },
+    {
+      "source": "Aniwave",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 7
+    },
+    {
+      "source": "Aniwatch",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 9
+    },
+    {
+      "source": "KickassAnime",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "YugenAnime",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 5
+    },
+    {
+      "source": "AniMixPlay",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "AnimeFox",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "AnimeDAO",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 4
+    },
+    {
+      "source": "AnimeFLV",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "AnimeSaturn",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "Crunchyroll",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "AnimeOnsen",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "Marin",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 5
+    },
+    {
+      "source": "AnimeHeaven",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "AnimeKisa",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 6
+    },
+    {
+      "source": "AnimeOwl",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 5
+    },
+    {
+      "source": "AnimeLand",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 5
+    },
+    {
+      "source": "AnimeFreak",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 5
+    },
+    {
+      "source": "Consumet",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 4
+    },
+    {
+      "source": "WatchHentai",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Unknown error"
+      ],
+      "duration": 4
+    }
+  ]
+}

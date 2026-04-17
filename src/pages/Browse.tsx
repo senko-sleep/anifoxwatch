@@ -68,22 +68,20 @@ const SAFE_GENRES = [
 const ADULT_GENRES = [
   'Hentai', 'Ecchi', 'Yaoi', 'Yuri',
   '3D', '2D', 'Ahegao', 'Anal', 'Animal Ears', 'BDSM', 'Beastiality', 'Big Boobs', 'Big Breast',
-  'Blackmail', 'Blowjob', 'Blow Job', 'Bondage', 'Brainwashed', 'Bukakke', 'Bukkake', 'Cat Girl',
-  'Censored', 'Comedy', 'Cosplay', 'Creampie', 'Dark Skin', 'Deepthroat', 'Double Penetration', 'Double Penetration',
-  'Facesitting', 'Facial', 'Femdom', 'Footjob', 'Foot Job', 'Futanari', 'Gangbang',
-  'Gyaru', 'Harem', 'Hardcore', 'HardCore', 'Hospital', 'Horny Slut', 'Housewife', 'Humiliation', 'Incest', 'Inflation',
+  'Bitch', 'Blackmail', 'Blowjob', 'Blow Job', 'Bondage', 'Boob Job', 'Brainwashed', 'Bukakke', 'Bukkake', 'Cat Girl',
+  'Censored', 'Cosplay', 'Creampie', 'Dark Skin', 'Deepthroat', 'Demon', 'Double Penetration',
+  'Facesitting', 'Facial', 'Family', 'Femdom', 'Footjob', 'Foot Job', 'Furry', 'Futanari', 'Gangbang',
+  'Glasses', 'Gyaru', 'Hand Job', 'Hardcore', 'Horny Slut', 'Hospital', 'Housewife', 'Humiliation', 'Incest', 'Inflation',
   'Internal Cumshot', 'Lactation', 'Large Breasts', 'Lolicon', 'Loli', 'Magical Girls', 'Maid', 'Masturbation',
-  'Megane', 'MILF', 'Milf', 'Mind Break', 'Mind Control', 'Molestation', 'Monster', 'NTR', 'Nuns', 'Nurses',
+  'Megane', 'MILF', 'Mind Break', 'Mind Control', 'Molestation', 'Monster', 'Nekomimi', 'NTR', 'Nuns', 'Nurses',
   'Office Ladies', 'Orgy', 'Paizuri', 'Plot', 'POV', 'Pregnant', 'Princess', 'Public Sex', 'Rape',
-  'Rim Job', 'Scat', 'School Girls', 'Sex Toys', 'Shimapan', 'Shoutacon', 'Shota', 'Slaves',
+  'Remove Censored', 'Reverse Rape', 'Rim Job', 'Scat', 'School Girls', 'Sex Toys', 'Shimapan', 'Shoutacon', 'Shota', 'Slaves',
   'Softcore', 'Squirting', 'Stocking', 'Strap On', 'Strapped On', 'Succubus', 'Swimsuit',
   'Teacher', 'Tentacles', 'Threesome', 'Three Some', 'Tits Fuck', 'Torture', 'Toys', 'Train Molestation', 'Trap',
-  'Tsundere', 'Uncensored', 'Urination', 'Vanilla', 'Virgins', 'Widow', 'X-Ray',
-  'Boob Job', 'Family', 'Fantasy', 'Glasses', 'Hand Job', 'Horror', 'Inflation',
-  'Mind Control', 'Nekomimi', 'Reverse Rape', 'Bitch', 'Demon', 'Remove Censored', 'Furry'
+  'Tsundere', 'Uncensored', 'Urination', 'Vanilla', 'Virgins', 'Widow', 'X-Ray'
 ];
 
-const MIXED_GENRES = [...SAFE_GENRES, ...ADULT_GENRES].sort();
+const MIXED_GENRES = [...new Set([...SAFE_GENRES, ...ADULT_GENRES])].sort();
 
 const currentYear = new Date().getFullYear();
 const YEAR_RANGES = [
