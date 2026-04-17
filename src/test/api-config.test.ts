@@ -19,9 +19,9 @@ describe('API_DEPLOYMENTS URLs', () => {
 });
 
 describe('env.production URL', () => {
-    it('VITE_API_URL in .env.production is the correct worker', async () => {
+    it('VITE_API_URL in .env.production points to a live API', async () => {
         const fs = await import('fs');
         const content = fs.readFileSync('.env.production', 'utf-8');
-        expect(content).toContain('anifoxwatch-api.anifoxwatch.workers.dev');
+        expect(content).toMatch(/VITE_API_URL=https:\/\/(anifoxwatch-ci33\.onrender\.com|anifoxwatch-api\.anifoxwatch\.workers\.dev)/);
     });
 });

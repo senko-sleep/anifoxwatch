@@ -23,7 +23,7 @@ export interface ApiConfig {
 export const API_DEPLOYMENTS = {
     local: 'http://localhost:3001',
     cloudflare: 'https://anifoxwatch-api.anifoxwatch.workers.dev',
-    render: 'https://anifoxwatch-ci33.onrender.com',
+    render: 'https://anifoxwatch-ci33.onrender.com', // primary when Worker is degraded
     firebase: '/api', // Firebase Functions proxy endpoint
     custom: '' // Will be set from environment variable
 } as const;
