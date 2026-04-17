@@ -36,70 +36,6 @@ const getProxyBaseUrl = (c: { req: { url: string } }): string => {
     return `${url.protocol}//${url.host}/api/stream/proxy`;
 };
 
-/**
- * Extract direct video URL from Streamtape embed page using CF Worker fetch.
- * The token is IP-bound, so extraction must happen on the same server that will proxy the video.
- */
-async function extractStreamtapeVideoUrl(embedUrl: string): Promise<string | null> {
-    try {
-        const resp = await fetch(embedUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            },
-        });
-        if (!resp.ok) return null;
-        const html = await resp.text();
-
-        // Parse ALL JS assignments to robotlink/ideoolink/botlink — the LAST one wins.
-        const jsPattern = /getElementById\(['"](?:robotlink|ideoolink|botlink)['"]\)\.innerHTML\s*=\s*['"]([^'"]+)['"]\s*\+\s*(?:['"]['"]\s*\+\s*)?\(?['"]([^'"]+)['"]\)?\.substring\((\d+)\)(?:\.substring\((\d+)\))?/g;
-        let lastMatch: RegExpExecArray | null = null;
-        let m: RegExpExecArray | null;
-        while ((m = jsPattern.exec(html)) !== null) {
-            lastMatch = m;
-        }
-
-        if (lastMatch) {
-            const prefix = lastMatch[1];
-            let suffix = lastMatch[2];
-            const sub1 = parseInt(lastMatch[3], 10);
-            const sub2 = lastMatch[4] ? parseInt(lastMatch[4], 10) : undefined;
-            suffix = suffix.substring(sub1);
-            if (sub2 !== undefined) suffix = suffix.substring(sub2);
-            const videoUrl = `https:${prefix}${suffix}`;
-            if (videoUrl.includes('/get_video?') || videoUrl.includes('streamtape.com')) {
-                return videoUrl;
-            }
-        }
-
-        // Fallback: robotlink div content
-        const divMatch = html.match(/<div id="robotlink"[^>]*>([^<]+)<\/div>/);
-        if (divMatch) {
-            const partial = divMatch[1].trim();
-            if (partial.includes('/get_video?')) {
-                return partial.startsWith('http') ? partial : `https:${partial}`;
-            }
-        }
-        return null;
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Given a streamtape get_video URL (with potentially wrong IP-bound token),
- * find the embed URL from the video ID and re-extract with CF Worker IP.
- */
-async function reExtractStreamtapeForWorkerIp(getVideoUrl: string): Promise<string | null> {
-    try {
-        const u = new URL(getVideoUrl);
-        const videoId = u.searchParams.get('id');
-        if (!videoId) return null;
-        const embedUrl = `https://streamtape.com/e/${videoId}/`;
-        return await extractStreamtapeVideoUrl(embedUrl);
-    } catch {
-        return null;
-    }
-}
 
 /**
  * Check if a URL's domain is on the dead domains list
@@ -252,9 +188,14 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
 
     // Get streaming links — try local sources first, then proxy to Render for Puppeteer
     app.get('/watch/:episodeId', async (c) => {
-        // Keep the full decoded episode ID including ?ep= for aniwatch-style IDs like
-        // "anime-slug-12345?ep=92595". Do NOT split on '?' — it's part of the ID, not a query param.
-        const episodeId = decodeURIComponent(c.req.param('episodeId'));
+        // Cloudflare/Hono may decode %3F→? in the path before routing, turning
+        // "anime-slug%3Fep%3D92595" into path param "anime-slug" + query "ep=92595".
+        // Reconstruct the full aniwatch-style ID when that happens.
+        let episodeId = decodeURIComponent(c.req.param('episodeId'));
+        const epQueryParam = c.req.query('ep');
+        if (epQueryParam && !episodeId.includes('?ep=')) {
+            episodeId = `${episodeId}?ep=${epQueryParam}`;
+        }
         const explicitServer = normalizeStreamServerQuery(c.req.query('server'));
         const category = c.req.query('category') as 'sub' | 'dub' | undefined;
         const epNum = c.req.query('ep_num');
