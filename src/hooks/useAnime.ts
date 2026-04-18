@@ -2,86 +2,11 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiClient, SourceHealth, StreamingData, EpisodeServer, ScheduleResponse, LeaderboardResponse, SeasonalResponse } from '@/lib/api-client';
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { enrichWithAniListCovers } from '@/lib/anilist-covers';
-import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
+import { fetchSeasonalFromAniList } from '@/lib/anilist-home-queries';
 
 // ─── Direct AniList seasonal fallback ────────────────────────────────────────
 // Used when the server-side /api/anime/seasonal returns empty (e.g. AniList
 // rate-limits the Cloudflare Worker). Queries AniList directly from the browser.
-
-async function fetchSeasonalFromAniList(year: number, season: string): Promise<SeasonalResponse> {
-    const query = `{
-      Page(page:1,perPage:40){
-        media(type:ANIME,season:${season},seasonYear:${year},sort:POPULARITY_DESC,isAdult:false,format_in:[TV,MOVIE,ONA]){
-          id title{romaji english} coverImage{extraLarge large} bannerImage
-          description genres episodes duration format status averageScore popularity
-          seasonYear season studios(isMain:true){nodes{name}}
-        }
-        pageInfo{hasNextPage currentPage total}
-      }
-    }`;
-
-    const res = await fetchAniListGraphQL({ query });
-    const json = await res.json();
-    const page = json?.data?.Page;
-    const media: Record<string, unknown>[] = page?.media || [];
-
-    const statusMap: Record<string, Anime['status']> = {
-        RELEASING: 'Ongoing', FINISHED: 'Completed', NOT_YET_RELEASED: 'Upcoming',
-        CANCELLED: 'Completed', HIATUS: 'Ongoing',
-    };
-    const formatMap: Record<string, Anime['type']> = {
-        TV: 'TV', MOVIE: 'Movie', OVA: 'OVA', ONA: 'ONA', SPECIAL: 'Special',
-    };
-
-    interface AniListSeasonMedia {
-        id: number;
-        title: { english: string | null; romaji: string };
-        coverImage: { extraLarge: string; large: string };
-        bannerImage: string | null;
-        description: string | null;
-        genres: string[];
-        episodes: number | null;
-        duration: number | null;
-        format: string | null;
-        status: string | null;
-        averageScore: number | null;
-        seasonYear: number | null;
-        season: string | null;
-        studios: { nodes: { name: string }[] };
-    }
-
-    const results: Anime[] = (media as unknown as AniListSeasonMedia[]).map((m) => ({
-        id: `anilist-${m.id}`,
-        title: m.title.english || m.title.romaji || 'Unknown',
-        titleJapanese: m.title.romaji || undefined,
-        image: m.coverImage.extraLarge || m.coverImage.large || '',
-        cover: m.coverImage.extraLarge || m.coverImage.large || '',
-        banner: m.bannerImage || undefined,
-        description: (m.description || '').replace(/<[^>]+>/g, '').trim(),
-        type: formatMap[m.format || ''] ?? 'TV',
-        status: statusMap[m.status || ''] ?? 'Ongoing',
-        rating: m.averageScore ? m.averageScore / 10 : undefined,
-        episodes: m.episodes || 0,
-        genres: m.genres || [],
-        studios: m.studios.nodes.map((s) => s.name),
-        year: m.seasonYear || year,
-        season: m.season || season,
-        isMature: false,
-        source: 'anilist',
-    }));
-
-    return {
-        results,
-        pageInfo: {
-            hasNextPage: page?.pageInfo?.hasNextPage ?? false,
-            currentPage: page?.pageInfo?.currentPage ?? 1,
-            totalPages: 1,
-            totalItems: page?.pageInfo?.total ?? results.length,
-        },
-        seasonInfo: { year, season: season.toLowerCase() },
-        source: 'AniList-direct',
-    };
-}
 
 // Query keys for caching and invalidation
 export const queryKeys = {

@@ -5,12 +5,13 @@ import { ContinueWatching } from '@/components/home/ContinueWatching';
 import { AnimeSlider } from '@/components/home/AnimeSlider';
 import { SectionHeader } from '@/components/shared/SectionHeader';
 import {
-  useTrending,
-  useSeasonal,
-  useUpcoming,
-  useLatest,
-  useBrowse,
-} from '@/hooks/useAnime';
+  useAnilistHomeTrending,
+  useAnilistHomeSeasonal,
+  useAnilistHomeUpcoming,
+  useAnilistHomeLatest,
+  useAnilistHomeMovies,
+  useAnilistHomeAction,
+} from '@/hooks/useAnilistHomeSections';
 import { useWatchHistory } from '@/hooks/useWatchHistory';
 import { useHeroAnime } from '@/hooks/useHeroAnimeMultiSource';
 import { AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
@@ -30,7 +31,7 @@ const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (
 const Index = () => {
   useDocumentTitle('Home');
 
-  const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useTrending(1, 24, 'safe');
+  const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useAnilistHomeTrending(24);
   const { currentSeasonLabel, currentSeasonApi, currentSeasonYear } = useMemo(() => {
     const now = new Date();
     const m = now.getMonth();
@@ -41,11 +42,11 @@ const Index = () => {
     if (m <= 10) return { currentSeasonLabel: `Fall ${y}`,       currentSeasonApi: 'FALL',   currentSeasonYear: y };
     return       { currentSeasonLabel: `Winter ${y + 1}`, currentSeasonApi: 'WINTER', currentSeasonYear: y + 1 };
   }, []);
-  const { data: seasonalData,  isLoading: seasonalLoading,  refetch: refetchSeasonal  } = useSeasonal(currentSeasonYear, currentSeasonApi, 1, true, 'safe');
-  const { data: upcomingData }                                = useUpcoming();
-  const { data: latestAnime,   isLoading: latestLoading,    refetch: refetchLatest   } = useLatest(1, undefined, 'safe');
-  const { data: moviesData,    isLoading: moviesLoading,    refetch: refetchMovies   } = useBrowse({ type: 'Movie', sort: 'popularity', mode: 'safe' }, 1, true, false, 20);
-  const { data: actionData,    isLoading: actionLoading,    refetch: refetchAction   } = useBrowse({ genre: 'Action', sort: 'trending', mode: 'safe' }, 1, true, false, 20);
+  const { data: seasonalData,  isLoading: seasonalLoading,  refetch: refetchSeasonal  } = useAnilistHomeSeasonal(currentSeasonYear, currentSeasonApi, true);
+  const { data: upcomingData }                                = useAnilistHomeUpcoming(24);
+  const { data: latestAnime,   isLoading: latestLoading,    refetch: refetchLatest   } = useAnilistHomeLatest(24);
+  const { data: moviesData,    isLoading: moviesLoading,    refetch: refetchMovies   } = useAnilistHomeMovies(20);
+  const { data: actionData,    isLoading: actionLoading,    refetch: refetchAction   } = useAnilistHomeAction(20);
   const { history, removeFromHistory }                        = useWatchHistory();
   const { heroAnime, isLoading: heroLoading }                 = useHeroAnime();
 
@@ -147,7 +148,7 @@ const Index = () => {
             <AlertCircle className="w-4 h-4 text-red-400/80 shrink-0" />
             <span className="text-zinc-400 flex-1">
               {import.meta.env.DEV
-                ? <>API unavailable on <span className="text-zinc-300">127.0.0.1:3001</span> — wait for it to start or check <span className="text-zinc-300">.env.development</span>.</>
+                ? <>Could not load home rows from AniList (network or rate limit). Retry in a moment.</>
                 : 'Couldn\'t load anime data. Check your connection and try again.'}
             </span>
             <Button onClick={handleRefresh} size="sm" variant="ghost" className="text-zinc-400 hover:text-white shrink-0 h-7 px-2">

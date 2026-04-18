@@ -4,9 +4,8 @@ import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
 import { isPlaceholderAnimeDescription } from '@/lib/utils';
 
 /**
- * Multi-source hero anime fetcher with fallbacks:
- * 1. AniList GraphQL (primary - HD widescreen banners, rich metadata, YouTube trailers)
- * 2. Local trending API (fallback)
+ * Hero anime: AniList GraphQL (catalog + metadata). Optional server hero-spotlight
+ * (same AniList-backed list with server-side synopsis helpers); no streaming-catalog fallback.
  * 
  * Cached for 30 minutes in localStorage. Clears stale caches automatically.
  */
@@ -45,7 +44,7 @@ export interface HeroAnime {
     id: string | null;
     site: string | null;
   } | null;
-  source: 'anilist' | 'local';
+  source: 'anilist';
 }
 
 interface CachedHeroData {
@@ -55,9 +54,9 @@ interface CachedHeroData {
   version: number;
 }
 
-const CACHE_KEY = 'anistream_hero_v8';
+const CACHE_KEY = 'anistream_hero_v9';
 const CACHE_TTL = 20 * 60 * 1000;
-const CACHE_VERSION = 8;
+const CACHE_VERSION = 9;
 
 // Clear legacy cache keys on load
 try {
@@ -284,45 +283,6 @@ async function fetchFromHeroSpotlightAPI(): Promise<HeroAnime[]> {
   }));
 }
 
-// ─── Local API fallback ─────────────────────────────────────────────────────
-
-async function fetchFromLocalAPI(): Promise<HeroAnime[]> {
-  const response = await fetch(apiUrl('/api/anime/trending?limit=25'));
-  if (!response.ok) throw new Error(`Local API ${response.status}`);
-  const data = await response.json();
-  const list: Record<string, unknown>[] = data.results || data || [];
-
-  return list
-    .filter((a: Record<string, unknown>) => a.banner || a.cover || a.image)
-    .map((a: Record<string, unknown>) => ({
-      id: parseInt(a.id as string) || Math.floor(Math.random() * 1e6),
-      idMal: null,
-      title: { english: a.title as string, romaji: a.title as string, native: (a.titleJapanese as string) || null },
-      bannerImage: typeof a.banner === 'string' && /^https?:\/\//i.test(a.banner.trim())
-        ? (a.banner as string)
-        : ((a.cover || a.image) as string),
-      coverImage: { extraLarge: (a.cover || a.image) as string, large: (a.image) as string, color: null },
-      description: (() => {
-        const d = cleanDescription((a.description as string) || '');
-        return isPlaceholderAnimeDescription(d) ? '' : d;
-      })(),
-      genres: (a.genres as string[]) || [],
-      averageScore: a.rating ? (a.rating as number) * 10 : null,
-      popularity: 0,
-      episodes: (a.episodes as number) || null,
-      duration: a.duration ? parseInt(a.duration as string) : null,
-      format: (a.type as string) || 'TV',
-      status: (a.status as string) || 'Ongoing',
-      season: (a.season as string) || null,
-      seasonYear: (a.year as number) || null,
-      studios: { nodes: ((a.studios as string[]) || []).map((s: string) => ({ name: s, isAnimationStudio: true })) },
-      nextAiringEpisode: null,
-      trailer: null,
-      source: 'local' as const,
-    }))
-    .slice(0, 20);
-}
-
 // ─── Orchestrator ───────────────────────────────────────────────────────────
 
 async function fetchHeroAnime(): Promise<HeroAnime[]> {
@@ -349,19 +309,7 @@ async function fetchHeroAnime(): Promise<HeroAnime[]> {
       return data;
     }
   } catch (err) {
-    console.warn('[Hero] AniList direct failed, trying local trending:', err);
-  }
-
-  // 3) Local streaming catalog (banner may be cover-only; last resort)
-  try {
-    const data = await fetchFromLocalAPI();
-    if (data.length > 0) {
-      console.log(`[Hero] ✅ ${data.length} anime from Local API (fallback)`);
-      setCachedData(data, 'Local');
-      return data;
-    }
-  } catch (err) {
-    console.error('[Hero] Local API failed:', err);
+    console.warn('[Hero] AniList direct failed:', err);
   }
 
   throw new Error('All hero sources failed');

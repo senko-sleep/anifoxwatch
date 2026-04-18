@@ -88,6 +88,29 @@ export const WatchHistory = {
         }
     },
 
+    /** Upgrade stored poster URL (e.g. swap dead scraper CDN for AniList). */
+    patchAnimeImage(animeId: string, imageUrl: string) {
+        try {
+            const historyJSON = localStorage.getItem(HISTORY_KEY);
+            if (!historyJSON || !imageUrl?.trim()) return;
+
+            let history: WatchHistoryItem[] = JSON.parse(historyJSON);
+            let changed = false;
+            history = history.map((item) => {
+                if (item.animeId !== animeId) return item;
+                if (item.animeImage === imageUrl) return item;
+                changed = true;
+                return { ...item, animeImage: imageUrl };
+            });
+
+            if (changed) {
+                localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+            }
+        } catch (e) {
+            console.error('Failed to patch watch history image:', e);
+        }
+    },
+
     clear: () => {
         localStorage.removeItem(HISTORY_KEY);
     }

@@ -37,6 +37,28 @@ async function fetchWith429Retry(init: RequestInit): Promise<Response> {
   }
 }
 
+const MAX_TRANSIENT_RETRIES = 3;
+
+/** 429 handled above; also retry 5xx and cold-start network failures. */
+async function fetchAniListOnceWithTransientRetry(init: RequestInit): Promise<Response> {
+  for (let attempt = 0; attempt < MAX_TRANSIENT_RETRIES; attempt++) {
+    try {
+      const res = await fetchWith429Retry(init);
+      if (res.ok) return res;
+      if (res.status === 429) return res;
+      if (res.status >= 500 && res.status < 600 && attempt < MAX_TRANSIENT_RETRIES - 1) {
+        await delay(500 * (attempt + 1));
+        continue;
+      }
+      return res;
+    } catch (e) {
+      if (attempt === MAX_TRANSIENT_RETRIES - 1) throw e;
+      await delay(650 * (attempt + 1));
+    }
+  }
+  throw new Error('AniList request exhausted retries');
+}
+
 /**
  * Serialize all AniList GraphQL POSTs and space them apart to stay under rate limits.
  */
@@ -47,7 +69,7 @@ export function fetchAniListGraphQL(body: Record<string, unknown>): Promise<Resp
     body: JSON.stringify(body),
   };
 
-  const run = queue.then(() => fetchWith429Retry(init));
+  const run = queue.then(() => fetchAniListOnceWithTransientRetry(init));
   queue = run.finally(() => delay(MIN_SPACING_MS));
   return run;
 }

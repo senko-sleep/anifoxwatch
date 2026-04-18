@@ -56,6 +56,141 @@ function persistCache(): void {
   } catch { /* quota exceeded — ignore */ }
 }
 
+// ─── AniList media id → cover (stable s4.anilist.co URLs) ─────────────────────
+
+const ID_COVER_CACHE_KEY = 'anistream_anilist_id_covers_v1';
+const ID_COVER_CACHE_TTL = 7 * 24 * 60 * 60 * 1000;
+
+let idMemCache: Map<number, string> | null = null;
+
+function loadIdCoverCache(): Map<number, string> {
+  if (idMemCache) return idMemCache;
+  idMemCache = new Map();
+  try {
+    const raw = sessionStorage.getItem(ID_COVER_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { data: Record<string, string>; ts: number };
+      if (Date.now() - parsed.ts < ID_COVER_CACHE_TTL) {
+        for (const [k, v] of Object.entries(parsed.data)) {
+          const id = parseInt(k, 10);
+          if (Number.isFinite(id) && typeof v === 'string' && v) idMemCache.set(id, v);
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return idMemCache;
+}
+
+function persistIdCoverCache(): void {
+  if (!idMemCache) return;
+  try {
+    const data: Record<string, string> = {};
+    for (const [k, v] of idMemCache.entries()) data[String(k)] = v;
+    sessionStorage.setItem(ID_COVER_CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Instant (session) lookup for Continue Watching — title cache from browse/home. */
+export function lookupCachedAnilistPosterByTitle(title: string): string | undefined {
+  if (!title?.trim()) return undefined;
+  return loadCacheFromStorage().get(normTitle(title));
+}
+
+/** Instant lookup after at least one id batch has populated the cache. */
+export function lookupCachedAnilistPosterByMediaId(mediaId: number): string | undefined {
+  if (!Number.isFinite(mediaId)) return undefined;
+  return loadIdCoverCache().get(mediaId);
+}
+
+/**
+ * Batch-fetch cover URLs by AniList media id (reliable CDN; fixes dead scraper URLs for anilist-* history).
+ */
+export async function fetchAniListCoversByMediaIds(mediaIds: number[]): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const unique = [...new Set(mediaIds.filter((n) => Number.isFinite(n)))];
+  if (unique.length === 0) return out;
+
+  const cache = loadIdCoverCache();
+  for (const id of unique) {
+    const u = cache.get(id);
+    if (u) out.set(id, u);
+  }
+
+  const missing = unique.filter((id) => !cache.has(id));
+  if (missing.length === 0) return out;
+
+  const CHUNK = 50;
+  for (let offset = 0; offset < missing.length; offset += CHUNK) {
+    const chunk = missing.slice(offset, offset + CHUNK);
+    const idsCsv = chunk.join(', ');
+    const query = `{ Page(page:1,perPage:50){ media(id_in:[${idsCsv}],type:ANIME){ id coverImage{extraLarge large} } } }`;
+
+    let chunkOk = false;
+    for (let attempt = 0; attempt < 3 && !chunkOk; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 700 * attempt));
+      try {
+        const response = await fetchAniListGraphQL({ query });
+        if (!response.ok) continue;
+        const json = (await response.json()) as {
+          errors?: { message: string }[];
+          data?: { Page?: { media?: { id: number; coverImage?: { extraLarge?: string; large?: string } }[] } };
+        };
+        if (json.errors?.length) continue;
+
+        const media = json.data?.Page?.media ?? [];
+        for (const m of media) {
+          const url = m.coverImage?.extraLarge || m.coverImage?.large;
+          if (m.id != null && url) {
+            cache.set(m.id, url);
+            out.set(m.id, url);
+          }
+        }
+        persistIdCoverCache();
+        chunkOk = true;
+      } catch {
+        /* retry */
+      }
+    }
+  }
+
+  return out;
+}
+
+/** Resolve poster URLs from titles; updates the same title cache as enrichWithAniListCovers. */
+export async function resolveAnilistPosterUrlsForTitles(titles: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(titles.map((t) => t?.trim()).filter((t): t is string => !!t))];
+  const out = new Map<string, string>();
+  if (unique.length === 0) return out;
+
+  const titleCache = loadCacheFromStorage();
+
+  const mergeBatch = (batch: Map<string, AniListCoverMedia>) => {
+    for (const t of unique) {
+      const media = batch.get(normTitle(t));
+      const url = media?.coverImage?.extraLarge || media?.coverImage?.large;
+      if (url) {
+        out.set(t, url);
+        titleCache.set(normTitle(t), url);
+      }
+    }
+  };
+
+  mergeBatch(await fetchBatchCovers(unique, false));
+
+  const missed = unique.filter((t) => !out.has(t));
+  if (missed.length > 0) {
+    await new Promise((r) => setTimeout(r, 950));
+    mergeBatch(await fetchBatchCovers(missed, false));
+  }
+
+  persistCache();
+  return out;
+}
+
 // ─── AniList GraphQL batch search ────────────────────────────────────────────
 
 /**
@@ -103,7 +238,8 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
         for (let i = 0; i < batch.length; i++) {
           const page = json.data?.[`q${i}`];
           const media: AniListCoverMedia | undefined = page?.media?.[0];
-          if (media?.coverImage?.extraLarge) {
+          const cover = media?.coverImage?.extraLarge || media?.coverImage?.large;
+          if (media && cover) {
             result.set(normTitle(batch[i]), media);
           }
         }
@@ -138,9 +274,9 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
       for (let i = 0; i < batch.length; i++) {
         const page = json.data?.[`q${i}`];
         const media: AniListCoverMedia | undefined = page?.media?.[0];
-        if (media?.coverImage?.extraLarge) {
-          const key = normTitle(batch[i]);
-          result.set(key, media);
+        const cover = media?.coverImage?.extraLarge || media?.coverImage?.large;
+        if (media && cover) {
+          result.set(normTitle(batch[i]), media);
         }
       }
     } catch {
@@ -160,11 +296,7 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
       const query = `{ ${fragments.join(' ')} }`;
 
       try {
-        const response = await fetch('https://graphql.anilist.co', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ query }),
-        });
+        const response = await fetchAniListGraphQL({ query });
         if (!response.ok) continue;
         const json = await response.json();
         if (json.errors) continue;
@@ -172,7 +304,8 @@ async function fetchBatchCovers(titles: string[], includeAdult: boolean = false)
         for (let i = 0; i < batch.length; i++) {
           const page = json.data?.[`q${i}`];
           const media: AniListCoverMedia | undefined = page?.media?.[0];
-          if (media?.coverImage?.extraLarge) {
+          const cover = media?.coverImage?.extraLarge || media?.coverImage?.large;
+          if (media && cover) {
             result.set(normTitle(batch[i]), media);
           }
         }
