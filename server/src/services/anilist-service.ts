@@ -179,9 +179,11 @@ export class AniListService {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json',
+                    Accept: 'application/json',
+                    // AniList may reject datacenter requests without a descriptive UA (e.g. Cloudflare Workers).
+                    'User-Agent': 'AniFoxWatch/1.0 (+https://anifoxwatch.web.app)',
                 },
-                body: JSON.stringify({ query, variables })
+                body: JSON.stringify({ query, variables }),
             });
 
             if (!response.ok) {

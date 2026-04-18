@@ -1,5 +1,6 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { getApiConfig, getApiFallbackUrl } from './api-config';
+import { fetchAniListAnimeByNumericId } from './anilist-anime-by-id';
 
 interface BrowseFilters {
     type?: string;
@@ -487,6 +488,19 @@ class AnimeApiClient {
             const params = new URLSearchParams({ id });
             if (source) params.append('source', source);
             return await this.fetch<Anime>(`/api/anime?${params}`);
+        } catch {
+            return this.getAnimeAnilistFallback(id);
+        }
+    }
+
+    /** When edge API returns 404 for anilist-* ids, load metadata directly from AniList GraphQL. */
+    private async getAnimeAnilistFallback(id: string): Promise<Anime | null> {
+        const m = /^anilist-(\d+)$/i.exec(id.trim());
+        if (!m) return null;
+        const numericId = parseInt(m[1], 10);
+        if (Number.isNaN(numericId)) return null;
+        try {
+            return await fetchAniListAnimeByNumericId(numericId);
         } catch {
             return null;
         }
