@@ -11,7 +11,7 @@ workers_dev = true
 
 [vars]
 NODE_ENV = "production"
-RENDER_BACKEND_URL = "https://anifoxwatch-ci33.onrender.com"
+# Optional: full Node API for Puppeteer-heavy streaming only (set in dashboard if you self-host Express elsewhere).
 # Optional: HiAnime via HTTP (e.g. aniwatch-api on Vercel). Worker calls this from the edge; browser still uses VITE_API_URL → Worker.
 HIANIME_REST_URL = "https://aniwatch-api-coral-seven.vercel.app"
 

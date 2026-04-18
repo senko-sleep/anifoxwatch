@@ -270,7 +270,7 @@ class AnimeApiClient {
                 }
 
                 // Detect CORS / network failures — these surface as TypeError('Failed to fetch')
-                // with no response body. Render free-tier cold starts sometimes cause transient CORS drops.
+                // with no response body (cold starts, transient edge issues, etc.).
                 const msg = lastError.message || '';
                 const isCorsOrNetwork = (
                     msg.includes('Failed to fetch') ||
@@ -298,7 +298,7 @@ class AnimeApiClient {
             }
         }
 
-        // All retries on primary failed — try fallback URL once (Cloudflare ↔ Render)
+        // All retries on primary failed — try fallback URL once if configured
         const fallbackBase = getApiFallbackUrl();
         if (fallbackBase && fallbackBase !== this.apiBase()) {
             try {
@@ -576,7 +576,7 @@ class AnimeApiClient {
             });
             return data;
         } catch (primaryErr) {
-            // Try fallback (Cloudflare ↔ Render) before giving up
+            // Try fallback host before giving up (if configured)
             const fallback = getApiFallbackUrl();
             if (fallback && fallback !== this.apiBase()) {
                 console.warn(`[API] Stream primary failed, trying fallback: ${fallback}`);

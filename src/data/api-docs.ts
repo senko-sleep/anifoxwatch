@@ -5,7 +5,7 @@ export const API_DOCS_MARKDOWN = `
 
 A complete anime streaming API built with Cloudflare Workers, providing search, details, episodes, and streaming sources for anime content.
 
-**Base URL:** \`https://anifoxwatch-api.anifoxwatch.workers.dev\`  
+**Base URL:** \`https://anifoxwatch-api.anya-bot.workers.dev\`  
 **API Version:** \`2.18.2\`  
 **Environment:** \`cloudflare-workers\`
 
@@ -35,16 +35,16 @@ A complete anime streaming API built with Cloudflare Workers, providing search, 
 
 \`\`\`bash
 # Get trending anime
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/home"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/api/home"
 
 # Search for anime
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/search?q=naruto"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/api/search?q=naruto"
 
 # Get anime details
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/anime/naruto-123"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/api/anime/naruto-123"
 
 # Get streaming sources
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/episode/sources?animeEpisodeId=naruto-ep-1"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/api/episode/sources?animeEpisodeId=naruto-ep-1"
 \`\`\`
 
 ## System Endpoints
@@ -56,7 +56,7 @@ curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/episode/sources?animeE
 - **Response:** \`daijoubu\` (Japanese for "I'm fine")
 
 \`\`\`bash
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/health"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/health"
 # Response: daijoubu
 \`\`\`
 
@@ -71,7 +71,7 @@ curl "https://anifoxwatch-api.anifoxwatch.workers.dev/health"
 - **Description:** API version information
 
 \`\`\`bash
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/v"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/v"
 # Response: aniwatch-api: v2.18.2
 #          environment: cloudflare-workers
 \`\`\`
@@ -109,7 +109,7 @@ curl "https://anifoxwatch-api.anifoxwatch.workers.dev/v"
 
 **Example:**
 \`\`\`bash
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/search?q=naruto&page=1"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/api/search?q=naruto&page=1"
 \`\`\`
 
 **Response:**
@@ -191,7 +191,7 @@ curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/search?q=naruto&page=1
 
 **Example:**
 \`\`\`bash
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/anime/naruto-123"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/api/anime/naruto-123"
 \`\`\`
 
 **Response:**
@@ -265,7 +265,7 @@ curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/anime/naruto-123"
 
 **Example:**
 \`\`\`bash
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/episode/servers?animeEpisodeId=naruto-ep-1"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/api/episode/servers?animeEpisodeId=naruto-ep-1"
 \`\`\`
 
 **Response:**
@@ -300,7 +300,7 @@ curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/episode/servers?animeE
 
 **Example:**
 \`\`\`bash
-curl "https://anifoxwatch-api.anifoxwatch.workers.dev/api/episode/sources?animeEpisodeId=naruto-ep-1&server=vidstreaming&category=sub"
+curl "https://anifoxwatch-api.anya-bot.workers.dev/api/episode/sources?animeEpisodeId=naruto-ep-1&server=vidstreaming&category=sub"
 \`\`\`
 
 **Response:**
@@ -413,9 +413,9 @@ All API responses follow this structure:
 
 ## Support
 
-- **API Documentation:** \`https://anifoxwatch-api.anifoxwatch.workers.dev/help\`
-- **Health Check:** \`https://anifoxwatch-api.anifoxwatch.workers.dev/health\`
-- **Version Info:** \`https://anifoxwatch-api.anifoxwatch.workers.dev/v\`
+- **API Documentation:** \`https://anifoxwatch-api.anya-bot.workers.dev/help\`
+- **Health Check:** \`https://anifoxwatch-api.anya-bot.workers.dev/health\`
+- **Version Info:** \`https://anifoxwatch-api.anya-bot.workers.dev/v\`
 
 ## License
 

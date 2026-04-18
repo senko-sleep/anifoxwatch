@@ -4,11 +4,10 @@
  * Automatically switches between different API deployments:
  * - Local Development: Express server on localhost:3001
  * - Cloudflare Workers: Your Cloudflare Workers deployment
- * - Render.com: Your Render.com deployment
  * - Production: Configured in .env.production
  */
 
-export type ApiDeployment = 'local' | 'cloudflare' | 'render' | 'firebase' | 'custom';
+export type ApiDeployment = 'local' | 'cloudflare' | 'firebase' | 'custom' | 'hianimeRest';
 
 export interface ApiConfig {
     deployment: ApiDeployment;
@@ -23,9 +22,10 @@ export interface ApiConfig {
 export const API_DEPLOYMENTS = {
     local: 'http://localhost:3001',
     cloudflare: 'https://anifoxwatch-api.anya-bot.workers.dev',
-    render: 'https://anifoxwatch-ci33.onrender.com', // fallback when Worker is degraded
-    firebase: '/api', // Firebase Functions proxy endpoint
-    custom: '' // Will be set from environment variable
+    firebase: '/api',
+    custom: '',
+    /** Optional HiAnime REST host for status checks (same shape as VITE_ANIWATCH_API_URL). */
+    hianimeRest: (import.meta.env.VITE_ANIWATCH_API_URL as string | undefined)?.trim() || '',
 } as const;
 
 function configFromUrl(envApiUrl: string): ApiConfig {
@@ -35,8 +35,6 @@ function configFromUrl(envApiUrl: string): ApiConfig {
         deployment = 'local';
     } else if (envApiUrl.includes('workers.dev')) {
         deployment = 'cloudflare';
-    } else if (envApiUrl.includes('render.com')) {
-        deployment = 'render';
     } else if (envApiUrl === '/api') {
         deployment = 'firebase';
     }
@@ -58,14 +56,12 @@ function configFromUrl(envApiUrl: string): ApiConfig {
  * - **Remote only:** `VITE_USE_LOCAL_API=false` and set `VITE_API_URL` to a deployed API (for `vite` alone).
  * - **`VITE_DEV_API_URL`:** absolute override (e.g. another port).
  *
- * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then Render default
- * (`https://anifoxwatch-ci33.onrender.com` unless overridden).
+ * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then the Cloudflare Worker default.
  */
 /**
  * Build the URL for an API path. When `baseUrl` is empty (local dev + Vite proxy),
  * returns the path as-is so the browser hits the dev server and `/api` is proxied.
- * When `baseUrl` is set (production), returns an absolute URL to the Render/API host
- * so requests do not go to static hosting or Firebase rewrites.
+ * When `baseUrl` is set (production), returns an absolute URL to the API host.
  */
 export function apiUrl(path: string): string {
     const normalized = path.startsWith('/') ? path : `/${path}`;
@@ -133,13 +129,10 @@ export function getApiConfig(): ApiConfig {
 }
 
 /**
- * Get fallback API URL when primary is unreachable.
- * Cloudflare → Render, Render → Cloudflare.
+ * Secondary BFF URL when the primary fails. There is no drop-in public fallback with the same
+ * `/api/anime` contract as the Worker, so this returns null (client retries primary only).
  */
 export function getApiFallbackUrl(): string | null {
-    const { baseUrl } = getApiConfig();
-    if (baseUrl.includes('workers.dev')) return API_DEPLOYMENTS.render;
-    if (baseUrl.includes('onrender.com')) return API_DEPLOYMENTS.cloudflare;
     return null;
 }
 
@@ -189,23 +182,50 @@ export async function getApiStatus(baseUrl: string): Promise<{
     }
 }
 
+/** HiAnime REST /health may be plain text (e.g. daijoubu). */
+async function getHianimeRestStatus(baseUrl: string): Promise<{
+    online: boolean;
+    deployment: string;
+    latency: number;
+    version: string;
+}> {
+    const start = Date.now();
+    try {
+        const response = await fetch(`${baseUrl.replace(/\/$/, '')}/health`, {
+            method: 'GET',
+            signal: AbortSignal.timeout(5000),
+        });
+        const latency = Date.now() - start;
+        const text = (await response.text()).trim().slice(0, 80);
+        return {
+            online: response.ok,
+            deployment: 'hianime-rest',
+            latency,
+            version: text || (response.ok ? 'ok' : 'unknown'),
+        };
+    } catch {
+        return { online: false, deployment: 'offline', latency: -1, version: 'unknown' };
+    }
+}
+
 /**
- * Test all API deployments and return their status
+ * Test configured deployments (local + primary edge + firebase + optional HiAnime REST).
  */
 export async function testAllDeployments(): Promise<Record<ApiDeployment, { online: boolean; deployment: string; latency: number; version: string; error?: boolean }>> {
+    const hianimeBase = API_DEPLOYMENTS.hianimeRest;
     const results = await Promise.allSettled([
         getApiStatus(API_DEPLOYMENTS.local),
         getApiStatus(API_DEPLOYMENTS.cloudflare),
-        getApiStatus(API_DEPLOYMENTS.render),
-        getApiStatus(API_DEPLOYMENTS.firebase)
+        getApiStatus(API_DEPLOYMENTS.firebase),
+        hianimeBase ? getHianimeRestStatus(hianimeBase) : Promise.resolve({ online: false, deployment: 'skipped', latency: -1, version: 'not-configured' }),
     ]);
 
     const offline = { online: false, deployment: 'offline', latency: -1, version: 'unknown', error: true };
     return {
-        local:      results[0].status === 'fulfilled' ? results[0].value : offline,
+        local: results[0].status === 'fulfilled' ? results[0].value : offline,
         cloudflare: results[1].status === 'fulfilled' ? results[1].value : offline,
-        render:     results[2].status === 'fulfilled' ? results[2].value : offline,
-        firebase:   results[3].status === 'fulfilled' ? results[3].value : offline,
-        custom:     offline,
+        firebase: results[2].status === 'fulfilled' ? results[2].value : offline,
+        hianimeRest: results[3].status === 'fulfilled' ? results[3].value : offline,
+        custom: offline,
     };
 }

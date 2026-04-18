@@ -8,6 +8,11 @@ import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streami
 
 const router = Router();
 
+/** When `REMOTE_PROXY_URL` is unset, chain HLS proxy through the Cloudflare Worker (not Render). */
+const DEFAULT_REMOTE_STREAM_PROXY =
+    process.env.DEFAULT_REMOTE_STREAM_PROXY ||
+    'https://anifoxwatch-api.anya-bot.workers.dev/api/stream/proxy';
+
 /**
  * AnimeKai (and peers) return a placeholder server named "default". Passing that to
  * /api/stream/watch disables multi-server racing and confuses upstream APIs that expect
@@ -620,7 +625,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         // Fast-path: skip local attempts for ISP-blocked domains
         if (isIspBlockedDomain(domain)) {
             logger.info(`[PROXY] ISP-blocked domain ${domain} — routing directly to remote proxy`, { domain, requestId });
-            const remoteProxy = process.env.REMOTE_PROXY_URL || 'https://anifoxwatch-ci33.onrender.com/api/stream/proxy';
+            const remoteProxy = process.env.REMOTE_PROXY_URL || DEFAULT_REMOTE_STREAM_PROXY;
             try {
                 const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
                 const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 50000, maxRedirects: 5 });
@@ -757,10 +762,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         }
 
         if (!response) {
-            // Remote proxy fallback: when local can't reach CDN (e.g. ISP block),
-            // Remote proxy fallback: when local can't reach CDN (e.g. ISP block),
-            // forward to Render which can reach it.
-            const remoteProxy = process.env.REMOTE_PROXY_URL || 'https://anifoxwatch-ci33.onrender.com/api/stream/proxy';
+            // Remote proxy fallback: when local can't reach CDN (e.g. ISP block), forward via Worker proxy.
+            const remoteProxy = process.env.REMOTE_PROXY_URL || DEFAULT_REMOTE_STREAM_PROXY;
             logger.info(`[PROXY] All local attempts failed, trying remote fallback for ${domain}`, { domain, requestId });
             try {
                 const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;

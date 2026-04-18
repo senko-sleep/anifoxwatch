@@ -27,7 +27,7 @@ interface StreamingSourceManager {
 }
 
 /**
- * Streaming routes for Cloudflare Worker/Render (Hono)
+ * Streaming routes for Cloudflare Worker (Hono)
  * Uses the same working approach as localhost
  */
 
@@ -105,28 +105,29 @@ function normalizeStreamServerQuery(raw: string | string[] | undefined): string 
 }
 
 /**
- * Render backend URL for Puppeteer-dependent requests.
- * CF Worker handles metadata (AniList) and proxy; Render handles stream extraction.
+ * Optional full Node API base for Puppeteer-heavy streaming (set `HEAVY_STREAM_BACKEND_URL` or legacy `RENDER_BACKEND_URL` in Worker env). If unset, Worker does not proxy stream extraction.
  */
-const RENDER_BACKEND_URL = 'https://anifoxwatch-ci33.onrender.com';
+function getHeavyStreamBackendUrl(env: unknown): string | undefined {
+    if (!env || typeof env !== 'object') return undefined;
+    const e = env as Record<string, unknown>;
+    const v = e.HEAVY_STREAM_BACKEND_URL ?? e.RENDER_BACKEND_URL;
+    if (typeof v === 'string' && v.trim()) return v.replace(/\/$/, '');
+    return undefined;
+}
 
-/**
- * Proxy a request to the Render backend (for routes that need Puppeteer/heavy scraping).
- * Forwards query params and returns the JSON response with CORS headers.
- * Includes retry logic for reliability.
- */
-async function proxyToRender(path: string, timeoutMs = 120_000): Promise<Response> {
+async function proxyToHeavyStreamBackend(env: unknown, path: string, timeoutMs = 120_000): Promise<Response | null> {
+    const base = getHeavyStreamBackendUrl(env);
+    if (!base) return null;
     return await retryWithBackoff(
         async () => {
             const controller = new AbortController();
             const tid = setTimeout(() => controller.abort(), timeoutMs);
             try {
-                const resp = await fetch(`${RENDER_BACKEND_URL}${path}`, {
+                const resp = await fetch(`${base}${path}`, {
                     signal: controller.signal,
                     headers: { 'Accept': 'application/json' },
                 });
                 clearTimeout(tid);
-                // Clone into a new Response so we can add CORS headers
                 const body = await resp.text();
                 return new Response(body, {
                     status: resp.status,
@@ -141,9 +142,9 @@ async function proxyToRender(path: string, timeoutMs = 120_000): Promise<Respons
                 throw e;
             }
         },
-        2, // maxAttempts
-        2000, // initialDelay
-        'proxyToRender'
+        2,
+        2000,
+        'proxyToHeavyStreamBackend'
     );
 }
 
@@ -228,7 +229,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
         return c.json({ servers: [], error: 'Streaming servers unavailable' }, 503);
     });
 
-    // Get streaming links — try local sources first, then proxy to Render for Puppeteer
+    // Get streaming links — try local sources first, then optional heavy backend
     app.get('/watch/:episodeId', async (c) => {
         // Cloudflare/Hono may decode %3F→? in the path before routing, turning
         // "anime-slug%3Fep%3D92595" into path param "anime-slug" + query "ep=92595".
@@ -317,7 +318,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
             }, 404);
         }
 
-        // IDs that require Render's full SourceManager (AnimeKai, etc.)
+        // IDs that require the full Node SourceManager (AnimeKai, etc.)
         // The CF Worker's CloudflareSourceManager only handles gogoanime/consumet/adult IDs.
         const RENDER_ONLY_PREFIXES = ['animekai-', 'kaido-', 'miruro-', '9anime-', 'zoro-', 'aniwave-',
             'allanime-', 'animepahe-', 'gogoanime-', 'animefox-', 'animeflv-', 'anix-', 'consumet-'];
@@ -335,15 +336,13 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                 streamData = await sourceManager.getStreamingLinks(episodeId, explicitServer, category || 'sub') as StreamPayload;
             } catch (e: unknown) {
                 lastError = e instanceof Error ? e.message : 'Local source error';
-                // If Render is unavailable, return error instead of trying to return empty streamData
                 if (!streamData.sources || streamData.sources.length === 0) {
-                    return c.json({ error: 'Streaming unavailable: Render backend is down', sources: [] }, 503);
+                    return c.json({ error: 'Streaming unavailable from edge sources', sources: [] }, 503);
                 }
             }
         }
 
-        // 2) Fall back to Render (Puppeteer sources)
-        // Trigger if: no sources at all, OR all sources are embed pages that can't be played directly
+        // 2) Optional fall back to a configured full Node API (Puppeteer sources)
         if (!streamData.sources || streamData.sources.length === 0 || !hasPlayableSources(streamData.sources)) {
             try {
                 const qs = new URLSearchParams();
@@ -351,8 +350,12 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                 if (category) qs.set('category', category);
                 if (epNum) qs.set('ep_num', epNum);
                 const qsStr = qs.toString() ? `?${qs.toString()}` : '';
-                const renderResp = await proxyToRender(`/api/stream/watch/${encodeURIComponent(episodeId)}${qsStr}`, 120_000);
-                if (renderResp.ok) {
+                const renderResp = await proxyToHeavyStreamBackend(
+                    c.env,
+                    `/api/stream/watch/${encodeURIComponent(episodeId)}${qsStr}`,
+                    120_000
+                );
+                if (renderResp?.ok) {
                     const renderData = await renderResp.json() as StreamPayload;
                     if (renderData.sources && renderData.sources.length > 0) {
                         streamData = renderData;
@@ -361,13 +364,11 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                             const referer = streamData.headers?.Referer || streamData.headers?.referer;
                             streamData.sources = streamData.sources.map(s => {
                                 const rawUrl = unwrapProxied(s.originalUrl || s.url);
-                                // Streamtape get_video tokens are IP-bound to Render's IP.
-                                // Keep Render's proxy URL for streamtape sources so the browser
-                                // fetches via Render (same IP as extraction).
+                                // Streamtape get_video tokens can be IP-bound to the extractor host.
                                 try {
                                     const h = new URL(rawUrl).hostname;
                                     if (h.includes('streamtape') && rawUrl.includes('/get_video')) {
-                                        // s.url is already Render-proxied — pass it through
+                                        // s.url is already upstream-proxied — pass it through
                                         return {
                                             ...s,
                                             originalUrl: rawUrl,
@@ -390,7 +391,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                     }
                 }
             } catch (e: unknown) {
-                lastError = `CF local + Render both failed: ${e instanceof Error ? e.message : String(e)}`;
+                lastError = `Edge + optional heavy backend failed: ${e instanceof Error ? e.message : String(e)}`;
             }
         }
 

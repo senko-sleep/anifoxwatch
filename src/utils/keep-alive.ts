@@ -1,13 +1,11 @@
 /**
  * Keep-Alive Utility
- * Pings the backend periodically to prevent Render free tier from spinning down.
- * Uses Page Visibility API to pause pings when tab is hidden and resume when visible.
- * Implements exponential backoff on consecutive failures to avoid wasting bandwidth.
+ * Pings the configured API `/health` periodically (visibility-aware, with backoff on failures).
  */
 
-import { apiUrl, API_DEPLOYMENTS } from '@/lib/api-config';
+import { apiUrl } from '@/lib/api-config';
 
-const PING_INTERVAL = 8 * 60 * 1000; // 8 minutes (under Render's 15-min spin-down)
+const PING_INTERVAL = 8 * 60 * 1000; // 8 minutes
 const MAX_BACKOFF = 30 * 60 * 1000; // 30 minutes max between pings on failure
 
 let pingInterval: NodeJS.Timeout | null = null;
@@ -27,8 +25,6 @@ async function ping() {
 
   try {
     await pingUrl(apiUrl('/health'));
-    // Also keep Render warm (handles streaming) — fire-and-forget
-    pingUrl(`${API_DEPLOYMENTS.render}/health`);
     consecutiveFailures = 0;
   } catch {
     consecutiveFailures++;

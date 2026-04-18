@@ -35,43 +35,14 @@ async function loadHianimeSearch(env: unknown, q: string, page: number): Promise
     }
 }
 
-/**
- * Render backend URL for fallback when CF Worker sources can't handle the request.
- * Source-prefixed IDs (allanime-*, animekai-*, 9anime-*, kaido-*, akih-*) need Puppeteer.
- */
-const RENDER_BACKEND_URL = 'https://anifoxwatch-ci33.onrender.com';
-
-async function proxyToRender(path: string, timeoutMs = 50_000): Promise<Response> {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-        const resp = await fetch(`${RENDER_BACKEND_URL}${path}`, {
-            signal: controller.signal,
-            headers: { 'Accept': 'application/json' },
-        });
-        clearTimeout(tid);
-        const body = await resp.text();
-        return new Response(body, {
-            status: resp.status,
-            headers: {
-                'Content-Type': resp.headers.get('Content-Type') || 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
-        });
-    } catch (e) {
-        clearTimeout(tid);
-        throw e;
-    }
-}
-
-/** IDs that need Render (Puppeteer sources) — CF Worker can't handle these. */
+/** IDs that need a Node/Puppeteer backend — not available on this Worker when no proxy URL is configured. */
 const RENDER_PREFIXES = ['allanime-', 'animekai-', '9anime-', 'kaido-', 'akih-', 'miruro-', 'aniwave-', 'anix-', 'zoro-', 'animefox-', 'gogoanime-', 'animepahe-', 'animeflv-'];
 function needsRender(id: string): boolean {
     const lower = id.toLowerCase();
     return RENDER_PREFIXES.some(p => lower.startsWith(p));
 }
 
-/** Sources only available on Render (require Puppeteer, axios+cheerio with node deps, etc.) */
+/** Sources that require a full Node backend (not provided on edge-only deploys). */
 const RENDER_ONLY_SOURCES = ['akih', 'allanime', '9anime', 'kaido', 'animekai', 'miruro', 'aniwave', 'anix', 'zoro', 'animefox', 'gogoanime', 'animepahe', 'animeflv'];
 function sourceNeedsRender(source?: string): boolean {
     if (!source) return false;
@@ -114,9 +85,8 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
 
         if (!q) return c.json({ error: 'Query parameter "q" is required' }, 400);
 
-        // Render-only source → return 502 (Render is down)
         if (sourceNeedsRender(source)) {
-            return c.json({ error: 'Render backend unavailable for this source', results: [] }, 502);
+            return c.json({ error: 'This source is not available on the edge API', results: [] }, 502);
         }
 
         // Adult mode always uses local hentai sources (WatchHentai/Hanime)
@@ -454,9 +424,8 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const limit = Number(query.limit) || 20;
         const genres = query.genre ? (query.genre as string).split(',').map(g => g.trim()) : [];
 
-        // Render-only source → return 502 (Render is down)
         if (sourceNeedsRender(query.source as string)) {
-            return c.json({ error: 'Render backend unavailable for this source', results: [] }, 502);
+            return c.json({ error: 'This source is not available on the edge API', results: [] }, 502);
         }
 
         const filters: Record<string, string | number | string[] | undefined> = {
@@ -512,9 +481,8 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const genreParam = (query.genres as string) || (query.genre as string);
         const parsedGenres = genreParam ? genreParam.split(',').map(g => g.trim()) : [];
 
-        // Render-only source → return 502 (Render is down)
         if (sourceNeedsRender(query.source as string)) {
-            return c.json({ error: 'Render backend unavailable for this source', results: [] }, 502);
+            return c.json({ error: 'This source is not available on the edge API', results: [] }, 502);
         }
 
         const filters: Record<string, string | number | string[] | undefined> = {
@@ -614,9 +582,8 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const source = c.req.query('source');
         if (!id) return c.json({ error: 'Query parameter "id" is required' }, 400);
 
-        // Source-prefixed IDs or render-only sources → return 502 (Render is down)
         if (needsRender(id) || sourceNeedsRender(source)) {
-            return c.json({ error: 'Render backend unavailable for this anime ID', results: [] }, 502);
+            return c.json({ error: 'This anime ID requires a full Node backend', results: [] }, 502);
         }
 
         try {
@@ -637,9 +604,8 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const source = c.req.query('source');
         if (!id) return c.json({ error: 'Query parameter "id" is required' }, 400);
 
-        // Source-prefixed IDs or render-only sources → return 502 (Render is down)
         if (needsRender(id) || sourceNeedsRender(source)) {
-            return c.json({ error: 'Render backend unavailable for this anime ID', episodes: [] }, 502);
+            return c.json({ error: 'This anime ID requires a full Node backend', episodes: [] }, 502);
         }
 
         try {
@@ -708,7 +674,7 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const id = decodeURIComponent(c.req.param('id'));
 
         if (needsRender(id)) {
-            return c.json({ error: 'Render backend unavailable for this anime ID' }, 502);
+            return c.json({ error: 'This anime ID requires a full Node backend' }, 502);
         }
 
         try {
@@ -728,7 +694,7 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const id = decodeURIComponent(c.req.param('id'));
 
         if (needsRender(id)) {
-            return c.json({ error: 'Render backend unavailable for this anime ID', episodes: [] }, 502);
+            return c.json({ error: 'This anime ID requires a full Node backend', episodes: [] }, 502);
         }
 
         try {
