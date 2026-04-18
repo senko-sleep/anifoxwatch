@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { retryWithBackoff, reliableRequest } from '../utils/workers-reliability.js';
+import { getHianimeRestBase, fetchHianimeRestData } from './hianime-rest.js';
 
 interface HiAnimeScraper {
     getEpisodeServers(episodeId: string): Promise<{
@@ -193,13 +194,23 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
         // HiAnime aniwatch-style IDs handled directly on CF Worker
         if (hianime && /^[^?]+\?ep=\d+$/.test(episodeId)) {
             try {
-                const data = await reliableRequest('HiAnime', 'getEpisodeServers',
-                    () => hianime.getEpisodeServers(episodeId),
-                    { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
-                );
+                const restBase = getHianimeRestBase(c.env);
+                const data = restBase
+                    ? await fetchHianimeRestData<Awaited<ReturnType<HiAnimeScraper['getEpisodeServers']>>>(
+                        restBase,
+                        `/api/v2/hianime/episode/servers?${new URLSearchParams({ animeEpisodeId: episodeId })}`
+                    )
+                    : null;
+                const resolved =
+                    data ??
+                    (await reliableRequest('HiAnime', 'getEpisodeServers', () => hianime!.getEpisodeServers(episodeId), {
+                        maxAttempts: 2,
+                        timeout: 10000,
+                        retryDelay: 1000,
+                    }));
                 const servers = [
-                    ...(data.sub || []).map(s => ({ name: s.serverName, url: '', type: 'sub' })),
-                    ...(data.dub || []).map(s => ({ name: s.serverName, url: '', type: 'dub' })),
+                    ...(resolved.sub || []).map(s => ({ name: s.serverName, url: '', type: 'sub' })),
+                    ...(resolved.dub || []).map(s => ({ name: s.serverName, url: '', type: 'dub' })),
                 ];
                 return c.json({ servers });
             } catch (e: unknown) {
@@ -244,12 +255,27 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                 : HIANIME_SERVERS;
             const cat = (category || 'sub') as 'sub' | 'dub' | 'raw';
 
+            const restBaseWatch = getHianimeRestBase(c.env);
             for (const server of serversToTry.slice(0, 3)) {
                 try {
-                    const data = await reliableRequest('HiAnime', `getEpisodeSources-${server}`,
-                        () => hianime.getEpisodeSources(episodeId, server, cat),
-                        { maxAttempts: 1, timeout: 15000, retryDelay: 0 }
-                    );
+                    let data: Awaited<ReturnType<HiAnimeScraper['getEpisodeSources']>> | null = null;
+                    if (restBaseWatch) {
+                        const qs = new URLSearchParams({
+                            animeEpisodeId: episodeId,
+                            server,
+                            category: cat,
+                        });
+                        data = await fetchHianimeRestData<Awaited<ReturnType<HiAnimeScraper['getEpisodeSources']>>>(
+                            restBaseWatch,
+                            `/api/v2/hianime/episode/sources?${qs}`
+                        );
+                    }
+                    if (!data?.sources?.length) {
+                        data = await reliableRequest('HiAnime', `getEpisodeSources-${server}`,
+                            () => hianime!.getEpisodeSources(episodeId, server, cat),
+                            { maxAttempts: 1, timeout: 15000, retryDelay: 0 }
+                        );
+                    }
                     if (data.sources && data.sources.length > 0) {
                         const referer = data.headers?.Referer || 'https://hianime.to/';
                         let sources: StreamSource[] = data.sources.map(s => ({

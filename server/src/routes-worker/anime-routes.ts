@@ -1,11 +1,39 @@
 import { Hono } from 'hono';
 import { HiAnime } from 'aniwatch';
+import { getHianimeRestBase, fetchHianimeRestData } from './hianime-rest.js';
 import { anilistService } from '../services/anilist-service.js';
 import { getHeroSpotlightCached } from '../services/hero-spotlight-service.js';
 import { AnimeBase, AnimeSearchResult, Episode, BrowseFilters, TopAnime } from '../types/anime.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
 
 const hianime = new HiAnime.Scraper();
+
+async function loadHianimeHome(env: unknown): Promise<any | null> {
+    const b = getHianimeRestBase(env);
+    if (b) {
+        const d = await fetchHianimeRestData<any>(b, '/api/v2/hianime/home');
+        if (d) return d;
+    }
+    try {
+        return await hianime.getHomePage() as any;
+    } catch {
+        return null;
+    }
+}
+
+async function loadHianimeSearch(env: unknown, q: string, page: number): Promise<any | null> {
+    const b = getHianimeRestBase(env);
+    if (b) {
+        const qs = new URLSearchParams({ q, page: String(page) });
+        const d = await fetchHianimeRestData<any>(b, `/api/v2/hianime/search?${qs}`);
+        if (d) return d;
+    }
+    try {
+        return await hianime.search(q, page) as any;
+    } catch {
+        return null;
+    }
+}
 
 /**
  * Render backend URL for fallback when CF Worker sources can't handle the request.
@@ -103,9 +131,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             return c.json({ results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' });
         }
 
-        // Safe/mixed: use HiAnime scraper directly
+        // Safe/mixed: HiAnime via optional REST (Vercel) or in-worker scraper
         try {
-            const searchResults = await hianime.search(q, page) as any;
+            const searchResults = (await loadHianimeSearch(c.env, q, page)) as any;
             const animes = searchResults?.animes || searchResults?.results || [];
             // Transform data to match expected frontend structure
             const transformed = animes.map((item: any) => ({
@@ -166,9 +194,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const page = Number(c.req.query('page')) || 1;
         const source = c.req.query('source');
 
-        // Use HiAnime scraper directly
+        // HiAnime via optional REST (Vercel) or in-worker scraper
         try {
-            const homeData = await hianime.getHomePage() as any;
+            const homeData = await loadHianimeHome(c.env);
             const trending = homeData?.trendingAnimes || [];
             // Transform data to match expected frontend structure
             const transformed = trending.map((item: any) => ({
@@ -198,9 +226,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const page = Number(c.req.query('page')) || 1;
         const source = c.req.query('source');
 
-        // Use HiAnime scraper directly
+        // HiAnime via optional REST (Vercel) or in-worker scraper
         try {
-            const homeData = await hianime.getHomePage() as any;
+            const homeData = await loadHianimeHome(c.env);
             const latest = homeData?.latestEpisodeAnimes || [];
             // Transform data to match expected frontend structure
             const transformed = latest.map((item: any) => ({
@@ -231,9 +259,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const limit = Number(c.req.query('limit')) || 10;
         const source = c.req.query('source');
 
-        // Use HiAnime scraper directly
+        // HiAnime via optional REST (Vercel) or in-worker scraper
         try {
-            const homeData = await hianime.getHomePage() as any;
+            const homeData = await loadHianimeHome(c.env);
             const top10 = homeData?.top10Animes;
             let results: unknown[] = [];
             if (top10) {
@@ -522,9 +550,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             return c.json({ results: [], currentPage: page, totalPages: 0, hasNextPage: false, totalResults: 0, source: 'none' });
         }
 
-        // Safe/mixed: use HiAnime scraper directly for trending
+        // Safe/mixed: HiAnime via optional REST (Vercel) or in-worker scraper
         try {
-            const homeData = await hianime.getHomePage() as any;
+            const homeData = await loadHianimeHome(c.env);
             const trending = homeData?.trendingAnimes || [];
             // Transform data to match expected frontend structure
             const transformed = trending.map((item: any) => ({
@@ -551,9 +579,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     app.get('/random', async (c) => {
         const source = c.req.query('source');
 
-        // Use HiAnime scraper directly for trending data
+        // HiAnime via optional REST (Vercel) or in-worker scraper
         try {
-            const homeData = await hianime.getHomePage() as any;
+            const homeData = await loadHianimeHome(c.env);
             const trending = homeData?.trendingAnimes || [];
             if (trending.length > 0) {
                 const randomIndex = Math.floor(Math.random() * trending.length);

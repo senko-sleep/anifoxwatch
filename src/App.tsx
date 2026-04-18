@@ -9,6 +9,7 @@ import Watch from "./pages/Watch";
 import Search from "./pages/Search";
 import Browse from "./pages/Browse";
 import Docs from "./pages/Docs";
+import Health from "./pages/Health";
 import NotFound from "./pages/NotFound";
 import { Loader2 } from "lucide-react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -81,6 +82,7 @@ const App = () => (
           <Route path="/watch" element={<Watch />} />
           <Route path="/search" element={<Search />} />
           <Route path="/docs" element={<Docs />} />
+          <Route path="/health" element={<Health />} />
           <Route
             path="/schedule"
             element={
