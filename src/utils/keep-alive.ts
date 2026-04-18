@@ -5,7 +5,7 @@
  * Implements exponential backoff on consecutive failures to avoid wasting bandwidth.
  */
 
-import { apiUrl } from '@/lib/api-config';
+import { apiUrl, API_DEPLOYMENTS } from '@/lib/api-config';
 
 const PING_INTERVAL = 8 * 60 * 1000; // 8 minutes (under Render's 15-min spin-down)
 const MAX_BACKOFF = 30 * 60 * 1000; // 30 minutes max between pings on failure
@@ -18,24 +18,20 @@ let isTabVisible = true;
  * Ping the backend health endpoint
  */
 async function ping() {
-  // Skip pings when tab is hidden to save bandwidth
   if (!isTabVisible) return;
 
+  const pingUrl = (url: string) => fetch(url, {
+    method: 'GET', mode: 'cors', cache: 'no-cache',
+    referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000),
+  }).catch(() => {});
+
   try {
-    // GET (not HEAD): Express exposes GET /health; some proxies handle GET more reliably than HEAD.
-    await fetch(apiUrl('/health'), {
-      method: 'GET',
-      mode: 'cors',
-      cache: 'no-cache',
-      referrerPolicy: 'no-referrer',
-      signal: AbortSignal.timeout(10000),
-    });
+    await pingUrl(apiUrl('/health'));
+    // Also keep Render warm (handles streaming) — fire-and-forget
+    pingUrl(`${API_DEPLOYMENTS.render}/health`);
     consecutiveFailures = 0;
   } catch {
     consecutiveFailures++;
-    if (consecutiveFailures > 5) {
-      console.warn('[Keep-Alive] Multiple failures, backing off');
-    }
   }
 }
 

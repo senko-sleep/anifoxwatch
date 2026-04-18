@@ -1,5 +1,20 @@
 import { Hono, type Context } from 'hono';
-import { retryWithBackoff } from '../utils/workers-reliability.js';
+import { retryWithBackoff, reliableRequest } from '../utils/workers-reliability.js';
+
+interface HiAnimeScraper {
+    getEpisodeServers(episodeId: string): Promise<{
+        sub: Array<{ serverId: number | null; serverName: string }>;
+        dub: Array<{ serverId: number | null; serverName: string }>;
+        raw?: Array<{ serverId: number | null; serverName: string }>;
+        [k: string]: unknown;
+    }>;
+    getEpisodeSources(episodeId: string, server?: string, category?: 'sub' | 'dub' | 'raw'): Promise<{
+        sources: Array<{ url: string; isM3U8?: boolean; type?: string; quality?: string; [k: string]: unknown }>;
+        subtitles?: Array<{ url: string; lang: string }>;
+        headers?: { [k: string]: string };
+        [k: string]: unknown;
+    }>;
+}
 
 // Flexible interface for both SourceManager and CloudflareSourceManager
 interface StreamingSourceManager {
@@ -131,7 +146,7 @@ async function proxyToRender(path: string, timeoutMs = 120_000): Promise<Respons
     );
 }
 
-export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
+export function createStreamingRoutes(sourceManager: StreamingSourceManager, hianime?: HiAnimeScraper) {
     const app = new Hono();
 
     interface StreamSource { url: string; originalUrl?: string; [k: string]: unknown }
@@ -169,21 +184,37 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
 
     // Get episode servers
     app.get('/servers/:episodeId', async (c) => {
-        const episodeId = decodeURIComponent(c.req.param('episodeId'));
+        let episodeId = decodeURIComponent(c.req.param('episodeId'));
+        const epQueryParam = c.req.query('ep');
+        if (epQueryParam && !episodeId.includes('?ep=')) {
+            episodeId = `${episodeId}?ep=${epQueryParam}`;
+        }
+
+        // HiAnime aniwatch-style IDs handled directly on CF Worker
+        if (hianime && /^[^?]+\?ep=\d+$/.test(episodeId)) {
+            try {
+                const data = await reliableRequest('HiAnime', 'getEpisodeServers',
+                    () => hianime.getEpisodeServers(episodeId),
+                    { maxAttempts: 2, timeout: 10000, retryDelay: 1000 }
+                );
+                const servers = [
+                    ...(data.sub || []).map(s => ({ name: s.serverName, url: '', type: 'sub' })),
+                    ...(data.dub || []).map(s => ({ name: s.serverName, url: '', type: 'dub' })),
+                ];
+                return c.json({ servers });
+            } catch (e: unknown) {
+                return c.json({ servers: [], error: `HiAnime servers failed: ${e instanceof Error ? e.message : String(e)}` }, 503);
+            }
+        }
 
         if (typeof sourceManager.getEpisodeServers === 'function') {
             try {
                 const servers = await sourceManager.getEpisodeServers(episodeId);
                 if (servers && servers.length > 0) return c.json({ servers });
-            } catch { /* fall through to Render */ }
+            } catch { /* fall through */ }
         }
 
-        try {
-            return await proxyToRender(`/api/stream/servers/${encodeURIComponent(episodeId)}`);
-        } catch (e: unknown) {
-            const msg = e instanceof Error ? e.message : 'Render proxy failed';
-            return c.json({ servers: [], error: msg }, 502);
-        }
+        return c.json({ servers: [], error: 'Streaming servers unavailable' }, 503);
     });
 
     // Get streaming links — try local sources first, then proxy to Render for Puppeteer
@@ -205,9 +236,63 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
         let streamData: StreamPayload = { sources: [], subtitles: [] };
         let lastError: string | null = null;
 
-        // IDs that require Render's full SourceManager (AnimeKai, HiAnime/aniwatch-style, etc.)
+        // HiAnime aniwatch-style IDs (slug?ep=NNNNN) handled directly on CF Worker
+        if (hianime && /^[^?]+\?ep=\d+$/.test(episodeId)) {
+            const HIANIME_SERVERS = ['vidstreaming', 'hd-1', 'hd-2', 'hd-3'];
+            const serversToTry = explicitServer
+                ? [explicitServer, ...HIANIME_SERVERS.filter(s => s !== explicitServer)]
+                : HIANIME_SERVERS;
+            const cat = (category || 'sub') as 'sub' | 'dub' | 'raw';
+
+            for (const server of serversToTry.slice(0, 3)) {
+                try {
+                    const data = await reliableRequest('HiAnime', `getEpisodeSources-${server}`,
+                        () => hianime.getEpisodeSources(episodeId, server, cat),
+                        { maxAttempts: 1, timeout: 15000, retryDelay: 0 }
+                    );
+                    if (data.sources && data.sources.length > 0) {
+                        const referer = data.headers?.Referer || 'https://hianime.to/';
+                        let sources: StreamSource[] = data.sources.map(s => ({
+                            url: s.url,
+                            quality: (s.quality || s.type || 'default') as string,
+                            isM3U8: s.isM3U8 ?? false,
+                        }));
+                        const subtitles: StreamSubtitle[] = (data.subtitles || [])
+                            .map(t => ({ url: t.url, lang: t.lang }));
+
+                        if (useProxy) {
+                            sources = sources.map(s => ({
+                                ...s,
+                                url: proxyUrl(s.url, proxyBase, referer),
+                                originalUrl: s.url,
+                            }));
+                        }
+
+                        c.header('Cache-Control', 'private, max-age=300');
+                        return c.json({
+                            sources,
+                            subtitles: useProxy
+                                ? subtitles.map(sub => ({ ...sub, url: proxyUrl(sub.url, proxyBase, referer) }))
+                                : subtitles,
+                            headers: { Referer: referer },
+                            server,
+                            source: 'hianime',
+                            triedServers: [server],
+                        });
+                    }
+                } catch { /* try next server */ }
+            }
+
+            return c.json({
+                error: 'No streaming sources found via HiAnime',
+                episodeId,
+                sources: [],
+                subtitles: [],
+            }, 404);
+        }
+
+        // IDs that require Render's full SourceManager (AnimeKai, etc.)
         // The CF Worker's CloudflareSourceManager only handles gogoanime/consumet/adult IDs.
-        // Sending these to the local manager wastes 30s before it falls through to Render.
         const RENDER_ONLY_PREFIXES = ['animekai-', 'kaido-', 'miruro-', '9anime-', 'zoro-', 'aniwave-',
             'allanime-', 'animepahe-', 'gogoanime-', 'animefox-', 'animeflv-', 'anix-', 'consumet-'];
         const isRenderOnlyId = (id: string): boolean => {
@@ -215,8 +300,6 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
             if (RENDER_ONLY_PREFIXES.some(p => low.startsWith(p))) return true;
             // AnimeKai episode format: slug$ep=N$token=KEY
             if (/\$ep=\d+(\$token=|\$)/.test(id)) return true;
-            // aniwatch/HiAnime episode format: slug?ep=NNNNN
-            if (/^[^?]+\?ep=\d+$/.test(id)) return true;
             return false;
         };
 
@@ -226,6 +309,10 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
                 streamData = await sourceManager.getStreamingLinks(episodeId, explicitServer, category || 'sub') as StreamPayload;
             } catch (e: unknown) {
                 lastError = e instanceof Error ? e.message : 'Local source error';
+                // If Render is unavailable, return error instead of trying to return empty streamData
+                if (!streamData.sources || streamData.sources.length === 0) {
+                    return c.json({ error: 'Streaming unavailable: Render backend is down', sources: [] }, 503);
+                }
             }
         }
 

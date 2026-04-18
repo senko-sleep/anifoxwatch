@@ -125,9 +125,9 @@ export interface SeasonalResponse {
 class AnimeApiClient {
     private cache: Map<string, CacheEntry<unknown>> = new Map();
     private inflight: Map<string, Promise<unknown>> = new Map();
-    private readonly MAX_RETRIES = 2;
-    private readonly TIMEOUT_MS = 25000;
-    private readonly FALLBACK_TTL = 5 * 60 * 1000; // 5 min before retrying primary
+    private readonly MAX_RETRIES = 1;
+    private readonly TIMEOUT_MS = 8000;
+    private readonly FALLBACK_TTL = 2 * 60 * 1000; // 2 min before retrying primary
     private _online = true;
     private _lastOnlineCheck = 0;
     /** Non-null when we've switched to a fallback URL after primary failed. */
@@ -279,11 +279,6 @@ class AnimeApiClient {
                     msg.includes('CORS')
                 );
 
-                if (isCorsOrNetwork && attempt === 0) {
-                    console.warn(`[API] Possible CORS/network error on ${endpoint}:`, msg,
-                        '— retrying in case of Render cold start');
-                }
-
                 // Retry on network errors and server errors
                 const isRetryable = attempt < retries && (
                     isCorsOrNetwork ||
@@ -295,11 +290,7 @@ class AnimeApiClient {
                 );
 
                 if (isRetryable) {
-                    // Longer delay on first attempt to let Render spin up
-                    const delay = attempt === 0 && isCorsOrNetwork
-                        ? 3000
-                        : Math.min(Math.pow(2, attempt) * 1000, 4000);
-                    await new Promise(resolve => setTimeout(resolve, delay));
+                    await new Promise(resolve => setTimeout(resolve, 500));
                     continue;
                 }
 
@@ -311,7 +302,6 @@ class AnimeApiClient {
         const fallbackBase = getApiFallbackUrl();
         if (fallbackBase && fallbackBase !== this.apiBase()) {
             try {
-                console.warn(`[API] Primary failed, trying fallback: ${fallbackBase}`);
                 const controller = new AbortController();
                 const tid = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
                 const response = await fetch(`${fallbackBase}${endpoint}`, {
@@ -444,10 +434,9 @@ class AnimeApiClient {
             params.append('_t', String(Date.now()));
         }
 
-        // Browse requests can be slow due to AniList enrichment, use longer timeout
         const endpoint = `/api/anime/browse?${params}`;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s timeout for browse
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
 
         try {
             const response = await fetch(`${this.apiBase()}${endpoint}`, {
@@ -554,8 +543,7 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            // Keep below server stream global cap (~26s) + buffer so the UI fails fast with 404 instead of "loading forever"
-            const streamTimeoutMs = base.includes('onrender.com') ? 120_000 : 58_000;
+            const streamTimeoutMs = 30_000;
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), streamTimeoutMs);
             try {

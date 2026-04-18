@@ -22,8 +22,8 @@ export interface ApiConfig {
  */
 export const API_DEPLOYMENTS = {
     local: 'http://localhost:3001',
-    cloudflare: 'https://anifoxwatch-api.anifoxwatch.workers.dev',
-    render: 'https://anifoxwatch-ci33.onrender.com', // primary when Worker is degraded
+    cloudflare: 'https://anifoxwatch-api.anya-bot.workers.dev',
+    render: 'https://anifoxwatch-ci33.onrender.com', // fallback when Worker is degraded
     firebase: '/api', // Firebase Functions proxy endpoint
     custom: '' // Will be set from environment variable
 } as const;
@@ -76,11 +76,10 @@ export function apiUrl(path: string): string {
 export function getApiConfig(): ApiConfig {
     if (import.meta.env.DEV) {
         if (import.meta.env.VITE_USE_LOCAL_API === 'true') {
-            // Empty baseUrl → same origin (Vite dev server). Requests go to `/api/*` and
-            // `vite.config.ts` proxies to the Express API — no CORS, works with `npm run dev`.
+            // Use local API explicitly on localhost:3001
             return {
                 deployment: 'local',
-                baseUrl: '',
+                baseUrl: API_DEPLOYMENTS.local,
                 timeout: 45000,
                 retries: 3
             };
@@ -96,9 +95,10 @@ export function getApiConfig(): ApiConfig {
             return configFromUrl(String(remote).trim());
         }
 
+        // Default to local API in development
         return {
-            deployment: 'cloudflare',
-            baseUrl: API_DEPLOYMENTS.cloudflare,
+            deployment: 'local',
+            baseUrl: API_DEPLOYMENTS.local,
             timeout: 30000,
             retries: 3
         };

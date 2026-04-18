@@ -51,10 +51,7 @@ app.use('*', async (c, next) => {
     await next();
 });
 
-// ============================================
-// Render backend URL for Puppeteer-dependent fallbacks
-// ============================================
-const RENDER_BACKEND_URL = 'https://anifoxwatch-ci33.onrender.com';
+
 
 // ============================================
 // Health Check
@@ -151,7 +148,7 @@ app.get('/api', (c) => c.json({
 const animeRoutes = createAnimeRoutes(sourceManager);
 app.route('/api/anime', animeRoutes);
 
-const streamingRoutes = createStreamingRoutes(sourceManager);
+const streamingRoutes = createStreamingRoutes(sourceManager, hianime);
 app.route('/api/stream', streamingRoutes);
 
 const sourcesRoutes = createSourcesRoutes(sourceManager);

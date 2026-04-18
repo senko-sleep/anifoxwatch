@@ -32,20 +32,22 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
     const isProxied = url.includes('/api/stream/proxy?url=');
     
     if (isProxied) {
-      // Extract the actual URL from the proxy parameter
-      const urlMatch = url.match(/\/api\/stream\/proxy\?url=(.+)/);
-      if (urlMatch) {
-        const encodedUrl = urlMatch[1];
-        const actualUrl = decodeURIComponent(encodedUrl);
+      try {
+        const urlParams = new URL(url, window.location.origin).searchParams;
+        const actualUrl = urlParams.get('url');
         
-        // Extract proxy base (everything before ?url=)
-        const proxyBase = url.substring(0, url.indexOf('?url='));
-        
-        // Use POST request for long URLs (>1000 chars to be safe)
-        if (actualUrl.length > 1000) {
-          this.loadViaPost(proxyBase, actualUrl, context, config, callbacks);
-          return;
+        if (actualUrl) {
+          // Extract proxy base (everything before ?)
+          const proxyBase = url.substring(0, url.indexOf('?'));
+          
+          // Use POST request for long URLs (>1000 chars to be safe)
+          if (actualUrl.length > 1000) {
+            this.loadViaPost(proxyBase, actualUrl, context, config, callbacks);
+            return;
+          }
         }
+      } catch (e) {
+        console.error('[PostProxyLoader] Failed to parse proxied URL', e);
       }
     } else if (url.includes('.key')) {
       // Automatic proxy for cross-origin key files to avoid CORS blocks.

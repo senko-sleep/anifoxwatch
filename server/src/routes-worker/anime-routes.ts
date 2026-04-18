@@ -1,7 +1,11 @@
 import { Hono } from 'hono';
+import { HiAnime } from 'aniwatch';
 import { anilistService } from '../services/anilist-service.js';
 import { getHeroSpotlightCached } from '../services/hero-spotlight-service.js';
-import { AnimeBase, AnimeSearchResult, Episode, BrowseFilters } from '../types/anime.js';
+import { AnimeBase, AnimeSearchResult, Episode, BrowseFilters, TopAnime } from '../types/anime.js';
+import { StreamingData, EpisodeServer } from '../types/streaming.js';
+
+const hianime = new HiAnime.Scraper();
 
 /**
  * Render backend URL for fallback when CF Worker sources can't handle the request.
@@ -53,9 +57,9 @@ interface SourceManagerLike {
     getEpisodes(animeId: string): Promise<Episode[]>;
     getTrending(page?: number, sourceName?: string): Promise<AnimeBase[]>;
     getLatest(page?: number, sourceName?: string): Promise<AnimeBase[]>;
-    getTopRated(page?: number, limit?: number, sourceName?: string): Promise<AnimeBase[]>;
-    getStreamingLinks?(episodeId: string, server?: string, category?: string): Promise<Record<string, unknown>>;
-    getEpisodeServers?(episodeId: string): Promise<Record<string, unknown>[]>;
+    getTopRated(page?: number, limit?: number, sourceName?: string): Promise<AnimeBase[] | TopAnime[]>;
+    getStreamingLinks?(episodeId: string, server?: string, category?: string): Promise<StreamingData | Record<string, unknown>>;
+    getEpisodeServers?(episodeId: string): Promise<EpisodeServer[] | Record<string, unknown>[]>;
     // Optional methods that may not exist in CloudflareSourceManager
     getAnimeByGenre?(genre: string, page?: number, source?: string): Promise<AnimeSearchResult>;
     getAnimeByGenreAniList?(genre: string, page?: number): Promise<AnimeSearchResult>;
@@ -82,12 +86,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
 
         if (!q) return c.json({ error: 'Query parameter "q" is required' }, 400);
 
-        // Render-only source → proxy
+        // Render-only source → return 502 (Render is down)
         if (sourceNeedsRender(source)) {
-            try { return await proxyToRender(`/api/anime/search?${qs}`); } catch (e: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage, results: [] }, 502);
-            }
+            return c.json({ error: 'Render backend unavailable for this source', results: [] }, 502);
         }
 
         // Adult mode always uses local hentai sources (WatchHentai/Hanime)
@@ -95,23 +96,38 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             try {
                 const data = await sourceManager.search(q, page, source, { mode: 'adult' });
                 if (data.results.length > 0) return c.json(data);
-            } catch (_) { void _; }
-            // Fallback to Render for adult if local sources are down too
-            try { return await proxyToRender(`/api/anime/search?${qs}`); } catch (_) { void _; }
+            } catch (e: unknown) {
+                const errorMessage = e instanceof Error ? e.message : String(e);
+                return c.json({ error: errorMessage, results: [] }, 500);
+            }
             return c.json({ results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' });
         }
 
-        // Safe/mixed: try local first, fall back to Render if empty
+        // Safe/mixed: use HiAnime scraper directly
         try {
-            const data = await sourceManager.search(q, page, source, { mode: mode || 'safe' });
-            if (data.results.length > 0) return c.json(data);
-        } catch (_) { void _; }
+            const searchResults = await hianime.search(q, page) as any;
+            const animes = searchResults?.animes || searchResults?.results || [];
+            // Transform data to match expected frontend structure
+            const transformed = animes.map((item: any) => ({
+                id: item.id,
+                title: item.title,
+                image: item.poster || item.image,
+                description: item.description || '',
+                genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
+                type: item.type || 'TV',
+                status: item.status || 'Ongoing',
+                releaseDate: item.releaseDate || '',
+                rating: item.rating || 0,
+                episodes: item.episodes || 0,
+                duration: item.duration || 24,
+                otherInfo: item.otherInfo || {}
+            }));
+            if (transformed.length > 0) {
+                return c.json({ results: transformed, source: 'hianime' });
+            }
+        } catch { /* fall through */ }
 
-        // Local returned nothing — proxy to Render
-        try { return await proxyToRender(`/api/anime/search?${qs}`, 45_000); } catch (e: unknown) {
-            const errorMessage = e instanceof Error ? e.message : String(e);
-            return c.json({ error: errorMessage, results: [] }, 502);
-        }
+        return c.json({ results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' });
     });
 
     // Get hero spotlight
@@ -121,17 +137,11 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             if (results && ((Array.isArray(results) && results.length > 0) || ((results as { results?: unknown[] }).results && (results as { results?: unknown[] }).results!.length > 0))) {
                 return c.json(results);
             }
-            // Empty result — fall through to Render
-            throw new Error('Empty hero-spotlight result');
+            // Empty result — return empty array
+            return c.json({ results: [], count: 0 });
         } catch (error: unknown) {
-            // Fallback: proxy hero-spotlight to Render (AniList from CF Worker IPs often fails)
-            try {
-                const qs = c.req.url.includes('?') ? `?${c.req.url.split('?')[1]}` : '';
-                return await proxyToRender(`/api/anime/hero-spotlight${qs}`, 45_000);
-            } catch (renderErr: unknown) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                return c.json({ error: `CF + Render both failed: ${errorMessage}`, results: [], count: 0 }, 500);
-            }
+            // Return empty array on error instead of 500
+            return c.json({ results: [], count: 0 });
         }
     });
 
@@ -155,47 +165,64 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     app.get('/trending', async (c) => {
         const page = Number(c.req.query('page')) || 1;
         const source = c.req.query('source');
-        
+
+        // Use HiAnime scraper directly
         try {
-            const data = await sourceManager.getTrending(page, source);
-            if (data && data.length > 0) {
-                return c.json({ results: data, source: source || 'default' });
+            const homeData = await hianime.getHomePage() as any;
+            const trending = homeData?.trendingAnimes || [];
+            // Transform data to match expected frontend structure
+            const transformed = trending.map((item: any) => ({
+                id: item.id,
+                title: item.title,
+                image: item.poster || item.image,
+                description: item.description || '',
+                genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
+                type: item.type || 'TV',
+                status: item.status || 'Ongoing',
+                releaseDate: item.releaseDate || '',
+                rating: item.rating || 0,
+                episodes: item.episodes || 0,
+                duration: item.duration || 24,
+                otherInfo: item.otherInfo || {}
+            }));
+            if (transformed.length > 0) {
+                return c.json({ results: transformed, source: 'hianime' });
             }
-            // Empty — fall through to Render
-            throw new Error('Empty trending result');
-        } catch (e: unknown) {
-            // Fallback to Render
-            try {
-                const qs = c.req.url.split('?')[1] || '';
-                return await proxyToRender(`/api/anime/trending?${qs}`, 50_000);
-            } catch (renderErr: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage, results: [] }, 500);
-            }
-        }
+        } catch { /* fall through */ }
+
+        return c.json({ results: [], source: 'none' });
     });
 
     // Get latest releases
     app.get('/latest', async (c) => {
         const page = Number(c.req.query('page')) || 1;
         const source = c.req.query('source');
-        
+
+        // Use HiAnime scraper directly
         try {
-            const data = await sourceManager.getLatest(page, source);
-            if (data && data.length > 0) {
-                return c.json({ results: data, source: source || 'default' });
+            const homeData = await hianime.getHomePage() as any;
+            const latest = homeData?.latestEpisodeAnimes || [];
+            // Transform data to match expected frontend structure
+            const transformed = latest.map((item: any) => ({
+                id: item.id,
+                title: item.title,
+                image: item.poster || item.image,
+                description: item.description || '',
+                genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
+                type: item.type || 'TV',
+                status: item.status || 'Ongoing',
+                releaseDate: item.releaseDate || '',
+                rating: item.rating || 0,
+                episodes: item.episodes || 0,
+                duration: item.duration || 24,
+                otherInfo: item.otherInfo || {}
+            }));
+            if (transformed.length > 0) {
+                return c.json({ results: transformed, source: 'hianime' });
             }
-            throw new Error('Empty latest result');
-        } catch (e: unknown) {
-            // Fallback to Render
-            try {
-                const qs = c.req.url.split('?')[1] || '';
-                return await proxyToRender(`/api/anime/latest?${qs}`, 50_000);
-            } catch (renderErr: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage, results: [] }, 500);
-            }
-        }
+        } catch { /* fall through */ }
+
+        return c.json({ results: [], source: 'none' });
     });
 
     // Get top rated anime
@@ -203,23 +230,40 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const page = Number(c.req.query('page')) || 1;
         const limit = Number(c.req.query('limit')) || 10;
         const source = c.req.query('source');
-        
+
+        // Use HiAnime scraper directly
         try {
-            const data = await sourceManager.getTopRated(page, limit, source);
-            if (data && data.length > 0) {
-                return c.json({ results: data });
+            const homeData = await hianime.getHomePage() as any;
+            const top10 = homeData?.top10Animes;
+            let results: unknown[] = [];
+            if (top10) {
+                if (Array.isArray(top10)) {
+                    results = top10;
+                } else if (typeof top10 === 'object') {
+                    results = top10.today || top10.week || top10.month || [];
+                }
             }
-            throw new Error('Empty top-rated result');
-        } catch (e: unknown) {
-            // Fallback to Render
-            try {
-                const qs = c.req.url.split('?')[1] || '';
-                return await proxyToRender(`/api/anime/top-rated?${qs}`, 50_000);
-            } catch (renderErr: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage, results: [] }, 500);
+            // Transform data to match expected frontend structure
+            const transformed = results.map((item: any) => ({
+                id: item.id,
+                title: item.title,
+                image: item.poster || item.image,
+                description: item.description || '',
+                genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
+                type: item.type || 'TV',
+                status: item.status || 'Ongoing',
+                releaseDate: item.releaseDate || '',
+                rating: item.rating || 0,
+                episodes: item.episodes || 0,
+                duration: item.duration || 24,
+                otherInfo: item.otherInfo || {}
+            }));
+            if (transformed.length > 0) {
+                return c.json({ results: transformed, source: 'hianime' });
             }
-        }
+        } catch { /* fall through */ }
+
+        return c.json({ results: [] });
     });
 
     // Get airing schedule
@@ -382,12 +426,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const limit = Number(query.limit) || 20;
         const genres = query.genre ? (query.genre as string).split(',').map(g => g.trim()) : [];
 
-        // Render-only source → proxy
+        // Render-only source → return 502 (Render is down)
         if (sourceNeedsRender(query.source as string)) {
-            try { return await proxyToRender(`/api/anime/filter?${c.req.url.split('?')[1] || ''}`); } catch (e: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage }, 502);
-            }
+            return c.json({ error: 'Render backend unavailable for this source', results: [] }, 502);
         }
 
         const filters: Record<string, string | number | string[] | undefined> = {
@@ -443,12 +484,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const genreParam = (query.genres as string) || (query.genre as string);
         const parsedGenres = genreParam ? genreParam.split(',').map(g => g.trim()) : [];
 
-        // Render-only source → proxy entire request to Render
+        // Render-only source → return 502 (Render is down)
         if (sourceNeedsRender(query.source as string)) {
-            try { return await proxyToRender(`/api/anime/browse?${c.req.url.split('?')[1] || ''}`); } catch (e: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage, results: [] }, 502);
-            }
+            return c.json({ error: 'Render backend unavailable for this source', results: [] }, 502);
         }
 
         const filters: Record<string, string | number | string[] | undefined> = {
@@ -471,7 +509,7 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
 
         const browseQs = c.req.url.split('?')[1] || '';
 
-        // Adult mode — use local hentai sources, fall back to Render if empty
+        // Adult mode — use local hentai sources
         if (filters.mode === 'adult') {
             try {
                 if (sourceManager.browseAnime) {
@@ -481,50 +519,65 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                     }
                 }
             } catch (_) { void _; }
-            try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
             return c.json({ results: [], currentPage: page, totalPages: 0, hasNextPage: false, totalResults: 0, source: 'none' });
         }
 
+        // Safe/mixed: use HiAnime scraper directly for trending
         try {
-            if (!sourceManager.browseAnime) {
-                try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
-                const trending = await sourceManager.getTrending(page);
-                return c.json({ results: trending || [], currentPage: page, totalPages: 1, hasNextPage: false, totalResults: trending?.length || 0, source: 'fallback' });
-            }
-            const result = await sourceManager.browseAnime(filters);
-            // Local returned nothing — proxy to Render
-            if (!result.results?.length) {
-                try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
-            }
-            return c.json({ results: result.results || [], currentPage: page, totalPages: result.totalPages || 1, hasNextPage: result.hasNextPage || false, totalResults: result.results?.length || 0, source: query.source || result.source || 'default' });
-        } catch (e: unknown) {
-            try { return await proxyToRender(`/api/anime/browse?${browseQs}`, 45_000); } catch (_) { void _; }
-            const errorMessage = e instanceof Error ? e.message : String(e);
-            return c.json({ error: errorMessage, results: [] }, 500);
-        }
+            const homeData = await hianime.getHomePage() as any;
+            const trending = homeData?.trendingAnimes || [];
+            // Transform data to match expected frontend structure
+            const transformed = trending.map((item: any) => ({
+                id: item.id,
+                title: item.title,
+                image: item.poster || item.image,
+                description: item.description || '',
+                genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
+                type: item.type || 'TV',
+                status: item.status || 'Ongoing',
+                releaseDate: item.releaseDate || '',
+                rating: item.rating || 0,
+                episodes: item.episodes || 0,
+                duration: item.duration || 24,
+                otherInfo: item.otherInfo || {}
+            }));
+            return c.json({ results: transformed, currentPage: page, totalPages: 1, hasNextPage: false, totalResults: transformed.length, source: 'hianime' });
+        } catch { /* fall through */ }
+
+        return c.json({ results: [], currentPage: page, totalPages: 0, hasNextPage: false, totalResults: 0, source: 'none' });
     });
 
     // Get random anime
     app.get('/random', async (c) => {
         const source = c.req.query('source');
-        
+
+        // Use HiAnime scraper directly for trending data
         try {
-            if (!sourceManager.getRandomAnime) {
-                // Fallback: get trending and pick random
-                const trending = await sourceManager.getTrending(1);
-                if (!trending || trending.length === 0) {
-                    return c.json({ error: 'No random anime found' }, 404);
-                }
+            const homeData = await hianime.getHomePage() as any;
+            const trending = homeData?.trendingAnimes || [];
+            if (trending.length > 0) {
                 const randomIndex = Math.floor(Math.random() * trending.length);
-                return c.json(trending[randomIndex]);
+                const item = trending[randomIndex];
+                // Transform data to match expected frontend structure
+                const transformed = {
+                    id: item.id,
+                    title: item.title,
+                    image: item.poster || item.image,
+                    description: item.description || '',
+                    genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
+                    type: item.type || 'TV',
+                    status: item.status || 'Ongoing',
+                    releaseDate: item.releaseDate || '',
+                    rating: item.rating || 0,
+                    episodes: item.episodes || 0,
+                    duration: item.duration || 24,
+                    otherInfo: item.otherInfo || {}
+                };
+                return c.json(transformed);
             }
-            const data = await sourceManager.getRandomAnime(source);
-            if (!data) return c.json({ error: 'No random anime found' }, 404);
-            return c.json(data);
-        } catch (e: unknown) {
-            const errorMessage = e instanceof Error ? e.message : String(e);
-            return c.json({ error: errorMessage }, 500);
-        }
+        } catch { /* fall through */ }
+
+        return c.json({ error: 'No anime available for random selection' }, 500);
     });
 
     // Get anime details (query-based)
@@ -533,24 +586,14 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const source = c.req.query('source');
         if (!id) return c.json({ error: 'Query parameter "id" is required' }, 400);
 
-        // Source-prefixed IDs or render-only sources → proxy to Render (Puppeteer sources)
+        // Source-prefixed IDs or render-only sources → return 502 (Render is down)
         if (needsRender(id) || sourceNeedsRender(source)) {
-            const qs = source ? `id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}` : `id=${encodeURIComponent(id)}`;
-            try {
-                return await proxyToRender(`/api/anime?${qs}`);
-            } catch (e: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage }, 502);
-            }
+            return c.json({ error: 'Render backend unavailable for this anime ID', results: [] }, 502);
         }
 
         try {
             const result = await sourceManager.getAnime(id);
             if (!result) {
-                // Fallback to Render if local source returned null
-                try {
-                    return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`);
-                } catch (_) { void _; }
                 return c.json({ error: 'Anime not found' }, 404);
             }
             return c.json(result);
@@ -566,29 +609,17 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const source = c.req.query('source');
         if (!id) return c.json({ error: 'Query parameter "id" is required' }, 400);
 
-        // Source-prefixed IDs or render-only sources → proxy to Render
+        // Source-prefixed IDs or render-only sources → return 502 (Render is down)
         if (needsRender(id) || sourceNeedsRender(source)) {
-            const qs = source ? `id=${encodeURIComponent(id)}&source=${encodeURIComponent(source)}` : `id=${encodeURIComponent(id)}`;
-            try {
-                return await proxyToRender(`/api/anime/episodes?${qs}`);
-            } catch (e: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage, episodes: [] }, 502);
-            }
+            return c.json({ error: 'Render backend unavailable for this anime ID', episodes: [] }, 502);
         }
 
         try {
             const result = await sourceManager.getEpisodes(id);
-            if (!result || result.length === 0) {
-                // Fallback to Render if local returned empty
-                try {
-                    return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`);
-                } catch (_) { void _; }
-            }
-            return c.json({ episodes: result });
+            return c.json({ episodes: result || [] });
         } catch (e: unknown) {
             const errorMessage = e instanceof Error ? e.message : String(e);
-            return c.json({ error: errorMessage }, 500);
+            return c.json({ error: errorMessage, episodes: [] }, 500);
         }
     });
 
@@ -649,18 +680,12 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const id = decodeURIComponent(c.req.param('id'));
 
         if (needsRender(id)) {
-            try {
-                return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`);
-            } catch (e: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage }, 502);
-            }
+            return c.json({ error: 'Render backend unavailable for this anime ID' }, 502);
         }
-        
+
         try {
             const data = await sourceManager.getAnime(id);
             if (!data) {
-                try { return await proxyToRender(`/api/anime?id=${encodeURIComponent(id)}`); } catch (_) { void _; }
                 return c.json({ error: 'Anime not found' }, 404);
             }
             return c.json(data);
@@ -675,23 +700,15 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const id = decodeURIComponent(c.req.param('id'));
 
         if (needsRender(id)) {
-            try {
-                return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`);
-            } catch (e: unknown) {
-                const errorMessage = e instanceof Error ? e.message : String(e);
-                return c.json({ error: errorMessage, episodes: [] }, 502);
-            }
+            return c.json({ error: 'Render backend unavailable for this anime ID', episodes: [] }, 502);
         }
-        
+
         try {
             const data = await sourceManager.getEpisodes(id);
-            if (!data || data.length === 0) {
-                try { return await proxyToRender(`/api/anime/episodes?id=${encodeURIComponent(id)}`); } catch (_) { void _; }
-            }
-            return c.json({ episodes: data });
+            return c.json({ episodes: data || [] });
         } catch (e: unknown) {
             const errorMessage = e instanceof Error ? e.message : String(e);
-            return c.json({ error: errorMessage }, 500);
+            return c.json({ error: errorMessage, episodes: [] }, 500);
         }
     });
 

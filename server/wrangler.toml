@@ -2,13 +2,19 @@ name = "anifoxwatch-api"
 # Choose your worker implementation:
 # - src/worker.ts = Standard (all routes inline, 700+ lines)
 # - src/worker-modular.ts = Modular (separate route files, maintainable) ✅ Recommended
-main = "src/worker-modular.ts"
+main = "dist/worker-modular.js"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
+
+# Deploy to workers.dev subdomain
+workers_dev = true
 
 [vars]
 NODE_ENV = "production"
 RENDER_BACKEND_URL = "https://anifoxwatch-ci33.onrender.com"
+
+# Build configuration - build TypeScript to dist before deploying
+outdir = "dist"
 
 # Use serverless-http/express adapter behavior
 [observability]

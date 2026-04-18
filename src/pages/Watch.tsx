@@ -279,11 +279,12 @@ const Watch = () => {
       return;
     }
 
-    // If we've exhausted sources, fail over to next server
-    if (servers?.length && serverRetryCount < servers.length) {
-      const currentIndex = servers.findIndex(s => s.name === selectedServer);
-      const nextServer = servers[(currentIndex + 1) % servers.length];
-      console.log(`[Watch] 🔄 Player failover to server: ${nextServer.name} (attempt ${serverRetryCount + 1}/${servers.length})`);
+    // If we've exhausted sources, fail over to next real server (skip 'default' placeholder)
+    const realServers = (servers || []).filter(s => s.name.toLowerCase() !== 'default');
+    if (realServers.length && serverRetryCount < realServers.length) {
+      const currentIndex = realServers.findIndex(s => s.name === selectedServer);
+      const nextServer = realServers[(currentIndex + 1) % realServers.length];
+      console.log(`[Watch] 🔄 Player failover to server: ${nextServer.name} (attempt ${serverRetryCount + 1}/${realServers.length})`);
       setSelectedServer(nextServer.name);
       setUserPickedServer(true);
       setServerRetryCount(prev => prev + 1);
@@ -430,6 +431,9 @@ const Watch = () => {
   useEffect(() => {
     if (!currentEpisode || !anime) return;
     if (audioManuallySet) return;
+    // Don't switch once a stream is already loaded — late-resolving metadata (dubCount)
+    // would otherwise destroy a working sub stream after the player has already initialized.
+    if ((streamData?.sources?.length ?? 0) > 0) return;
 
     const animeId = cleanAnimeId || anime.id;
     const storedPref = getAnimeAudioPref(animeId);
@@ -458,7 +462,7 @@ const Watch = () => {
     if (currentHasDub) {
       setAudioType('dub');
     }
-  }, [currentEpisode, anime, audioManuallySet, anime?.dubCount, dubProbeHasSources, cleanAnimeId, getAnimeAudioPref]);
+  }, [currentEpisode, anime, audioManuallySet, streamData, anime?.dubCount, dubProbeHasSources, cleanAnimeId, getAnimeAudioPref]);
 
   // Store user's manual audio choice when they change it
   useEffect(() => {

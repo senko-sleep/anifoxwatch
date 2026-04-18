@@ -172,6 +172,19 @@ async function isDomainResolvable(hostname: string): Promise<boolean> {
     }
 }
 
+// Protocol cache to remember domains that failed TLS and need HTTP fallback
+const PROTOCOL_CACHE = new Map<string, 'http' | 'https'>();
+
+// Domains known to be unreachable locally due to ISP/network blocking.
+// These are sent directly to the remote proxy without wasting time on local attempts.
+// We keep this EMPTY by default, because users' residential ISPs often do not block these,
+// whereas datacenter IPs (the fallback) are heavily anti-bot protected!
+const ISP_BLOCKED_DOMAINS: string[] = [];
+
+function isIspBlockedDomain(domain: string): boolean {
+    return ISP_BLOCKED_DOMAINS.some(d => domain.includes(d));
+}
+
 /**
  * Check if a URL's domain is on the dead domains list
  */
@@ -236,7 +249,8 @@ const proxyUrl = (url: string, proxyBase: string, referer?: string): string => {
  * Rewrite m3u8 content to proxy all segment URLs
  */
 const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: string, referer?: string): string => {
-    const baseUrl = originalUrl.substring(0, originalUrl.lastIndexOf('/') + 1);
+    const urlNoQuery = originalUrl.split('?')[0].split('#')[0];
+    const baseUrl = urlNoQuery.substring(0, urlNoQuery.lastIndexOf('/') + 1);
     const lines = content.split('\n');
 
     return lines.map(line => {
@@ -266,9 +280,14 @@ const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: str
 /**
  * Helper to convert a stream to string
  */
-async function streamToString(stream: any): Promise<string> {
+async function streamToString(stream: any, maxSize = 5 * 1024 * 1024): Promise<string> {
     const chunks: Buffer[] = [];
+    let size = 0;
     for await (const chunk of stream) {
+        size += chunk.length;
+        if (size > maxSize) {
+            throw new Error(`Stream exceeded max size of ${maxSize} bytes for M3U8 manifest`);
+        }
         chunks.push(Buffer.from(chunk));
     }
     return Buffer.concat(chunks).toString("utf-8");
@@ -516,6 +535,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'owocdn': { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
             'vault': { referer: 'https://kwik.cx/', origin: 'https://kwik.cx' },
             'kwik': { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
+            'animekai': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+            'shop21pro': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
             'animepahe': { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
             'pahe': { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
             'nextcdn': { referer: 'https://animepahe.ru/', origin: 'https://animepahe.ru' },
@@ -596,6 +617,32 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
+        // Fast-path: skip local attempts for ISP-blocked domains
+        if (isIspBlockedDomain(domain)) {
+            logger.info(`[PROXY] ISP-blocked domain ${domain} — routing directly to remote proxy`, { domain, requestId });
+            const remoteProxy = process.env.REMOTE_PROXY_URL || 'https://anifoxwatch-ci33.onrender.com/api/stream/proxy';
+            try {
+                const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
+                const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 50000, maxRedirects: 5 });
+                const ct = remoteResp.headers['content-type'] || 'application/vnd.apple.mpegurl';
+                res.setHeader('Content-Type', ct);
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.setHeader('Cache-Control', 'no-store');
+                res.status(200);
+                remoteResp.data.on('error', (err: any) => {
+                    logger.error(`[PROXY] Remote fast-path pipeline error for ${domain}`, err);
+                    if (!res.headersSent) res.status(502).end();
+                });
+                remoteResp.data.pipe(res);
+                logger.info(`[PROXY] Remote fast-path success for ${domain}`, { domain, requestId });
+                return;
+            } catch (remoteErr: unknown) {
+                logger.warn(`[PROXY] Remote fast-path failed for ${domain}: ${remoteErr instanceof Error ? remoteErr.message : String(remoteErr)}`, { requestId });
+                res.status(502).json({ error: 'ISP-blocked domain unreachable via remote proxy', domain });
+                return;
+            }
+        }
+
         const isResolvable = await isDomainResolvable(domain);
         if (!isResolvable) {
             logger.warn(`[PROXY] Domain not resolvable: ${domain}`, { domain, requestId });
@@ -630,38 +677,76 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 headers['Range'] = req.headers.range;
             }
 
-            const makeProxyRequest = (relaxedTls: boolean) => axios({
-                method: 'get',
-                url: url,
-                responseType: 'stream',
-                headers,
-                timeout: 22000,
-                maxRedirects: 5,
-                validateStatus: (status) => status < 400,
-                ...(relaxedTls ? {
-                    httpsAgent: new https.Agent({ rejectUnauthorized: false, minVersion: 'TLSv1' })
-                } : {})
-            });
+            const makeProxyRequest = (protocol: 'http' | 'https', relaxedTls: boolean) => {
+                const targetUrl = protocol === 'http' ? url.replace(/^https:\/\//i, 'http://') : url;
+                return axios({
+                    method: 'get',
+                    url: targetUrl,
+                    responseType: 'stream',
+                    headers,
+                    timeout: 22000,
+                    maxRedirects: 5,
+                    validateStatus: (status: number) => status < 400,
+                    ...(relaxedTls ? {
+                        httpsAgent: new (require('https').Agent)({
+                            rejectUnauthorized: false,
+                            secureOptions: require('crypto').constants.SSL_OP_LEGACY_SERVER_CONNECT,
+                            ciphers: 'DEFAULT:@SECLEVEL=0'
+                        })
+                    } : {})
+                });
+            };
 
+            // Check protocol cache
+            const cachedProtocol = PROTOCOL_CACHE.get(domain);
+            
             try {
-                response = await makeProxyRequest(false);
+                if (cachedProtocol === 'http') {
+                    response = await makeProxyRequest('http', false);
+                } else {
+                    response = await makeProxyRequest('https', false);
+                }
                 logger.info(`[PROXY] Success on attempt ${attempt + 1} with referer ${combo.referer}`, { domain, requestId });
                 break;
             } catch (err: unknown) {
                 lastProxyError = err;
                 const errMsg = err instanceof Error ? err.message : String(err);
                 const errCode = (err as NodeJS.ErrnoException).code;
-                const isEproto = errMsg.includes('EPROTO') || errCode === 'EPROTO';
-                if (isEproto) {
+                const isEconnreset = errCode === 'ECONNRESET' || errMsg.includes('socket hang up') || errCode === 'ECONNREFUSED';
+                const isEproto = errMsg.includes('EPROTO') || errCode === 'EPROTO' || isEconnreset;
+                const isTlsError = isEproto || errMsg.includes('wrong version number') || errMsg.includes('alert protocol version');
+                
+                if (isTlsError && cachedProtocol !== 'http') {
                     logger.warn(`[PROXY] TLS/EPROTO for ${domain} — retrying with relaxed TLS`, { requestId });
                     try {
-                        response = await makeProxyRequest(true);
+                        response = await makeProxyRequest('https', true);
                         logger.info(`[PROXY] Relaxed TLS success for ${domain}`, { domain, requestId });
                         break;
                     } catch (tlsErr: unknown) {
                         lastProxyError = tlsErr;
-                        logger.warn(`[PROXY] Relaxed TLS also failed for ${domain}: ${tlsErr instanceof Error ? tlsErr.message : String(tlsErr)}`, { requestId });
-                        break;
+                        const tlsErrMsg = tlsErr instanceof Error ? tlsErr.message : String(tlsErr);
+                        logger.warn(`[PROXY] Relaxed TLS also failed for ${domain}: ${tlsErrMsg}`, { requestId });
+                        
+                        if (url.startsWith('https://')) {
+                            logger.warn(`[PROXY] Trying HTTP fallback for ${domain}`, { requestId });
+                            try {
+                                const httpResp = await makeProxyRequest('http', false);
+                                const ct = httpResp.headers['content-type'] || '';
+                                if (ct.includes('text/html')) {
+                                    // ISP block page — drain and discard
+                                    if (typeof httpResp.data?.resume === 'function') httpResp.data.resume();
+                                    logger.warn(`[PROXY] HTTP fallback returned HTML (ISP block?) for ${domain}`, { requestId });
+                                } else {
+                                    response = httpResp;
+                                    PROTOCOL_CACHE.set(domain, 'http');
+                                    logger.info(`[PROXY] HTTP fallback success for ${domain}`, { domain, requestId });
+                                    break;
+                                }
+                            } catch (httpErr: unknown) {
+                                lastProxyError = httpErr;
+                                logger.warn(`[PROXY] HTTP fallback also failed for ${domain}: ${httpErr instanceof Error ? httpErr.message : String(httpErr)}`, { requestId });
+                            }
+                        }
                     }
                 }
                 logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed for ${domain} (referer: ${combo.referer}): ${errMsg}`, { requestId });
@@ -672,6 +757,30 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         }
 
         if (!response) {
+            // Remote proxy fallback: when local can't reach CDN (e.g. ISP block),
+            // Remote proxy fallback: when local can't reach CDN (e.g. ISP block),
+            // forward to Render which can reach it.
+            const remoteProxy = process.env.REMOTE_PROXY_URL || 'https://anifoxwatch-ci33.onrender.com/api/stream/proxy';
+            logger.info(`[PROXY] All local attempts failed, trying remote fallback for ${domain}`, { domain, requestId });
+            try {
+                const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
+                const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 35000, maxRedirects: 5 });
+                const ct = remoteResp.headers['content-type'] || 'application/vnd.apple.mpegurl';
+                res.setHeader('Content-Type', ct);
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                res.setHeader('Cache-Control', 'no-store');
+                res.status(200);
+                remoteResp.data.on('error', (err: any) => {
+                    logger.error(`[PROXY] Remote fallback pipeline error for ${domain}`, err);
+                    if (!res.headersSent) res.status(502).end();
+                });
+                remoteResp.data.pipe(res);
+                logger.info(`[PROXY] Remote fallback success for ${domain}`, { domain, requestId });
+                return;
+            } catch (remoteErr: unknown) {
+                logger.warn(`[PROXY] Remote fallback also failed for ${domain}: ${remoteErr instanceof Error ? remoteErr.message : String(remoteErr)}`, { requestId });
+            }
+            
             throw lastProxyError || new Error('All proxy attempts failed');
         }
 
@@ -694,7 +803,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
         // Determine content type
         const upstreamContentType = response.headers['content-type'] || '';
-        const isUpstreamM3u8 = upstreamContentType.includes('x-mpegurl') || upstreamContentType.includes('vnd.apple.mpegurl') || url.includes('.m3u8');
+        // Better M3U8 detection: extension, content-type, or known AnimeKai pattern
+        const isUpstreamM3u8 = 
+            upstreamContentType.includes('x-mpegurl') || 
+            upstreamContentType.includes('vnd.apple.mpegurl') || 
+            url.includes('.m3u8') ||
+            (domain.includes('shop21pro.site') && !url.includes('.ts') && !url.includes('.m4s'));
 
         // Handle M3U8 Manifests (Buffer & Rewrite)
         if (isUpstreamM3u8) {
@@ -708,7 +822,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 );
 
                 res.set('Content-Type', 'application/vnd.apple.mpegurl');
-                res.set('Cache-Control', 'private, max-age=5');
+                res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+                res.set('Pragma', 'no-cache');
+                res.set('Expires', '0');
                 res.set('Access-Control-Allow-Origin', '*');
                 res.send(rewrittenContent);
 
@@ -783,7 +899,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         const errCode = (error as NodeJS.ErrnoException).code;
         const isTimeout = errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT';
         const isBlocked = errorMessage.includes('blocked') || errorMessage.includes('forbidden');
-        const isEproto = errorMessage.includes('EPROTO') || errCode === 'EPROTO';
+        const isEconnreset = errCode === 'ECONNRESET' || errorMessage.includes('socket hang up') || errCode === 'ECONNREFUSED';
+        const isEproto = errorMessage.includes('EPROTO') || errCode === 'EPROTO' || isEconnreset;
 
         logger.error(`[PROXY] Failed to proxy from ${domain}`, error instanceof Error ? error : undefined, {
             domain,
