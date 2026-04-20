@@ -339,15 +339,55 @@ export class AnimeFLVSource extends BaseAnimeSource {
         }
     }
 
+    /**
+     * Build candidate episode slugs for AnimeFLV's `/ver/{slug}` URL.
+     *
+     * HiAnime returns episode IDs like `frieren-beyond-journeys-end-season-2-20409?ep=163517`
+     * where the trailing numeric segment (`20409`) is the AniList media ID, not the episode
+     * number.  AnimeFLV uses `{anime-slug}-{episode_number}` (e.g. `steinsgate-3` for ep 3).
+     * We strip the AniList suffix and, when `episodeNum` is supplied, append it so the URL
+     * resolves correctly.  The raw slug is tried first for legacy AnimeKai-prefixed IDs.
+     */
+    private buildEpSlugs(rawSlug: string, episodeNum?: number): string[] {
+        const candidates: string[] = [rawSlug];
+
+        // Strip trailing 4-7 digit AniList-style suffix (e.g. "-20409")
+        const stripped = rawSlug.replace(/-\d{4,7}$/, '');
+        if (stripped !== rawSlug) {
+            if (episodeNum && episodeNum > 0) {
+                candidates.push(`${stripped}-${episodeNum}`);
+            }
+            candidates.push(stripped);
+        } else if (episodeNum && episodeNum > 0) {
+            // No AniList suffix but we know the episode number — try appending it
+            const withEp = rawSlug.replace(/-\d+$/, '') + `-${episodeNum}`;
+            if (withEp !== rawSlug) candidates.push(withEp);
+        }
+
+        return [...new Set(candidates)];
+    }
+
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         try {
-            const epId = episodeId.replace('animeflv-', '').split('?')[0]; // Strip query params
-            const response = await axios.get(`${this.baseUrl}/ver/${epId}`, {
-                signal: options?.signal,
-                timeout: options?.timeout || 10000,
-                headers: this.getHeaders()
-            });
-            const $ = cheerio.load(response.data);
+            const rawSlug = episodeId.replace('animeflv-', '').split('?')[0]; // Strip query params
+            const slugsToTry = this.buildEpSlugs(rawSlug, options?.episodeNum);
+
+            let responseData: string | null = null;
+            let epId = rawSlug;
+            for (const slug of slugsToTry) {
+                try {
+                    const r = await axios.get<string>(`${this.baseUrl}/ver/${slug}`, {
+                        signal: options?.signal,
+                        timeout: options?.timeout || 10000,
+                        headers: this.getHeaders(),
+                        validateStatus: (s) => s < 500,
+                    });
+                    if (r.status === 200) { responseData = r.data; epId = slug; break; }
+                } catch { /* try next slug */ }
+            }
+            if (!responseData) return { sources: [], subtitles: [] };
+
+            const $ = cheerio.load(responseData);
             const sources: VideoSource[] = [];
 
             // Extract videos from script — format: var videos = {"SUB":[{"server":"sw","title":"SW","code":"https://..."},...]}

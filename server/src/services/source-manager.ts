@@ -793,6 +793,33 @@ export class SourceManager {
     }
 
     /**
+     * Maps public API query values (`source=hianime`, `aniwatch`) to registered {@link #sources} keys.
+     * Without this, `hianime` is unknown and {@link #getAvailableSource} falls through to AnimeKai priority.
+     */
+    private resolveSearchSourceAlias(raw?: string): string | undefined {
+        if (!raw || typeof raw !== 'string') return undefined;
+        const t = raw.trim();
+        if (this.sources.has(t)) return t;
+
+        const lower = t.toLowerCase();
+        const aliases: Record<string, string> = {
+            hianime: 'Miruro',
+            'hi-anime': 'Miruro',
+            hianimez: 'Miruro',
+            aniwatch: 'Miruro',
+            aniwatchtv: 'Miruro',
+            miruro: 'Miruro',
+        };
+        const mapped = aliases[lower];
+        if (mapped) return mapped;
+
+        for (const name of this.sourceOrder) {
+            if (name.toLowerCase() === lower) return name;
+        }
+        return t;
+    }
+
+    /**
      * Known source prefixes for ID detection
      */
     private readonly knownPrefixes = [
@@ -983,8 +1010,13 @@ export class SourceManager {
     async search(query: string, page: number = 1, sourceName?: string, options?: { mode?: 'safe' | 'mixed' | 'adult' }): Promise<AnimeSearchResult> {
         const timer = new PerformanceTimer(`Search: ${query}`, { query, page });
         const mode = options?.mode || 'safe';
-        
-        console.log(`🔍 [SourceManager] Search request: "${query}" (page: ${page}, mode: ${mode}, source: ${sourceName || 'auto'})`);
+        const resolvedSource = this.resolveSearchSourceAlias(sourceName);
+
+        if (sourceName && resolvedSource && sourceName !== resolvedSource && this.sources.has(resolvedSource)) {
+            console.log(`🔍 [SourceManager] Resolved source alias "${sourceName}" → "${resolvedSource}"`);
+        }
+
+        console.log(`🔍 [SourceManager] Search request: "${query}" (page: ${page}, mode: ${mode}, source: ${resolvedSource || 'auto'})`);
 
         if (mode === 'adult') {
             const adultSources = ['WatchHentai', 'Hanime', 'AkiH']
@@ -1090,27 +1122,28 @@ export class SourceManager {
 
         // Safe Mode (Default)
         // If a specific source is requested, use it
-        if (sourceName) {
-            const source = this.getAvailableSource(sourceName);
+        if (resolvedSource) {
+            // Do not use getAvailableSource() here: when Miruro is marked !isAvailable it would fall through to AnimeKai.
+            const source = this.sources.get(resolvedSource) ?? null;
             if (!source) {
-                console.log(`❌ [SourceManager] Requested source "${sourceName}" is not available`);
-                logger.warn(`Requested source ${sourceName} not available`, { query }, 'SourceManager');
+                console.log(`❌ [SourceManager] Unknown source "${resolvedSource}"`);
+                logger.warn(`Unknown source ${resolvedSource}`, { query }, 'SourceManager');
                 return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' };
             }
             try {
                 const result = await this.executeReliably(source.name, 'search', (signal) => source.search(query, page, undefined, { signal }));
                 if (!result.results || result.results.length === 0) {
-                    logger.warn(`Source "${sourceName}" returned no results for query "${query}"`, { source: sourceName, query });
-                    console.log(`⚠️ [SourceManager] Source "${sourceName}" returned no results for: "${query}"`);
+                    logger.warn(`Source "${resolvedSource}" returned no results for query "${query}"`, { source: resolvedSource, query });
+                    console.log(`⚠️ [SourceManager] Source "${resolvedSource}" returned no results for: "${query}"`);
                 } else {
-                    logger.info(`Source "${sourceName}" returned ${result.results.length} results for query "${query}"`, { source: sourceName, query, count: result.results.length });
-                    console.log(`✅ [SourceManager] Source "${sourceName}" returned ${result.results.length} results`);
+                    logger.info(`Source "${resolvedSource}" returned ${result.results.length} results for query "${query}"`, { source: resolvedSource, query, count: result.results.length });
+                    console.log(`✅ [SourceManager] Source "${resolvedSource}" returned ${result.results.length} results`);
                 }
                 timer.end();
                 return result;
             } catch (error) {
-                console.log(`❌ [SourceManager] Search failed with source "${sourceName}": ${(error as Error).message}`);
-                logger.error(`Search failed with source ${sourceName}`, error as Error, { query });
+                console.log(`❌ [SourceManager] Search failed with source "${resolvedSource}": ${(error as Error).message}`);
+                logger.error(`Search failed with source ${resolvedSource}`, error as Error, { query });
                 throw error;
             }
         }
@@ -2876,7 +2909,7 @@ export class SourceManager {
                             ? { timeout: 16_000, maxAttempts: 1 }
                             : { timeout: 16_000, maxAttempts: 1 };
                 this.executeReliably(source.name, 'getStreamingLinks',
-                    (signal) => source.getStreamingLinks!(idToUse, server, category, { signal }),
+                    (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum }),
                     streamReliabilityOpts
                 )
                 .then(data => {

@@ -4,6 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 import animeRoutes from './routes/anime.js';
 import sourcesRoutes from './routes/sources.js';
 import streamingRoutes from './routes/streaming.js';
+import hianimeRestProxyRoutes from './routes/hianime-rest-proxy.js';
+import monitoringRoutes from './routes/monitoring.js';
 import { logger, createRequestContext, PerformanceTimer } from './utils/logger.js';
 import { reliabilityMiddleware, healthCheckMiddleware } from './middleware/reliability.js';
 import { REGISTERED_SOURCE_NAMES } from './registered-sources.js';
@@ -165,6 +167,8 @@ app.get('/api/image-proxy', async (req: Request, res: Response) => {
 app.use('/api/anime', animeRoutes);
 app.use('/api/sources', sourcesRoutes);
 app.use('/api/stream', streamingRoutes);
+app.use('/api/hianime-rest', hianimeRestProxyRoutes);
+app.use('/api/monitoring', monitoringRoutes);
 
 // API documentation
 app.get('/api', (_req: Request, res: Response) => {
@@ -188,6 +192,12 @@ app.get('/api', (_req: Request, res: Response) => {
                 servers: 'GET /api/stream/servers/:episodeId',
                 watch: 'GET /api/stream/watch/:episodeId?server={server}',
                 proxy: 'GET /api/stream/proxy?url={hlsUrl}'
+            },
+            hianimeRest: {
+                episodeServers:
+                    'GET /api/hianime-rest/episode/servers?animeEpisodeId={slug?ep=id}',
+                episodeSources:
+                    'GET /api/hianime-rest/episode/sources?animeEpisodeId={slug?ep=id}&server=&category='
             },
             sources: {
                 list: 'GET /api/sources',

@@ -12,6 +12,8 @@ export interface SourceRequestOptions {
     priority?: 'high' | 'normal' | 'low';
     /** When set, passed to reliability layer (e.g. skip retries for expensive Puppeteer streams). */
     maxAttempts?: number;
+    /** 1-based episode number; used by sources that need it for URL construction (e.g. AnimeFLV). */
+    episodeNum?: number;
 }
 
 /**
