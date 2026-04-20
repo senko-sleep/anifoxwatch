@@ -359,6 +359,8 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     const explicitServer = normalizeStreamServerQuery(req.query.server);
     const epNumRaw = req.query.ep_num;
     const episodeNum = epNumRaw ? parseInt(String(epNumRaw), 10) || undefined : undefined;
+    const anilistIdRaw = req.query.anilist_id;
+    const anilistId = anilistIdRaw ? parseInt(String(anilistIdRaw), 10) || undefined : undefined;
     const requestId = (req as any).id;
     const shouldProxy = useProxy !== 'false';
     const proxyBase = getProxyBaseUrl(req);
@@ -382,7 +384,8 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
             episodeId,
             explicitServer,
             (category as 'sub' | 'dub') || 'sub',
-            episodeNum
+            episodeNum,
+            anilistId
         );
     } catch (error: any) {
         lastError = error.message;

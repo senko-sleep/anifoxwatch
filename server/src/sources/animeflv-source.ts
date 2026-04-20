@@ -396,11 +396,9 @@ export class AnimeFLVSource extends BaseAnimeSource {
             const rawSlug = episodeId.replace('animeflv-', '').split('?')[0]; // Strip query params
             const slugsToTry = this.buildEpSlugs(rawSlug, options?.episodeNum);
 
-            // If a trailing numeric suffix looks like an AniList ID (1-6 digits), fetch romaji title as extra candidates
-            const anilistMatch = rawSlug.match(/-(\d{1,6})$/);
-            if (anilistMatch) {
-                const anilistId = parseInt(anilistMatch[1], 10);
-                const extra = await this.fetchAniListSlugCandidates(anilistId, options?.episodeNum);
+            // Use the AniList ID (passed from frontend) to fetch romaji/english title as extra slug candidates
+            if (options?.anilistId) {
+                const extra = await this.fetchAniListSlugCandidates(options.anilistId, options?.episodeNum);
                 for (const c of extra) if (!slugsToTry.includes(c)) slugsToTry.push(c);
             }
 

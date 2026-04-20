@@ -14,6 +14,8 @@ export interface SourceRequestOptions {
     maxAttempts?: number;
     /** 1-based episode number; used by sources that need it for URL construction (e.g. AnimeFLV). */
     episodeNum?: number;
+    /** AniList ID of the anime; used for romaji title lookup when slug matching fails. */
+    anilistId?: number;
 }
 
 /**

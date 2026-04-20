@@ -269,10 +269,10 @@ export function useEpisodeServers(episodeId: string, enabled: boolean = true) {
     });
 }
 
-export function useStreamingLinks(episodeId: string, server?: string, category?: string, enabled: boolean = true, episodeNum?: number) {
+export function useStreamingLinks(episodeId: string, server?: string, category?: string, enabled: boolean = true, episodeNum?: number, anilistId?: number) {
     return useQuery<StreamingData, Error>({
         queryKey: queryKeys.stream(episodeId, server, category),
-        queryFn: () => apiClient.getStreamingLinks(episodeId, server, category, episodeNum),
+        queryFn: () => apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId),
         enabled: enabled && episodeId.length > 0,
         staleTime: 2 * 60 * 1000,   // 2 min — reuse when toggling sub/dub or returning quickly
         gcTime: 5 * 60 * 1000,

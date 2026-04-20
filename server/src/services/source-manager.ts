@@ -2687,7 +2687,7 @@ export class SourceManager {
      * Uses PARALLEL multi-source querying for maximum reliability
      * Queries multiple sources simultaneously and returns the first successful result
      */
-    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', episodeNum?: number): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', episodeNum?: number, anilistId?: number): Promise<StreamingData> {
         const timer = new PerformanceTimer(`Get streaming links: ${episodeId}`, { episodeId, server, category });
         const startTime = Date.now();
         
@@ -2909,7 +2909,7 @@ export class SourceManager {
                             ? { timeout: 16_000, maxAttempts: 1 }
                             : { timeout: 16_000, maxAttempts: 1 };
                 this.executeReliably(source.name, 'getStreamingLinks',
-                    (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum }),
+                    (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
                     streamReliabilityOpts
                 )
                 .then(data => {
