@@ -3,6 +3,7 @@ import { HiAnime } from 'aniwatch';
 import { getHianimeRestBase, fetchHianimeRestData } from './hianime-rest.js';
 import { anilistService } from '../services/anilist-service.js';
 import { getHeroSpotlightCached } from '../services/hero-spotlight-service.js';
+import { loadHianimeAnimeDetails, loadHianimeEpisodeList } from '../services/hianime-anime-details.js';
 import { AnimeBase, AnimeSearchResult, Episode, BrowseFilters, TopAnime } from '../types/anime.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
 
@@ -587,7 +588,10 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         }
 
         try {
-            const result = await sourceManager.getAnime(id);
+            let result = await sourceManager.getAnime(id);
+            if (!result) {
+                result = await loadHianimeAnimeDetails(c.env, id);
+            }
             if (!result) {
                 return c.json({ error: 'Anime not found' }, 404);
             }
@@ -609,7 +613,11 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         }
 
         try {
-            const result = await sourceManager.getEpisodes(id);
+            let result = await sourceManager.getEpisodes(id);
+            if (!result?.length) {
+                const hi = await loadHianimeEpisodeList(c.env, id);
+                if (hi.length > 0) result = hi;
+            }
             return c.json({ episodes: result || [] });
         } catch (e: unknown) {
             const errorMessage = e instanceof Error ? e.message : String(e);
@@ -678,7 +686,10 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         }
 
         try {
-            const data = await sourceManager.getAnime(id);
+            let data = await sourceManager.getAnime(id);
+            if (!data) {
+                data = await loadHianimeAnimeDetails(c.env, id);
+            }
             if (!data) {
                 return c.json({ error: 'Anime not found' }, 404);
             }
@@ -698,7 +709,11 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         }
 
         try {
-            const data = await sourceManager.getEpisodes(id);
+            let data = await sourceManager.getEpisodes(id);
+            if (!data?.length) {
+                const hi = await loadHianimeEpisodeList(c.env, id);
+                if (hi.length > 0) data = hi;
+            }
             return c.json({ episodes: data || [] });
         } catch (e: unknown) {
             const errorMessage = e instanceof Error ? e.message : String(e);

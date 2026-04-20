@@ -5,7 +5,8 @@ import path from "path";
 export default defineConfig({
   plugins: [react()],
   test: {
-    environment: "jsdom",
+    // jsdom 27 pulls @asamuzakjp/css-color → ERR_REQUIRE_ESM on @csstools/css-calc in Node's CJS path.
+    environment: "happy-dom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],

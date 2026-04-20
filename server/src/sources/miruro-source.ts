@@ -437,7 +437,11 @@ export class MiruroSource extends BaseAnimeSource {
         const { aniwatch: epQueries } = this.episodeIdVariantsForStreaming(episodeId);
         const cat: 'sub' | 'dub' | 'raw' = category === 'dub' ? 'dub' : 'sub';
         const prefer = this.normalizeAniwatchServer(server);
-        const serversToTry = server ? [prefer] : (['hd-1', 'hd-2', 'megacloud'] as const);
+        /** Prefer requested embed, then same rotation as REST discovery when one id is missing for dub/sub. */
+        const defaultRotation: HiAnime.AnimeServers[] = ['hd-1', 'hd-2', 'megacloud', 'streamsb', 'streamtape'];
+        const serversToTry: HiAnime.AnimeServers[] = server
+            ? [prefer, ...defaultRotation.filter((s) => s !== prefer)]
+            : [...defaultRotation];
 
         for (const epQuery of epQueries) {
             if (!this.isValidAniwatchEpQuery(epQuery)) {

@@ -439,7 +439,12 @@ export class CloudflareSourceManager {
         }
     }
 
-    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
+    async getStreamingLinks(
+        episodeId: string,
+        server?: string,
+        category: 'sub' | 'dub' = 'sub',
+        fallbackEpisodeNum?: number
+    ): Promise<StreamingData> {
         const source = this.getStreamingSource(episodeId);
         if (!source || !source.getStreamingLinks) {
             logger.warn(`No streaming source available for ${episodeId}`, undefined, 'CloudflareSourceManager');
@@ -492,7 +497,7 @@ export class CloudflareSourceManager {
                 recordFailure(source.name);
                 
                 // Try cross-source fallback before giving up
-                const fallbackData = await this.crossSourceStreamingFallback(episodeId, server, category);
+                const fallbackData = await this.crossSourceStreamingFallback(episodeId, server, category, fallbackEpisodeNum);
                 if (fallbackData && fallbackData.sources.length > 0) {
                     return fallbackData;
                 }
@@ -504,7 +509,7 @@ export class CloudflareSourceManager {
             recordFailure(source.name);
 
             // Try title-based fallback on error
-            const fallbackData = await this.crossSourceStreamingFallback(episodeId, server, category).catch(() => null);
+            const fallbackData = await this.crossSourceStreamingFallback(episodeId, server, category, fallbackEpisodeNum).catch(() => null);
             if (fallbackData && fallbackData.sources.length > 0) {
                 return fallbackData;
             }
@@ -543,23 +548,24 @@ export class CloudflareSourceManager {
         const title = this.episodeIdToFallbackSearchTitle(episodeId);
         if (!title) return null;
 
-        // Determine episode number from ID if not hinted
-        let episodeNum = hintEpisodeNum;
-        if (!episodeNum) {
+        // Prefer UI/URL ep_num (client sends ep_num); HiAnime uses large opaque ids in ?ep= that are NOT display episode numbers.
+        let episodeNum = hintEpisodeNum != null && hintEpisodeNum > 0 ? hintEpisodeNum : undefined;
+        if (episodeNum == null) {
             const numMatch = episodeId.match(/[/-]episode-(\d+)/i) || episodeId.match(/[/-](\d+)$/);
             if (numMatch) episodeNum = parseInt(numMatch[1], 10);
             else if (episodeId.includes('?ep=') || episodeId.includes('$ep=')) {
-                // For HiAnime/AnimeKai IDs
                 const epMatch = episodeId.match(/[?$]ep=(\d+)/i);
                 if (epMatch) {
-                    episodeNum = parseInt(epMatch[1], 10);
+                    const n = parseInt(epMatch[1], 10);
+                    // Zoro/small ids: often real episode index. HiAnime: opaque 5–6 digit ids (e.g. 107257).
+                    if (n >= 1 && n <= 2000) episodeNum = n;
                 } else {
                     const dashMatch = episodeId.split(/[?$]/)[0].match(/-(\d+)$/);
                     if (dashMatch) episodeNum = parseInt(dashMatch[1], 10);
                 }
             }
         }
-        if (!episodeNum) episodeNum = 1;
+        if (!episodeNum || episodeNum < 1) episodeNum = 1;
 
         logger.info(`[CloudflareSourceManager] Attempting cross-source fallback for "${title}" Ep ${episodeNum}`, undefined, 'CloudflareSourceManager');
 

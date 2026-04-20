@@ -3,11 +3,11 @@
  * 
  * Automatically switches between different API deployments:
  * - Local Development: Express server on localhost:3001
- * - Cloudflare Workers: Your Cloudflare Workers deployment
+ * - Vercel: Node API from this repo (`/api/*` on your *.vercel.app deployment)
  * - Production: Configured in .env.production
  */
 
-export type ApiDeployment = 'local' | 'cloudflare' | 'firebase' | 'custom' | 'hianimeRest';
+export type ApiDeployment = 'local' | 'vercel' | 'firebase' | 'custom' | 'hianimeRest';
 
 export interface ApiConfig {
     deployment: ApiDeployment;
@@ -21,7 +21,8 @@ export interface ApiConfig {
  */
 export const API_DEPLOYMENTS = {
     local: 'http://localhost:3001',
-    cloudflare: 'https://anifoxwatch-api.anya-bot.workers.dev',
+    /** Express API deployed with the frontend on Vercel (see root `vercel.json`). */
+    vercel: 'https://anifoxwatch.vercel.app',
     firebase: '/api',
     custom: '',
     /** Optional HiAnime REST host for status checks (same shape as VITE_ANIWATCH_API_URL). */
@@ -33,8 +34,8 @@ function configFromUrl(envApiUrl: string): ApiConfig {
 
     if (envApiUrl.includes('localhost') || envApiUrl.includes('127.0.0.1')) {
         deployment = 'local';
-    } else if (envApiUrl.includes('workers.dev')) {
-        deployment = 'cloudflare';
+    } else if (envApiUrl.includes('vercel.app')) {
+        deployment = 'vercel';
     } else if (envApiUrl === '/api') {
         deployment = 'firebase';
     }
@@ -56,7 +57,7 @@ function configFromUrl(envApiUrl: string): ApiConfig {
  * - **Remote only:** `VITE_USE_LOCAL_API=false` and set `VITE_API_URL` to a deployed API (for `vite` alone).
  * - **`VITE_DEV_API_URL`:** absolute override (e.g. another port).
  *
- * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then the Cloudflare Worker default.
+ * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then the Vercel API default.
  */
 /**
  * Build the URL for an API path. When `baseUrl` is empty (local dev + Vite proxy),
@@ -113,24 +114,23 @@ export function getApiConfig(): ApiConfig {
 
     if (isFirebaseHosting) {
         return {
-            deployment: 'cloudflare',
-            baseUrl: API_DEPLOYMENTS.cloudflare,
+            deployment: 'vercel',
+            baseUrl: API_DEPLOYMENTS.vercel,
             timeout: 30000,
             retries: 3
         };
     }
 
     return {
-        deployment: 'cloudflare',
-        baseUrl: API_DEPLOYMENTS.cloudflare,
+        deployment: 'vercel',
+        baseUrl: API_DEPLOYMENTS.vercel,
         timeout: 30000,
         retries: 3
     };
 }
 
 /**
- * Secondary BFF URL when the primary fails. There is no drop-in public fallback with the same
- * `/api/anime` contract as the Worker, so this returns null (client retries primary only).
+ * Secondary BFF URL when the primary fails (no alternate public BFF configured).
  */
 export function getApiFallbackUrl(): string | null {
     return null;
@@ -209,13 +209,13 @@ async function getHianimeRestStatus(baseUrl: string): Promise<{
 }
 
 /**
- * Test configured deployments (local + primary edge + firebase + optional HiAnime REST).
+ * Test configured deployments (local + Vercel API + firebase + optional HiAnime REST).
  */
 export async function testAllDeployments(): Promise<Record<ApiDeployment, { online: boolean; deployment: string; latency: number; version: string; error?: boolean }>> {
     const hianimeBase = API_DEPLOYMENTS.hianimeRest;
     const results = await Promise.allSettled([
         getApiStatus(API_DEPLOYMENTS.local),
-        getApiStatus(API_DEPLOYMENTS.cloudflare),
+        getApiStatus(API_DEPLOYMENTS.vercel),
         getApiStatus(API_DEPLOYMENTS.firebase),
         hianimeBase ? getHianimeRestStatus(hianimeBase) : Promise.resolve({ online: false, deployment: 'skipped', latency: -1, version: 'not-configured' }),
     ]);
@@ -223,7 +223,7 @@ export async function testAllDeployments(): Promise<Record<ApiDeployment, { onli
     const offline = { online: false, deployment: 'offline', latency: -1, version: 'unknown', error: true };
     return {
         local: results[0].status === 'fulfilled' ? results[0].value : offline,
-        cloudflare: results[1].status === 'fulfilled' ? results[1].value : offline,
+        vercel: results[1].status === 'fulfilled' ? results[1].value : offline,
         firebase: results[2].status === 'fulfilled' ? results[2].value : offline,
         hianimeRest: results[3].status === 'fulfilled' ? results[3].value : offline,
         custom: offline,

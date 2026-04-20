@@ -6,6 +6,7 @@ import { CloudflareSourceManager } from './services/source-manager-cloudflare.js
 import { REGISTERED_SOURCE_NAMES } from './registered-sources.js';
 import { createAnimeRoutes } from './routes-worker/anime-routes.js';
 import { createStreamingRoutes } from './routes-worker/streaming-routes.js';
+import { createHianimeRestProxyRoutes } from './routes-worker/hianime-rest-proxy-routes.js';
 import { createSourcesRoutes } from './routes-worker/sources-routes.js';
 import { reliableRequest, getCircuitBreakerStates } from './utils/workers-reliability.js';
 
@@ -130,6 +131,10 @@ app.get('/api', (c) => c.json({
             watch: 'GET /api/stream/watch/:episodeId?server={server}&category={sub|dub}',
             proxy: 'GET /api/stream/proxy?url={hlsUrl}'
         },
+        hianimeRest: {
+            episodeSources:
+                'GET /api/hianime-rest/episode/sources?animeEpisodeId={slug?ep=id}&server={hd-1|...}&category={sub|dub}'
+        },
         sources: {
             list: 'GET /api/sources',
             health: 'GET /api/sources/health',
@@ -151,11 +156,14 @@ app.route('/api/anime', animeRoutes);
 const streamingRoutes = createStreamingRoutes(sourceManager, hianime);
 app.route('/api/stream', streamingRoutes);
 
+const hianimeRestProxyRoutes = createHianimeRestProxyRoutes();
+app.route('/api/hianime-rest', hianimeRestProxyRoutes);
+
 const sourcesRoutes = createSourcesRoutes(sourceManager);
 app.route('/api/sources', sourcesRoutes);
 
 logger.info('All route modules loaded successfully', {
-    routes: ['anime', 'streaming', 'sources', 'hianime']
+    routes: ['anime', 'streaming', 'hianime-rest', 'sources', 'hianime']
 }, 'Worker');
 
 // ============================================

@@ -1,5 +1,9 @@
 import { Hono, type Context } from 'hono';
 import { retryWithBackoff, reliableRequest } from '../utils/workers-reliability.js';
+import {
+    buildHianimeRestServersToTry,
+    fetchHianimeRestEpisodeServerIds,
+} from '../utils/hianime-rest-episode-discovery.js';
 import { getHianimeRestBase, fetchHianimeRestData } from './hianime-rest.js';
 
 interface HiAnimeScraper {
@@ -20,7 +24,7 @@ interface HiAnimeScraper {
 // Flexible interface for both SourceManager and CloudflareSourceManager
 interface StreamingSourceManager {
     getEpisodeServers?(episodeId: string): Promise<Array<{ name: string; url: string; type: string }>>;
-    getStreamingLinks?(episodeId: string, server?: string, category?: 'sub' | 'dub'): Promise<{
+    getStreamingLinks?(episodeId: string, server?: string, category?: 'sub' | 'dub', fallbackEpisodeNum?: number): Promise<{
         sources: Array<{ url: string; quality: string; isM3U8?: boolean }>;
         subtitles?: Array<{ url: string; lang: string }>;
     }>;
@@ -239,25 +243,40 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
         if (epQueryParam && !episodeId.includes('?ep=')) {
             episodeId = `${episodeId}?ep=${epQueryParam}`;
         }
-        const explicitServer = normalizeStreamServerQuery(c.req.query('server'));
+        const explicitServerRaw = normalizeStreamServerQuery(c.req.query('server'));
         const category = c.req.query('category') as 'sub' | 'dub' | undefined;
         const epNum = c.req.query('ep_num');
+        const fallbackEpisodeNum = epNum ? parseInt(epNum, 10) : undefined;
+        const epNumHint = fallbackEpisodeNum != null && !Number.isNaN(fallbackEpisodeNum) && fallbackEpisodeNum > 0
+            ? fallbackEpisodeNum
+            : undefined;
         const useProxy = c.req.query('proxy') !== 'false';
         const proxyBase = getProxyBaseUrl(c);
 
         let streamData: StreamPayload = { sources: [], subtitles: [] };
         let lastError: string | null = null;
 
-        // HiAnime aniwatch-style IDs (slug?ep=NNNNN) handled directly on CF Worker
+        // HiAnime aniwatch-style IDs (slug?ep=NNNNN) — try REST + scraper first, then fall through to
+        // CloudflareConsumet / cross-source title search (Vercel upstream often 404s on sources).
         if (hianime && /^[^?]+\?ep=\d+$/.test(episodeId)) {
-            const HIANIME_SERVERS = ['vidstreaming', 'hd-1', 'hd-2', 'hd-3'];
-            const serversToTry = explicitServer
-                ? [explicitServer, ...HIANIME_SERVERS.filter(s => s !== explicitServer)]
-                : HIANIME_SERVERS;
             const cat = (category || 'sub') as 'sub' | 'dub' | 'raw';
+            const discoveryCat: 'sub' | 'dub' = cat === 'dub' ? 'dub' : 'sub';
 
             const restBaseWatch = getHianimeRestBase(c.env);
-            for (const server of serversToTry.slice(0, 3)) {
+            let discovered: string[] | null = null;
+            if (restBaseWatch) {
+                discovered = await fetchHianimeRestEpisodeServerIds(
+                    restBaseWatch,
+                    episodeId,
+                    discoveryCat,
+                    12_000
+                );
+            }
+            const serversToTry = buildHianimeRestServersToTry({
+                explicitServer: explicitServerRaw,
+                discoveredIds: discovered,
+            });
+            for (const server of serversToTry.slice(0, 12)) {
                 try {
                     let data: Awaited<ReturnType<HiAnimeScraper['getEpisodeSources']>> | null = null;
                     if (restBaseWatch) {
@@ -309,13 +328,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                     }
                 } catch { /* try next server */ }
             }
-
-            return c.json({
-                error: 'No streaming sources found via HiAnime',
-                episodeId,
-                sources: [],
-                subtitles: [],
-            }, 404);
+            // Do not return 404 — fall through to Consumet + title-based fallback below.
         }
 
         // IDs that require the full Node SourceManager (AnimeKai, etc.)
@@ -333,7 +346,12 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
         // 1) Try local CF Worker sources (only for IDs it can actually handle)
         if (!isRenderOnlyId(episodeId) && typeof sourceManager.getStreamingLinks === 'function') {
             try {
-                streamData = await sourceManager.getStreamingLinks(episodeId, explicitServer, category || 'sub') as StreamPayload;
+                streamData = await sourceManager.getStreamingLinks(
+                    episodeId,
+                    explicitServerRaw,
+                    category || 'sub',
+                    epNumHint
+                ) as StreamPayload;
             } catch (e: unknown) {
                 lastError = e instanceof Error ? e.message : 'Local source error';
                 if (!streamData.sources || streamData.sources.length === 0) {
@@ -346,7 +364,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
         if (!streamData.sources || streamData.sources.length === 0 || !hasPlayableSources(streamData.sources)) {
             try {
                 const qs = new URLSearchParams();
-                if (explicitServer) qs.set('server', explicitServer);
+                if (explicitServerRaw) qs.set('server', explicitServerRaw);
                 if (category) qs.set('category', category);
                 if (epNum) qs.set('ep_num', epNum);
                 const qsStr = qs.toString() ? `?${qs.toString()}` : '';
@@ -399,7 +417,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
             return c.json({
                 error: 'No streaming sources found',
                 episodeId,
-                triedServers: explicitServer ? [explicitServer] : ['auto'],
+                triedServers: explicitServerRaw ? [explicitServerRaw] : ['auto'],
                 lastError,
                 sources: [],
                 subtitles: [],
@@ -422,8 +440,8 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
             }
         }
 
-        streamData.server = explicitServer || (typeof streamData.source === 'string' ? streamData.source : undefined) || 'auto';
-        streamData.triedServers = explicitServer ? [explicitServer] : ['auto'];
+        streamData.server = explicitServerRaw || (typeof streamData.source === 'string' ? streamData.source : undefined) || 'auto';
+        streamData.triedServers = explicitServerRaw ? [explicitServerRaw] : ['auto'];
 
         c.header('Cache-Control', 'private, max-age=300');
         return c.json(streamData);

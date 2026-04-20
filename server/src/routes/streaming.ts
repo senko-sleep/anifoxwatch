@@ -1,5 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
+import { tryFetchHianimeRestStreamingData } from '../services/hianime-rest-fallback.js';
+import { isHianimeStyleEpisodeId } from '../utils/hianime-rest-servers.js';
 import { logger } from '../utils/logger.js';
 import axios, { type AxiosResponse } from 'axios';
 import https from 'https';
@@ -385,6 +387,18 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     } catch (error: any) {
         lastError = error.message;
         logger.warn(`[STREAM] getStreamingLinks failed: ${error.message}`, { episodeId, requestId });
+    }
+
+    if ((!streamData.sources || streamData.sources.length === 0) && isHianimeStyleEpisodeId(episodeId)) {
+        const fromRest = await tryFetchHianimeRestStreamingData({
+            episodeId,
+            category: ((category as 'sub' | 'dub') || 'sub'),
+            explicitServer: explicitServer,
+        });
+        if (fromRest?.sources?.length) {
+            streamData = fromRest;
+            logger.info(`[STREAM] HiAnime REST fallback succeeded for ${episodeId}`, { requestId });
+        }
     }
 
     const winningSource = typeof streamData?.source === 'string' ? streamData.source : undefined;

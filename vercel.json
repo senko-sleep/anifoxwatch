@@ -13,6 +13,10 @@
   ],
   "routes": [
     {
+      "src": "/health",
+      "dest": "/server/src/index.ts"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/server/src/index.ts"
     },
@@ -23,13 +27,7 @@
   ],
   "env": {
     "NODE_ENV": "production",
-    "CORS_ORIGIN": "https://anifoxwatch.vercel.app"
+    "CORS_ORIGIN": "*"
   },
-  "regions": ["iad1", "sfo1", "lhr1"],
-  "functions": {
-    "server/src/index.ts": {
-      "maxDuration": 300,
-      "memory": 256
-    }
-  }
+  "regions": ["iad1"]
 }

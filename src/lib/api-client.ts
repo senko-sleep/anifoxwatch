@@ -1,6 +1,108 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { getApiConfig, getApiFallbackUrl } from './api-config';
 import { fetchAniListAnimeByNumericId } from './anilist-anime-by-id';
+import {
+    buildBffServersToTry,
+    fetchHianimeEpisodeServerIdsFromBff,
+} from './hianime-episode-discovery';
+import {
+    isHianimeStyleEpisodeId,
+    normalizeAnimeEpisodeIdForHianimeRest,
+} from './hianime-episode-id';
+
+/**
+ * When the primary API returns no sources, fetch episode sources via the same API host's
+ * `/api/hianime-rest/episode/sources` proxy (Worker or Express → `HIANIME_REST_URL` / Vercel).
+ * The browser must not call Vercel directly — CORS often fails on errors. Playback URLs are
+ * rewritten through `/api/stream/proxy` on this host.
+ */
+async function fetchStreamingFromAniwatchRest(params: {
+    workerProxyBase: string;
+    episodeId: string;
+    server?: string;
+    category?: string;
+}): Promise<StreamingData | null> {
+    const { workerProxyBase, episodeId, server, category } = params;
+    const apiBase = workerProxyBase.replace(/\/$/, '');
+    const cat = category === 'dub' ? 'dub' : 'sub';
+    const timeoutMs = 22_000;
+    const restId = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
+
+    const discovered = await fetchHianimeEpisodeServerIdsFromBff(apiBase, restId, cat, 12_000);
+    const serversToTry = buildBffServersToTry({
+        explicitServer: server,
+        discoveredIds: discovered,
+    });
+
+    const refererFromHeaders = (headers: unknown): string => {
+        if (headers && typeof headers === 'object' && 'Referer' in headers) {
+            const r = (headers as { Referer?: string }).Referer;
+            if (typeof r === 'string' && r) return r;
+        }
+        return 'https://hianime.to/';
+    };
+
+    const toProxied = (mediaUrl: string, referer: string) =>
+        `${apiBase}/api/stream/proxy?url=${encodeURIComponent(mediaUrl)}&referer=${encodeURIComponent(referer)}`;
+
+    for (const srv of serversToTry) {
+        const qs = new URLSearchParams({
+            animeEpisodeId: restId,
+            server: srv,
+            category: cat,
+        });
+        const url = `${apiBase}/api/hianime-rest/episode/sources?${qs}`;
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const resp = await fetch(url, {
+                signal: controller.signal,
+                headers: { Accept: 'application/json' },
+                mode: 'cors',
+            });
+            clearTimeout(tid);
+            const body = (await resp.json()) as {
+                status?: number;
+                message?: string;
+                data?: {
+                    sources?: Array<{
+                        url: string;
+                        isM3U8?: boolean;
+                        quality?: string;
+                        type?: string;
+                    }>;
+                    subtitles?: Array<{ url: string; lang: string }>;
+                    headers?: { Referer?: string };
+                };
+            };
+            if (body?.status !== undefined && body.status !== 200) continue;
+            const data = body?.data;
+            if (!data?.sources?.length) continue;
+
+            const referer = refererFromHeaders(data.headers);
+            const sources: VideoSource[] = data.sources.map((s) => ({
+                url: toProxied(s.url, referer),
+                quality: (s.quality || s.type || 'default') as VideoSource['quality'],
+                isM3U8: Boolean(s.isM3U8),
+            }));
+            const subtitles: VideoSubtitle[] = (data.subtitles || []).map((t) => ({
+                url: toProxied(t.url, referer),
+                lang: t.lang,
+            }));
+
+            return {
+                sources,
+                subtitles,
+                headers: { Referer: referer },
+                source: 'hianime',
+            };
+        } catch {
+            clearTimeout(tid);
+            continue;
+        }
+    }
+    return null;
+}
 
 interface BrowseFilters {
     type?: string;
@@ -539,20 +641,26 @@ class AnimeApiClient {
     // ============ STREAMING ENDPOINTS ============
 
     async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
+        const [slugPart, epPart] = episodeId.split('?ep=');
+        const qs = epPart ? `?ep=${epPart}` : '';
         const response = await this.fetch<{ servers: EpisodeServer[] }>(
-            `/api/stream/servers/${encodeURIComponent(episodeId)}`
+            `/api/stream/servers/${encodeURIComponent(slugPart)}${qs}`
         );
         return response.servers || [];
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number): Promise<StreamingData> {
+        // Split hianime-style "slug?ep=12345" — put `ep` as a real query param so
+        // the path never contains %3F (Vercel returns 404 for encoded ? in paths).
+        const [slugPart, epPart] = episodeId.split('?ep=');
         const params = new URLSearchParams();
+        if (epPart) params.append('ep', epPart);
         if (server) params.append('server', server);
         if (category) params.append('category', category);
         if (episodeNum != null) params.append('ep_num', String(episodeNum));
 
         const queryString = params.toString() ? `?${params.toString()}` : '';
-        const streamPath = `/api/stream/watch/${encodeURIComponent(episodeId)}${queryString}`;
+        const streamPath = `/api/stream/watch/${encodeURIComponent(slugPart)}${queryString}`;
 
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
@@ -579,8 +687,9 @@ class AnimeApiClient {
             }
         };
 
+        const primaryBase = this.apiBase();
         try {
-            const data = await tryFetch(this.apiBase());
+            const data = await tryFetch(primaryBase);
             console.log(`[API] ✅ Stream received:`, {
                 sources: data.sources?.length || 0,
                 qualities: data.sources?.map((s: any) => s.quality).join(', '),
@@ -592,7 +701,7 @@ class AnimeApiClient {
         } catch (primaryErr) {
             // Try fallback host before giving up (if configured)
             const fallback = getApiFallbackUrl();
-            if (fallback && fallback !== this.apiBase()) {
+            if (fallback && fallback !== primaryBase) {
                 console.warn(`[API] Stream primary failed, trying fallback: ${fallback}`);
                 try {
                     const data = await tryFetch(fallback);
@@ -605,6 +714,26 @@ class AnimeApiClient {
                     console.error(`[API] ❌ Fallback stream also failed:`, fallbackErr);
                 }
             }
+
+            // HiAnime: primary may 404 while upstream aniwatch-api (HIANIME_REST_URL) still returns sources.
+            if (isHianimeStyleEpisodeId(episodeId)) {
+                const proxyBase = primaryBase;
+                console.warn(`[API] Stream primary failed; trying HiAnime REST proxy (${proxyBase}/api/hianime-rest/...)`);
+                const fromRest = await fetchStreamingFromAniwatchRest({
+                    workerProxyBase: proxyBase,
+                    episodeId,
+                    server,
+                    category,
+                });
+                if (fromRest?.sources?.length) {
+                    console.log(`[API] ✅ Stream received via HiAnime REST proxy`, {
+                        sources: fromRest.sources.length,
+                        source: fromRest.source,
+                    });
+                    return fromRest;
+                }
+            }
+
             console.error(`[API] ❌ Stream fetch failed:`, primaryErr);
             throw primaryErr;
         }

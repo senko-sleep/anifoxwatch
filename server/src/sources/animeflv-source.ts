@@ -367,10 +367,42 @@ export class AnimeFLVSource extends BaseAnimeSource {
         return [...new Set(candidates)];
     }
 
+    /** Fetch romaji/english title from AniList by numeric ID; returns slug candidates to try on AnimeFLV. */
+    private async fetchAniListSlugCandidates(anilistId: number, episodeNum?: number): Promise<string[]> {
+        try {
+            const query = `query($id:Int){Media(id:$id,type:ANIME){title{romaji english}}}`;
+            const res = await axios.post<{ data: { Media: { title: { romaji: string; english: string | null } } } }>(
+                'https://graphql.anilist.co',
+                { query, variables: { id: anilistId } },
+                { timeout: 5000, headers: { 'Content-Type': 'application/json' } }
+            );
+            const t = res.data?.data?.Media?.title;
+            if (!t) return [];
+            const candidates: string[] = [];
+            for (const title of [t.romaji, t.english]) {
+                if (!title) continue;
+                const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                if (episodeNum && episodeNum > 0) candidates.push(`${slug}-${episodeNum}`);
+                candidates.push(slug);
+            }
+            return candidates;
+        } catch {
+            return [];
+        }
+    }
+
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         try {
             const rawSlug = episodeId.replace('animeflv-', '').split('?')[0]; // Strip query params
             const slugsToTry = this.buildEpSlugs(rawSlug, options?.episodeNum);
+
+            // If a trailing numeric suffix looks like an AniList ID (1-6 digits), fetch romaji title as extra candidates
+            const anilistMatch = rawSlug.match(/-(\d{1,6})$/);
+            if (anilistMatch) {
+                const anilistId = parseInt(anilistMatch[1], 10);
+                const extra = await this.fetchAniListSlugCandidates(anilistId, options?.episodeNum);
+                for (const c of extra) if (!slugsToTry.includes(c)) slugsToTry.push(c);
+            }
 
             let responseData: string | null = null;
             let epId = rawSlug;
