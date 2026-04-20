@@ -122,6 +122,25 @@ async function main() {
                   : r.snippet,
     });
 
+    // Frieren S2 ep 1 — HiAnime-style ID that requires anilist_id + ep_num for AnimeFLV fallback
+    const frierenUrl = new URL(`${base}/api/stream/watch/frieren-beyond-journeys-end-season-2-20409`);
+    frierenUrl.searchParams.set('ep', '163517');
+    frierenUrl.searchParams.set('category', 'sub');
+    frierenUrl.searchParams.set('ep_num', '1');
+    frierenUrl.searchParams.set('anilist_id', '182255');
+    r = await get(frierenUrl.toString());
+    {
+        let sourcesCount = 0;
+        try { sourcesCount = JSON.parse(r.body ?? '{}').sources?.length ?? 0; } catch { /* */ }
+        rows.push({
+            step: 'GET /api/stream/watch (Frieren S2 ep 1, anilist fallback)',
+            ok: r.ok && sourcesCount > 0,
+            status: r.status,
+            critical: true,
+            detail: r.ok && sourcesCount > 0 ? `${sourcesCount} source(s)` : r.snippet,
+        });
+    }
+
     // Extra stream probes (optional) — tests AnimeFLV coverage for additional anime
     const extraStreams: Array<{ label: string; path: string; ep: string }> = [
         { label: 'Attack on Titan ep 1',        path: 'shingeki-no-kyojin-1',  ep: '1'   },

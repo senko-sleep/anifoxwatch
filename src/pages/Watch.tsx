@@ -399,14 +399,17 @@ const Watch = () => {
 
   // Prefetch next episode's stream so switching episodes feels instant
   const prefetchNext = usePrefetchNextEpisode();
+  const anilistIdForPrefetch = cleanAnimeId.startsWith('anilist-')
+    ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined
+    : undefined;
   useEffect(() => {
     if (!episodes?.length || !selectedEpisode || !cleanAnimeId) return;
     const idx = episodes.findIndex(e => e.id === selectedEpisode);
     if (idx >= 0 && idx < episodes.length - 1) {
       const next = episodes[idx + 1];
-      prefetchNext(cleanAnimeId, next.id, audioType);
+      prefetchNext(cleanAnimeId, next.id, audioType, next.number, anilistIdForPrefetch);
     }
-  }, [episodes, selectedEpisode, cleanAnimeId, audioType, prefetchNext]);
+  }, [episodes, selectedEpisode, cleanAnimeId, audioType, prefetchNext, anilistIdForPrefetch]);
 
   // Helper: get/set per-anime audio preference
   const getAnimeAudioPref = useCallback((animeId: string): AudioType | null => {

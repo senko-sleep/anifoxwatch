@@ -359,8 +359,8 @@ export function useRecommendedSource() {
  */
 export function usePrefetchNextEpisode() {
     const queryClient = useQueryClient();
-    
-    return (animeId: string, episodeId: string, category?: string) => {
+
+    return (animeId: string, episodeId: string, category?: string, episodeNum?: number, anilistId?: number) => {
         // Prefetch episodes if not already cached
         if (!queryClient.getQueryData(queryKeys.episodes(animeId))) {
             queryClient.prefetchQuery({
@@ -382,7 +382,7 @@ export function usePrefetchNextEpisode() {
         if (!queryClient.getQueryData(streamKey)) {
             queryClient.prefetchQuery({
                 queryKey: streamKey,
-                queryFn: () => apiClient.getStreamingLinks(episodeId, undefined, category),
+                queryFn: () => apiClient.getStreamingLinks(episodeId, undefined, category, episodeNum, anilistId),
                 staleTime: 2 * 60 * 1000,
             });
         }
