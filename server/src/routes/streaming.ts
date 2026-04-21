@@ -444,6 +444,81 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     if (shouldProxy) {
         const streamReferer = streamData.headers?.Referer || streamData.headers?.referer || 'https://megacloud.blog/';
 
+        // IP-locked sources (e.g. Streamtape /get_video URLs) cannot be proxied
+        // through serverless functions — the CDN token is bound to the server IP.
+        // Filter them out so the client never receives unplayable URLs.
+        const isIpLockedUrl = (source: VideoSource): boolean => {
+            if (source.ipLocked) return true;
+            const u = (source.originalUrl || source.url || '').toLowerCase();
+            return (u.includes('streamtape') || u.includes('tapecontent')) && u.includes('get_video');
+        };
+
+        const proxyableSources = streamData.sources.filter((s: VideoSource) => !isIpLockedUrl(s));
+
+        if (proxyableSources.length < streamData.sources.length) {
+            logger.info(`[STREAM] Filtered out ${streamData.sources.length - proxyableSources.length} IP-locked source(s) (Streamtape)`, {
+                episodeId,
+                requestId
+            });
+        }
+
+        // If ALL sources are IP-locked, try AllAnime as a direct last-resort
+        // fallback — it provides fast4speed CDN streams that work from any IP.
+        if (proxyableSources.length === 0 && streamData.sources.length > 0) {
+            logger.warn(`[STREAM] All ${streamData.sources.length} source(s) are IP-locked — trying AllAnime direct fallback`, {
+                episodeId,
+                requestId
+            });
+
+            try {
+                const allAnimeData = await sourceManager.tryAllAnimeFallback(
+                    episodeId,
+                    (category as 'sub' | 'dub') || 'sub',
+                    episodeNum,
+                    anilistId
+                );
+                if (allAnimeData?.sources?.length) {
+                    logger.info(`[STREAM] AllAnime fallback succeeded: ${allAnimeData.sources.length} source(s)`, {
+                        episodeId,
+                        requestId
+                    });
+                    // Replace streamData entirely with AllAnime's non-IP-locked sources
+                    streamData = allAnimeData;
+                    // Re-clone and re-run the proxy logic below
+                    response.sources = allAnimeData.sources.map((source: VideoSource): VideoSource => {
+                        const rawUrl = source.originalUrl || source.url;
+                        return {
+                            ...source,
+                            url: proxyUrl(rawUrl, proxyBase, allAnimeData.headers?.Referer || streamReferer),
+                            originalUrl: rawUrl
+                        };
+                    });
+                    response.subtitles = (allAnimeData.subtitles || []).map((sub: VideoSubtitle): VideoSubtitle => ({
+                        ...sub,
+                        url: proxyUrl(sub.url, proxyBase, allAnimeData.headers?.Referer || streamReferer)
+                    }));
+                    response.server = 'AllAnime';
+                    response.triedServers = explicitServer ? [explicitServer] : ['auto'];
+                    res.set('Cache-Control', 'private, max-age=300');
+                    res.json(response);
+                    return;
+                }
+            } catch (e) {
+                logger.warn(`[STREAM] AllAnime fallback failed: ${(e as Error).message}`, { episodeId, requestId });
+            }
+
+            // If AllAnime also failed, return 404
+            res.status(404).json({
+                error: 'Only IP-locked sources available (Streamtape) — cannot proxy through serverless',
+                sources: [],
+                subtitles: [],
+                ipLockedCount: streamData.sources.length,
+            });
+            return;
+        }
+
+        const sourcesToProcess = proxyableSources;
+
         // Some kwik hosts work better as direct browser fetches; vault-*.owocdn.top must NOT
         // be direct — browsers often hit ERR_SSL_PROTOCOL_ERROR on raw HTTPS to owocdn.
         // Always proxy owocdn/vault through this API so HLS loads same-origin.
@@ -456,7 +531,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
             } catch { return false; }
         };
 
-        response.sources = streamData.sources.map((source: VideoSource): VideoSource => {
+        response.sources = sourcesToProcess.map((source: VideoSource): VideoSource => {
             const rawUrl = source.originalUrl || source.url;
             if (isDirectPlay(rawUrl)) {
                 return { ...source, isDirect: true, originalUrl: rawUrl };
@@ -870,7 +945,18 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             res.set('Content-Length', response.headers['content-length']);
         }
         if (response.headers['content-range']) res.set('Content-Range', response.headers['content-range']);
-        if (response.headers['accept-ranges']) res.set('Accept-Ranges', response.headers['accept-ranges']);
+        if (response.headers['accept-ranges']) {
+            res.set('Accept-Ranges', response.headers['accept-ranges']);
+        } else if (
+            upstreamContentType.startsWith('video/') ||
+            upstreamContentType === 'application/octet-stream' ||
+            url.endsWith('.mp4') || url.endsWith('.ts') || url.endsWith('.m4s') ||
+            domain.includes('streamtape') || domain.includes('tapecontent')
+        ) {
+            // Force Accept-Ranges for video responses so the browser uses range requests
+            // (required for Chrome to seek moov atom without buffering the full file).
+            res.set('Accept-Ranges', 'bytes');
+        }
 
         // Set Content-Type — override application/octet-stream for known video CDNs
         const isOctetStream = upstreamContentType === 'application/octet-stream' || upstreamContentType === '';

@@ -1,10 +1,24 @@
 import axios from 'axios';
+import { createHash, createDecipheriv } from 'crypto';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js';
 
 const API_URL = 'https://api.allanime.day/api';
 const CDN_REFERER = 'https://allanime.day';
+
+/** Decrypt AllAnime's AES-256-GCM encrypted `tobeparsed` responses. */
+function decryptTobeparsed(tbp: string): any {
+    const raw = Buffer.from(tbp, 'base64');
+    const key = createHash('sha256').update('SimtVuagFbGR2K7P').digest();
+    const iv = raw.subarray(0, 12);
+    const tag = raw.subarray(raw.length - 16);
+    const ciphertext = raw.subarray(12, raw.length - 16);
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return JSON.parse(decrypted.toString('utf-8'));
+}
 
 export class AllAnimeSource extends BaseAnimeSource {
     name = 'AllAnime';
@@ -21,14 +35,23 @@ export class AllAnimeSource extends BaseAnimeSource {
 
     private async gqlQuery(query: string, options?: SourceRequestOptions): Promise<any> {
         const response = await axios.post(API_URL, { query }, {
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Referer': 'https://allmanga.to/' },
             signal: options?.signal,
             timeout: options?.timeout || 10000
         });
         if (response.data.errors?.length) {
             throw new Error(response.data.errors[0].message);
         }
-        return response.data.data;
+        let data = response.data.data;
+        // AllAnime now returns encrypted responses for some queries
+        if (data?.tobeparsed) {
+            try {
+                data = decryptTobeparsed(data.tobeparsed);
+            } catch (e) {
+                console.error('[AllAnime] Failed to decrypt tobeparsed:', (e as Error).message);
+            }
+        }
+        return data;
     }
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
@@ -170,25 +193,59 @@ export class AllAnimeSource extends BaseAnimeSource {
 
             const sourceUrls: any[] = data?.episode?.sourceUrls || [];
 
-            // Try Yt-mp4 first (direct video, highest usable priority)
-            const ytMp4 = sourceUrls.find(s => s.sourceName === 'Yt-mp4' && s.sourceUrl?.startsWith('--'));
-            if (ytMp4) {
-                const rawUrl = this.decodeUrl(ytMp4.sourceUrl);
-                if (rawUrl.startsWith('http') && rawUrl.includes('fast4speed')) {
-                    return {
-                        sources: [{
-                            url: rawUrl,
-                            quality: 'default',
-                            isM3U8: false
-                        }],
-                        subtitles: [],
-                        headers: { 'Referer': CDN_REFERER },
-                        source: this.name
-                    };
+            // Decode all source URLs and collect playable ones.
+            // Priority: fast4speed direct > M3U8 > other direct MP4.
+            const sources: VideoSource[] = [];
+            // Preferred source names in order (Yt-mp4 = fast4speed CDN, Default/Ak/Sak = gogoanime-style embed, Luf-mp4 = alternative)
+            const preferred = ['Yt-mp4', 'Default', 'Ak', 'Sak', 'S-mp4', 'Luf-mp4'];
+            const sorted = [
+                ...sourceUrls.filter(s => preferred.includes(s.sourceName)),
+                ...sourceUrls.filter(s => !preferred.includes(s.sourceName))
+            ];
+
+            for (const src of sorted) {
+                if (!src.sourceUrl) continue;
+                const raw = src.sourceUrl.startsWith('--') ? this.decodeUrl(src.sourceUrl) : src.sourceUrl;
+
+                // Direct HTTP URLs (fast4speed CDN, etc.)
+                if (raw.startsWith('http')) {
+                    const isM3U8 = raw.includes('.m3u8');
+                    const isFast4speed = raw.includes('fast4speed');
+                    if (isM3U8 || isFast4speed) {
+                        sources.push({ url: raw, quality: isM3U8 ? 'auto' : 'default', isM3U8 });
+                    }
+                    continue;
+                }
+
+                // /apivtwo/clock paths → fetch from AllAnime to get actual stream links
+                if (raw.startsWith('/apivtwo/clock')) {
+                    try {
+                        const clockUrl = `https://allanime.day${raw.replace('clock', 'clock.json')}`;
+                        const clockResp = await axios.get(clockUrl, {
+                            headers: { 'Referer': 'https://allmanga.to/' },
+                            timeout: 8000,
+                            signal: options?.signal,
+                        });
+                        const links: any[] = clockResp.data?.links || [];
+                        for (const link of links) {
+                            const href: string = link?.link || '';
+                            if (!href) continue;
+                            const linkIsM3U8 = href.includes('.m3u8');
+                            const linkIsMp4 = href.includes('.mp4');
+                            if (linkIsM3U8 || linkIsMp4) {
+                                sources.push({ url: href, quality: linkIsM3U8 ? 'auto' : 'default', isM3U8: linkIsM3U8 });
+                            }
+                        }
+                    } catch { /* clock endpoint unavailable */ }
                 }
             }
 
-            return { sources: [], subtitles: [] };
+            return {
+                sources,
+                subtitles: [],
+                headers: { 'Referer': CDN_REFERER },
+                source: this.name
+            };
         } catch (error) {
             this.handleError(error, 'getStreamingLinks');
             return { sources: [], subtitles: [] };

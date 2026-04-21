@@ -378,21 +378,23 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                     if (renderData.sources && renderData.sources.length > 0) {
                         streamData = renderData;
 
+                        // Filter out IP-locked sources (Streamtape /get_video URLs) — their
+                        // CDN tokens are bound to the Render server IP and cannot be proxied
+                        // through CF Worker (range requests from a different IP → playback error).
+                        const isIpLocked = (s: StreamSource) => {
+                            if ((s as Record<string, unknown>).ipLocked) return true;
+                            const rawUrl = unwrapProxied(s.originalUrl || s.url).toLowerCase();
+                            return (rawUrl.includes('streamtape') || rawUrl.includes('tapecontent')) && rawUrl.includes('get_video');
+                        };
+                        const proxyableSources = streamData.sources.filter(s => !isIpLocked(s));
+                        if (proxyableSources.length > 0) {
+                            streamData.sources = proxyableSources;
+                        }
+
                         if (useProxy) {
                             const referer = streamData.headers?.Referer || streamData.headers?.referer;
                             streamData.sources = streamData.sources.map(s => {
                                 const rawUrl = unwrapProxied(s.originalUrl || s.url);
-                                // Streamtape get_video tokens can be IP-bound to the extractor host.
-                                try {
-                                    const h = new URL(rawUrl).hostname;
-                                    if (h.includes('streamtape') && rawUrl.includes('/get_video')) {
-                                        // s.url is already upstream-proxied — pass it through
-                                        return {
-                                            ...s,
-                                            originalUrl: rawUrl,
-                                        };
-                                    }
-                                } catch { /* fall through to CF Worker proxy */ }
                                 return {
                                     ...s,
                                     url: proxyUrl(rawUrl, proxyBase, referer),

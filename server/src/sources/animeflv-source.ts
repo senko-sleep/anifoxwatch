@@ -476,6 +476,10 @@ export class AnimeFLVSource extends BaseAnimeSource {
                     }
 
                     // Streamtape: extract direct video URL
+                    // NOTE: Streamtape /get_video URLs are IP-locked — the CDN token is
+                    // valid only for the IP that extracted it. Proxying through serverless
+                    // (Vercel/CF Worker) breaks because each range request may originate
+                    // from a different IP. We tag these so downstream can filter them out.
                     if (hostname.includes('streamtape')) {
                         const directUrl = await extractStreamtapeUrl(url);
                         if (directUrl) {
@@ -484,6 +488,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
                                 quality: 'auto',
                                 isM3U8: false,
                                 server: 'streamtape',
+                                ipLocked: true,
                             } as VideoSource;
                         }
                         return null;

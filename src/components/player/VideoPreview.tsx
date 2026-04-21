@@ -89,15 +89,8 @@ export const VideoPreview = ({
         }
       });
     } else {
-      video.src = src;
-      video.onloadeddata = () => {
-        console.log('[VideoPreview] Video loaded, ready for seeking');
-        setIsReady(true);
-      };
-      video.onerror = () => {
-        console.error('[VideoPreview] Video load error');
-        setIsReady(false);
-      };
+      // Non-HLS direct video (e.g. CDN MP4) — skip thumbnail preview to avoid loading large files
+      setIsReady(false);
     }
 
     return () => {

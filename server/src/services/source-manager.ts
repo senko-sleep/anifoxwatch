@@ -2807,7 +2807,7 @@ export class SourceManager {
             const result = await new Promise<StreamingData>((resolveStream) => {
             let pending = 0;
 
-            const pickBestAndResolve = () => {
+            const pickBestAndResolve = (force = false) => {
                 if (resolved) return;
                 const ok = allResults.filter(r => r.success);
                 if (ok.length === 0) return false;
@@ -2817,7 +2817,27 @@ export class SourceManager {
                         const u = (s as { originalUrl?: string }).originalUrl || s.url || '';
                         return u.includes('.m3u8') || u.includes('.mp4') || u.includes('.mpd');
                     });
-                const realOk = ok.filter(hasRealStream);
+                // Strongly prefer proxyable streams (M3U8/HLS) over IP-locked sources
+                // (e.g. Streamtape /get_video URLs whose CDN token is bound to the
+                // server IP — breaks when proxied through serverless/Vercel).
+                const hasProxyableStream = (r: RaceResult) =>
+                    r.data.sources.some((s) => {
+                        if ((s as { ipLocked?: boolean }).ipLocked) return false;
+                        const u = (s as { originalUrl?: string }).originalUrl || s.url || '';
+                        // Streamtape direct videos are IP-locked even without the flag
+                        if ((u.includes('streamtape') || u.includes('tapecontent')) && u.includes('get_video')) return false;
+                        return u.includes('.m3u8') || u.includes('.mp4') || u.includes('.mpd');
+                    });
+                const proxyableOk = ok.filter(hasProxyableStream);
+
+                // If only IP-locked sources are available and there are still pending
+                // requests (cross-source fallback may return HLS), don't resolve yet.
+                if (!force && proxyableOk.length === 0 && pending > 0) {
+                    console.log(`   ⏳ Only IP-locked sources so far, waiting for ${pending} pending source(s)...`);
+                    return false;
+                }
+
+                const realOk = proxyableOk.length > 0 ? proxyableOk : ok.filter(hasRealStream);
                 const candidates = realOk.length > 0 ? realOk : ok;
                 // Pick the highest-priority successful source
                 let best: RaceResult | null = null;
@@ -2867,8 +2887,8 @@ export class SourceManager {
                 pending--;
                 tryResolve();
                 if (pending <= 0 && !resolved) {
-                    // All sources done, pick whatever we have
-                    if (!pickBestAndResolve()) {
+                    // All sources done, pick whatever we have (force=true bypasses IP-lock wait)
+                    if (!pickBestAndResolve(true)) {
                         resolved = true;
                         if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
                         timer.end();
@@ -2883,7 +2903,7 @@ export class SourceManager {
             setTimeout(() => {
                 if (!resolved) {
                     console.log(`   ⏰ Global streaming timeout (${STREAM_GLOBAL_MAX_MS}ms) — resolving with best available`);
-                    if (!pickBestAndResolve()) {
+                    if (!pickBestAndResolve(true)) {
                         resolved = true;
                         if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
                         timer.end();
@@ -2930,7 +2950,7 @@ export class SourceManager {
             // Cross-source title-based fallback (lower priority, runs in parallel; time-boxed — full uncapped run can exceed 35s)
             pending++;
             Promise.race([
-                this.crossSourceStreamingFallback(episodeId, server, category, episodeNum),
+                this.crossSourceStreamingFallback(episodeId, server, category, episodeNum, anilistId),
                 new Promise<StreamingData | null>((resolve) =>
                     setTimeout(() => resolve(null), CROSS_SOURCE_FALLBACK_MAX_MS),
                 ),
@@ -2966,12 +2986,31 @@ export class SourceManager {
         episodeId: string,
         server?: string,
         category: 'sub' | 'dub' = 'sub',
-        hintEpisodeNum?: number
+        hintEpisodeNum?: number,
+        anilistId?: number
     ): Promise<StreamingData | null> {
-        const title = this.episodeIdToFallbackSearchTitle(episodeId);
+        let title = this.episodeIdToFallbackSearchTitle(episodeId);
+        if (!title && !anilistId) return null;
+
+        // Use AniList API to get the canonical title (romaji/english) for better search
+        if (anilistId) {
+            try {
+                const { default: axios } = await import('axios');
+                const query = `query($id:Int){Media(id:$id,type:ANIME){title{romaji english}}}`;
+                const res = await axios.post<{ data: { Media: { title: { romaji: string; english: string | null } } } }>(
+                    'https://graphql.anilist.co',
+                    { query, variables: { id: anilistId } },
+                    { timeout: 5000, headers: { 'Content-Type': 'application/json' } }
+                );
+                const t = res.data?.data?.Media?.title;
+                if (t?.romaji) title = t.romaji;
+                else if (t?.english) title = t.english;
+            } catch { /* use slug-derived title */ }
+        }
+
         if (!title) return null;
 
-        console.log(`   🔄 Cross-source fallback: searching "${title}" on fallback sources`);
+        console.log(`   🔄 Cross-source fallback: searching "${title}" on fallback sources${anilistId ? ` (anilistId=${anilistId})` : ''}`);
 
         // Determine target episode number
         let targetEpNum: number | null = null;
@@ -3079,6 +3118,77 @@ export class SourceManager {
         }
 
         return null;
+    }
+
+    /**
+     * Direct AllAnime fallback: when only IP-locked sources are available,
+     * use AniList title + AllAnime search to find non-IP-locked streams.
+     */
+    async tryAllAnimeFallback(
+        episodeId: string,
+        category: 'sub' | 'dub' = 'sub',
+        episodeNum?: number,
+        anilistId?: number
+    ): Promise<StreamingData | null> {
+        const allAnime = this.sources.get('AllAnime') as StreamingSource;
+        if (!allAnime?.isAvailable || !allAnime.getStreamingLinks) return null;
+
+        // Get title from AniList or slug
+        let title = this.episodeIdToFallbackSearchTitle(episodeId);
+        if (anilistId) {
+            try {
+                const { default: axios } = await import('axios');
+                const query = `query($id:Int){Media(id:$id,type:ANIME){title{romaji english}}}`;
+                const res = await axios.post<{ data: { Media: { title: { romaji: string; english: string | null } } } }>(
+                    'https://graphql.anilist.co',
+                    { query, variables: { id: anilistId } },
+                    { timeout: 5000, headers: { 'Content-Type': 'application/json' } }
+                );
+                const t = res.data?.data?.Media?.title;
+                if (t?.romaji) title = t.romaji;
+                else if (t?.english) title = t.english;
+            } catch { /* use slug-derived title */ }
+        }
+        if (!title) return null;
+
+        const targetEpNum = episodeNum ?? 1;
+        console.log(`[AllAnime fallback] Searching "${title}" ep ${targetEpNum}`);
+
+        try {
+            const searchResult = await Promise.race([
+                allAnime.search(title, 1),
+                new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
+            ]);
+            if (!searchResult.results?.length) return null;
+
+            const bestMatch = searchResult.results[0];
+            console.log(`[AllAnime fallback] Found: "${bestMatch.title}" (${bestMatch.id})`);
+
+            const episodes = await Promise.race([
+                allAnime.getEpisodes!(bestMatch.id, { timeout: 8000 }),
+                new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
+            ]);
+            if (!episodes?.length) return null;
+
+            const targetEp = episodes.find(e => e.number === targetEpNum);
+            if (!targetEp) {
+                console.log(`[AllAnime fallback] ep ${targetEpNum} not in ${episodes.length} episodes`);
+                return null;
+            }
+
+            console.log(`[AllAnime fallback] Streaming ep ${targetEpNum} (ID: ${targetEp.id})`);
+            const streamData = await Promise.race([
+                allAnime.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 15000 }),
+                new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
+            ]);
+            if (!streamData.sources?.length) return null;
+
+            console.log(`[AllAnime fallback] Got ${streamData.sources.length} source(s)`);
+            return streamData;
+        } catch (e) {
+            console.log(`[AllAnime fallback] Failed: ${(e as Error).message}`);
+            return null;
+        }
     }
 
     async searchAll(query: string, page: number = 1): Promise<AnimeSearchResult> {

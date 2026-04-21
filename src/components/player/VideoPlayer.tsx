@@ -373,7 +373,7 @@ export const VideoPlayer = ({
       });
 
       hlsRef.current = hls;
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    } else if (isM3U8 && video.canPlayType('application/vnd.apple.mpegurl')) {
       playerLog('info', 'Using native HLS support');
 
       const attachNativeHls = (videoSrc: string) => {
@@ -478,6 +478,16 @@ export const VideoPlayer = ({
         }
 
         video.play().catch(() => { });
+      });
+      video.addEventListener('error', () => {
+        const now = Date.now();
+        if (errorFiredRef.current && (now - lastErrorTimeRef.current) < 1000) return;
+        errorFiredRef.current = true;
+        lastErrorTimeRef.current = now;
+        const err = video.error;
+        playerLog('error', 'Direct video error', { code: err?.code, message: err?.message });
+        setError('Failed to load video. Try a different server.');
+        onError?.('native_error');
       });
     }
 

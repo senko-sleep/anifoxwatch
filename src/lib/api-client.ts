@@ -124,6 +124,8 @@ export interface VideoSource {
     isM3U8: boolean;
     isDASH?: boolean;
     isDirect?: boolean;
+    /** Source URL is bound to the server IP (e.g. Streamtape). Cannot be proxied through serverless. */
+    ipLocked?: boolean;
 }
 
 export interface VideoSubtitle {

@@ -8,6 +8,8 @@ export interface VideoSource {
     isM3U8: boolean;
     isDASH?: boolean;
     isDirect?: boolean;
+    /** Source URL is bound to the server IP that extracted it (e.g. Streamtape /get_video tokens). Cannot be proxied through serverless. */
+    ipLocked?: boolean;
     originalUrl?: string;
     size?: number;
 }

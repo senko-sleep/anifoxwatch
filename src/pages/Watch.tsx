@@ -33,10 +33,13 @@ import { toast } from 'sonner';
 type AudioType = 'sub' | 'dub';
 
 const EMBED_DOMAINS = ['streamwish', 'mega.nz', 'hqq.tv', 'streamtape', 'doodstream', 'mp4upload', 'sendvid', 'ok.ru'];
-const isEmbedUrl = (url: string) =>
-  EMBED_DOMAINS.some((d) => url.toLowerCase().includes(d)) &&
-  !url.toLowerCase().includes('.m3u8') &&
-  !url.toLowerCase().includes('.mp4');
+const isEmbedUrl = (url: string) => {
+  const lower = url.toLowerCase();
+  if (lower.includes('.m3u8') || lower.includes('.mp4')) return false;
+  // Streamtape /get_video? and tapecontent CDN are direct video links, not embed pages
+  if ((lower.includes('streamtape') || lower.includes('tapecontent')) && lower.includes('get_video')) return false;
+  return EMBED_DOMAINS.some((d) => lower.includes(d));
+};
 type QualityType = '1080p' | '720p' | '480p' | '360p' | 'auto';
 
 function plainDescription(raw: string | undefined): string {
@@ -100,7 +103,15 @@ const Watch = () => {
   // State
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(1);
-  const [audioType, setAudioType] = useState<AudioType>('sub');
+  const [audioType, setAudioType] = useState<AudioType>(() => {
+    // Restore stored preference for this anime so dub users don't get sub on reload
+    try {
+      const animeId = new URLSearchParams(window.location.search).get('id') || '';
+      const prefs = JSON.parse(localStorage.getItem('anime_audio_prefs') || '{}');
+      if (prefs[animeId] === 'dub') return 'dub';
+    } catch { /* ignore */ }
+    return 'sub';
+  });
   const [audioManuallySet, setAudioManuallySet] = useState(false);
   const [quality, setQuality] = useState<QualityType>('auto');
   const [selectedServer, setSelectedServer] = useState<string>('');
@@ -324,7 +335,10 @@ const Watch = () => {
     if (!streamData?.sources?.length) return null;
 
     // Filter out sources that previously had errors (simple retry tracking)
-    const sources = streamData.sources.filter((_, idx) => idx >= sourceRetryIndex);
+    // Also skip IP-locked sources (Streamtape /get_video) — cannot be proxied through serverless
+    const sources = streamData.sources
+      .filter((_, idx) => idx >= sourceRetryIndex)
+      .filter((s) => !s.ipLocked);
 
     if (!sources.length) return null;
 
@@ -332,6 +346,8 @@ const Watch = () => {
     const playable = sources.filter((s) => {
       const raw = (s as { originalUrl?: string }).originalUrl || s.url || '';
       const lower = raw.toLowerCase();
+      // Streamtape /get_video URLs are IP-locked — skip them even without the flag
+      if ((lower.includes('streamtape') || lower.includes('tapecontent')) && lower.includes('get_video')) return false;
       return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd') ||
              !EMBED_DOMAINS.some((d) => lower.includes(d));
     });
