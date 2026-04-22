@@ -240,11 +240,11 @@ export const Navbar = () => {
               ) : (
                 <button
                   onClick={() => setIsSearchOpen(true)}
-                  className="group flex items-center gap-2.5 h-9 px-3 rounded-lg bg-white/[0.04] border border-white/[0.07] hover:bg-white/[0.07] hover:border-white/[0.12] transition-all duration-200"
+                  className="group flex items-center gap-2.5 h-9 px-3 rounded-lg bg-white/[0.04] border border-fox-orange/25 hover:bg-white/[0.06] hover:border-fox-orange/60 transition-all duration-200 shadow-[0_0_8px_rgba(255,102,0,0.08)]"
                   title="Search (press / or Ctrl+K)"
                 >
-                  <Search className="w-4 h-4 text-zinc-400 group-hover:text-zinc-200 transition-colors" />
-                  <span className="text-[12px] text-zinc-500 group-hover:text-zinc-400 transition-colors hidden lg:block pr-1">
+                  <Search className="w-4 h-4 text-zinc-400 group-hover:text-fox-orange transition-colors" />
+                  <span className="text-[12px] text-zinc-500 group-hover:text-zinc-300 transition-colors hidden lg:block pr-1">
                     Search anime...
                   </span>
                   <kbd className="hidden lg:inline-flex items-center text-[9px] font-mono bg-white/[0.06] text-zinc-500 px-1.5 py-0.5 rounded border border-white/[0.08]">

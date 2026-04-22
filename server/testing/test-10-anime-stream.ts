@@ -3,8 +3,7 @@
  * Uses local server search (returns AnimeKai IDs), CF Worker for episodes and streaming.
  */
 
-const LOCAL_URL = 'http://localhost:3001';
-const CF_WORKER_URL = 'https://anifoxwatch-api.anya-bot.workers.dev';
+const API_URL = 'https://anifoxwatch.vercel.app';
 
 async function fetchWithTimeout(url: string, timeoutMs = 5000): Promise<Response> {
     return fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
@@ -17,7 +16,7 @@ async function testAnime(anime: any): Promise<{ success: boolean; url?: string; 
     // Get episodes from local server (without source parameter)
     let episodes: any[];
     try {
-        const resp = await fetchWithTimeout(`${LOCAL_URL}/api/anime/${anime.id}/episodes`, 30000);
+        const resp = await fetchWithTimeout(`${API_URL}/api/anime/${anime.id}/episodes`, 30000);
         if (!resp.ok) throw new Error(`Episodes ${resp.status}`);
         const data = await resp.json();
         episodes = data.episodes || [];
@@ -33,7 +32,7 @@ async function testAnime(anime: any): Promise<{ success: boolean; url?: string; 
 
     // Try streaming from CF Worker
     try {
-        const resp = await fetchWithTimeout(`${CF_WORKER_URL}/api/stream/watch/${encodeURIComponent(epId)}?category=sub`, 60000);
+        const resp = await fetchWithTimeout(`${API_URL}/api/stream/watch/${encodeURIComponent(epId)}?category=sub`, 60000);
         if (!resp.ok) {
             console.log(`   ❌ Stream failed: HTTP ${resp.status}`);
             return { success: false, error: `HTTP ${resp.status}` };
@@ -55,7 +54,7 @@ async function testAnime(anime: any): Promise<{ success: boolean; url?: string; 
 }
 
 async function runTest() {
-    console.log('🚀 Testing streams for popular anime (CF Worker, filtering HiAnime format)');
+    console.log('🚀 Testing streams for popular anime (Vercel API, filtering HiAnime format)');
     console.log('============================================================\n');
 
     // Search for popular anime names using CF Worker
@@ -64,7 +63,7 @@ async function runTest() {
 
     for (const term of SEARCH_TERMS) {
         try {
-            const resp = await fetchWithTimeout(`${CF_WORKER_URL}/api/anime/search?q=${encodeURIComponent(term)}`, 30000);
+            const resp = await fetchWithTimeout(`${API_URL}/api/anime/search?q=${encodeURIComponent(term)}`, 30000);
             if (!resp.ok) continue;
             const data = await resp.json();
             const results = data.results || [];

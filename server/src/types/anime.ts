@@ -3,13 +3,16 @@ export interface AnimeBase {
     streamingId?: string; // The actual streaming source ID for navigation
     title: string;
     titleJapanese?: string;
+    titleEnglish?: string; // English title from AniList
+    titleRomaji?: string; // Romaji title from AniList
     image: string;
     cover?: string;
     banner?: string;
-    description: string;
+    description?: string;
     type: 'TV' | 'Movie' | 'OVA' | 'ONA' | 'Special';
     status: 'Ongoing' | 'Completed' | 'Upcoming';
-    rating?: number;
+    rating?: number; // AniList rating (0-100)
+    imdbRating?: number; // IMDB rating (0-10)
     episodes: number;
     episodesAired?: number;
     duration?: string;
@@ -23,6 +26,11 @@ export interface AnimeBase {
     source?: string; // Which source this came from
     nextAiringEpisode?: number;
     timeUntilAiring?: number; // in seconds
+    voiceActors?: Array<{
+        name: string;
+        image: string;
+        character?: string;
+    }>;
 }
 
 export interface Episode {

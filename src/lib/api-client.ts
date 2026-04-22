@@ -230,8 +230,8 @@ export interface SeasonalResponse {
 class AnimeApiClient {
     private cache: Map<string, CacheEntry<unknown>> = new Map();
     private inflight: Map<string, Promise<unknown>> = new Map();
-    private readonly MAX_RETRIES = 1;
-    private readonly TIMEOUT_MS = 8000;
+    private readonly MAX_RETRIES = 2;
+    private readonly TIMEOUT_MS = 30000;
     private readonly FALLBACK_TTL = 2 * 60 * 1000; // 2 min before retrying primary
     private _online = true;
     private _lastOnlineCheck = 0;
@@ -371,7 +371,13 @@ class AnimeApiClient {
                 lastError = error as Error;
 
                 if (lastError.name === 'AbortError') {
-                    throw new Error('Request timeout - please try again');
+                    lastError = new Error('Request timeout - please try again');
+                    // Retry on timeout instead of immediately throwing
+                    if (attempt < retries) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        continue;
+                    }
+                    throw lastError;
                 }
 
                 // Detect CORS / network failures — these surface as TypeError('Failed to fetch')
@@ -539,41 +545,7 @@ class AnimeApiClient {
             params.append('_t', String(Date.now()));
         }
 
-        const endpoint = `/api/anime/browse?${params}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-        try {
-            const response = await fetch(`${this.apiBase()}${endpoint}`, {
-                ...{ mode: 'cors', signal: controller.signal, headers: { 'Accept': 'application/json' } }
-            });
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-                try {
-                    const errorData = JSON.parse(errorText);
-                    if (errorData.error) {
-                        errorMessage = errorData.error;
-                    }
-                } catch {
-                    // Ignore JSON parse errors
-                }
-                throw Object.assign(new Error(errorMessage), { status: response.status });
-            }
-
-            const data = await response.json();
-            this._online = true;
-            return data;
-        } catch (error) {
-            clearTimeout(timeoutId);
-            const lastError = error as Error;
-            if (lastError.name === 'AbortError') {
-                throw new Error('Request timeout - please try again');
-            }
-            throw lastError;
-        }
+        return this.fetch<AnimeSearchResult>(`/api/anime/browse?${params}`);
     }
 
     async getRandomAnime(source?: string): Promise<Anime | null> {
@@ -668,26 +640,51 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            const streamTimeoutMs = 30_000;
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), streamTimeoutMs);
-            try {
-                const response = await fetch(`${base}${streamPath}`, {
-                    signal: controller.signal,
-                    headers: { 'Accept': 'application/json' }
-                });
-                clearTimeout(timeoutId);
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-                    try { errorMessage = JSON.parse(errorText).error || errorMessage; } catch {}
-                    throw Object.assign(new Error(errorMessage), { status: response.status });
+            const streamTimeoutMs = 45_000;
+            const maxAttempts = 3;
+            let lastErr: Error | null = null;
+
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), streamTimeoutMs);
+                try {
+                    const response = await fetch(`${base}${streamPath}`, {
+                        signal: controller.signal,
+                        headers: { 'Accept': 'application/json' }
+                    });
+                    clearTimeout(timeoutId);
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+                        try { errorMessage = JSON.parse(errorText).error || errorMessage; } catch {}
+                        const err = Object.assign(new Error(errorMessage), { status: response.status });
+                        // Don't retry 4xx client errors (except 408/429)
+                        if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
+                            throw err;
+                        }
+                        lastErr = err;
+                        if (attempt < maxAttempts - 1) {
+                            await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+                            continue;
+                        }
+                        throw err;
+                    }
+                    return response.json();
+                } catch (e) {
+                    clearTimeout(timeoutId);
+                    lastErr = e as Error;
+                    // Don't retry non-retryable errors
+                    if (lastErr.name !== 'AbortError' && !(lastErr as any).status && !lastErr.message?.includes('fetch')) {
+                        throw lastErr;
+                    }
+                    if (attempt < maxAttempts - 1) {
+                        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+                        continue;
+                    }
+                    throw lastErr;
                 }
-                return response.json();
-            } catch (e) {
-                clearTimeout(timeoutId);
-                throw e;
             }
+            throw lastErr || new Error('Stream fetch failed');
         };
 
         const primaryBase = this.apiBase();

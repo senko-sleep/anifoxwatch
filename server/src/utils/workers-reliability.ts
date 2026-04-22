@@ -21,7 +21,7 @@ const circuitBreakers = new Map<string, CircuitBreakerState>();
 const DEFAULT_CIRCUIT_SETTINGS = {
     maxFailures: 5, // Allow more failures before tripping - prevents transient errors from killing sources
     resetTime: 15000, // 15s recovery - fast enough to recover from brief outages
-    timeout: 8000 // 8s timeout for instant feedback
+    timeout: 25000 // 25s timeout — Vercel allows 60s; sources need time on cold starts
 };
 
 // Get or create circuit breaker for a source
@@ -123,21 +123,24 @@ export async function withTimeout<T>(
     timeoutMs: number = DEFAULT_CIRCUIT_SETTINGS.timeout,
     context?: string
 ): Promise<T> {
-    const controller = new AbortController();
-    const { signal } = controller;
+    return new Promise<T>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            const error = new Error(`${context || 'Operation'} timed out after ${timeoutMs}ms`);
+            console.error(`[Timeout] ${context || 'operation'} timed out after ${timeoutMs}ms`);
+            reject(error);
+        }, timeoutMs);
 
-    const timeoutId = setTimeout(() => {
-        controller.abort();
-        const error = new Error(`${context || 'Operation'} timed out after ${timeoutMs}ms`);
-        console.error(`[Timeout] ${context || 'operation'} timed out after ${timeoutMs}ms`);
-        throw error;
-    }, timeoutMs);
-
-    try {
-        return await fn();
-    } finally {
-        clearTimeout(timeoutId);
-    }
+        fn().then(
+            (result) => {
+                clearTimeout(timeoutId);
+                resolve(result);
+            },
+            (error) => {
+                clearTimeout(timeoutId);
+                reject(error);
+            }
+        );
+    });
 }
 
 /**
@@ -186,7 +189,7 @@ export async function reliableRequest<T>(
 ): Promise<T> {
     const {
         maxAttempts = 2, // 1 retry for transient failures
-        timeout = 8000, // 8s timeout for fast failures
+        timeout = 25000, // 25s timeout — sources need time, especially on Vercel cold starts
         retryDelay = 1000,
     } = options;
 

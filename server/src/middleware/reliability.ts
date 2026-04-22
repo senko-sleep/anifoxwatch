@@ -18,7 +18,7 @@ const circuitBreakers = new Map<string, CircuitBreakerState>();
 const DEFAULT_CIRCUIT_SETTINGS = {
     maxFailures: 5, // Allow more failures before tripping - prevents transient errors from killing sources
     resetTime: 15000, // 15s recovery - fast enough to recover from brief outages
-    timeout: 8000 // 8s timeout for instant feedback
+    timeout: 25000 // 25s timeout — Vercel allows 60s; sources need time on cold starts
 };
 
 // Get or create circuit breaker for a source
@@ -215,7 +215,7 @@ export async function reliableRequest<T>(
 ): Promise<T> {
     const {
         maxAttempts = 2, // 1 retry for transient failures - prevents single blips from cascading
-        timeout = 8000, // 8s timeout for fast failures
+        timeout = 25000, // 25s timeout — sources need time, especially on Vercel cold starts
         retryDelay = 1000,
         context: extraContext = {},
         signal: parentSignal

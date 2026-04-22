@@ -590,12 +590,12 @@ const Search = () => {
                 <div className="flex-1 max-w-4xl flex items-center gap-3">
                   {/* Search Input */}
                   <div className="relative flex-1 fox-search-input">
-                    <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+                    <SearchIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
                     <Input
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder="Search anime..."
-                      className="pl-10 h-10 bg-transparent border-0 rounded-xl text-sm focus:ring-0 focus-visible:ring-0 transition-all font-medium placeholder:text-zinc-600"
+                      className="pl-10 h-10 bg-white/[0.04] border border-white/[0.08] rounded-xl text-sm focus:border-fox-orange focus:ring-fox-orange/20 transition-all font-medium placeholder:text-zinc-600 backdrop-blur-sm"
                     />
                     {query && (
                       <button

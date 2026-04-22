@@ -186,10 +186,10 @@ export class AnixSource extends BaseAnimeSource {
                 });
             });
 
-            return servers.length > 0 ? servers : [{ name: 'Default', url: '', type: 'sub' }];
+            return servers.length > 0 ? servers : [{ name: 'Senkofox Server', url: '', type: 'sub' }];
         } catch (error) {
             this.handleError(error, 'getEpisodeServers');
-            return [{ name: 'Default', url: '', type: 'sub' }];
+            return [{ name: 'Senkofox Server', url: '', type: 'sub' }];
         }
     }
 

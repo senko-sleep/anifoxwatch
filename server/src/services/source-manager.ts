@@ -403,7 +403,7 @@ export class SourceManager {
     ): Promise<T> {
         return new Promise<T>((resolve, reject) => {
             const queuedAt = Date.now();
-            const QUEUE_TIMEOUT = 30000; // 30s max wait in queue
+            const QUEUE_TIMEOUT = 55000; // 55s max wait in queue (Vercel limit is 60s)
 
             // Reject if queue is too large (backpressure)
             if (this.requestQueue.length >= 50) {
@@ -1050,14 +1050,15 @@ export class SourceManager {
                 });
 
                 const uniqueResults = this.deduplicateResults(combinedResults);
+                const enrichedResults = await this.enrichWithAniListData(uniqueResults);
 
                 timer.end();
                 return {
-                    results: uniqueResults,
+                    results: enrichedResults,
                     totalPages: maxTotalPages,
                     currentPage: page,
                     hasNextPage: hasNextPage,
-                    totalResults: uniqueResults.length,
+                    totalResults: enrichedResults.length,
                     source: adultSources.map(s => s.name).join('+')
                 };
             } catch (error) {
@@ -1108,14 +1109,15 @@ export class SourceManager {
 
             // Deduplicate
             const uniqueResults = this.deduplicateResults(combinedResults);
+            const enrichedResults = await this.enrichWithAniListData(uniqueResults);
 
             timer.end();
             return {
-                results: uniqueResults,
+                results: enrichedResults,
                 totalPages: maxTotalPages,
                 currentPage: page,
                 hasNextPage: hasNextPage,
-                totalResults: uniqueResults.length,
+                totalResults: enrichedResults.length,
                 source: 'Mixed'
             };
         }
@@ -1139,8 +1141,10 @@ export class SourceManager {
                     logger.info(`Source "${resolvedSource}" returned ${result.results.length} results for query "${query}"`, { source: resolvedSource, query, count: result.results.length });
                     console.log(`✅ [SourceManager] Source "${resolvedSource}" returned ${result.results.length} results`);
                 }
+                // Enrich results with AniList data
+                const enrichedResults = await this.enrichWithAniListData(result.results || []);
                 timer.end();
-                return result;
+                return { ...result, results: enrichedResults };
             } catch (error) {
                 console.log(`❌ [SourceManager] Search failed with source "${resolvedSource}": ${(error as Error).message}`);
                 logger.error(`Search failed with source ${resolvedSource}`, error as Error, { query });
@@ -1220,8 +1224,10 @@ export class SourceManager {
                     console.log(`[SourceManager] search: scrapers empty, falling back to AniList for "${query}"`);
                     const anilistResult = await anilistService.advancedSearch({ search: query, sort: ['SEARCH_MATCH'], perPage: 20, page });
                     if (anilistResult.results.length > 0) {
+                        // Enrich AniList results with the missing fields
+                        const enrichedResults = await this.enrichWithAniListData(anilistResult.results);
                         timer.end();
-                        return { ...anilistResult, source: 'AniList' };
+                        return { ...anilistResult, results: enrichedResults, source: 'AniList' };
                     }
                 } catch (e) {
                     console.warn(`[SourceManager] AniList search fallback failed:`, (e as Error).message);
@@ -1230,13 +1236,16 @@ export class SourceManager {
                 console.log(`✅ [SourceManager] Found ${sortedResults.length} results from: ${successfulSources.join(', ')}`);
             }
 
+            // Enrich results with AniList data for missing fields
+            const enrichedResults = await this.enrichWithAniListData(sortedResults);
+
             timer.end();
             return {
-                results: sortedResults,
+                results: enrichedResults,
                 totalPages: maxTotalPages,
                 currentPage: page,
                 hasNextPage: hasNextPage,
-                totalResults: sortedResults.length,
+                totalResults: enrichedResults.length,
                 source: successfulSources.join('+') || 'None'
             };
 
@@ -1244,6 +1253,23 @@ export class SourceManager {
             logger.error(`Multi-source search failed`, error as Error, { query });
             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'error' };
         }
+    }
+
+    // Cache for AniList enrichment data to avoid repeated API calls
+    private anilistEnrichmentCache = new Map<string, AnimeBase>();
+    private enrichmentQueue = new Map<string, Promise<AnimeBase>>();
+
+    /**
+     * Enrich search results with AniList data (rating, duration, title variants)
+     * DISABLED - AniList rate limiting prevents reliable enrichment
+     * Description and genres will be available on detail page instead
+     */
+    private async enrichWithAniListData(results: AnimeBase[]): Promise<AnimeBase[]> {
+        return results.map(anime => ({
+            ...anime,
+            voiceActors: [],
+            imdbRating: undefined
+        }));
     }
 
     /**
@@ -2800,7 +2826,7 @@ export class SourceManager {
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
             const GRACE_PERIOD = 3000; // Wait up to 3s for a higher-priority source after first success
             /** Cross-source does search + episodes + stream per provider (~40s worst case). Cap so watch API does not hang. */
-            const CROSS_SOURCE_FALLBACK_MAX_MS = 25_000;
+            const CROSS_SOURCE_FALLBACK_MAX_MS = 45_000;
             /** Must exceed Puppeteer budgets (9Anime/Kaido 45s) but keep total latency reasonable */
             const STREAM_GLOBAL_MAX_MS = 50_000;
 
@@ -2920,14 +2946,11 @@ export class SourceManager {
 
                 const usesPuppeteerStream = source.name === '9Anime' || source.name === 'Kaido';
                 const usesMiruroStack = source.name === 'Miruro';
-                const usesSlowConsumetStream = source.name === 'AnimeKai';
                 const streamReliabilityOpts = usesPuppeteerStream
-                    ? { timeout: 45_000, maxAttempts: 1 }
+                    ? { timeout: 50_000, maxAttempts: 1 }
                     : usesMiruroStack
-                        ? { timeout: 20_000, maxAttempts: 1 }
-                        : usesSlowConsumetStream
-                            ? { timeout: 16_000, maxAttempts: 1 }
-                            : { timeout: 16_000, maxAttempts: 1 };
+                        ? { timeout: 25_000, maxAttempts: 1 }
+                        : { timeout: 25_000, maxAttempts: 1 };
                 this.executeReliably(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
                     streamReliabilityOpts
@@ -3024,8 +3047,8 @@ export class SourceManager {
             try {
                 const kaidoId = animeSlug.includes('kaido-') ? animeSlug : `kaido-${animeSlug}`;
                 const eps = await Promise.race([
-                    kaidoSource.getEpisodes!(kaidoId, { timeout: 8000 }),
-                    new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
+                    kaidoSource.getEpisodes!(kaidoId, { timeout: 15000 }),
+                    new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
                 ]);
                 const match = eps.find(e => e.id === episodeId);
                 if (match) targetEpNum = match.number;
@@ -3041,8 +3064,8 @@ export class SourceManager {
                     const numericSuffix = slugOnly.match(/-(\d+)$/)?.[1];
                     if (numericSuffix) {
                         const eps = await Promise.race([
-                            nine.getEpisodes(`9anime-${slugOnly}`, { timeout: 12_000 }),
-                            new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 12_000))
+                            nine.getEpisodes(`9anime-${slugOnly}`, { timeout: 15_000 }),
+                            new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 15_000))
                         ]);
                         const hit = eps.find((e) => e.id === episodeId);
                         if (hit?.number != null) targetEpNum = hit.number;
@@ -3085,7 +3108,7 @@ export class SourceManager {
                 console.log(`   📡 ${srcName} title-search for "${searchTitle}"`);
                 const searchResult = await Promise.race([
                     src.search(searchTitle, 1),
-                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 7000))
+                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
                 ]);
                 if (!searchResult.results?.length) throw new Error('no results');
 
@@ -3093,8 +3116,8 @@ export class SourceManager {
                 console.log(`   📺 ${srcName} found: "${bestMatch.title}" (${bestMatch.id})`);
 
                 const episodes = await Promise.race([
-                    src.getEpisodes!(bestMatch.id, { timeout: 8000 }),
-                    new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
+                    src.getEpisodes!(bestMatch.id, { timeout: 15000 }),
+                    new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
                 ]);
                 if (!episodes?.length) throw new Error('no episodes');
 
@@ -3103,8 +3126,8 @@ export class SourceManager {
 
                 console.log(`   ⏳ ${srcName}: streaming ep ${targetEpNum} (ID: ${targetEp.id})`);
                 const streamData = await Promise.race([
-                    src.getStreamingLinks!(targetEp.id, server, category, { timeout: 10000 }),
-                    new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 10000))
+                    src.getStreamingLinks!(targetEp.id, server, category, { timeout: 20000 }),
+                    new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 20000))
                 ]);
                 if (!streamData.sources.length) throw new Error('no sources');
 
@@ -3157,7 +3180,7 @@ export class SourceManager {
         try {
             const searchResult = await Promise.race([
                 allAnime.search(title, 1),
-                new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
+                new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
             ]);
             if (!searchResult.results?.length) return null;
 
@@ -3165,8 +3188,8 @@ export class SourceManager {
             console.log(`[AllAnime fallback] Found: "${bestMatch.title}" (${bestMatch.id})`);
 
             const episodes = await Promise.race([
-                allAnime.getEpisodes!(bestMatch.id, { timeout: 8000 }),
-                new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
+                allAnime.getEpisodes!(bestMatch.id, { timeout: 15000 }),
+                new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
             ]);
             if (!episodes?.length) return null;
 
@@ -3178,8 +3201,8 @@ export class SourceManager {
 
             console.log(`[AllAnime fallback] Streaming ep ${targetEpNum} (ID: ${targetEp.id})`);
             const streamData = await Promise.race([
-                allAnime.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 15000 }),
-                new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
+                allAnime.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 25000 }),
+                new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 25000))
             ]);
             if (!streamData.sources?.length) return null;
 

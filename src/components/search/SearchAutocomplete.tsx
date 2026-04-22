@@ -1,20 +1,30 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Search, X, Play, Star, Clock, TrendingUp, Loader2 } from 'lucide-react';
+import { Search, X, Play, Star, Clock, TrendingUp, Loader2, Mic, Film, Eye } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { apiClient } from '@/lib/api-client';
-import { cn, normalizeRating, stripSourcePrefix } from '@/lib/utils';
+import { cn, normalizeRating, stripSourcePrefix, truncateAtWordBoundary } from '@/lib/utils';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface SearchResult {
   id: string;
   title: string;
+  titleEnglish?: string;
+  titleRomaji?: string;
   image: string;
+  description?: string;
   type?: string;
   status?: string;
   rating?: number;
+  imdbRating?: number;
   genres?: string[];
   subCount?: number;
   dubCount?: number;
+  voiceActors?: Array<{
+    name: string;
+    image: string;
+    character?: string;
+  }>;
 }
 
 interface SearchAutocompleteProps {
@@ -37,6 +47,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
   const [isLoading, setIsLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const localInputRef = useRef<HTMLInputElement>(null);
@@ -47,10 +58,12 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
     if (q.length < 2) {
       setResults([]);
       setShowDropdown(q.length > 0);
+      setIsInitialLoad(false);
       return;
     }
 
     setIsLoading(true);
+    setIsInitialLoad(true);
     try {
       const data = await apiClient.search(q, 1);
       setResults((data.results || []).slice(0, 8));
@@ -59,6 +72,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
       setResults([]);
     } finally {
       setIsLoading(false);
+      setTimeout(() => setIsInitialLoad(false), 300);
     }
   }, []);
 
@@ -159,29 +173,42 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
       {/* Dropdown */}
       {showDropdown && (
         <div className={cn(
-          "absolute top-full left-0 right-0 mt-2 bg-fox-surface/95 backdrop-blur-xl border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50",
-          isMobile ? "max-h-[60vh]" : "max-h-[400px]"
+          "absolute top-full left-0 right-0 mt-2 bg-zinc-950 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[100]",
+          isMobile ? "max-h-[60vh]" : "max-h-[450px]"
         )}>
           {/* Results */}
           {results.length > 0 ? (
-            <div className="overflow-y-auto max-h-[340px]">
+            <div className="overflow-y-auto max-h-[390px]">
+              {/* Results count */}
+              <div className="px-4 py-2 text-xs text-zinc-500 border-b border-white/5">
+                {results.length} results
+              </div>
+
               {results.map((result, i) => {
                 const rating = normalizeRating(result.rating);
+                const displayTitle = result.titleEnglish || result.title || result.titleRomaji || '';
+                const isAiring = result.status === 'Ongoing';
+                
                 return (
                   <button
                     key={result.id}
                     onClick={() => handleSelect(result)}
                     onMouseEnter={() => setSelectedIndex(i)}
                     className={cn(
-                      "w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors",
-                      selectedIndex === i ? "bg-fox-orange/10" : "hover:bg-white/5"
+                      "w-full flex gap-3 px-4 py-3 text-left transition-all duration-200 border-b border-white/5 last:border-b-0",
+                      selectedIndex === i 
+                        ? "bg-gradient-to-r from-fox-orange/20 to-fox-orange/5" 
+                        : "hover:bg-white/[0.03] hover:backdrop-blur-sm",
+                      "animate-in fade-in slide-in-from-top-2",
+                      isInitialLoad && "opacity-0"
                     )}
+                    style={{ animationDelay: `${i * 50}ms`, opacity: isInitialLoad ? 0 : 1 }}
                   >
                     {/* Thumbnail */}
-                    <div className="w-10 h-14 rounded-lg overflow-hidden bg-zinc-800 flex-shrink-0">
+                    <div className="w-14 h-20 rounded-lg overflow-hidden bg-zinc-900 flex-shrink-0 ring-1 ring-white/10 shadow-lg">
                       <img
                         src={result.image}
-                        alt={result.title}
+                        alt={displayTitle}
                         className="w-full h-full object-cover"
                         loading="lazy"
                       />
@@ -189,34 +216,67 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
 
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate">{result.title}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {result.type && (
-                          <span className="text-[10px] text-zinc-400 bg-zinc-800/80 px-1.5 py-0.5 rounded">
-                            {result.type}
-                          </span>
-                        )}
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-bold text-white truncate leading-tight" title={displayTitle}>
+                          {displayTitle}
+                        </p>
                         {rating && rating >= 1 && (
-                          <span className="flex items-center gap-0.5 text-[10px] text-amber-400">
-                            <Star className="w-2.5 h-2.5 fill-amber-400" />
+                          <span className="shrink-0 flex items-center gap-0.5 text-xs font-medium text-amber-400">
+                            <Star className="w-3 h-3 fill-amber-400" />
                             {rating.toFixed(1)}
                           </span>
                         )}
-                        {result.subCount && result.subCount > 0 && (
-                          <span className="text-[10px] text-zinc-500">
-                            {result.subCount} eps
-                          </span>
-                        )}
-                        {result.genres && result.genres.length > 0 && (
-                          <span className="text-[10px] text-zinc-500 truncate">
-                            {result.genres.slice(0, 2).join(', ')}
-                          </span>
-                        )}
                       </div>
+
+                      {/* Description */}
+                      {result.description && (
+                        <p className="text-xs text-zinc-400 mt-1 line-clamp-2">
+                          {result.description}
+                        </p>
+                      )}
+
+                      {/* Genre Tags */}
+                      {result.genres && result.genres.length > 0 && (
+                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                          {result.genres.slice(0, 4).map((genre, idx) => (
+                            <span
+                              key={`${genre}-${idx}`}
+                              className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-white/10"
+                            >
+                              {genre}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* VA Avatars */}
+                      {result.voiceActors && result.voiceActors.length > 0 && (
+                        <div className="flex items-center gap-1 mt-2">
+                          {result.voiceActors.slice(0, 3).map((va, idx) => (
+                            <div
+                              key={`${va.name}-${idx}`}
+                              className="w-6 h-6 rounded-full overflow-hidden ring-1 ring-white/20"
+                              title={va.name}
+                            >
+                              <img
+                                src={va.image}
+                                alt={va.name}
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                            </div>
+                          ))}
+                          {result.voiceActors.length > 3 && (
+                            <span className="text-[10px] text-zinc-500">+{result.voiceActors.length - 3}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Play icon */}
-                    <Play className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+                    <div className="shrink-0 w-8 h-8 rounded-full bg-white/5 hover:bg-fox-orange/20 flex items-center justify-center transition-colors">
+                      <Play className="w-3.5 h-3.5 text-zinc-400 fill-zinc-400" />
+                    </div>
                   </button>
                 );
               })}
@@ -224,10 +284,23 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
               {/* View all results link */}
               <button
                 onClick={(e) => handleSubmit(e as unknown as React.FormEvent)}
-                className="w-full px-3 py-2.5 text-center text-xs text-fox-orange hover:bg-fox-orange/10 transition-colors border-t border-white/5"
+                className="w-full px-4 py-3 text-center text-xs font-medium text-fox-orange hover:bg-fox-orange/10 transition-colors border-t border-white/10"
               >
                 View all results for "{query}"
               </button>
+            </div>
+          ) : isLoading && results.length === 0 ? (
+            <div className="p-4 space-y-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 px-4 py-3">
+                  <Skeleton className="w-12 h-16 rounded-lg" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
+                    <Skeleton className="h-3 w-1/3" />
+                  </div>
+                </div>
+              ))}
             </div>
           ) : query.length >= 2 && !isLoading ? (
             <div className="px-4 py-8 text-center">
@@ -236,17 +309,17 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
             </div>
           ) : query.length < 2 ? (
             /* Popular searches when typing starts */
-            <div className="p-3">
-              <div className="flex items-center gap-2 px-1 mb-2">
-                <TrendingUp className="w-3.5 h-3.5 text-fox-orange" />
-                <span className="text-xs font-medium text-zinc-400">Popular Searches</span>
+            <div className="p-4">
+              <div className="flex items-center gap-2 px-1 mb-3">
+                <TrendingUp className="w-4 h-4 text-fox-orange" />
+                <span className="text-xs font-semibold text-zinc-300">Popular Searches</span>
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-2">
                 {POPULAR_SEARCHES.map(term => (
                   <button
                     key={term}
                     onClick={() => handlePopularClick(term)}
-                    className="px-2.5 py-1.5 text-xs text-zinc-300 bg-zinc-800/60 hover:bg-fox-orange/10 hover:text-fox-orange rounded-lg transition-colors border border-white/5"
+                    className="px-3 py-2 text-xs font-medium text-zinc-300 bg-zinc-800/80 hover:bg-fox-orange/20 hover:text-fox-orange hover:border-fox-orange/30 rounded-lg transition-all border border-white/10"
                   >
                     {term}
                   </button>

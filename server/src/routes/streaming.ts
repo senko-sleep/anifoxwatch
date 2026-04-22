@@ -147,7 +147,7 @@ async function retryProxyRequest(
                 url,
                 responseType: 'stream',
                 headers,
-                timeout: 30000,
+                timeout: 45000,
                 maxRedirects: 5
             });
         } catch (error) {
@@ -379,17 +379,24 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     let streamData: any = { sources: [], subtitles: [] };
     let lastError: string | null = null;
 
-    try {
-        streamData = await sourceManager.getStreamingLinks(
-            episodeId,
-            explicitServer,
-            (category as 'sub' | 'dub') || 'sub',
-            episodeNum,
-            anilistId
-        );
-    } catch (error: any) {
-        lastError = error.message;
-        logger.warn(`[STREAM] getStreamingLinks failed: ${error.message}`, { episodeId, requestId });
+    // Retry getStreamingLinks up to 2 times for transient failures (cold starts, network blips)
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            streamData = await sourceManager.getStreamingLinks(
+                episodeId,
+                explicitServer,
+                (category as 'sub' | 'dub') || 'sub',
+                episodeNum,
+                anilistId
+            );
+            if (streamData.sources?.length > 0) break; // Got sources, stop retrying
+        } catch (error: any) {
+            lastError = error.message;
+            logger.warn(`[STREAM] getStreamingLinks attempt ${attempt + 1} failed: ${error.message}`, { episodeId, requestId });
+            if (attempt < 1) {
+                await new Promise(r => setTimeout(r, 1500));
+            }
+        }
     }
 
     if ((!streamData.sources || streamData.sources.length === 0) && isHianimeStyleEpisodeId(episodeId)) {
@@ -781,7 +788,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                     url: targetUrl,
                     responseType: 'stream',
                     headers,
-                    timeout: 22000,
+                    timeout: 30000,
                     maxRedirects: 5,
                     validateStatus: (status: number) => status < 400,
                     ...(relaxedTls ? {
@@ -859,7 +866,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             logger.info(`[PROXY] All local attempts failed, trying remote fallback for ${domain}`, { domain, requestId });
             try {
                 const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
-                const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 35000, maxRedirects: 5 });
+                const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 50000, maxRedirects: 5 });
                 const ct = remoteResp.headers['content-type'] || 'application/vnd.apple.mpegurl';
                 res.setHeader('Content-Type', ct);
                 res.setHeader('Access-Control-Allow-Origin', '*');

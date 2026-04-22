@@ -68,28 +68,12 @@ export function useTopRated(page: number = 1, limit: number = 10, source?: strin
 export function useSearch(query: string, page: number = 1, source?: string, enabled: boolean = true, mode: 'safe' | 'mixed' | 'adult' = 'safe') {
     return useQuery<AnimeSearchResult, Error>({
         queryKey: queryKeys.search(query, page, source, mode),
-        queryFn: async () => {
-            try {
-                const result = await apiClient.search(query, page, source, mode);
-                return result;
-            } catch (error) {
-                console.error('[useSearch] Search failed:', error);
-                // Return empty result instead of throwing
-                return {
-                    results: [],
-                    totalPages: 0,
-                    currentPage: page,
-                    hasNextPage: false,
-                    totalResults: 0,
-                    source: 'error'
-                };
-            }
-        },
+        queryFn: () => apiClient.search(query, page, source, mode),
         enabled: enabled && query.trim().length >= 2,
-        staleTime: 0,
+        staleTime: 30 * 1000,
         gcTime: 5 * 60 * 1000,
-        retry: 1,
-        retryDelay: 1000,
+        retry: 3,
+        retryDelay: (attempt) => Math.min(1000 * Math.pow(2, attempt), 8000),
     });
 }
 
@@ -123,30 +107,16 @@ export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boo
     return useQuery<AnimeSearchResult, Error>({
         queryKey: ['browse', filterKey, page, bypassCache, limit],
         queryFn: async () => {
-            try {
-                const result = await apiClient.browseAnime(filters, page, bypassCache, limit);
-                // Enrich with AniList HD covers (include adult content for adult mode)
-                const includeAdult = filters.mode === 'adult' || filters.mode === 'mixed';
-                const enrichedResults = await enrichWithAniListCovers(result.results, includeAdult);
-                return { ...result, results: enrichedResults };
-            } catch (error) {
-                console.error('[useBrowse] Browse failed:', error);
-                // Return empty result instead of throwing
-                return {
-                    results: [],
-                    totalPages: 0,
-                    currentPage: page,
-                    hasNextPage: false,
-                    totalResults: 0,
-                    source: 'error'
-                };
-            }
+            const result = await apiClient.browseAnime(filters, page, bypassCache, limit);
+            const includeAdult = filters.mode === 'adult' || filters.mode === 'mixed';
+            const enrichedResults = await enrichWithAniListCovers(result.results, includeAdult);
+            return { ...result, results: enrichedResults };
         },
         enabled,
         staleTime: bypassCache ? 0 : 2 * 60 * 1000,
         gcTime: bypassCache ? 0 : 5 * 60 * 1000,
-        retry: 1,
-        retryDelay: 1000,
+        retry: 3,
+        retryDelay: (attempt: number) => Math.min(1000 * Math.pow(2, attempt), 8000),
     });
 }
 
@@ -276,7 +246,8 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
         enabled: enabled && episodeId.length > 0,
         staleTime: 2 * 60 * 1000,   // 2 min — reuse when toggling sub/dub or returning quickly
         gcTime: 5 * 60 * 1000,
-        retry: 0,
+        retry: 2,
+        retryDelay: (attempt: number) => Math.min(2000 * Math.pow(2, attempt), 10000),
         refetchOnWindowFocus: false,
     });
 }

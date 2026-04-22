@@ -55,6 +55,7 @@ interface StreamingControlsProps {
   selectedProvider?: string;
   onProviderChange?: (provider: string) => void;
   showProviderSelector?: boolean;
+  showServerSelector?: boolean;
 }
 
 const qualityLabels: Record<QualityType, string> = {
@@ -99,6 +100,9 @@ export function StreamingControls({
   const visibleServers = (audioType === 'dub' ? dubServers : subServers).length
     ? (audioType === 'dub' ? dubServers : subServers)
     : servers;
+
+  const displayServerName = (name: string) =>
+    !name || name.toLowerCase() === 'default' ? 'SenkoFox' : name;
 
   return (
     <div className="bg-fox-surface/30 rounded-xl overflow-hidden">
@@ -149,7 +153,7 @@ export function StreamingControls({
             <SelectContent>
               {visibleServers.map(server => (
                 <SelectItem key={`${server.type}-${server.name}`} value={server.name}>
-                  {server.name}
+                  {displayServerName(server.name)}
                 </SelectItem>
               ))}
               {visibleServers.length === 0 && (
@@ -255,7 +259,7 @@ export function StreamingControls({
                   <SelectItem key={`${server.type}-${server.name}`} value={server.name}>
                     <div className="flex items-center gap-2">
                       {selectedServer === server.name && <CheckCircle2 className="w-3 h-3 text-green-500" />}
-                      {server.name}
+                      {displayServerName(server.name)}
                     </div>
                   </SelectItem>
                 ))}

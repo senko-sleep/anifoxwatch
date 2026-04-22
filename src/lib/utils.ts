@@ -260,3 +260,22 @@ export function dedupeSearchResultsForGrid<T extends { id: string; title: string
   }
   return Array.from(seen.values());
 }
+
+/**
+ * Truncate text at word boundaries to avoid mid-word cutoffs.
+ * Returns original text if it's shorter than maxLength.
+ */
+export function truncateAtWordBoundary(text: string, maxLength: number): string {
+  if (!text || text.length <= maxLength) return text;
+  
+  const truncated = text.slice(0, maxLength);
+  // Find the last space before the cutoff
+  const lastSpaceIndex = truncated.lastIndexOf(' ');
+  
+  // If no space found or space is too early, just truncate at maxLength
+  if (lastSpaceIndex === -1 || lastSpaceIndex < maxLength * 0.5) {
+    return truncated + '...';
+  }
+  
+  return truncated.slice(0, lastSpaceIndex) + '...';
+}

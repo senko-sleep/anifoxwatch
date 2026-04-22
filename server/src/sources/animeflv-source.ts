@@ -307,13 +307,13 @@ export class AnimeFLVSource extends BaseAnimeSource {
 
                     if (hasSub) {
                         for (const v of videos.SUB) {
-                            const name = v.title || v.server || 'Default';
+                            const name = v.title || v.server || 'Senkofox Server';
                             servers.push({ name, url: '', type: 'sub' });
                         }
                     }
                     if (hasDub) {
                         for (const v of videos.LAT) {
-                            const name = v.title || v.server || 'Default';
+                            const name = v.title || v.server || 'Senkofox Server';
                             servers.push({ name: `${name} (Latino)`, url: '', type: 'dub' });
                         }
                     }
@@ -332,10 +332,10 @@ export class AnimeFLVSource extends BaseAnimeSource {
                 });
             }
 
-            return servers.length > 0 ? servers : [{ name: 'Default', url: '', type: 'sub' }];
+            return servers.length > 0 ? servers : [{ name: 'Senkofox Server', url: '', type: 'sub' }];
         } catch (error) {
             this.handleError(error, 'getEpisodeServers');
-            return [{ name: 'Default', url: '', type: 'sub' }];
+            return [{ name: 'Senkofox Server', url: '', type: 'sub' }];
         }
     }
 

@@ -210,6 +210,34 @@ const Watch = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodes]);
 
+  // Auto-select default server (neko_senko) when servers are loaded
+  useEffect(() => {
+    if (!servers?.length || serversLoading) return;
+    if (userPickedServer) return; // Don't override if user already picked one
+
+    // Filter out 'default' placeholder servers
+    const realServers = servers.filter(s => s.name.toLowerCase() !== 'default');
+    if (realServers.length === 0) return;
+
+    // Try to find neko_senko first
+    const nekoSenko = realServers.find(s => s.name.toLowerCase().includes('neko_senko'));
+    // Filter servers by current audio type (sub/dub)
+    const audioTypeServers = realServers.filter(s => 
+      audioType === 'dub' ? s.type === 'dub' : s.type === 'sub'
+    );
+    const targetServers = audioTypeServers.length > 0 ? audioTypeServers : realServers;
+
+    // Select neko_senko if available in target servers, otherwise first available
+    const defaultServer = targetServers.find(s => s.name.toLowerCase().includes('neko_senko')) 
+      || targetServers[0];
+
+    if (defaultServer) {
+      console.log('[Watch] Auto-selecting default server:', defaultServer.name);
+      setSelectedServer(defaultServer.name);
+      setUserPickedServer(true);
+    }
+  }, [servers, serversLoading, userPickedServer, audioType]);
+
 
 
 
