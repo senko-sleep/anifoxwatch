@@ -15,14 +15,19 @@ import {
     MiruroSource,
     AniwaveSource,
     AnixSource,
+    DirectDownloadSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
 import { logger, PerformanceTimer, createRequestContext } from '../utils/logger.js';
+import { AnimeCache } from '../lib/anime-cache.js';
+import { animeCache, episodesCache, searchCache, trendingCache } from '../lib/memory-cache.js';
 import { anilistService } from './anilist-service.js';
 import { reliableRequest, retry, withTimeout } from '../middleware/reliability.js';
 import { REGISTERED_SOURCE_NAMES } from '../registered-sources.js';
+import { isHianimeStyleEpisodeId } from '../utils/hianime-rest-servers.js';
+import { reconstructAnimeKaiCompoundFromWatchUrl } from '../utils/animekai-compound-from-watch.js';
 
 export { REGISTERED_SOURCE_NAMES };
 
@@ -67,7 +72,7 @@ interface SourceMetadata {
  */
 export class SourceManager {
     private sources: Map<string, StreamingSource> = new Map();
-    private primarySource: string = 'AnimeKai';
+    private primarySource: string = 'AnimeFLV';
     private healthStatus: Map<string, SourceHealth> = new Map();
     private sourceMetadata: Map<string, SourceMetadata> = new Map();
     
@@ -89,6 +94,7 @@ export class SourceManager {
         ['Miruro', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['Aniwave', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['Anix', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['DirectDownload', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -119,7 +125,10 @@ export class SourceManager {
     private sourceSuccessRates: Map<string, { success: number; total: number }> = new Map();
 
     constructor() {
-        // PRIMARY: AnimeKai — verified working HLS streams (sub + dub) via @consumet/extensions
+        // PRIMARY: AnimeFLV — verified working streams (bypasses aniwatch-pkg Cloudflare issues)
+        this.registerSource(new AnimeFLVSource());
+
+        // BACKUP: AnimeKai — verified working HLS streams (sub + dub) via @consumet/extensions
         this.registerSource(new AnimeKaiSource());
 
         // BACKUP: AnimePahe — @consumet/extensions
@@ -128,7 +137,6 @@ export class SourceManager {
         // FALLBACK: External API-based sources
         this.registerSource(new NineAnimeSource());
         this.registerSource(new ConsumetSource(process.env.CONSUMET_API_URL || 'https://api.consumet.org', 'gogoanime'));
-        this.registerSource(new AnimeFLVSource());
 
         // PRODUCTION FALLBACK: Gogoanime (anitaku.pe) — direct HTTP scraper, not Cloudflare-blocked
         this.registerSource(new GogoanimeSource());
@@ -148,6 +156,7 @@ export class SourceManager {
         // New expansions
         this.registerSource(new AniwaveSource());
         this.registerSource(new AnixSource());
+        this.registerSource(new DirectDownloadSource());
 
         // Adult sources
         this.registerSource(new WatchHentaiSource());
@@ -991,9 +1000,10 @@ export class SourceManager {
             if (kai?.isAvailable) return kai;
         }
 
-        // "{animeSlug}?ep={numericEpisodeKey}" — same watch URL as aniwatchtv / kaido.
-        // Prefer Miruro (aniwatch npm + Consumet hianime) before 9Anime (slow Puppeteer) or Kaido.
-        if (/^[^?]+\?ep=\d+$/i.test(id)) {
+        // "{animeSlug}?ep={key}" — HiAnime / aniwatch watch URLs (display episode number OR internal embed token).
+        // Compound AnimeKai list ids (`slug$ep=N$token=KEY`) normalize to `slug?ep=KEY` on the API; those must
+        // resolve through Miruro, not Consumet AnimeKai (which expects `$episode$` / `$ep=` shapes).
+        if (/^[^/?#]+\?ep=[^&?#]+$/i.test(id)) {
             const miruro = this.sources.get('Miruro');
             if (miruro?.isAvailable) return miruro;
             const nine = this.sources.get('9Anime');
@@ -1299,11 +1309,11 @@ export class SourceManager {
 
             if (titleMap.has(key)) {
                 const existing = titleMap.get(key)!;
-                // Always keep AnimeKai version for streaming reliability
-                const existingIsKai = existing.id?.startsWith('animekai-');
-                const incomingIsKai = anime.id?.startsWith('animekai-');
-                if (existingIsKai && !incomingIsKai) continue;
-                if (incomingIsKai && !existingIsKai) {
+                // Always keep AnimeFLV version for streaming reliability
+                const existingIsFLV = existing.id?.startsWith('animeflv-');
+                const incomingIsFLV = anime.id?.startsWith('animeflv-');
+                if (existingIsFLV && !incomingIsFLV) continue;
+                if (incomingIsFLV && !existingIsFLV) {
                     unique.delete(existing.id);
                     unique.set(anime.id, anime);
                     titleMap.set(key, anime);
@@ -1386,6 +1396,27 @@ export class SourceManager {
      * For AniList IDs, does a title-based search to find the streaming source
      */
     async getAnime(id: string): Promise<AnimeBase | null> {
+        // Check memory cache first (fastest)
+        const memCached = animeCache.get(id);
+        if (memCached) {
+            logger.info(`[SourceManager] Memory cache hit for anime: ${id}`);
+            return memCached;
+        }
+
+        // Check database cache
+        if (process.env.POSTGRES_URL) {
+            try {
+                const cached = await AnimeCache.getAnime(id);
+                if (cached) {
+                    logger.info(`[SourceManager] Database cache hit for anime: ${id}`);
+                    animeCache.set(id, cached); // Cache in memory for instant next access
+                    return cached;
+                }
+            } catch (error) {
+                logger.warn(`[SourceManager] Database cache check failed:`, { error: String(error) });
+            }
+        }
+
         const lowerId = id.toLowerCase();
 
         // Handle AniList IDs specially - do title-based search
@@ -1408,16 +1439,43 @@ export class SourceManager {
                     return null;
                 }
 
-                // Now search for streaming source using the title
-                const title = anilistData.title;
-                logger.info(`[SourceManager] Looking for streaming match for: ${title} (type: ${anilistData.type})`);
-                const streamingMatch = await this.findStreamingAnimeByTitle(title, anilistData.type);
+                // Now search for streaming source using multiple title variants (English/Romaji/Native)
+                const titlesToTry = [
+                    anilistData.titleEnglish,
+                    anilistData.titleRomaji,
+                    anilistData.titleJapanese,
+                    anilistData.title,
+                ]
+                    .filter((t): t is string => typeof t === 'string' && t.trim().length >= 2)
+                    .map((t) => t.trim());
+                const seen = new Set<string>();
+                const uniqueTitles = titlesToTry.filter((t) => {
+                    const key = t.toLowerCase();
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+
+                logger.info(
+                    `[SourceManager] Looking for streaming match for AniList titles: ${uniqueTitles
+                        .map((t) => `"${t}"`)
+                        .join(' | ')} (type: ${anilistData.type})`
+                );
+
+                let streamingMatch: AnimeBase | null = null;
+                for (const t of uniqueTitles) {
+                    streamingMatch = await this.findStreamingAnimeByTitle(t, anilistData.type);
+                    if (streamingMatch) break;
+                }
 
                 if (streamingMatch) {
                     logger.info(`[SourceManager] Found streaming match: ${streamingMatch.id}`);
                     // Return streaming data enriched with AniList info
                     return {
                         ...streamingMatch,
+                        // Preserve original AniList id for the client, but also expose the playable streaming id
+                        id: `anilist-${numericId}`,
+                        streamingId: streamingMatch.id,
                         genres: anilistData.genres,
                         description: anilistData.description,
                         rating: anilistData.rating || streamingMatch.rating,
@@ -1448,7 +1506,18 @@ export class SourceManager {
         if (source) {
             try {
                 const result = await this.executeReliably(source.name, 'getAnime', (signal) => source.getAnime(id, { signal }));
-                if (result && result.title && result.title !== 'Unknown') return result;
+                if (result && result.title && result.title !== 'Unknown') {
+                    // Cache the result in memory (instant access)
+                    animeCache.set(id, result);
+                    
+                    // Cache the result if database is available
+                    if (process.env.POSTGRES_URL) {
+                        AnimeCache.setAnime(result).catch((err: Error) => 
+                            logger.warn(`[SourceManager] Failed to cache anime:`, { error: err.message })
+                        );
+                    }
+                    return result;
+                }
             } catch (error) {
                 console.log(`[SourceManager] getAnime failed for ${source.name}:`, (error as Error).message);
             }
@@ -1483,6 +1552,29 @@ export class SourceManager {
 
         console.log(`📺 [SourceManager] getEpisodes called: ${animeId}`);
 
+        // Check memory cache first (fastest)
+        const memCached = episodesCache.get(animeId);
+        if (memCached && memCached.length > 0) {
+            console.log(`[SourceManager] Memory cache hit for episodes: ${animeId}`);
+            timer.end();
+            return memCached;
+        }
+
+        // Check database cache
+        if (process.env.POSTGRES_URL) {
+            try {
+                const cachedEpisodes = await AnimeCache.getEpisodes(animeId);
+                if (cachedEpisodes && cachedEpisodes.length > 0) {
+                    console.log(`[SourceManager] Database cache hit for episodes: ${animeId}`);
+                    episodesCache.set(animeId, cachedEpisodes); // Cache in memory for instant next access
+                    timer.end();
+                    return cachedEpisodes;
+                }
+            } catch (error) {
+                logger.warn(`[SourceManager] Database episode cache check failed:`, { error: String(error) });
+            }
+        }
+
         // SPECIAL HANDLING: AniList IDs need title-based search to find streaming source
         if (animeId.toLowerCase().startsWith('anilist-')) {
             console.log(`   🔍 AniList ID detected - searching by title for streaming source`);
@@ -1509,12 +1601,46 @@ export class SourceManager {
                     const anilistData = await anilistService.getAnimeById(numericId);
 
                     if (anilistData?.title) {
-                        const searchTitle = anilistData.title;
-                        console.log(`   🔍 Resolving streaming episodes for AniList title: "${searchTitle}" (type: ${anilistData.type})`);
+                        const titlesToTry = [
+                            anilistData.titleEnglish,
+                            anilistData.titleRomaji,
+                            anilistData.titleJapanese,
+                            anilistData.title,
+                        ]
+                            .filter((t): t is string => typeof t === 'string' && t.trim().length >= 2)
+                            .map((t) => t.trim());
 
-                        // Same matching as getAnime() — avoids wrong first-page aggregate results
-                        const byTitle = await this.findStreamingAnimeByTitle(searchTitle, anilistData.type);
-                        if (byTitle?.id && !byTitle.id.startsWith('anilist-')) {
+                        // De-dupe while preserving order
+                        const seen = new Set<string>();
+                        const uniqueTitles = titlesToTry.filter((t) => {
+                            const key = t.toLowerCase();
+                            if (seen.has(key)) return false;
+                            seen.add(key);
+                            return true;
+                        });
+
+                        console.log(
+                            `   🔍 Resolving streaming episodes for AniList titles: ${uniqueTitles
+                                .map((t) => `"${t}"`)
+                                .join(' | ')} (type: ${anilistData.type})`
+                        );
+
+                        const isMovie = /movie/i.test(anilistData.type || '');
+
+                        // Helper: synthesize a single episode for movies when source returns empty list
+                        const syntheticMovieEpisode = (streamingId: string, title: string): Episode[] => [{
+                            id: streamingId,
+                            number: 1,
+                            title: title || 'Movie',
+                            isFiller: false,
+                            hasSub: true,
+                            hasDub: false,
+                        }];
+
+                        for (const searchTitle of uniqueTitles) {
+                            const byTitle = await this.findStreamingAnimeByTitle(searchTitle, anilistData.type);
+                            if (!byTitle?.id || byTitle.id.startsWith('anilist-')) continue;
+
                             console.log(`   ✅ findStreamingAnimeByTitle: "${byTitle.title}" (${byTitle.id})`);
                             const episodes = await this.getEpisodes(byTitle.id);
                             if (episodes && episodes.length > 0) {
@@ -1525,9 +1651,78 @@ export class SourceManager {
                                 timer.end();
                                 return episodes;
                             }
+                            // For movies: streaming source found but episode list empty — synthesize ep 1
+                            if (isMovie) {
+                                console.log(`   🎬 Movie match found with empty episodes, synthesizing ep 1 for ${byTitle.id}`);
+                                this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
+                                timer.end();
+                                return syntheticMovieEpisode(byTitle.id, anilistData.title || byTitle.title);
+                            }
                         }
 
-                        console.log(`   ⚠️ No streaming episodes for AniList title: "${searchTitle}"`);
+                        // Fallback: try searching with simplified title (remove common suffixes/prefixes)
+                        console.log(`   🔍 Trying simplified title search as fallback`);
+                        const simplifiedTitles = uniqueTitles.map(t => {
+                            return t
+                                .replace(/-\s*the movie:\s*/gi, '') // Remove "The Movie:" prefix
+                                .replace(/:\s*the movie\s*$/gi, '') // Remove ": The Movie" suffix
+                                .replace(/\s*-\s*mugen train\s*$/gi, '') // Remove specific subtitle (example)
+                                .replace(/\s*-\s*the movie\s*$/gi, '') // Remove " - The Movie" suffix
+                                .replace(/\s*\(movie\)\s*$/gi, '') // Remove "(movie)" suffix
+                                .replace(/\s*-\s*movie\s*$/gi, '') // Remove " - movie" suffix
+                                .replace(/-\s*kimetsu no yaiba\s*-/gi, '') // Remove franchise name (example)
+                                .replace(/-\s*season\s*\d+\s*$/gi, '') // Remove " - Season X"
+                                .trim();
+                        }).filter(t => t.length > 2);
+
+                        for (const simplifiedTitle of simplifiedTitles) {
+                            const byTitle = await this.findStreamingAnimeByTitle(simplifiedTitle, anilistData.type);
+                            if (!byTitle?.id || byTitle.id.startsWith('anilist-')) continue;
+
+                            console.log(`   ✅ findStreamingAnimeByTitle (simplified): "${byTitle.title}" (${byTitle.id})`);
+                            const episodes = await this.getEpisodes(byTitle.id);
+                            if (episodes && episodes.length > 0) {
+                                const duration = Date.now() - startTime;
+                                console.log(`   ✅ Got ${episodes.length} episodes via simplified title match in ${duration}ms`);
+                                this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
+                                timer.end();
+                                return episodes;
+                            }
+                            if (isMovie) {
+                                console.log(`   🎬 Movie match (simplified) with empty episodes, synthesizing ep 1 for ${byTitle.id}`);
+                                this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
+                                timer.end();
+                                return syntheticMovieEpisode(byTitle.id, anilistData.title || byTitle.title);
+                            }
+                        }
+
+                        // Final fallback: try searching with just the main title (everything before subtitle)
+                        console.log(`   🔍 Trying main title only as final fallback`);
+                        for (const title of uniqueTitles) {
+                            const mainTitle = title.split(/:\s*|-\s*/)[0].trim();
+                            if (mainTitle.length > 3 && mainTitle !== title) {
+                                const byTitle = await this.findStreamingAnimeByTitle(mainTitle, anilistData.type);
+                                if (!byTitle?.id || byTitle.id.startsWith('anilist-')) continue;
+
+                                console.log(`   ✅ findStreamingAnimeByTitle (main title): "${byTitle.title}" (${byTitle.id})`);
+                                const episodes = await this.getEpisodes(byTitle.id);
+                                if (episodes && episodes.length > 0) {
+                                    const duration = Date.now() - startTime;
+                                    console.log(`   ✅ Got ${episodes.length} episodes via main title match in ${duration}ms`);
+                                    this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
+                                    timer.end();
+                                    return episodes;
+                                }
+                                if (isMovie) {
+                                    console.log(`   🎬 Movie match (main title) with empty episodes, synthesizing ep 1 for ${byTitle.id}`);
+                                    this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
+                                    timer.end();
+                                    return syntheticMovieEpisode(byTitle.id, anilistData.title || byTitle.title);
+                                }
+                            }
+                        }
+
+                        console.log(`   ⚠️ No streaming episodes for AniList titles (all attempts failed)`);
                     }
                 }
             } catch (err) {
@@ -1565,6 +1760,17 @@ export class SourceManager {
                         const duration = Date.now() - startTime;
                         console.log(`   ✅ Got ${episodes.length} episodes from ${primarySource.name} in ${duration}ms`);
                         logger.episodeFetch(animeId, episodes.length, primarySource.name, duration);
+                        
+                        // Cache in memory for instant access
+                        episodesCache.set(animeId, episodes);
+                        
+                        // Cache episodes if database is available
+                        if (process.env.POSTGRES_URL) {
+                            AnimeCache.setEpisodes(animeId, episodes).catch((err: Error) => 
+                                logger.warn(`[SourceManager] Failed to cache episodes:`, { error: err.message })
+                            );
+                        }
+                        
                         timer.end();
                         return episodes;
                     }
@@ -2737,11 +2943,12 @@ export class SourceManager {
         const sourcesToTry: StreamingSource[] = [];
         
         // Add primary source first: matching prefix or any available for raw slug
+        // Removed isAvailable check to try all sources even if health check failed
         const primaryMatchesId = primarySource && hasSourcePrefix && primarySource.getStreamingLinks;
         if (primaryMatchesId && !sourcesToTry.includes(primarySource!)) {
             sourcesToTry.push(primarySource!);
         }
-        if (primarySource?.isAvailable && primarySource.getStreamingLinks && !sourcesToTry.includes(primarySource)) {
+        if (primarySource?.getStreamingLinks && !sourcesToTry.includes(primarySource)) {
             sourcesToTry.push(primarySource);
         }
 
@@ -2766,18 +2973,38 @@ export class SourceManager {
         for (const s of sourcesToTry) {
             if (!ordered.includes(s)) ordered.push(s);
         }
-        const finalSources = ordered;
+        let finalSources = ordered;
+
+        // HiAnime/Miruro embed ids (`slug?ep=<token>`) should not fan out to every scraper —
+        // several providers will launch Puppeteer and keep running long after we've already
+        // decided to give up, which delays HTTP responses and makes the client feel "stuck".
+        if (isHianimeStyleEpisodeId(episodeId)) {
+            const allow = new Set<string>([
+                'Miruro',
+                'Consumet',
+                'AllAnime',
+                'AnimeKai',
+                'Gogoanime',
+                'AnimePahe',
+                'Zoro',
+                'AnimeFLV',
+                'Aniwave',
+                'Anix',
+            ]);
+            finalSources = finalSources.filter((s) => allow.has(s.name));
+        }
 
         console.log(`   📋 Sources to try (priority-ordered): ${finalSources.map(s => s.name).join(', ')}`);
 
         /** Prefer Miruro + API mirrors for aniwatch-shaped IDs so we do not wait on Puppeteer first. */
         const buildStreamingPickOrder = (epId: string): string[] => {
-            const watchShape = /^[^/?]+\?ep=\d+$/i.test(epId);
+            // HiAnime/Miruro episode keys are usually `slug?ep=<id>` where `<id>` is often NOT numeric
+            // (e.g. Miruro's `$ep=12$token=XXXX` normalizes to `slug?ep=XXXX`).
+            const watchShape = /^[^/?#]+\?ep=[^&?#]+$/i.test(epId);
             if (!watchShape) return [...STREAM_PRIORITY, 'cross-source'];
             const preferred = [
                 'Miruro',
                 'Consumet',
-                'Kaido',
                 'AllAnime',
                 'Gogoanime',
                 'AnimePahe',
@@ -2787,9 +3014,6 @@ export class SourceManager {
                 'AnimeFLV',
                 'Aniwave',
                 'Anix',
-                'AkiH',
-                'WatchHentai',
-                'Hanime',
             ];
             const seen = new Set<string>();
             const out: string[] = [];
@@ -2826,9 +3050,10 @@ export class SourceManager {
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
             const GRACE_PERIOD = 3000; // Wait up to 3s for a higher-priority source after first success
             /** Cross-source does search + episodes + stream per provider (~40s worst case). Cap so watch API does not hang. */
-            const CROSS_SOURCE_FALLBACK_MAX_MS = 45_000;
-            /** Must exceed Puppeteer budgets (9Anime/Kaido 45s) but keep total latency reasonable */
-            const STREAM_GLOBAL_MAX_MS = 50_000;
+            // Keep watch-page requests bounded: long hangs feel like "infinite loading" in the UI
+            // even though the browser may abort earlier.
+            const CROSS_SOURCE_FALLBACK_MAX_MS = 14_000;
+            const STREAM_GLOBAL_MAX_MS = 18_000;
 
             const result = await new Promise<StreamingData>((resolveStream) => {
             let pending = 0;
@@ -2999,6 +3224,41 @@ export class SourceManager {
         });
 
         return result;
+    }
+
+    /**
+     * Direct AnimeKai (Consumet) fetch using native compound id when we only have `slug?ep=TOKEN` on the wire
+     * plus catalog episode from `ep_num` (from `slug$ep=N$token=TOKEN` on the client).
+     */
+    async tryAnimeKaiCompoundFromWatchQueryEpisode(
+        watchEpisodeId: string,
+        catalogEpisode: number,
+        server?: string,
+        category: 'sub' | 'dub' = 'sub',
+        extra?: { anilistId?: number }
+    ): Promise<StreamingData | null> {
+        const compound = reconstructAnimeKaiCompoundFromWatchUrl(watchEpisodeId, catalogEpisode);
+        if (!compound) return null;
+        const kai = this.sources.get('AnimeKai') as StreamingSource | undefined;
+        if (!kai?.getStreamingLinks) return null;
+        const id = `animekai-${compound}`;
+        try {
+            const data = await this.executeReliably(
+                'AnimeKai',
+                'getStreamingLinks',
+                (signal) =>
+                    kai.getStreamingLinks!(id, server, category, {
+                        signal,
+                        episodeNum: catalogEpisode,
+                        anilistId: extra?.anilistId,
+                    }),
+                { timeout: 14_000, maxAttempts: 1 }
+            );
+            if (data?.sources?.length) return data;
+        } catch {
+            /* ignore */
+        }
+        return null;
     }
 
     /**
@@ -3611,40 +3871,146 @@ export class SourceManager {
     private readonly ANILIST_STREAMING_ID_TTL = 30 * 60 * 1000; // 30 minutes
 
     /**
+     * Resolve an AniList id to a playable streaming id.
+     * Uses multiple title variants + multi-source search as fallback.
+     */
+    async resolveAniListToStreamingId(anilistNumericId: number): Promise<string | null> {
+        if (!Number.isFinite(anilistNumericId) || anilistNumericId <= 0) return null;
+
+        const cachedMapping = this.anilistStreamingIdCache.get(anilistNumericId);
+        if (cachedMapping && cachedMapping.timestamp > Date.now() - this.ANILIST_STREAMING_ID_TTL) {
+            return cachedMapping.streamingId;
+        }
+
+        const anilistData = await anilistService.getAnimeById(anilistNumericId);
+        if (!anilistData?.title) return null;
+
+        const titlesToTry = [
+            anilistData.titleEnglish,
+            anilistData.titleRomaji,
+            anilistData.titleJapanese,
+            anilistData.title,
+        ]
+            .filter((t): t is string => typeof t === 'string' && t.trim().length >= 2)
+            .map((t) => t.trim());
+
+        const seen = new Set<string>();
+        const uniqueTitles = titlesToTry.filter((t) => {
+            const key = t.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+
+        // Fast path: try the dedicated title matcher.
+        for (const t of uniqueTitles) {
+            const match = await this.findStreamingAnimeByTitle(t, anilistData.type);
+            if (match?.id && !match.id.startsWith('anilist-')) {
+                this.anilistStreamingIdCache.set(anilistNumericId, { streamingId: match.id, timestamp: Date.now() });
+                return match.id;
+            }
+        }
+
+        // Fallback: multi-source search and pick best similarity.
+        const normalize = (s: string) =>
+            s
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+        const scoreCandidate = (queryTitle: string, candidateTitle: string) => {
+            const q = normalize(queryTitle);
+            const c = normalize(candidateTitle);
+            if (!q || !c) return 0;
+            if (q === c) return 10;
+            const qWords = q.split(' ').filter((w) => w.length >= 3);
+            let hits = 0;
+            for (const w of qWords) if (c.includes(w)) hits++;
+            return hits / Math.max(1, qWords.length);
+        };
+
+        for (const t of uniqueTitles) {
+            const all = await this.searchAll(t, 1);
+            const candidates = (all?.results || []).filter((r) => r?.id && !String(r.id).startsWith('anilist-'));
+            if (!candidates.length) continue;
+
+            const best = candidates
+                .map((c) => ({
+                    c,
+                    s:
+                        scoreCandidate(anilistData.title, c.title) +
+                        (anilistData.titleJapanese ? 0.35 * scoreCandidate(anilistData.titleJapanese, c.title) : 0) +
+                        (c.type === anilistData.type ? 0.25 : 0),
+                }))
+                .sort((a, b) => b.s - a.s)[0];
+
+            if (best?.c?.id && best.s >= 0.34) {
+                this.anilistStreamingIdCache.set(anilistNumericId, { streamingId: best.c.id, timestamp: Date.now() });
+                return best.c.id;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Calculate similarity between two strings (simple Levenshtein-based ratio)
      */
     private calculateSimilarity(str1: string, str2: string): number {
         const s1 = str1.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
         const s2 = str2.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
+        // Extract season numbers for better matching
+        const extractSeason = (s: string): number | null => {
+            const seasonMatch = s.match(/(?:season|cour|part)\s*(\d+)/i);
+            if (seasonMatch) return parseInt(seasonMatch[1], 10);
+            const ordinalMatch = s.match(/(\d+)(?:st|nd|rd|th)\s*season/i);
+            if (ordinalMatch) return parseInt(ordinalMatch[1], 10);
+            return null;
+        };
+
+        const season1 = extractSeason(s1);
+        const season2 = extractSeason(s2);
+
         // Exact match after normalization
         if (s1 === s2) return 1.0;
 
         // Check if one contains the other
         if (s2.includes(s1)) {
-            // Result is a superstring of query (e.g. result has extra subtitle words)
-            return s1.length / s2.length;
+            let score = s1.length / s2.length;
+            if (season1 !== null && season2 !== null && season1 === season2) {
+                score *= 1.3;
+            } else if (season1 !== null && season2 !== null && season1 !== season2) {
+                score *= 0.3;
+            }
+            return score;
         }
         if (s1.includes(s2)) {
-            // Result is a substring of query — result is too general (e.g. "Spy x Family" matching
-            // "Spy x Family Code: White"). Penalise heavily so a more specific match wins.
-            return (s2.length / s1.length) * 0.55;
+            let score = (s2.length / s1.length) * 0.55;
+            if (season1 !== null && season2 !== null && season1 === season2) {
+                score *= 1.3;
+            } else if (season1 !== null && season2 !== null && season1 !== season2) {
+                score *= 0.3;
+            }
+            return score;
         }
 
         // Word-based matching
         const words1 = s1.split(/\s+/).filter(w => w.length > 2);
         const words2 = s2.split(/\s+/).filter(w => w.length > 2);
+        const matchedQueryWords = words1.filter(w => words2.includes(w));
+        let baseScore = matchedQueryWords.length / Math.max(words1.length, words2.length);
 
-        if (words1.length === 0 || words2.length === 0) return 0;
+        // Apply season matching bonus/penalty
+        if (season1 !== null && season2 !== null) {
+            if (season1 === season2) {
+                baseScore *= 1.3;
+            } else {
+                baseScore *= 0.3;
+            }
+        }
 
-        const matchedQueryWords = words1.filter(w =>
-            words2.some(w2 => w.includes(w2) || w2.includes(w))
-        );
-
-        const baseScore = matchedQueryWords.length / Math.max(words1.length, words2.length);
-
-        // Penalise when significant query words are absent from the result.
-        // "code" and "white" being missing tells us this is the wrong entry entirely.
         const missingRatio = (words1.length - matchedQueryWords.length) / words1.length;
         const penaltyFactor = 1 - missingRatio * 0.5;
 
