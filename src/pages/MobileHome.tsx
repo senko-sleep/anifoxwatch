@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback, useMemo, useTransition } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Search, Shuffle, Play, Star, ChevronRight, Loader2,
   Home, Compass, Calendar, RefreshCw, AlertCircle,
+  Sparkles, Captions, Clock,
 } from 'lucide-react';
-import { cn, normalizeRating, ensureHttps } from '@/lib/utils';
+import { cn, ensureHttps, normalizeAnimeGenresForDisplay } from '@/lib/utils';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AnimeSlider } from '@/components/home/AnimeSlider';
 import { ContinueWatching } from '@/components/home/ContinueWatching';
@@ -43,140 +44,260 @@ const NAV_ITEMS = [
   { to: '/schedule', label: 'Schedule', Icon: Calendar },
 ] as const;
 
-// ─── Swipeable hero ────────────────────────────────────────────────────────────
+// ─── Cinematic mobile hero ────────────────────────────────────────────────────
+const FILM_GRAIN = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
+
 function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>['heroAnime'] }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [idx, setIdx] = useState(0);
-  const [animating, setAnimating] = useState(false);
-  const touchStart = useRef<number | null>(null);
+  const { isLandscape } = useBreakpoint();
+  const [idx, setIdx]           = useState(0);
+  const [prevIdx, setPrevIdx]   = useState<number | null>(null);
+  const [contentVisible, setContentVisible] = useState(true);
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isPaused = useRef(false);
 
   const count = heroAnime.length;
 
   const go = useCallback((next: number) => {
-    if (animating) return;
-    setAnimating(true);
-    setIdx(((next % count) + count) % count);
-    setTimeout(() => setAnimating(false), 350);
-  }, [animating, count]);
+    const n = ((next % count) + count) % count;
+    if (n === idx) return;
+    setContentVisible(false);
+    setPrevIdx(idx);
+    setIdx(n);
+    setTimeout(() => setContentVisible(true), 100);
+    setTimeout(() => setPrevIdx(null), 600);
+  }, [idx, count]);
 
-  // Auto-advance every 7 s
+  // Auto-advance every 8 s
   useEffect(() => {
     if (count <= 1) return;
-    intervalRef.current = setInterval(() => go(idx + 1), 7000);
+    const tick = () => { if (!isPaused.current) go(idx + 1); };
+    intervalRef.current = setInterval(tick, 8000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [idx, count, go]);
 
   const onTouchStart = (e: React.TouchEvent) => {
-    touchStart.current = e.touches[0].clientX;
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+    isPaused.current = true;
     if (intervalRef.current) clearInterval(intervalRef.current);
   };
   const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStart.current === null) return;
-    const dx = e.changedTouches[0].clientX - touchStart.current;
-    if (Math.abs(dx) > 40) go(dx < 0 ? idx + 1 : idx - 1);
-    touchStart.current = null;
+    if (touchStartX.current === null || touchStartY.current === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
+    // Only swipe if horizontal movement dominates
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 36) {
+      go(dx < 0 ? idx + 1 : idx - 1);
+    }
+    touchStartX.current = null;
+    touchStartY.current = null;
+    setTimeout(() => { isPaused.current = false; }, 1000);
   };
 
   if (!heroAnime.length) return null;
-  const anime = heroAnime[idx];
-  const title = getHeroTitle(anime);
-  const rating = formatHeroRating(anime.averageScore);
-  const watchPath = anime.source === 'anilist'
-    ? `/watch?id=anilist-${anime.id}`
-    : `/watch?id=${anime.id}`;
-  const bg = ensureHttps(anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large || '');
+
+  const anime     = heroAnime[idx];
+  const title     = getHeroTitle(anime);
+  const rating    = formatHeroRating(anime.averageScore);
+  const watchPath = anime.source === 'anilist' ? `/watch?id=anilist-${anime.id}` : `/watch?id=${anime.id}`;
+  const bannerSrc = ensureHttps(anime.bannerImage || anime.coverImage?.extraLarge || anime.coverImage?.large || '');
+  const posterSrc = ensureHttps(anime.coverImage?.large || anime.coverImage?.extraLarge || '');
+  const formatLabel = (anime.format || 'TV').replace(/_/g, ' ');
+  const seasonLabel = [anime.season, anime.seasonYear].filter(Boolean).join(' ');
+  const epCount = anime.episodes != null && anime.episodes > 0 ? `${anime.episodes} eps` : null;
+  const runtime = anime.duration != null && anime.duration > 0 ? `${anime.duration}m` : null;
+  const genres = normalizeAnimeGenresForDisplay(anime.genres).slice(0, 3);
 
   return (
     <div
-      className="relative w-full overflow-hidden touch-pan-y select-none"
-      style={{ height: 'clamp(240px, 54vw, 320px)' }}
+      className="relative w-full overflow-hidden select-none bg-[#0c0e14]"
+      style={{ height: isLandscape ? 'clamp(200px, 44vh, 300px)' : 'clamp(280px, 64vw, 420px)' }}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
-      {/* Background image */}
-      <div
-        className={cn(
-          'absolute inset-0 transition-opacity duration-350',
-          animating ? 'opacity-0' : 'opacity-100'
-        )}
-      >
-        {bg ? (
-          <img
-            src={bg}
-            alt=""
-            className="w-full h-full object-cover"
-            loading="eager"
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <div className="w-full h-full bg-zinc-900" />
-        )}
-        {/* Gradient overlays */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#080a0f] via-[#080a0f]/50 to-transparent" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#080a0f]/60 to-transparent" />
+      {/* ── Background slides ─────────────────────────────────── */}
+      {heroAnime.map((a, i) => {
+        const bg = ensureHttps(a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large || '');
+        const isActive = i === idx;
+        const isPrev   = i === prevIdx;
+        if (!isActive && !isPrev) return null;
+        return (
+          <div
+            key={a.id}
+            className={cn(
+              'absolute inset-0 transition-opacity duration-600',
+              isActive ? 'opacity-100 z-[1]' : 'opacity-0 z-[0]'
+            )}
+          >
+            {bg ? (
+              <img
+                src={bg}
+                alt=""
+                className="w-full h-full object-cover object-top"
+                loading={i === 0 ? 'eager' : 'lazy'}
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-full h-full bg-zinc-900" />
+            )}
+          </div>
+        );
+      })}
+
+      {/* ── Gradient layers (matching desktop) ───────────────── */}
+      <div className="absolute inset-0 z-[2] pointer-events-none">
+        {/* Bottom fade — strong for text legibility */}
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(to top, #080a0f 0%, #080a0f90 28%, transparent 65%)' }} />
+        {/* Left fade */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#080a0f]/80 via-[#080a0f]/30 to-transparent" />
+        {/* Top edge */}
+        <div className="absolute inset-x-0 top-0 h-14 bg-gradient-to-b from-[#080a0f]/60 to-transparent" />
+        {/* Right vignette (leaves room for poster) */}
+        <div className="absolute inset-y-0 right-0 w-2/5 bg-gradient-to-l from-[#080a0f]/60 via-transparent to-transparent" />
       </div>
 
-      {/* Content */}
+      {/* ── Film grain ────────────────────────────────────────── */}
+      <div
+        className="pointer-events-none absolute inset-0 z-[3] opacity-[0.055] mix-blend-overlay"
+        style={{ backgroundImage: FILM_GRAIN }}
+      />
+
+      {/* ── Orange accent glow ────────────────────────────────── */}
+      <div
+        className="pointer-events-none absolute bottom-0 left-0 z-[3] w-[70%] h-[50%] opacity-[0.20]"
+        style={{ background: 'radial-gradient(ellipse at 20% 100%, hsl(28 95% 55% / 1) 0%, transparent 65%)' }}
+      />
+
+      {/* ── Poster card (right) ───────────────────────────────── */}
       <div
         className={cn(
-          'absolute bottom-0 left-0 right-0 px-4 pb-5 transition-all duration-300',
-          animating ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0'
+          'absolute right-4 bottom-8 z-[5] w-[80px] aspect-[2/3] rounded-xl overflow-hidden shadow-2xl shadow-black/70 ring-1 ring-white/10 transition-all duration-500',
+          contentVisible ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-3'
+        )}
+        onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
+      >
+        {posterSrc ? (
+          <img src={posterSrc} alt={title} className="w-full h-full object-cover" loading="eager" referrerPolicy="no-referrer" />
+        ) : (
+          <div className="w-full h-full bg-zinc-800" />
+        )}
+        {/* Play overlay */}
+        <div className="absolute inset-0 bg-black/0 active:bg-black/40 transition-colors flex items-center justify-center">
+          <div className="w-7 h-7 rounded-full bg-fox-orange/90 flex items-center justify-center shadow-lg shadow-fox-orange/40 opacity-0 active:opacity-100 transition-opacity">
+            <Play className="w-3.5 h-3.5 fill-white text-white" />
+          </div>
+        </div>
+        {rating && (
+          <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/70 backdrop-blur-sm text-[9px] font-bold text-amber-300">
+            <Star className="w-2 h-2 fill-amber-400 text-amber-400" />{rating}
+          </div>
+        )}
+      </div>
+
+      {/* ── Content panel ─────────────────────────────────────── */}
+      <div
+        className={cn(
+          'absolute bottom-0 left-0 z-[5] px-4 pb-4 pr-[108px] transition-all duration-500 ease-out',
+          contentVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
         )}
       >
-        {/* Labels */}
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[9px] font-bold uppercase tracking-[0.12em] text-fox-orange bg-fox-orange/15 border border-fox-orange/30 px-2 py-0.5 rounded-full">
+        {/* Spotlight + season */}
+        <div className="flex items-center gap-2 mb-1.5">
+          <span className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.22em] text-fox-orange">
+            <Sparkles className="w-2.5 h-2.5 text-fox-orange/80" />
             Spotlight
           </span>
-          {rating && (
-            <span className="flex items-center gap-1 text-[10px] text-yellow-400 font-semibold">
-              <Star className="w-2.5 h-2.5 fill-current" />{rating}
-            </span>
-          )}
-          {anime.format && (
-            <span className="text-[9px] text-zinc-400 font-medium uppercase tracking-wide">
-              {anime.format.replace(/_/g, ' ')}
-            </span>
+          {seasonLabel && (
+            <>
+              <span className="text-zinc-700 text-[9px]">·</span>
+              <span className="text-[9px] text-zinc-500 uppercase tracking-wide">{seasonLabel}</span>
+            </>
           )}
         </div>
 
         {/* Title */}
-        <h1 className="text-white font-bold text-lg leading-tight line-clamp-2 mb-3 drop-shadow-lg">
+        <h1
+          className="font-display text-[17px] font-bold leading-[1.2] tracking-tight text-white drop-shadow-[0_2px_16px_rgba(0,0,0,0.9)] mb-2"
+          style={{ textWrap: 'balance' } as React.CSSProperties}
+        >
           {title}
         </h1>
 
-        {/* Actions */}
+        {/* Metadata badges */}
+        <div className="flex flex-wrap items-center gap-1.5 mb-3">
+          {rating && (
+            <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-500/30 bg-amber-950/50 px-1.5 py-0.5 text-[9px] font-bold text-amber-300 backdrop-blur-sm">
+              <Star className="w-2 h-2 fill-amber-400 text-amber-400" />{rating}
+            </span>
+          )}
+          <span className="rounded-full border border-white/[0.1] bg-white/[0.07] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-zinc-200 backdrop-blur-sm">
+            {formatLabel}
+          </span>
+          <span className="inline-flex items-center gap-0.5 rounded-full border border-sky-500/25 bg-sky-950/30 px-1.5 py-0.5 text-[9px] font-bold uppercase text-sky-300">
+            <Captions className="w-2 h-2" />Sub
+          </span>
+          {epCount && (
+            <span className="rounded-full border border-white/[0.07] bg-white/[0.05] px-1.5 py-0.5 text-[9px] text-zinc-400">
+              {epCount}
+            </span>
+          )}
+          {runtime && (
+            <span className="inline-flex items-center gap-0.5 rounded-full border border-white/[0.07] bg-black/30 px-1.5 py-0.5 text-[9px] text-zinc-400">
+              <Clock className="w-2 h-2 opacity-60" />{runtime}
+            </span>
+          )}
+        </div>
+
+        {/* Genre tags */}
+        {genres.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-3">
+            {genres.map(g => (
+              <span key={g} className="rounded border border-fox-orange/20 bg-fox-orange/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-200/90">
+                {g}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* CTA buttons */}
         <div className="flex items-center gap-2">
           <button
             onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
-            className="flex items-center gap-1.5 bg-fox-orange text-white text-xs font-bold px-4 py-2 rounded-full shadow-lg shadow-fox-orange/30 active:scale-95 transition-transform touch-manipulation"
+            className="flex items-center gap-1.5 bg-fox-orange text-white text-xs font-bold h-8 px-4 rounded-full shadow-lg shadow-fox-orange/35 ring-1 ring-white/10 active:scale-95 transition-transform touch-manipulation"
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
+            <Play className="w-3 h-3 fill-white" />
             Watch Now
           </button>
-          <Link
-            to={`/browse?q=${encodeURIComponent(title)}`}
-            className="flex items-center gap-1 text-xs text-zinc-300 font-medium px-3 py-2 rounded-full border border-white/10 bg-white/5 backdrop-blur-sm active:scale-95 transition-transform touch-manipulation"
+          <button
+            onClick={() => navigate(`/browse?q=${encodeURIComponent(title)}`)}
+            className="flex items-center gap-1 text-xs font-medium text-zinc-200 h-8 px-3 rounded-full border border-white/[0.12] bg-white/[0.06] backdrop-blur-sm active:scale-95 transition-transform touch-manipulation"
           >
-            Details <ChevronRight className="w-3 h-3" />
-          </Link>
+            Details<ChevronRight className="w-3 h-3" />
+          </button>
         </div>
       </div>
 
-      {/* Dot indicators */}
+      {/* ── Slide dots (bottom-center) ────────────────────────── */}
       {count > 1 && (
-        <div className="absolute top-3 right-3 flex gap-1">
-          {heroAnime.slice(0, 8).map((_, i) => (
+        <div className="absolute bottom-0 inset-x-0 z-[6] flex items-center justify-center gap-0.5 pb-1">
+          {heroAnime.slice(0, 12).map((_, i) => (
             <button
               key={i}
               onClick={() => go(i)}
-              className={cn(
-                'rounded-full transition-all duration-300 touch-manipulation',
-                i === idx ? 'w-4 h-1.5 bg-fox-orange' : 'w-1.5 h-1.5 bg-white/30'
-              )}
-            />
+              className="p-1.5 touch-manipulation flex items-center justify-center"
+              aria-label={`Slide ${i + 1}`}
+            >
+              <span className={cn(
+                'block rounded-full transition-all duration-300',
+                i === idx
+                  ? 'w-5 h-1 bg-fox-orange shadow-[0_0_5px_1px] shadow-fox-orange/60'
+                  : 'w-1 h-1 bg-white/25'
+              )} />
+            </button>
           ))}
         </div>
       )}
@@ -401,7 +522,6 @@ export const MobileHome = () => {
   useDocumentTitle('Home');
   const navigate = useNavigate();
   const location = useLocation();
-  const { isLandscape } = useBreakpoint();
   const [searchOpen, setSearchOpen] = useState(false);
   const [isLoadingRandom, setIsLoadingRandom] = useState(false);
 
@@ -467,8 +587,8 @@ export const MobileHome = () => {
         isLoadingRandom={isLoadingRandom}
       />
 
-      {/* Hero — hide in landscape to save screen height */}
-      {!isLandscape && <MobileHero heroAnime={heroAnime} />}
+      {/* Hero */}
+      <MobileHero heroAnime={heroAnime} />
 
       {/* Category chips */}
       <div className="px-4 mt-4 mb-1">
