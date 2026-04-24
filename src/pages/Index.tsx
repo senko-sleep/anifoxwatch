@@ -18,6 +18,7 @@ import { AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useEffect, useMemo, useCallback } from 'react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
+import { useBreakpoint } from '@/hooks/useBreakpoint';
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (string | null)[] | null } | null) => {
   if (!anime) return false;
@@ -30,6 +31,7 @@ const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (
 // ─── Component ───────────────────────────────────────────────────────────────
 const Index = () => {
   useDocumentTitle('Home');
+  const { isMobile, isLandscape } = useBreakpoint();
 
   const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useAnilistHomeTrending(24);
   const { currentSeasonLabel, currentSeasonApi, currentSeasonYear } = useMemo(() => {
@@ -159,7 +161,7 @@ const Index = () => {
       )}
 
       {/* ── Main content ──────────────────────────────────────────────── */}
-      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-28 sm:pb-20 space-y-5 sm:space-y-10 pt-3 sm:pt-8">
+      <main className="relative z-10 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pb-[calc(58px+env(safe-area-inset-bottom,0px)+8px)] sm:pb-20 space-y-3 sm:space-y-8 lg:space-y-10 pt-2 sm:pt-6 lg:pt-8">
 
         {/* Continue Watching */}
         {history.length > 0 && (
@@ -170,7 +172,7 @@ const Index = () => {
         )}
 
         {/* Trending Now */}
-        <section>
+        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
           <SectionHeader title="Trending Now" link="/browse?sort=trending" linkText="View all" />
           {trendingLoading ? <SkeletonRow /> : dedupTrending.length > 0
             ? <AnimeSlider anime={dedupTrending.slice(0, 20)} cardSize="md" />
@@ -178,7 +180,7 @@ const Index = () => {
         </section>
 
         {/* This Season */}
-        <section>
+        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
           <SectionHeader title={currentSeasonLabel} link="/browse?status=ongoing" linkText="Browse" />
           {seasonalLoading ? <SkeletonRow /> : dedupSeasonal.length > 0
             ? <AnimeSlider anime={dedupSeasonal.slice(0, 20)} cardSize="md" />
@@ -186,7 +188,7 @@ const Index = () => {
         </section>
 
         {/* Latest Episodes */}
-        <section>
+        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
           <SectionHeader title="Latest Episodes" link="/browse?sort=recently_released" linkText="More" />
           {latestLoading ? <SkeletonRow /> : dedupLatest.length > 0
             ? <AnimeSlider anime={dedupLatest.slice(0, 20)} cardSize="md" />
@@ -194,7 +196,7 @@ const Index = () => {
         </section>
 
         {/* Action Anime */}
-        <section>
+        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
           <SectionHeader title="Action Anime" link="/browse?genre=Action" linkText="View all" />
           {actionLoading ? <SkeletonRow /> : dedupAction.length > 0
             ? <AnimeSlider anime={dedupAction.slice(0, 20)} cardSize="md" />
@@ -202,7 +204,7 @@ const Index = () => {
         </section>
 
         {/* Popular Movies */}
-        <section>
+        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
           <SectionHeader title="Popular Movies" link="/browse?type=Movie" linkText="View all" />
           {moviesLoading ? <SkeletonRow /> : dedupMovies.length > 0
             ? <AnimeSlider anime={dedupMovies.slice(0, 20)} cardSize="md" />

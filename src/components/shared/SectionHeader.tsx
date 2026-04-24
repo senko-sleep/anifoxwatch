@@ -24,7 +24,7 @@ export const SectionHeader = ({
 }: SectionHeaderProps) => {
     const quiet = variant === 'quiet';
     return (
-        <div className={cn('flex items-center justify-between gap-4 mb-3 sm:mb-4', className)}>
+        <div className={cn('flex items-center justify-between gap-4 mb-2 sm:mb-3 lg:mb-4', className)}>
             <div className="flex items-center gap-2.5 min-w-0">
                 {/* Left accent bar */}
                 {!quiet && (
@@ -36,7 +36,7 @@ export const SectionHeader = ({
                             'font-display tracking-tight leading-tight',
                             quiet
                                 ? 'text-[15px] sm:text-base font-semibold text-zinc-300'
-                                : 'text-[15px] sm:text-lg font-bold text-white'
+                                : 'text-[14px] sm:text-lg font-bold text-white'
                         )}
                     >
                         {title}

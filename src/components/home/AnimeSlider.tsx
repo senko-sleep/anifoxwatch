@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { ChevronLeft, ChevronRight, Star, Mic, Subtitles, Play, Clock, CalendarDays } from 'lucide-react';
 import { cn, normalizeRating, isValidAnimeYear, isValidEpisodeCount, ensureHttps } from '@/lib/utils';
 import { apiUrl } from '@/lib/api-config';
@@ -84,11 +85,13 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
   const [canScrollRight, setCanScrollRight] = useState(true);
   const location = useLocation();
   const history = WatchHistory.get();
+  const { width: vw } = useBreakpoint();
 
+  // Tighter cards on very small phones (< 360px), standard on larger
   const cardWidths = {
-    sm: 'w-[8.5rem] sm:w-[9.5rem]',
-    md: 'w-[10rem] sm:w-[11.5rem]',
-    lg: 'w-[12rem] sm:w-[14rem]',
+    sm: vw < 360 ? 'w-[6.25rem] sm:w-[9.5rem]' : 'w-[7.25rem] sm:w-[9.5rem]',
+    md: vw < 360 ? 'w-[7rem]    sm:w-[11.5rem]' : 'w-[8.25rem] sm:w-[11.5rem]',
+    lg: vw < 360 ? 'w-[8rem]    sm:w-[14rem]'   : 'w-[9.5rem]  sm:w-[14rem]',
   };
 
   const checkScroll = () => {
@@ -114,7 +117,6 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
       {/* Left fade + arrow */}
       {canScrollLeft && (
         <>
-          <div className="pointer-events-none absolute left-0 top-0 bottom-8 w-20 z-10 bg-gradient-to-r from-background to-transparent" />
           <button
             onClick={() => scroll('left')}
             className="absolute left-1 top-[38%] -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#0e1018]/90 border border-white/[0.1] backdrop-blur-md flex items-center justify-center text-white/70 shadow-xl
@@ -127,7 +129,6 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
       )}
       {canScrollRight && (
         <>
-          <div className="pointer-events-none absolute right-0 top-0 bottom-8 w-20 z-10 bg-gradient-to-l from-background to-transparent" />
           <button
             onClick={() => scroll('right')}
             className="absolute right-1 top-[38%] -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-[#0e1018]/90 border border-white/[0.1] backdrop-blur-md flex items-center justify-center text-white/70 shadow-xl
@@ -142,7 +143,7 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
       <div
         ref={scrollRef}
         onScroll={checkScroll}
-        className="flex gap-3 sm:gap-3.5 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4 -mx-1 px-1"
+        className="flex gap-2.5 sm:gap-3.5 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4 -mx-1 px-1"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
       >
         {anime.map((item) => {

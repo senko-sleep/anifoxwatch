@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
+import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Play, Star, Clock, Captions, Sparkles, BookmarkPlus, ChevronRight, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,7 @@ function heroSynopsis(anime: HeroAnime): string {
 }
 
 export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
+  const { isMobile, isLandscape } = useBreakpoint();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [prevIndex, setPrevIndex] = useState<number | null>(null);
   const [_progress, setProgress] = useState(0);
@@ -126,7 +128,16 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
         onMouseLeave={() => setIsPaused(false)}
       >
         {/* Background slides */}
-        <div className="relative w-full h-[52vw] min-h-[280px] max-h-[400px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]">
+        <div
+          className="relative w-full sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]"
+          style={{
+            height: isMobile
+              ? isLandscape
+                ? '38vh'         // landscape phone: use viewport height so it doesn't eat the screen
+                : 'clamp(200px, 46vw, 320px)' // portrait phone
+              : undefined,
+          }}
+        >
 
           {heroAnime.map((a, idx) => {
             const isActive = idx === currentIndex;
