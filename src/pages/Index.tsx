@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button';
 import { useEffect, useMemo, useCallback } from 'react';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
+import { MobileHome } from '@/pages/MobileHome';
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (string | null)[] | null } | null) => {
   if (!anime) return false;
@@ -31,7 +32,7 @@ const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (
 // ─── Component ───────────────────────────────────────────────────────────────
 const Index = () => {
   useDocumentTitle('Home');
-  const { isMobile, isLandscape } = useBreakpoint();
+  const { isMobile } = useBreakpoint();
 
   const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useAnilistHomeTrending(24);
   const { currentSeasonLabel, currentSeasonApi, currentSeasonYear } = useMemo(() => {
@@ -125,6 +126,8 @@ const Index = () => {
       ))}
     </div>
   );
+
+  if (isMobile) return <MobileHome />;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-background to-background text-foreground font-sans">
