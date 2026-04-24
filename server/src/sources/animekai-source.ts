@@ -7,7 +7,25 @@ import axios, { AxiosError } from 'axios';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
+import { ANIME as ConsumetAnime } from '@consumet/extensions';
 import { logger } from '../utils/logger.js';
+
+// Custom axios instance with headers to bypass Cloudflare
+const customAxios = axios.create({
+    headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0',
+    },
+    timeout: 15000,
+});
 
 function axiosConfigFullUrl(cfg: AxiosError['config']): string {
     if (!cfg) return '';
@@ -77,7 +95,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
     private async getProvider() {
         if (!this.provider) {
             const anime = await getConsumet();
-            this.provider = new anime.AnimeKai();
+            this.provider = new ConsumetAnime.AnimeKai();
         }
         return this.provider;
     }
@@ -257,12 +275,30 @@ export class AnimeKaiSource extends BaseAnimeSource {
 
         // Strip source prefix added by SourceManager when AnimeKai is a fallback for other sources.
         // The consumet AnimeKai provider expects its native episode ID (e.g. slug$ep=N$token=KEY).
-        const rawEpisodeId = episodeId.replace(/^animekai-/i, '');
+        let rawEpisodeId = episodeId.replace(/^animekai-/i, '');
 
         try {
             const p = await this.getProvider();
             const mod = await import('@consumet/extensions');
             const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
+
+            // If the ID is a bare anime slug (no compound $ep=N$token= format), resolve it to
+            // the first episode ID. This happens for movies synthesized from the anime-level ID.
+            if (!rawEpisodeId.includes('$ep=') && !rawEpisodeId.includes('?ep=')) {
+                try {
+                    const info = await Promise.race([
+                        p.fetchAnimeInfo(rawEpisodeId),
+                        new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 8_000))
+                    ]);
+                    if (info?.episodes?.length > 0) {
+                        rawEpisodeId = info.episodes[0].id;
+                        logger.info(`AnimeKai: resolved bare slug "${episodeId}" → episode id "${rawEpisodeId}"`, undefined, this.name);
+                    }
+                } catch {
+                    // ignore — proceed with bare slug, fetchEpisodeSources may still work
+                }
+            }
+
             logger.info(`Fetching ${category} stream from AnimeKai for ${rawEpisodeId}`, undefined, this.name);
 
             // Try twice — keep total time under SourceManager executeReliably budget
