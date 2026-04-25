@@ -1628,160 +1628,41 @@ export class SourceManager {
             }
         }
 
-        // SPECIAL HANDLING: AniList IDs need title-based search to find streaming source
+        // SPECIAL HANDLING: AniList IDs — delegate to resolveAniListToStreamingId which
+        // has the proven multi-source fallback logic (also used by /api/anime/resolve).
+        // Previous duplicate implementation had stale-cache and key-collision bugs.
         if (animeId.toLowerCase().startsWith('anilist-')) {
-            console.log(`   🔍 AniList ID detected - searching by title for streaming source`);
-
-            try {
-                // Get anime details from AniList
-                const anilistId = animeId.replace(/^anilist-/i, '');
-                const numericId = parseInt(anilistId, 10);
-
-                if (!isNaN(numericId)) {
-                    // Fast path: we've already resolved this AniList ID to a streaming ID recently
-                    const cachedMapping = this.anilistStreamingIdCache.get(numericId);
-                    if (cachedMapping && cachedMapping.timestamp > Date.now() - this.ANILIST_STREAMING_ID_TTL) {
-                        console.log(`   ⚡ Cache hit: AniList ${numericId} → ${cachedMapping.streamingId}`);
-                        const episodes = await this.getEpisodes(cachedMapping.streamingId);
+            const numericId = parseInt(animeId.replace(/^anilist-/i, ''), 10);
+            if (!isNaN(numericId)) {
+                try {
+                    const streamingId = await this.resolveAniListToStreamingId(numericId);
+                    if (streamingId) {
+                        console.log(`   ✅ Resolved anilist-${numericId} → ${streamingId}`);
+                        const episodes = await this.getEpisodes(streamingId);
                         if (episodes && episodes.length > 0) {
                             timer.end();
                             return episodes;
                         }
-                        // Cached ID no longer works — fall through to re-resolve
-                        this.anilistStreamingIdCache.delete(numericId);
+                        // Streaming ID returned no episodes — could be a movie, synthesize EP1
+                        try {
+                            const anilistData = await anilistService.getAnimeById(numericId);
+                            if (/movie/i.test(anilistData?.type || '')) {
+                                timer.end();
+                                return [{
+                                    id: streamingId,
+                                    number: 1,
+                                    title: anilistData?.title || 'Movie',
+                                    isFiller: false,
+                                    hasSub: true,
+                                    hasDub: false,
+                                }];
+                            }
+                        } catch { /* ignore */ }
                     }
-
-                    const anilistData = await anilistService.getAnimeById(numericId);
-
-                    if (anilistData?.title) {
-                        const titlesToTry = [
-                            anilistData.titleEnglish,
-                            anilistData.titleRomaji,
-                            anilistData.titleJapanese,
-                            anilistData.title,
-                        ]
-                            .filter((t): t is string => typeof t === 'string' && t.trim().length >= 2)
-                            .map((t) => t.trim());
-
-                        // De-dupe while preserving order
-                        const seen = new Set<string>();
-                        const uniqueTitles = titlesToTry.filter((t) => {
-                            const key = t.toLowerCase();
-                            if (seen.has(key)) return false;
-                            seen.add(key);
-                            return true;
-                        });
-
-                        console.log(
-                            `   🔍 Resolving streaming episodes for AniList titles: ${uniqueTitles
-                                .map((t) => `"${t}"`)
-                                .join(' | ')} (type: ${anilistData.type})`
-                        );
-
-                        const isMovie = /movie/i.test(anilistData.type || '');
-
-                        // Helper: synthesize a single episode for movies when source returns empty list
-                        const syntheticMovieEpisode = (streamingId: string, title: string): Episode[] => [{
-                            id: streamingId,
-                            number: 1,
-                            title: title || 'Movie',
-                            isFiller: false,
-                            hasSub: true,
-                            hasDub: false,
-                        }];
-
-                        for (const searchTitle of uniqueTitles) {
-                            const byTitle = await this.findStreamingAnimeByTitle(searchTitle, anilistData.type);
-                            if (!byTitle?.id || byTitle.id.startsWith('anilist-')) continue;
-
-                            console.log(`   ✅ findStreamingAnimeByTitle: "${byTitle.title}" (${byTitle.id})`);
-                            const episodes = await this.getEpisodes(byTitle.id);
-                            if (episodes && episodes.length > 0) {
-                                const duration = Date.now() - startTime;
-                                console.log(`   ✅ Got ${episodes.length} episodes via title match in ${duration}ms`);
-                                // Cache this resolution for 30 min
-                                this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
-                                timer.end();
-                                return episodes;
-                            }
-                            // For movies: streaming source found but episode list empty — synthesize ep 1
-                            if (isMovie) {
-                                console.log(`   🎬 Movie match found with empty episodes, synthesizing ep 1 for ${byTitle.id}`);
-                                this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
-                                timer.end();
-                                return syntheticMovieEpisode(byTitle.id, anilistData.title || byTitle.title);
-                            }
-                        }
-
-                        // Fallback: try searching with simplified title (remove common suffixes/prefixes)
-                        console.log(`   🔍 Trying simplified title search as fallback`);
-                        const simplifiedTitles = uniqueTitles.map(t => {
-                            return t
-                                .replace(/-\s*the movie:\s*/gi, '') // Remove "The Movie:" prefix
-                                .replace(/:\s*the movie\s*$/gi, '') // Remove ": The Movie" suffix
-                                .replace(/\s*-\s*mugen train\s*$/gi, '') // Remove specific subtitle (example)
-                                .replace(/\s*-\s*the movie\s*$/gi, '') // Remove " - The Movie" suffix
-                                .replace(/\s*\(movie\)\s*$/gi, '') // Remove "(movie)" suffix
-                                .replace(/\s*-\s*movie\s*$/gi, '') // Remove " - movie" suffix
-                                .replace(/-\s*kimetsu no yaiba\s*-/gi, '') // Remove franchise name (example)
-                                .replace(/-\s*season\s*\d+\s*$/gi, '') // Remove " - Season X"
-                                .trim();
-                        }).filter(t => t.length > 2);
-
-                        for (const simplifiedTitle of simplifiedTitles) {
-                            const byTitle = await this.findStreamingAnimeByTitle(simplifiedTitle, anilistData.type);
-                            if (!byTitle?.id || byTitle.id.startsWith('anilist-')) continue;
-
-                            console.log(`   ✅ findStreamingAnimeByTitle (simplified): "${byTitle.title}" (${byTitle.id})`);
-                            const episodes = await this.getEpisodes(byTitle.id);
-                            if (episodes && episodes.length > 0) {
-                                const duration = Date.now() - startTime;
-                                console.log(`   ✅ Got ${episodes.length} episodes via simplified title match in ${duration}ms`);
-                                this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
-                                timer.end();
-                                return episodes;
-                            }
-                            if (isMovie) {
-                                console.log(`   🎬 Movie match (simplified) with empty episodes, synthesizing ep 1 for ${byTitle.id}`);
-                                this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
-                                timer.end();
-                                return syntheticMovieEpisode(byTitle.id, anilistData.title || byTitle.title);
-                            }
-                        }
-
-                        // Final fallback: try searching with just the main title (everything before subtitle)
-                        console.log(`   🔍 Trying main title only as final fallback`);
-                        for (const title of uniqueTitles) {
-                            const mainTitle = title.split(/:\s*|-\s*/)[0].trim();
-                            if (mainTitle.length > 3 && mainTitle !== title) {
-                                const byTitle = await this.findStreamingAnimeByTitle(mainTitle, anilistData.type);
-                                if (!byTitle?.id || byTitle.id.startsWith('anilist-')) continue;
-
-                                console.log(`   ✅ findStreamingAnimeByTitle (main title): "${byTitle.title}" (${byTitle.id})`);
-                                const episodes = await this.getEpisodes(byTitle.id);
-                                if (episodes && episodes.length > 0) {
-                                    const duration = Date.now() - startTime;
-                                    console.log(`   ✅ Got ${episodes.length} episodes via main title match in ${duration}ms`);
-                                    this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
-                                    timer.end();
-                                    return episodes;
-                                }
-                                if (isMovie) {
-                                    console.log(`   🎬 Movie match (main title) with empty episodes, synthesizing ep 1 for ${byTitle.id}`);
-                                    this.anilistStreamingIdCache.set(numericId, { streamingId: byTitle.id, timestamp: Date.now() });
-                                    timer.end();
-                                    return syntheticMovieEpisode(byTitle.id, anilistData.title || byTitle.title);
-                                }
-                            }
-                        }
-
-                        console.log(`   ⚠️ No streaming episodes for AniList titles (all attempts failed)`);
-                    }
+                } catch (err) {
+                    console.log(`   ❌ AniList resolution failed: ${(err as Error).message}`);
                 }
-            } catch (err) {
-                console.log(`   ❌ AniList title search failed: ${(err as Error).message}`);
             }
-
             timer.end();
             return [];
         }
