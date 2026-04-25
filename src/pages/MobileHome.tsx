@@ -218,6 +218,34 @@ function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>[
         )}
       </div>
 
+      {/* ── Poster card — top right (matches desktop design) ─── */}
+      <div
+        className={cn(
+          'absolute top-3 right-3 z-[6] transition-all duration-300',
+          panelVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
+        )}
+        onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
+      >
+        <div className="relative w-[72px] aspect-[2/3] rounded-xl overflow-hidden shadow-2xl shadow-black/60 ring-1 ring-white/15">
+          {anime.coverImage?.large || anime.coverImage?.extraLarge ? (
+            <img
+              src={anime.coverImage?.extraLarge || anime.coverImage?.large}
+              alt={title}
+              className="w-full h-full object-cover"
+              loading="eager"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <div className="w-full h-full bg-zinc-800" />
+          )}
+          {rating && (
+            <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[9px] font-bold text-amber-300">
+              <Star className="w-2 h-2 fill-amber-400 text-amber-400" />{rating}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* ── Overlaid content — bottom of hero ─────────────────── */}
       <div
         className={cn(
