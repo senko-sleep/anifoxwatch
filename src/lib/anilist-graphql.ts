@@ -1,9 +1,10 @@
 /**
- * Shared AniList GraphQL access: one-at-a-time pacing + 429 retry.
- * Prevents concurrent browser calls from tripping public rate limits (~90 req/min).
+ * Shared AniList GraphQL access: proxied through our Vercel API to avoid
+ * browser CORS blocks. One-at-a-time pacing + 429 retry.
  */
+import { apiUrl } from '@/lib/api-config';
 
-export const ANILIST_GRAPHQL_URL = 'https://graphql.anilist.co';
+export const ANILIST_GRAPHQL_URL = apiUrl('/api/anilist/graphql');
 
 const MIN_SPACING_MS = 850;
 const MAX_429_RETRIES = 5;

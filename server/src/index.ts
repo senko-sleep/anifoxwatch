@@ -9,6 +9,7 @@ import monitoringRoutes from './routes/monitoring.js';
 import { logger, createRequestContext, PerformanceTimer } from './utils/logger.js';
 import { reliabilityMiddleware, healthCheckMiddleware } from './middleware/reliability.js';
 import { REGISTERED_SOURCE_NAMES } from './registered-sources.js';
+import { initDatabase } from './lib/db.js';
 // Extend Request interface to include id and reliability utilities
 interface ExtendedRequest extends Request {
     id: string;
@@ -170,6 +171,23 @@ app.use('/api/stream', streamingRoutes);
 app.use('/api/hianime-rest', hianimeRestProxyRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 
+// AniList GraphQL proxy — browsers can't call graphql.anilist.co directly due to CORS;
+// route all queries through here so they originate from the server.
+app.post('/api/anilist/graphql', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { default: axios } = await import('axios');
+        const response = await axios.post('https://graphql.anilist.co', req.body, {
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            timeout: 10000,
+        });
+        res.set('Cache-Control', 'public, max-age=300');
+        res.json(response.data);
+    } catch (err: any) {
+        const status = err?.response?.status || 500;
+        res.status(status).json(err?.response?.data || { error: 'AniList proxy error' });
+    }
+});
+
 // API documentation
 app.get('/api', (_req: Request, res: Response) => {
     res.set('Cache-Control', 'public, max-age=3600');
@@ -248,7 +266,16 @@ process.on('unhandledRejection', (reason: unknown) => {
 // Start server
 let activeServer: ReturnType<typeof app.listen> | null = null;
 
-const startServer = (port: number) => {
+const startServer = async (port: number) => {
+    // Initialize database in background (non-blocking)
+    if (process.env.POSTGRES_URL) {
+        initDatabase().catch(error => {
+            console.error('❌ Failed to initialize database:', error);
+        });
+    } else {
+        console.log('⚠️  POSTGRES_URL not set - using in-memory caching only');
+    }
+
     const server = app.listen(port, () => {
         const isProduction = process.env.NODE_ENV === 'production';
         const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
@@ -284,6 +311,17 @@ const startServer = (port: number) => {
 
     server.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
+            // Auto-incrementing ports breaks the Vite dev proxy (defaults to :3001) and looks like random 500s.
+            // Opt in only when you intentionally run off-default and will point Vite at `VITE_API_PROXY_TARGET`.
+            if (process.env.ALLOW_PORT_FALLBACK !== '1') {
+                console.error(
+                    `❌ Port ${port} is already in use. Another process is bound to this port, so the API cannot start.\n` +
+                        `Fix: stop the other listener on port ${port}, or set PORT to a free port and set Vite's VITE_API_PROXY_TARGET / VITE_API_PROXY_PORT to match.\n` +
+                        `Rare escape hatch: ALLOW_PORT_FALLBACK=1`,
+                );
+                process.exit(1);
+            }
+
             console.log(`⚠️  Port ${port} is in use, trying ${port + 1}...`);
             startServer(port + 1);
         } else {
