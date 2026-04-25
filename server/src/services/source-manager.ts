@@ -3812,9 +3812,24 @@ export class SourceManager {
     async resolveAniListToStreamingId(anilistNumericId: number): Promise<string | null> {
         if (!Number.isFinite(anilistNumericId) || anilistNumericId <= 0) return null;
 
+        // 1. In-memory cache (warm instances)
         const cachedMapping = this.anilistStreamingIdCache.get(anilistNumericId);
         if (cachedMapping && cachedMapping.timestamp > Date.now() - this.ANILIST_STREAMING_ID_TTL) {
             return cachedMapping.streamingId;
+        }
+
+        // 2. DB cache — persists across cold Vercel starts and prevents duplicate AniList calls
+        //    when /api/anime and /api/anime/episodes fire in parallel for the same AniList ID.
+        //    We store the resolved streaming ID under the key 'anilist-<numericId>' in source_preferences.
+        if (process.env.POSTGRES_URL) {
+            try {
+                const dbCached = await AnimeCache.getSourcePreference(`anilist-${anilistNumericId}`);
+                if (dbCached && dbCached.startsWith('animekai-')) {
+                    this.anilistStreamingIdCache.set(anilistNumericId, { streamingId: dbCached, timestamp: Date.now() });
+                    console.log(`   💾 DB cache hit: anilist-${anilistNumericId} → ${dbCached}`);
+                    return dbCached;
+                }
+            } catch { /* ignore DB errors */ }
         }
 
         const anilistData = await anilistService.getAnimeById(anilistNumericId);
@@ -3837,11 +3852,19 @@ export class SourceManager {
             return true;
         });
 
+        // Helper: save resolved mapping to both in-memory and DB caches
+        const saveMapping = (streamingId: string) => {
+            this.anilistStreamingIdCache.set(anilistNumericId, { streamingId, timestamp: Date.now() });
+            if (process.env.POSTGRES_URL) {
+                AnimeCache.setSourcePreference(`anilist-${anilistNumericId}`, streamingId).catch(() => {});
+            }
+        };
+
         // Fast path: try the dedicated title matcher.
         for (const t of uniqueTitles) {
             const match = await this.findStreamingAnimeByTitle(t, anilistData.type);
             if (match?.id && !match.id.startsWith('anilist-')) {
-                this.anilistStreamingIdCache.set(anilistNumericId, { streamingId: match.id, timestamp: Date.now() });
+                saveMapping(match.id);
                 return match.id;
             }
         }
@@ -3881,7 +3904,7 @@ export class SourceManager {
                 .sort((a, b) => b.s - a.s)[0];
 
             if (best?.c?.id && best.s >= 0.34) {
-                this.anilistStreamingIdCache.set(anilistNumericId, { streamingId: best.c.id, timestamp: Date.now() });
+                saveMapping(best.c.id);
                 return best.c.id;
             }
         }
