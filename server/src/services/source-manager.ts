@@ -1294,37 +1294,90 @@ export class SourceManager {
             .trim();
     }
 
+    /** Source priority for dedup — lower index wins */
+    private readonly SOURCE_PRIORITY = ['animekai-', 'animepahe-', 'allAnime-', 'consumet-', 'animeflv-'];
+    private sourceRank(id: string): number {
+        const idx = this.SOURCE_PRIORITY.findIndex(p => id.startsWith(p));
+        return idx === -1 ? this.SOURCE_PRIORITY.length : idx;
+    }
+
     /**
-     * Deduplicate search results: only collapse entries that are truly the same
-     * anime from different sources (same title + season). Prefer AnimeKai IDs.
+     * Deduplicate search results: collapse entries that are the same anime
+     * from different sources. AnimeKai wins over AnimeFLV.
+     * Also does fuzzy cross-source dedup: "Re:ZERO -Starting Life in Another World-"
+     * and "Re:Zero kara Hajimeru Isekai Seikatsu" (same show, different romanisations)
+     * are collapsed by checking word overlap after title normalisation.
      */
     private deduplicateResults(results: AnimeBase[]): AnimeBase[] {
         const unique = new Map<string, AnimeBase>();
         const titleMap = new Map<string, AnimeBase>();
 
+        // Normalise + extract season so "Re:ZERO" and "Re Zero" collapse but
+        // "Re:ZERO Season 2" and "Re:ZERO Season 3" stay separate.
+        const normTitle = (t: string) =>
+            t.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+        const extractSeasonNum = (t: string): number | null => {
+            const m = t.match(/(?:season|cour|part)\s*(\d+)/i) || t.match(/(\d+)(?:st|nd|rd|th)\s*season/i) || t.match(/\b(\d+)(?:nd|rd|th)\s*(?:season|cour|part)/i);
+            return m ? parseInt(m[1], 10) : null;
+        };
+
+        // For fuzzy cross-source dedup, keep a list of accepted entries to compare against
+        const accepted: AnimeBase[] = [];
+
+        const isSameShow = (a: string, b: string): boolean => {
+            const na = normTitle(a);
+            const nb = normTitle(b);
+            if (na === nb) return true;
+            // Check season numbers — if both have a season and they differ, not same entry
+            const sa = extractSeasonNum(na);
+            const sb = extractSeasonNum(nb);
+            if (sa !== null && sb !== null && sa !== sb) return false;
+            // Word overlap — if >60% of the shorter title's meaningful words exist in the longer, treat as same
+            const wa = na.split(/\s+/).filter(w => w.length > 2);
+            const wb = nb.split(/\s+/).filter(w => w.length > 2);
+            const shorter = wa.length <= wb.length ? wa : wb;
+            const longer  = wa.length <= wb.length ? wb : wa;
+            if (shorter.length === 0) return false;
+            const overlap = shorter.filter(w => longer.includes(w)).length;
+            return overlap / shorter.length >= 0.65;
+        };
+
         for (const anime of results) {
             if (unique.has(anime.id)) continue;
+            const key = normTitle(anime.title);
 
-            const key = this.normalizeForSearchDedup(anime.title);
-
+            // Exact-key match
             if (titleMap.has(key)) {
                 const existing = titleMap.get(key)!;
-                // Always keep AnimeFLV version for streaming reliability
-                const existingIsFLV = existing.id?.startsWith('animeflv-');
-                const incomingIsFLV = anime.id?.startsWith('animeflv-');
-                if (existingIsFLV && !incomingIsFLV) continue;
-                if (incomingIsFLV && !existingIsFLV) {
+                if (this.sourceRank(anime.id) < this.sourceRank(existing.id)) {
                     unique.delete(existing.id);
                     unique.set(anime.id, anime);
                     titleMap.set(key, anime);
-                    continue;
+                    // Replace in accepted list
+                    const ai = accepted.indexOf(existing);
+                    if (ai !== -1) accepted[ai] = anime;
                 }
-                // Same source or neither is primary — keep first
+                continue;
+            }
+
+            // Fuzzy cross-source match (catches different romanisations of same title)
+            const fuzzyMatch = accepted.find(a => isSameShow(a.title, anime.title));
+            if (fuzzyMatch) {
+                if (this.sourceRank(anime.id) < this.sourceRank(fuzzyMatch.id)) {
+                    unique.delete(fuzzyMatch.id);
+                    unique.set(anime.id, anime);
+                    titleMap.set(normTitle(fuzzyMatch.title), anime);
+                    titleMap.set(key, anime);
+                    const ai = accepted.indexOf(fuzzyMatch);
+                    if (ai !== -1) accepted[ai] = anime;
+                }
                 continue;
             }
 
             unique.set(anime.id, anime);
             titleMap.set(key, anime);
+            accepted.push(anime);
         }
 
         return Array.from(unique.values());
@@ -3983,6 +4036,8 @@ export class SourceManager {
                 score *= 1.3;
             } else if (season1 !== null && season2 !== null && season1 !== season2) {
                 score *= 0.3;
+            } else if (season1 !== null && season2 === null) {
+                score *= 0.5; // query wants specific season, result has none
             }
             return score;
         }
@@ -3992,6 +4047,8 @@ export class SourceManager {
                 score *= 1.3;
             } else if (season1 !== null && season2 !== null && season1 !== season2) {
                 score *= 0.3;
+            } else if (season1 !== null && season2 === null) {
+                score *= 0.5;
             }
             return score;
         }
@@ -4009,6 +4066,11 @@ export class SourceManager {
             } else {
                 baseScore *= 0.3;
             }
+        } else if (season1 !== null && season2 === null) {
+            // Query explicitly asks for a season but result has no season indicator —
+            // likely S1 matching a query for S3. Apply a meaningful penalty so the
+            // wrong season doesn't win over a correct match.
+            baseScore *= 0.5;
         }
 
         const missingRatio = (words1.length - matchedQueryWords.length) / words1.length;

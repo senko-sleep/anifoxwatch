@@ -136,7 +136,12 @@ export class AnimeFLVSource extends BaseAnimeSource {
             const results: AnimeBase[] = [];
 
             $('.ListAnimes .Anime').each((i, el) => {
-                const title = $(el).find('.Title').text().trim();
+                const rawTitle = $(el).find('.Title').text().trim();
+                // AnimeFLV sometimes doubles the title text inside the element — deduplicate
+                const half = Math.floor(rawTitle.length / 2);
+                const title = (rawTitle.length > 0 && rawTitle.length % 2 === 0 && rawTitle.slice(0, half) === rawTitle.slice(half))
+                    ? rawTitle.slice(0, half)
+                    : rawTitle;
                 const href = $(el).find('a').attr('href') || '';
                 const id = href.split('/anime/').pop() || '';
                 const image = $(el).find('img').attr('src') || '';
