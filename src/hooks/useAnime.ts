@@ -132,7 +132,17 @@ export function useAnime(id: string, enabled: boolean = true, source?: string) {
 export function useEpisodes(animeId: string, enabled: boolean = true, source?: string) {
     return useQuery<Episode[], Error>({
         queryKey: [...queryKeys.episodes(animeId), source],
-        queryFn: () => apiClient.getEpisodes(animeId, source),
+        queryFn: async () => {
+            // For AniList IDs, resolve to the direct streaming ID first.
+            // The /api/anime/resolve endpoint is reliably cached (in-memory + DB)
+            // and avoids hitting AniList under rate-limit conditions on the server.
+            let fetchId = animeId;
+            if (animeId.startsWith('anilist-')) {
+                const resolved = await apiClient.resolveAniListToStreamingId(animeId);
+                if (resolved?.streamingId) fetchId = resolved.streamingId;
+            }
+            return apiClient.getEpisodes(fetchId, source);
+        },
         enabled: enabled && animeId.length > 0,
         staleTime: 10 * 60 * 1000,
     });
@@ -246,7 +256,15 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
         enabled: enabled && episodeId.length > 0,
         staleTime: 2 * 60 * 1000,   // 2 min — reuse when toggling sub/dub or returning quickly
         gcTime: 5 * 60 * 1000,
-        retry: 2,
+        // AbortError = hard timeout (10s). Don't retry or the UI can appear to "load forever".
+        retry: (failureCount, error) => {
+            if (error?.name === 'AbortError') return false;
+            const status = (error as { status?: number })?.status;
+            if (status === 404) return false;
+            const msg = String((error as Error)?.message || '');
+            if (/404|no streaming sources found/i.test(msg)) return false;
+            return failureCount < 2;
+        },
         retryDelay: (attempt: number) => Math.min(2000 * Math.pow(2, attempt), 10000),
         refetchOnWindowFocus: false,
     });
