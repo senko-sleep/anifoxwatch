@@ -3425,7 +3425,7 @@ export class SourceManager {
                 ]);
                 if (!searchResult.results?.length) throw new Error('no results');
 
-                const bestMatch = searchResult.results[0];
+                const bestMatch = this.findBestMatch(searchTitle, searchResult.results) ?? searchResult.results[0];
                 console.log(`   📺 ${srcName} found: "${bestMatch.title}" (${bestMatch.id})`);
 
                 const episodes = await Promise.race([
@@ -3497,7 +3497,8 @@ export class SourceManager {
             ]);
             if (!searchResult.results?.length) return null;
 
-            const bestMatch = searchResult.results[0];
+            // Use scored matching — never blindly pick results[0] which may be the wrong season
+            const bestMatch = this.findBestMatch(title, searchResult.results) ?? searchResult.results[0];
             console.log(`[AllAnime fallback] Found: "${bestMatch.title}" (${bestMatch.id})`);
 
             const episodes = await Promise.race([
