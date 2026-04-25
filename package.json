@@ -21,7 +21,7 @@
     "deploy": "npm run deploy:hosting",
     "deploy:frontend": "npm run deploy:hosting",
     "deploy:hosting": "npm run build && npx firebase deploy --only hosting",
-    "deploy:api": "echo 'Push to GitHub - Render.com auto-deploys'",
+    "deploy:api": "echo 'Push to GitHub - Vercel auto-deploys the API'",
     "deploy:firebase": "npx firebase deploy",
     "deploy:firebase:hosting": "npx firebase deploy --only hosting",
     "deploy:firebase:functions": "npx firebase deploy --only functions",
