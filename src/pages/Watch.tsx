@@ -109,14 +109,14 @@ const Watch = () => {
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(1);
   const [audioType, setAudioType] = useState<AudioType>(() => {
-    // Restore stored preference; default to sub — dub auto-switches when confirmed available
+    // Restore stored preference; default to dub — auto-falls back to sub if dub has no sources
     try {
       const animeId = new URLSearchParams(window.location.search).get('id') || '';
       const prefs = JSON.parse(localStorage.getItem('anime_audio_prefs') || '{}');
       if (prefs[animeId] === 'dub') return 'dub';
       if (prefs[animeId] === 'sub') return 'sub';
     } catch { /* ignore */ }
-    return 'sub'; // Default to sub — auto-switches to dub when metadata confirms it
+    return 'dub';
   });
   const [audioManuallySet, setAudioManuallySet] = useState(false);
   const [quality, setQuality] = useState<QualityType>('auto');
