@@ -4129,7 +4129,9 @@ export class SourceManager {
             console.log(`🔎 [SourceManager] Finding streaming match for AniList title: "${title}" (type: ${animeType || 'unknown'})`);
 
             // Check cache first
-            const cacheKey = title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 30);
+            // Use full normalised title — truncating to 30 chars caused "Season 4" to share
+            // a cache key with the base title, returning the wrong season's search results.
+            const cacheKey = title.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
             const cached = this.searchCache.get(cacheKey);
             if (cached && cached.timestamp > Date.now() - this.SEARCH_CACHE_TTL) {
                 console.log(`   ✅ Using cached results for "${title}"`);
