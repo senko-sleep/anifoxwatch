@@ -110,7 +110,7 @@ const Watch = () => {
       const prefs = JSON.parse(localStorage.getItem('anime_audio_prefs') || '{}');
       if (prefs[animeId] === 'dub') return 'dub';
     } catch { /* ignore */ }
-    return 'sub';
+    return 'dub'; // Default to dub
   });
   const [audioManuallySet, setAudioManuallySet] = useState(false);
   const [quality, setQuality] = useState<QualityType>('auto');
@@ -138,7 +138,7 @@ const Watch = () => {
 
   // Data fetching
   const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
-  const { data: episodes, isLoading: episodesLoading, isFetching: episodesFetching } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
+  const { data: episodes, isLoading: episodesLoading, isFetching: episodesFetching, error: episodesError, refetch: refetchEpisodes } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
   const { data: servers, isLoading: serversLoading } = useEpisodeServers(selectedEpisode || '', !!selectedEpisode);
   const serversHaveDub = useMemo(
     () => servers?.some((s) => s.type === 'dub') ?? false,
@@ -617,32 +617,58 @@ const Watch = () => {
   }
 
   if (!episodes || episodes.length === 0) {
+    const isServerError = !!episodesError;
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <Navbar />
         <main className="flex-1 container py-8">
           <div className="flex flex-col items-center justify-center py-20">
-            <AlertCircle className="w-16 h-16 text-yellow-500 mb-4" />
-            <h2 className="text-2xl font-bold mb-2">No Episodes Found</h2>
+            <AlertCircle className={`w-16 h-16 mb-4 ${isServerError ? 'text-red-500' : 'text-yellow-500'}`} />
+            <h2 className="text-2xl font-bold mb-2">
+              {isServerError ? 'Server Error' : 'No Episodes Found'}
+            </h2>
             <p className="text-muted-foreground mb-6 text-center max-w-md">
-              We couldn't find any episodes for this anime. This might be because:
-              <br /><br />
-              • The anime is not yet released
-              <br />
-              • It's a new entry that hasn't been added to streaming sources
-              <br />
-              • The AniList entry needs to be linked to streaming sources
+              {isServerError ? (
+                <>
+                  The server returned an error while loading episodes. This is usually a temporary issue — the server may be starting up or overloaded.
+                  <br /><br />
+                  <span className="text-xs font-mono text-red-400/80">
+                    {(episodesError as Error)?.message || 'Unknown server error'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  We couldn&apos;t find any episodes for this anime. This might be because:
+                  <br /><br />
+                  • The anime is not yet released
+                  <br />
+                  • It&apos;s a new entry that hasn&apos;t been added to streaming sources
+                  <br />
+                  • The AniList entry needs to be linked to streaming sources
+                </>
+              )}
             </p>
 
             <div className="flex flex-col gap-4 w-full max-w-md">
-              <Button
-                onClick={() => navigate(`/browse?q=${encodeURIComponent(anime?.title || 'anime')}`)}
-                variant="default"
-                className="bg-fox-orange hover:bg-fox-orange/90"
-              >
-                <Play className="w-4 h-4 mr-2" />
-                Search for "{anime?.title || 'anime'}"
-              </Button>
+              {isServerError ? (
+                <Button
+                  onClick={() => refetchEpisodes()}
+                  variant="default"
+                  className="bg-fox-orange hover:bg-fox-orange/90"
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Retry
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => navigate(`/browse?q=${encodeURIComponent(anime?.title || 'anime')}`)}
+                  variant="default"
+                  className="bg-fox-orange hover:bg-fox-orange/90"
+                >
+                  <Play className="w-4 h-4 mr-2" />
+                  Search for &quot;{anime?.title || 'anime'}&quot;
+                </Button>
+              )}
 
               {cleanAnimeId.startsWith('anilist-') && (
                 <a

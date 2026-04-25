@@ -4073,7 +4073,12 @@ export class SourceManager {
                 return this.findBestMatch(title, cached.results, animeType);
             }
 
-            let source = this.sources.get('Kaido');
+            // Prefer AnimeKai (most reliable) → Kaido → 9Anime → any available
+            let source = this.sources.get('AnimeKai');
+            if (!source || !source.isAvailable) {
+                console.log(`   ⚠️ AnimeKai not available, trying Kaido...`);
+                source = this.sources.get('Kaido');
+            }
             if (!source || !source.isAvailable) {
                 console.log(`   ⚠️ Kaido not available, trying 9Anime...`);
                 source = this.sources.get('9Anime');
