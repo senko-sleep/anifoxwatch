@@ -258,25 +258,28 @@ export const VideoPlayer = ({
         hlsRef.current.destroy();
       }
 
+      const onMobile = isMobile();
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
+        lowLatencyMode: false,         // off on mobile — reduces CPU churn
         liveSyncDurationCount: 3,
         liveMaxLatencyDurationCount: 5,
         liveDurationInfinity: true,
-        backBufferLength: 60,
-        maxBufferLength: 60,
-        maxMaxBufferLength: 120,
-        maxBufferHole: 0.3,
+        backBufferLength: onMobile ? 20 : 60,
+        maxBufferLength: onMobile ? 20 : 60,
+        maxMaxBufferLength: onMobile ? 40 : 120,
+        maxBufferHole: 0.5,
         startLevel: -1,
-        abrEwmaDefaultEstimate: 50000000,
-        abrEwmaFastLive: 5,
-        abrEwmaSlowLive: 15,
-        abrEwmaFastVoD: 5,
-        abrEwmaSlowVoD: 15,
+        // 50 Mbps default made HLS instantly pick the highest quality on mobile,
+        // causing stall-then-drop. 1 Mbps lets ABR ramp up naturally from a stable start.
+        abrEwmaDefaultEstimate: onMobile ? 1000000 : 50000000,
+        abrEwmaFastLive: 3,
+        abrEwmaSlowLive: 9,
+        abrEwmaFastVoD: 3,
+        abrEwmaSlowVoD: 9,
         abrMaxWithRealBitrate: true,
         testBandwidth: true,
-        startFragPrefetch: true,
+        startFragPrefetch: !onMobile,  // skip prefetch on mobile to save bandwidth
         fragLoadingMaxRetry: 4,
         manifestLoadingMaxRetry: 3,
         levelLoadingMaxRetry: 3,

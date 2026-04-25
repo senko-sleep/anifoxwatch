@@ -715,280 +715,201 @@ const Watch = () => {
     return null;
   })();
 
-  // Mobile: Normal scrollable page layout (not forced fullscreen)
+  // Mobile: immersive layout — full-width player, no navbar, episodes first
   if (isMobile()) {
     return (
-      <div className="min-h-screen flex flex-col bg-background relative overflow-x-hidden">
-        {/* Cinematic Backdrop — same as desktop */}
-        {anime?.cover && (
-          <div className="absolute inset-0 z-0 opacity-15 pointer-events-none select-none overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-background/70 to-background" />
-            <img
-              src={anime.cover}
-              alt=""
-              className="w-full h-full object-cover blur-3xl scale-110"
-            />
-          </div>
-        )}
-        <Navbar />
-
-        <main className="flex-1 relative z-10">
-          {/* Video Player - Larger viewport with HD effect */}
-          <div className="w-full bg-black" ref={playerRef}>
-            <div className="relative w-full max-w-[95vw] mx-auto aspect-[16/9] lg:aspect-[16/8] xl:aspect-[16/7] shadow-2xl ring-1 ring-white/10">
-              <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/20 pointer-events-none z-10" />
-              {streamLoading ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-black">
-                  <div className="flex flex-col items-center gap-3">
-                    <Loader2 className="w-10 h-10 animate-spin text-fox-orange" />
-                    <p className="text-white/80 text-sm">Loading stream...</p>
-                    {streamSlowWarning && (
-                      <p className="text-white/50 text-xs text-center max-w-[220px]">Server is waking up — this can take 30–60 s on first load</p>
-                    )}
-                  </div>
-                </div>
-              ) : embedFallbackUrl ? (
-                <iframe
-                  src={embedFallbackUrl}
-                  className="absolute inset-0 w-full h-full border-0"
-                  allowFullScreen
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  referrerPolicy="no-referrer"
-                />
-              ) : videoSource ? (
-                <VideoPlayer
-                  src={videoSource?.url || ''}
-                  isM3U8={videoSource?.isM3U8}
-                  subtitles={streamData?.subtitles}
-                  intro={streamData?.intro}
-                  outro={streamData?.outro}
-                  onError={handlePlayerError}
-                  poster={anime?.image}
-                  onNextEpisode={handleNextEpisode}
-                  hasNextEpisode={hasNext}
-                  animeId={cleanAnimeId}
-                  selectedEpisodeNum={selectedEpisodeNum}
-                  animeTitle={anime?.title}
-                  animeImage={anime?.image}
-                  animeSeason={anime?.season}
-                />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center bg-black">
-                  <div className="text-center p-6">
-                    <AlertCircle className="w-10 h-10 text-yellow-500 mx-auto mb-3" />
-                    <p className="text-white font-medium text-sm">No stream available</p>
-                    <Button
-                      size="sm"
-                      className="mt-3 bg-fox-orange"
-                      onClick={() => { setServerRetryCount(0); refetchStream(); }}
-                    >
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                      Retry
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Episode Nav + Title */}
-          <div className="px-4 pt-3 pb-2 border-b border-white/[0.04]">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-medium text-fox-orange/80 uppercase tracking-widest mb-0.5 truncate">{anime?.title}</p>
-                <h2 className="text-sm font-bold text-white leading-tight truncate">
-                  Episode {currentEpisode?.number || selectedEpisodeNum}
-                  {currentEpisode?.title && currentEpisode.title !== `Episode ${currentEpisode.number}` && (
-                    <span className="text-zinc-400 font-normal ml-1.5">
-                      — {currentEpisode.title}
-                    </span>
+      <div className="min-h-screen flex flex-col bg-zinc-950">
+        {/* Full-width player — edge to edge, no side gaps */}
+        <div className="w-full bg-black sticky top-0 z-20" ref={playerRef}>
+          <div className="relative w-full aspect-[16/9]">
+            {streamLoading ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 className="w-9 h-9 animate-spin text-fox-orange" />
+                  <p className="text-white/70 text-xs">Loading stream…</p>
+                  {streamSlowWarning && (
+                    <p className="text-white/40 text-[10px] text-center max-w-[200px]">Server warming up — may take ~30 s</p>
                   )}
-                </h2>
+                </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handlePrevEpisode}
-                  disabled={!hasPrev}
-                  className="border-white/10 hover:bg-white/5 h-9 w-9 p-0 touch-manipulation"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleNextEpisode}
-                  disabled={!hasNext}
-                  className="border-white/10 hover:bg-white/5 h-9 w-9 p-0 touch-manipulation"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </Button>
+            ) : embedFallbackUrl ? (
+              <iframe
+                src={embedFallbackUrl}
+                className="absolute inset-0 w-full h-full border-0"
+                allowFullScreen
+                allow="autoplay; encrypted-media; picture-in-picture"
+                referrerPolicy="no-referrer"
+              />
+            ) : videoSource ? (
+              <VideoPlayer
+                src={videoSource?.url || ''}
+                isM3U8={videoSource?.isM3U8}
+                subtitles={streamData?.subtitles}
+                intro={streamData?.intro}
+                outro={streamData?.outro}
+                onError={handlePlayerError}
+                poster={anime?.image}
+                onNextEpisode={handleNextEpisode}
+                hasNextEpisode={hasNext}
+                animeId={cleanAnimeId}
+                selectedEpisodeNum={selectedEpisodeNum}
+                animeTitle={anime?.title}
+                animeImage={anime?.image}
+                animeSeason={anime?.season}
+                onBack={() => navigate(backUrl)}
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
+                <div className="text-center p-6">
+                  <AlertCircle className="w-10 h-10 text-yellow-500 mx-auto mb-3" />
+                  <p className="text-white font-medium text-sm">No stream available</p>
+                  <Button size="sm" className="mt-3 bg-fox-orange" onClick={() => { setServerRetryCount(0); refetchStream(); }}>
+                    <RefreshCw className="w-4 h-4 mr-2" />Retry
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <main className="flex-1">
+          {/* Episode nav + title + sub/dub — one compact row */}
+          <div className="px-3 py-2.5 bg-zinc-900/80 border-b border-white/[0.05]">
+            <div className="flex items-center gap-2">
+              <button onClick={() => navigate(backUrl)} className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 active:bg-white/10 touch-manipulation">
+                <ArrowLeft className="w-4 h-4 text-white/70" />
+              </button>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] text-fox-orange/80 font-medium uppercase tracking-wider truncate">{anime?.title}</p>
+                <p className="text-xs font-semibold text-white truncate">
+                  Ep {currentEpisode?.number || selectedEpisodeNum}
+                  {currentEpisode?.title && currentEpisode.title !== `Episode ${currentEpisode.number}` && (
+                    <span className="text-zinc-400 font-normal"> — {currentEpisode.title}</span>
+                  )}
+                </p>
+              </div>
+              {/* Sub/Dub toggle */}
+              <div className="flex items-center gap-1 shrink-0">
+                {(currentEpisode?.hasSub !== false) && (
+                  <button
+                    onClick={() => { setAudioManuallySet(true); setAudioType('sub'); }}
+                    className={cn("px-2 py-1 rounded text-[10px] font-bold touch-manipulation transition-colors",
+                      audioType === 'sub' ? "bg-fox-orange text-white" : "bg-white/10 text-white/60")}
+                  >SUB</button>
+                )}
+                {dubAvailable && (
+                  <button
+                    onClick={() => { setAudioManuallySet(true); setAudioType('dub'); }}
+                    className={cn("px-2 py-1 rounded text-[10px] font-bold touch-manipulation transition-colors",
+                      audioType === 'dub' ? "bg-green-500 text-white" : "bg-white/10 text-white/60")}
+                  >DUB</button>
+                )}
+              </div>
+              {/* Prev/Next */}
+              <div className="flex items-center gap-1 shrink-0">
+                <button onClick={handlePrevEpisode} disabled={!hasPrev}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 disabled:opacity-30 active:bg-white/10 touch-manipulation">
+                  <ChevronLeft className="w-4 h-4 text-white" />
+                </button>
+                <button onClick={handleNextEpisode} disabled={!hasNext}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 disabled:opacity-30 active:bg-white/10 touch-manipulation">
+                  <ChevronRight className="w-4 h-4 text-white" />
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Streaming Controls */}
-          <div className="px-4 pb-2">
-            <StreamingControls
-              audioType={audioType}
-              onAudioTypeChange={(type) => {
-                setAudioManuallySet(true);
-                setAudioType(type);
-              }}
-              quality={quality}
-              onQualityChange={setQuality}
-              availableQualities={streamData?.sources?.map(s => s.quality) || []}
-              servers={servers || []}
-              selectedServer={selectedServer}
-              onServerChange={(server) => {
-                setSelectedServer(server);
-                setUserPickedServer(true);
-                setServerRetryCount(0);
-              }}
-              serversLoading={serversLoading}
-              autoPlay={autoPlay}
-              onAutoPlayChange={setAutoPlay}
-              currentSource={streamData?.source}
-              hasDub={dubAvailable}
-              hasSub={currentEpisode?.hasSub !== false}
-            />
-          </div>
-
-          {/* Download Manager */}
-          {episodes && episodes.length > 0 && (
-            <div className="px-4 pb-2">
-              <DownloadManager
-                episodes={episodes}
-                animeTitle={anime?.title || 'Anime'}
-                animeId={cleanAnimeId}
-                audioType={audioType}
-              />
+          {/* Server selector — compact, only shown when servers are loaded */}
+          {servers && servers.filter(s => s.name.toLowerCase() !== 'default').length > 1 && (
+            <div className="px-3 py-2 bg-zinc-900/60 border-b border-white/[0.04] flex items-center gap-2 overflow-x-auto scrollbar-none">
+              <span className="text-[10px] text-zinc-500 uppercase tracking-wider shrink-0">Server</span>
+              {servers.filter(s => s.name.toLowerCase() !== 'default').map(s => (
+                <button
+                  key={s.name}
+                  onClick={() => { setSelectedServer(s.name); setUserPickedServer(true); setServerRetryCount(0); }}
+                  className={cn(
+                    "shrink-0 px-2.5 py-1 rounded-full text-[10px] font-medium touch-manipulation transition-colors",
+                    selectedServer === s.name ? "bg-fox-orange text-white" : "bg-white/8 text-white/60 active:bg-white/15"
+                  )}
+                >{s.name}</button>
+              ))}
             </div>
           )}
 
-          {/* About Section */}
-          <div className="px-4 pb-4">
-            <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4 backdrop-blur-sm">
-              <div className="flex gap-3">
-                <img
-                  src={anime?.image}
-                  alt=""
-                  className="h-28 w-20 shrink-0 rounded-lg object-cover ring-1 ring-white/10"
-                />
-                <div className="min-w-0 flex-1">
-                  <h3 className="font-display text-sm font-bold text-white leading-tight">{anime?.title}</h3>
-                  {anime?.titleJapanese && (
-                    <p className="mt-0.5 text-xs italic text-muted-foreground truncate">{anime.titleJapanese}</p>
-                  )}
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {formatRating(anime?.rating) && (
-                      <Badge variant="secondary" className="gap-1 border-yellow-500/20 bg-yellow-500/10 text-yellow-500 text-[10px] px-1.5 py-0">
-                        <Star className="h-2.5 w-2.5 fill-current" />
-                        {formatRating(anime?.rating)}
-                      </Badge>
+          {/* Episode List — right below the player where it belongs */}
+          <div className="px-3 pt-3 pb-2">
+            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+              Episodes <span className="text-zinc-600">{episodes?.length || 0}</span>
+            </p>
+            <div className="space-y-1">
+              {episodes?.map((ep) => {
+                const progress = getEpisodeProgress(ep.number);
+                return (
+                  <button
+                    key={ep.id}
+                    onClick={() => handleEpisodeSelect(ep.id, ep.number)}
+                    className={cn(
+                      "w-full rounded-xl text-left relative overflow-hidden touch-manipulation active:scale-[0.98] transition-transform",
+                      selectedEpisode === ep.id ? "bg-fox-orange" : "bg-white/[0.04] active:bg-white/[0.08]"
                     )}
-                    <Badge variant="outline" className="border-white/10 text-[10px] px-1.5 py-0">{anime?.type}</Badge>
-                    {anime?.status && (
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "text-[10px] px-1.5 py-0",
-                          anime.status === 'Ongoing'
-                            ? 'border-green-500/50 bg-green-500/10 text-green-500'
-                            : anime.status === 'Completed'
-                              ? 'border-blue-500/50 bg-blue-500/10 text-blue-500'
-                              : 'border-yellow-500/50 bg-yellow-500/10 text-yellow-500'
-                        )}
-                      >
-                        {anime.status}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-                    {(anime?.season || anime?.year != null) && (
-                      <span className="inline-flex items-center gap-1">
-                        <Calendar className="h-3 w-3 opacity-80" />
-                        {[anime.season, anime.year].filter((v) => v != null && v !== '').join(' ')}
+                  >
+                    <div className="flex items-center gap-3 px-3 py-3 relative z-10">
+                      <span className={cn(
+                        "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0",
+                        selectedEpisode === ep.id ? "bg-white/25 text-white" : "bg-white/8 text-white/70"
+                      )}>
+                        {selectedEpisode === ep.id ? <Play className="w-3.5 h-3.5 fill-current" /> : ep.number}
                       </span>
+                      <div className="flex-1 min-w-0">
+                        <p className={cn("text-sm font-medium truncate", selectedEpisode === ep.id ? "text-white" : "text-white/85")}>
+                          {ep.title || `Episode ${ep.number}`}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {ep.hasSub && <span className="text-[10px] text-white/40">SUB</span>}
+                          {(ep.hasDub || (anime?.dubCount != null && ep.number <= anime.dubCount)) && (
+                            <span className="text-[10px] text-green-400/70">DUB</span>
+                          )}
+                          {progress > 0 && progress < 0.9 && (
+                            <span className={cn("text-[10px]", selectedEpisode === ep.id ? "text-white/70" : "text-fox-orange")}>{Math.round(progress * 100)}%</span>
+                          )}
+                          {progress >= 0.9 && <span className="text-[10px] text-green-400">Watched</span>}
+                        </div>
+                      </div>
+                    </div>
+                    {progress > 0 && selectedEpisode !== ep.id && (
+                      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/8">
+                        <div className={cn("h-full", progress >= 0.9 ? "bg-green-500" : "bg-fox-orange")} style={{ width: `${Math.min(100, progress * 100)}%` }} />
+                      </div>
                     )}
-                    <span className="inline-flex items-center gap-1">
-                      <Tv className="h-3 w-3 opacity-80" />
-                      {anime?.episodes || '?'} eps
-                    </span>
-                  </div>
-                </div>
-              </div>
-              {plainDescription(anime?.description) && (
-                <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-                  {plainDescription(anime?.description)}
-                </p>
-              )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Episode List */}
-          <div className="px-4 pb-6">
-            <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] backdrop-blur-sm overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.05]">
-                <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">
-                  Episodes
-                  <span className="text-white/30 font-normal ml-2">{episodes?.length || 0}</span>
-                </h3>
-              </div>
-              <div className="max-h-[50vh] overflow-y-auto overscroll-contain p-2 space-y-1">
-                {episodes?.map((ep) => {
-                  const progress = getEpisodeProgress(ep.number);
-                  return (
-                    <button
-                      key={ep.id}
-                      onClick={() => handleEpisodeSelect(ep.id, ep.number)}
-                      className={cn(
-                        "w-full rounded-lg text-left transition-colors relative overflow-hidden touch-manipulation",
-                        selectedEpisode === ep.id ? "bg-fox-orange text-white" : "bg-white/[0.03] text-white/80 active:bg-white/10"
-                      )}
-                    >
-                      <div className="flex items-center gap-3 px-3 py-2.5 relative z-10">
-                        <span className={cn(
-                          "w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold shrink-0",
-                          selectedEpisode === ep.id ? "bg-white/20" : "bg-white/10"
-                        )}>
-                          {selectedEpisode === ep.id ? <Play className="w-3 h-3 fill-current" /> : ep.number}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm truncate">{ep.title || `Episode ${ep.number}`}</p>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            {ep.hasSub && <span className="text-[10px] text-white/50">SUB</span>}
-                            {(ep.hasDub ||
-                              (anime?.dubCount != null && ep.number <= anime.dubCount)) && (
-                              <span className="text-[10px] text-green-400/70">DUB</span>
-                            )}
-                            {progress > 0 && progress < 0.9 && (
-                              <span className="text-[10px] text-fox-orange">{Math.round(progress * 100)}%</span>
-                            )}
-                            {progress >= 0.9 && (
-                              <span className="text-[10px] text-green-400">Watched</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      {progress > 0 && selectedEpisode !== ep.id && (
-                        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
-                          <div
-                            className={cn("h-full rounded-full", progress >= 0.9 ? "bg-green-500" : "bg-fox-orange")}
-                            style={{ width: `${Math.min(100, progress * 100)}%` }}
-                          />
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
+          {/* About — compact, at the bottom */}
+          <div className="px-3 pt-2 pb-6">
+            <div className="flex gap-3 p-3 rounded-xl bg-white/[0.03]">
+              <img src={anime?.image} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-white leading-tight truncate">{anime?.title}</p>
+                {anime?.titleJapanese && <p className="text-[10px] italic text-zinc-500 truncate mt-0.5">{anime.titleJapanese}</p>}
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {formatRating(anime?.rating) && (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] text-yellow-400 bg-yellow-500/10 px-1.5 py-0.5 rounded">
+                      <Star className="h-2.5 w-2.5 fill-current" />{formatRating(anime?.rating)}
+                    </span>
+                  )}
+                  <span className="text-[10px] text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded">{anime?.type}</span>
+                  {anime?.status && <span className="text-[10px] text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded">{anime.status}</span>}
+                </div>
+                {plainDescription(anime?.description) && (
+                  <p className="mt-2 text-[11px] leading-relaxed text-zinc-500 line-clamp-3">{plainDescription(anime?.description)}</p>
+                )}
               </div>
             </div>
           </div>
         </main>
-
-        <Footer />
       </div>
     );
   }
