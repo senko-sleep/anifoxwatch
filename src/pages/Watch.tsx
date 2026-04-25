@@ -7,6 +7,7 @@ import { EpisodeList } from '../components/player/EpisodeList';
 import { StreamingControls } from '../components/player/StreamingControls';
 import { DownloadManager } from '../components/player/DownloadManager';
 import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers, useDubStreamProbe, usePrefetchNextEpisode } from '@/hooks/useAnime';
+import { ping } from '@/utils/keep-alive';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -66,8 +67,12 @@ const Watch = () => {
   // Store the referrer URL (browse URL with params) for going back
   const [backUrl, setBackUrl] = useState<string>('/browse');
 
+  // Immediately ping the API on watch page mount to ensure the Vercel function is warm
+  // before stream fetch begins — eliminates the cold-start delay users see on first load.
+  useEffect(() => { ping(); }, []);
+
   useEffect(() => {
-    // Try to get referrer from navigation state first, 
+    // Try to get referrer from navigation state first,
     // then fall back to sessionStorage (saved by Search page)
     // then fall back to searchParams
     const savedBrowseUrl = sessionStorage.getItem('last_browse_url');

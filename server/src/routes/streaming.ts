@@ -10,6 +10,15 @@ import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streami
 
 const router = Router();
 
+/** When `?ep=` is a non-numeric embed token, allow HiAnime REST to retry with `?ep=<ep_num>` from the query string. */
+function catalogEpisodeFallbackForRest(episodeId: string, episodeNum?: number): number | undefined {
+    if (episodeNum == null || !Number.isFinite(episodeNum) || episodeNum < 1) return undefined;
+    if (!episodeId.includes('?ep=')) return undefined;
+    const epSeg = episodeId.split('?ep=')[1]?.split('&')[0]?.split('#')[0] ?? '';
+    if (!epSeg || /^\d+$/.test(epSeg)) return undefined;
+    return episodeNum;
+}
+
 /** When `REMOTE_PROXY_URL` is unset, chain HLS proxy through the Cloudflare Worker (not Render). */
 const DEFAULT_REMOTE_STREAM_PROXY =
     process.env.DEFAULT_REMOTE_STREAM_PROXY ||
@@ -206,12 +215,37 @@ function isDeadDomain(url: string): boolean {
 
 // Base URL for proxy - used to rewrite stream URLs
 const getProxyBaseUrl = (req: Request): string => {
-    // Force HTTPS on Render.com and other production environments
     const isProduction = process.env.NODE_ENV === 'production';
     const protocol = isProduction ? 'https' : req.protocol;
     const host = req.get('host');
     return `${protocol}://${host}/api/stream/proxy`;
 };
+
+// In-memory stream cache: keeps resolved stream URLs hot between requests within the same
+// Vercel function instance. Avoids hitting AnimeKai on every play/resume/tab-switch.
+const STREAM_CACHE_TTL = 8 * 60 * 1000; // 8 minutes — matches typical stream token lifetime
+interface StreamCacheEntry { data: any; expiresAt: number; }
+const streamCache = new Map<string, StreamCacheEntry>();
+
+function streamCacheKey(episodeId: string, server: string | undefined, category: string): string {
+    return `${episodeId}|${server ?? ''}|${category}`;
+}
+function streamCacheGet(key: string): any | null {
+    const entry = streamCache.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) { streamCache.delete(key); return null; }
+    return entry.data;
+}
+function streamCacheSet(key: string, data: any): void {
+    // Only cache if we actually got sources — don't cache failures
+    if (!data?.sources?.length) return;
+    streamCache.set(key, { data, expiresAt: Date.now() + STREAM_CACHE_TTL });
+    // Evict oldest entries if cache grows large
+    if (streamCache.size > 200) {
+        const oldest = streamCache.keys().next().value;
+        if (oldest) streamCache.delete(oldest);
+    }
+}
 
 /**
  * Strip nested /api/stream/proxy?url=... wrappers so m3u8 rewrites never stack
@@ -355,6 +389,12 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         episodeId = `${episodeId}?ep=${req.query.ep}`;
     }
 
+    // Handle AnimeKai compound IDs: if episodeId is in format slug$ep=N$token=KEY,
+    // add animekai- prefix so the source manager can recognize it
+    if (/^[^$]+\$\d+\$/.test(episodeId) && !episodeId.startsWith('animekai-')) {
+        episodeId = `animekai-${episodeId}`;
+    }
+
     const { category, proxy: useProxy = 'true' } = req.query;
     const explicitServer = normalizeStreamServerQuery(req.query.server);
     const epNumRaw = req.query.ep_num;
@@ -366,6 +406,18 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     const proxyBase = getProxyBaseUrl(req);
 
     const triedLabel = explicitServer ?? 'auto';
+    const categoryStr = String(category || 'sub');
+    const cacheKey = streamCacheKey(episodeId, explicitServer, categoryStr);
+
+    // Serve from cache if available — avoids round-trip to AnimeKai on resume/tab-switch
+    const cached = streamCacheGet(cacheKey);
+    if (cached) {
+        logger.info(`[STREAM] Cache hit for ${episodeId}`, { requestId });
+        res.set('Cache-Control', 'private, max-age=300');
+        res.set('X-Stream-Cache', 'HIT');
+        res.json(cached);
+        return;
+    }
 
     logger.info(`[STREAM] Fetching stream for episode: ${episodeId}`, {
         episodeId,
@@ -379,24 +431,54 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     let streamData: any = { sources: [], subtitles: [] };
     let lastError: string | null = null;
 
-    // Retry getStreamingLinks up to 2 times for transient failures (cold starts, network blips)
-    for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-            streamData = await sourceManager.getStreamingLinks(
+    // Try multiple sources in parallel for faster streaming
+    // This returns the first successful result instead of waiting for each source sequentially
+    const parallelSourceAttempts = [];
+    
+    // Check if we have a preferred source for this anime (from previous successful streams)
+    const sourcePreferenceKey = `source-pref-${anilistId || episodeId}`;
+    const preferredSource = explicitServer || (req.query.preferred_source as string) || undefined;
+    
+    // Try HiAnime REST first if applicable with longer timeout
+    if (isHianimeStyleEpisodeId(episodeId) && (!streamData.sources || streamData.sources.length === 0)) {
+        parallelSourceAttempts.push(
+            tryFetchHianimeRestStreamingData({
                 episodeId,
-                explicitServer,
-                (category as 'sub' | 'dub') || 'sub',
-                episodeNum,
-                anilistId
-            );
-            if (streamData.sources?.length > 0) break; // Got sources, stop retrying
-        } catch (error: any) {
-            lastError = error.message;
-            logger.warn(`[STREAM] getStreamingLinks attempt ${attempt + 1} failed: ${error.message}`, { episodeId, requestId });
-            if (attempt < 1) {
-                await new Promise(r => setTimeout(r, 1500));
-            }
+                category: ((category as 'sub' | 'dub') || 'sub'),
+                explicitServer: preferredSource,
+                perAttemptTimeoutMs: 15000, // Increased from 9000 to 15000
+                catalogEpisodeFallback: catalogEpisodeFallbackForRest(episodeId, episodeNum),
+            }).catch(() => null)
+        );
+    }
+    
+    // Try SourceManager extraction with preferred source
+    parallelSourceAttempts.push(
+        sourceManager.getStreamingLinks(
+            episodeId,
+            preferredSource,
+            (category as 'sub' | 'dub') || 'sub',
+            episodeNum,
+            anilistId
+        ).catch(() => ({ sources: [], subtitles: [] }))
+    );
+    
+    // Wait for all parallel attempts to complete
+    const results = await Promise.allSettled(parallelSourceAttempts);
+    
+    // Use the first successful result and remember which source worked
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value?.sources && result.value.sources.length > 0) {
+        streamData = result.value;
+        // Remember the source that worked for this anime
+        if (result.value && 'source' in result.value && (result.value as any).source && anilistId) {
+          // In a real implementation, this would be stored in a database
+          // For now, we just log it
+          logger.info(`[STREAM] Source ${(result.value as any).source} worked for anilist ${anilistId}`, { requestId });
         }
+        logger.info(`[STREAM] Parallel source fetch succeeded for ${episodeId}`, { requestId });
+        break;
+      }
     }
 
     if ((!streamData.sources || streamData.sources.length === 0) && isHianimeStyleEpisodeId(episodeId)) {
@@ -404,10 +486,50 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
             episodeId,
             category: ((category as 'sub' | 'dub') || 'sub'),
             explicitServer: explicitServer,
+            catalogEpisodeFallback: catalogEpisodeFallbackForRest(episodeId, episodeNum),
         });
         if (fromRest?.sources?.length) {
             streamData = fromRest;
             logger.info(`[STREAM] HiAnime REST fallback succeeded for ${episodeId}`, { requestId });
+        }
+    }
+
+    // HiAnime/aniwatch often 521 while animekai.to still serves the same logical episode via Consumet compound id.
+    if (!streamData.sources || streamData.sources.length === 0) {
+        if (episodeNum != null && episodeNum >= 1) {
+            try {
+                const kaiHit = await sourceManager.tryAnimeKaiCompoundFromWatchQueryEpisode(
+                    episodeId,
+                    episodeNum,
+                    explicitServer,
+                    (category as 'sub' | 'dub') || 'sub',
+                    { anilistId }
+                );
+                if (kaiHit?.sources?.length) {
+                    streamData = kaiHit;
+                    logger.info(`[STREAM] AnimeKai compound-key fallback succeeded for ${episodeId}`, { requestId });
+                }
+            } catch (e: unknown) {
+                lastError = e instanceof Error ? e.message : String(e);
+            }
+        }
+    }
+
+    // Final fallback: try AllAnime if no sources found (IP-locked sources often fail on serverless)
+    if (!streamData.sources || streamData.sources.length === 0) {
+        try {
+            logger.info(`[STREAM] Trying AllAnime fallback for ${episodeId}`, { requestId });
+            const allAnimeResult = await sourceManager.tryAllAnimeFallback(
+                episodeId,
+                (category as 'sub' | 'dub') || 'sub',
+                episodeNum
+            );
+            if (allAnimeResult?.sources?.length) {
+                streamData = allAnimeResult;
+                logger.info(`[STREAM] AllAnime fallback succeeded for ${episodeId}`, { requestId });
+            }
+        } catch (e: unknown) {
+            lastError = e instanceof Error ? e.message : String(e);
         }
     }
 
@@ -567,8 +689,11 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     response.server = successServer;
     response.triedServers = explicitServer ? [explicitServer] : ['auto'];
 
-    // Short cache - streams expire quickly
-    res.set('Cache-Control', 'private, max-age=300'); // 5 minutes
+    // Store in server-side cache so repeat requests (resume, tab-switch) are instant
+    streamCacheSet(cacheKey, response);
+
+    res.set('Cache-Control', 'private, max-age=300');
+    res.set('X-Stream-Cache', 'MISS');
     res.json(response);
 });
 

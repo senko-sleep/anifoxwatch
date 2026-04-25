@@ -5,17 +5,17 @@
 
 import { apiUrl } from '@/lib/api-config';
 
-const PING_INTERVAL = 8 * 60 * 1000; // 8 minutes
-const MAX_BACKOFF = 30 * 60 * 1000; // 30 minutes max between pings on failure
+const PING_INTERVAL = 4 * 60 * 1000; // 4 minutes — Vercel goes cold after ~5 min
+const MAX_BACKOFF = 20 * 60 * 1000; // 20 minutes max between pings on failure
 
 let pingInterval: NodeJS.Timeout | null = null;
 let consecutiveFailures = 0;
 let isTabVisible = true;
 
 /**
- * Ping the backend health endpoint
+ * Ping the backend health endpoint — exported so pages can trigger an immediate warm-up.
  */
-async function ping() {
+export async function ping() {
   if (!isTabVisible) return;
 
   const pingUrl = (url: string) => fetch(url, {
