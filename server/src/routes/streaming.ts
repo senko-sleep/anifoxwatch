@@ -522,7 +522,8 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
             const allAnimeResult = await sourceManager.tryAllAnimeFallback(
                 episodeId,
                 (category as 'sub' | 'dub') || 'sub',
-                episodeNum
+                episodeNum,
+                anilistId
             );
             if (allAnimeResult?.sources?.length) {
                 streamData = allAnimeResult;
