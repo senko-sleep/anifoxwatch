@@ -3409,6 +3409,21 @@ export class SourceManager {
         }
     }
 
+    async tryAllAnimeFallbackWithSubFallback(
+        episodeId: string,
+        category: 'sub' | 'dub' = 'sub',
+        episodeNum?: number,
+        anilistId?: number
+    ): Promise<StreamingData | null> {
+        const result = await this.tryAllAnimeFallback(episodeId, category, episodeNum, anilistId);
+        if (result?.sources?.length) return result;
+        if (category === 'dub') {
+            console.log(`[AllAnime fallback] Dub unavailable, retrying with sub`);
+            return this.tryAllAnimeFallback(episodeId, 'sub', episodeNum, anilistId);
+        }
+        return null;
+    }
+
     async searchAll(query: string, page: number = 1): Promise<AnimeSearchResult> {
         try {
             logger.info(`Starting search for "${query}"(page ${page})`, undefined, 'SourceManager');

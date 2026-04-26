@@ -431,103 +431,74 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     let streamData: any = { sources: [], subtitles: [] };
     let lastError: string | null = null;
 
-    // Try multiple sources in parallel for faster streaming
-    // This returns the first successful result instead of waiting for each source sequentially
-    const parallelSourceAttempts = [];
-    
-    // Check if we have a preferred source for this anime (from previous successful streams)
-    const sourcePreferenceKey = `source-pref-${anilistId || episodeId}`;
     const preferredSource = explicitServer || (req.query.preferred_source as string) || undefined;
-    
-    // Try HiAnime REST first if applicable with longer timeout
-    if (isHianimeStyleEpisodeId(episodeId) && (!streamData.sources || streamData.sources.length === 0)) {
-        parallelSourceAttempts.push(
+    const cat = (category as 'sub' | 'dub') || 'sub';
+
+    // All candidates race in parallel; the first to return sources wins and the
+    // function resolves immediately without stalling on the slower remaining ones.
+    // Previously three sequential fallbacks each burned 12-14 s before AllAnime ran.
+    const parallelAttempts: Promise<any>[] = [];
+
+    if (isHianimeStyleEpisodeId(episodeId)) {
+        parallelAttempts.push(
             tryFetchHianimeRestStreamingData({
                 episodeId,
-                category: ((category as 'sub' | 'dub') || 'sub'),
+                category: cat,
                 explicitServer: preferredSource,
-                perAttemptTimeoutMs: 15000, // Increased from 9000 to 15000
+                perAttemptTimeoutMs: 12_000,
                 catalogEpisodeFallback: catalogEpisodeFallbackForRest(episodeId, episodeNum),
             }).catch(() => null)
         );
     }
-    
-    // Try SourceManager extraction with preferred source
-    parallelSourceAttempts.push(
-        sourceManager.getStreamingLinks(
-            episodeId,
-            preferredSource,
-            (category as 'sub' | 'dub') || 'sub',
-            episodeNum,
-            anilistId
-        ).catch(() => ({ sources: [], subtitles: [] }))
+
+    parallelAttempts.push(
+        sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId)
+            .catch(() => null)
     );
-    
-    // Wait for all parallel attempts to complete
-    const results = await Promise.allSettled(parallelSourceAttempts);
-    
-    // Use the first successful result and remember which source worked
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value?.sources && result.value.sources.length > 0) {
-        streamData = result.value;
-        // Remember the source that worked for this anime
-        if (result.value && 'source' in result.value && (result.value as any).source && anilistId) {
-          // In a real implementation, this would be stored in a database
-          // For now, we just log it
-          logger.info(`[STREAM] Source ${(result.value as any).source} worked for anilist ${anilistId}`, { requestId });
-        }
-        logger.info(`[STREAM] Parallel source fetch succeeded for ${episodeId}`, { requestId });
-        break;
-      }
+
+    // AllAnime title-based search — start in parallel so it runs concurrently with HiAnime REST,
+    // not sequentially after it. Requires anilistId for a reliable canonical title lookup.
+    if (anilistId != null && episodeNum != null && episodeNum >= 1) {
+        parallelAttempts.push(
+            sourceManager.tryAllAnimeFallback(episodeId, cat, episodeNum, anilistId).catch(() => null)
+        );
     }
 
-    if ((!streamData.sources || streamData.sources.length === 0) && isHianimeStyleEpisodeId(episodeId)) {
-        const fromRest = await tryFetchHianimeRestStreamingData({
-            episodeId,
-            category: ((category as 'sub' | 'dub') || 'sub'),
-            explicitServer: explicitServer,
-            catalogEpisodeFallback: catalogEpisodeFallbackForRest(episodeId, episodeNum),
-        });
-        if (fromRest?.sources?.length) {
-            streamData = fromRest;
-            logger.info(`[STREAM] HiAnime REST fallback succeeded for ${episodeId}`, { requestId });
-        }
-    }
-
-    // HiAnime/aniwatch often 521 while animekai.to still serves the same logical episode via Consumet compound id.
-    if (!streamData.sources || streamData.sources.length === 0) {
-        if (episodeNum != null && episodeNum >= 1) {
-            try {
-                const kaiHit = await sourceManager.tryAnimeKaiCompoundFromWatchQueryEpisode(
-                    episodeId,
-                    episodeNum,
-                    explicitServer,
-                    (category as 'sub' | 'dub') || 'sub',
-                    { anilistId }
-                );
-                if (kaiHit?.sources?.length) {
-                    streamData = kaiHit;
-                    logger.info(`[STREAM] AnimeKai compound-key fallback succeeded for ${episodeId}`, { requestId });
+    streamData = await new Promise<any>((resolve) => {
+        let remaining = parallelAttempts.length;
+        if (remaining === 0) { resolve({ sources: [], subtitles: [] }); return; }
+        let done = false;
+        for (const p of parallelAttempts) {
+            p.then((result: any) => {
+                if (!done && result?.sources?.length > 0) {
+                    done = true;
+                    resolve(result);
+                    return;
                 }
-            } catch (e: unknown) {
-                lastError = e instanceof Error ? e.message : String(e);
-            }
+                if (--remaining === 0 && !done) resolve({ sources: [], subtitles: [] });
+            }).catch(() => {
+                if (--remaining === 0 && !done) resolve({ sources: [], subtitles: [] });
+            });
         }
+    });
+
+    if (streamData?.sources?.length) {
+        logger.info(`[STREAM] Source resolved (${streamData.source || 'unknown'}) for ${episodeId}`, { requestId });
     }
 
-    // Final fallback: try AllAnime if no sources found (IP-locked sources often fail on serverless)
-    if (!streamData.sources || streamData.sources.length === 0) {
+    // Dub unavailable → fall back to sub so the episode plays rather than erroring
+    if ((!streamData.sources || streamData.sources.length === 0) && categoryStr === 'dub') {
         try {
-            logger.info(`[STREAM] Trying AllAnime fallback for ${episodeId}`, { requestId });
-            const allAnimeResult = await sourceManager.tryAllAnimeFallback(
+            logger.info(`[STREAM] Dub unavailable for ${episodeId}, trying sub fallback`, { requestId });
+            const subFallback = await sourceManager.tryAllAnimeFallback(
                 episodeId,
-                (category as 'sub' | 'dub') || 'sub',
+                'sub',
                 episodeNum,
                 anilistId
             );
-            if (allAnimeResult?.sources?.length) {
-                streamData = allAnimeResult;
-                logger.info(`[STREAM] AllAnime fallback succeeded for ${episodeId}`, { requestId });
+            if (subFallback?.sources?.length) {
+                streamData = subFallback;
+                logger.info(`[STREAM] Sub fallback succeeded for ${episodeId} (dub unavailable)`, { requestId });
             }
         } catch (e: unknown) {
             lastError = e instanceof Error ? e.message : String(e);
