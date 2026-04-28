@@ -1,4 +1,4 @@
-le/**
+/**
  * AnimeKai Source - Uses @consumet/extensions AnimeKai provider
  * Reliable backup streaming provider
  */
