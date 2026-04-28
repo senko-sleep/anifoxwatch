@@ -392,7 +392,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
             const mod = await import('@consumet/extensions');
             const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
 
-            // Resolve bare anime slug → first episode ID
+            // Resolve bare anime slug → correct episode ID using episodeNum when available
             if (!rawEpisodeId.includes('$ep=') && !rawEpisodeId.includes('?ep=')) {
                 try {
                     const info = await Promise.race([
@@ -400,8 +400,19 @@ export class AnimeKaiSource extends BaseAnimeSource {
                         new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 8_000))
                     ]);
                     if (info?.episodes?.length > 0) {
-                        rawEpisodeId = info.episodes[0].id;
-                        logger.info(`AnimeKai: resolved bare slug "${episodeId}" → "${rawEpisodeId}"`, undefined, this.name);
+                        const epNum = options?.episodeNum;
+                        let targetEp = info.episodes[0];
+                        if (epNum != null && epNum >= 1) {
+                            // Try to find the episode by number in the list (episodes may be 0-indexed or 1-indexed)
+                            const byNumber = info.episodes.find((e: { number?: number; id: string }) => e.number === epNum);
+                            if (byNumber) {
+                                targetEp = byNumber;
+                            } else if (epNum <= info.episodes.length) {
+                                targetEp = info.episodes[epNum - 1];
+                            }
+                        }
+                        rawEpisodeId = targetEp.id;
+                        logger.info(`AnimeKai: resolved bare slug "${episodeId}" → ep${epNum ?? 1} "${rawEpisodeId}"`, undefined, this.name);
                     }
                 } catch { /* ignore */ }
             }

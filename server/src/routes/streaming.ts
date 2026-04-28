@@ -578,12 +578,14 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     if ((!streamData.sources || streamData.sources.length === 0) && categoryStr === 'dub') {
         try {
             logger.info(`[STREAM] Dub unavailable for ${episodeId}, trying sub fallback`, { requestId });
-            const subFallback = await sourceManager.tryAllAnimeFallback(
-                episodeId,
-                'sub',
-                episodeNum,
-                anilistId
-            );
+            // Try sub via all registered sources first (faster than AllAnime title search)
+            const [subDirect, subAllAnime] = await Promise.allSettled([
+                sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId),
+                sourceManager.tryAllAnimeFallback(episodeId, 'sub', episodeNum, anilistId),
+            ]);
+            const subFallback =
+                (subDirect.status === 'fulfilled' && subDirect.value?.sources?.length ? subDirect.value : null) ??
+                (subAllAnime.status === 'fulfilled' && subAllAnime.value?.sources?.length ? subAllAnime.value : null);
             if (subFallback?.sources?.length) {
                 streamData = subFallback;
                 logger.info(`[STREAM] Sub fallback succeeded for ${episodeId} (dub unavailable)`, { requestId });
