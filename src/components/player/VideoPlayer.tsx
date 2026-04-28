@@ -182,6 +182,10 @@ export const VideoPlayer = ({
   const [showMobileSettings, setShowMobileSettings] = useState(false);
   const [mobileSettingsTab, setMobileSettingsTab] = useState<'quality' | 'speed' | 'subtitles'>('quality');
 
+  // Landscape lock state
+  const [isLandscapeLocked, setIsLandscapeLocked] = useState(false);
+  const isLandscapeLockedRef = useRef(false);
+
   // Auto-fullscreen on mobile: trigger once per mount when autoFullscreen prop is true
   const autoFullscreenFiredRef = useRef(false);
 
@@ -261,35 +265,38 @@ export const VideoPlayer = ({
       const onMobile = isMobile();
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: false,         // off on mobile — reduces CPU churn
+        lowLatencyMode: false,
         liveSyncDurationCount: 3,
         liveMaxLatencyDurationCount: 5,
         liveDurationInfinity: true,
-        backBufferLength: onMobile ? 20 : 60,
-        maxBufferLength: onMobile ? 20 : 60,
-        maxMaxBufferLength: onMobile ? 40 : 120,
+        backBufferLength: onMobile ? 15 : 30,
+        maxBufferLength: onMobile ? 15 : 30,
+        maxMaxBufferLength: onMobile ? 30 : 60,
         maxBufferHole: 0.5,
         startLevel: -1,
-        // 50 Mbps default made HLS instantly pick the highest quality on mobile,
-        // causing stall-then-drop. 1 Mbps lets ABR ramp up naturally from a stable start.
-        abrEwmaDefaultEstimate: onMobile ? 1000000 : 50000000,
+        // Proxied streams through Vercel are 1–3 Mbps; start conservatively
+        // so ABR ramps up instead of picking 720p then stalling.
+        abrEwmaDefaultEstimate: onMobile ? 800000 : 2500000,
         abrEwmaFastLive: 3,
         abrEwmaSlowLive: 9,
         abrEwmaFastVoD: 3,
         abrEwmaSlowVoD: 9,
         abrMaxWithRealBitrate: true,
         testBandwidth: true,
-        startFragPrefetch: !onMobile,  // skip prefetch on mobile to save bandwidth
-        fragLoadingMaxRetry: 4,
-        manifestLoadingMaxRetry: 3,
-        levelLoadingMaxRetry: 3,
-        fragLoadingRetryDelay: 200,
-        manifestLoadingRetryDelay: 200,
+        startFragPrefetch: !onMobile,
+        fragLoadingMaxRetry: 5,
+        manifestLoadingMaxRetry: 4,
+        levelLoadingMaxRetry: 4,
+        fragLoadingRetryDelay: 500,
+        manifestLoadingRetryDelay: 500,
+        fragLoadingTimeOut: 12000,
+        manifestLoadingTimeOut: 10000,
+        levelLoadingTimeOut: 10000,
         nudgeOffset: 0.1,
         nudgeMaxRetry: 5,
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 20000;
+          xhr.timeout = 15000;
         }
       });
 
@@ -356,10 +363,11 @@ export const VideoPlayer = ({
                 setError('Failed to load video manifest. The stream may be unavailable.');
                 onError?.('manifest_load_error');
               } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
-                playerLog('warn', 'Fragment load error, attempting recovery');
+                playerLog('warn', 'Fragment load error, attempting recovery via startLoad');
+                hls.startLoad();
               } else {
-                setError('Network error. Check your connection and try again.');
-                onError?.('network_error');
+                playerLog('warn', 'Network error, attempting recovery via startLoad');
+                hls.startLoad();
               }
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
@@ -762,7 +770,18 @@ export const VideoPlayer = ({
   // Fullscreen change handler
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const inFullscreen = !!document.fullscreenElement;
+      setIsFullscreen(inFullscreen);
+      // If exited fullscreen while landscape was locked, unlock orientation
+      if (!inFullscreen && isLandscapeLockedRef.current) {
+        isLandscapeLockedRef.current = false;
+        setIsLandscapeLocked(false);
+        try {
+          if ((screen.orientation as any).unlock) {
+            (screen.orientation as any).unlock();
+          }
+        } catch (_e) { /* ignore */ }
+      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -987,6 +1006,51 @@ export const VideoPlayer = ({
     setSelectedSubtitle(lang);
     setSubtitleEnabled(!!lang);
   }, []);
+
+  // Toggle landscape orientation lock + fullscreen on mobile
+  const toggleLandscapeLock = useCallback(async () => {
+    const video = videoRef.current;
+    const container = containerRef.current;
+    if (!video || !container) return;
+
+    try {
+      if (isLandscapeLockedRef.current) {
+        // Unlock orientation
+        if ((screen.orientation as any).unlock) {
+          (screen.orientation as any).unlock();
+        }
+        // Exit fullscreen if active
+        if (document.fullscreenElement) {
+          await document.exitFullscreen();
+        } else if ((video as any).webkitDisplayingFullscreen) {
+          (video as any).webkitExitFullscreen?.();
+        }
+        isLandscapeLockedRef.current = false;
+        setIsLandscapeLocked(false);
+      } else {
+        // Lock to landscape
+        if (screen.orientation && (screen.orientation as any).lock) {
+          await (screen.orientation as any).lock('landscape');
+        }
+        // Enter fullscreen
+        if ((video as any).webkitEnterFullscreen) {
+          try {
+            (video as any).webkitEnterFullscreen();
+          } catch (_e) {
+            if (container.requestFullscreen) await container.requestFullscreen();
+          }
+        } else if (container.requestFullscreen) {
+          await container.requestFullscreen();
+        }
+        isLandscapeLockedRef.current = true;
+        setIsLandscapeLocked(true);
+      }
+    } catch (e) {
+      playerLog('warn', 'Landscape lock toggle failed', e);
+      // Fallback to regular fullscreen
+      toggleFullscreen();
+    }
+  }, [toggleFullscreen]);
 
   // ─── TOUCH HANDLERS ────────────────────────────────────────────────────────
 
@@ -1718,6 +1782,22 @@ export const VideoPlayer = ({
                 </>
               )}
 
+              {/* Mobile: Landscape lock button */}
+              {isMobile() && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={(e) => { e.stopPropagation(); toggleLandscapeLock(); }}
+                  title={isLandscapeLocked ? 'Unlock orientation' : 'Watch in landscape'}
+                  className={cn(
+                    "hover:bg-white/20 h-9 w-9 transition-colors",
+                    isLandscapeLocked ? "text-fox-orange" : "text-white"
+                  )}
+                >
+                  <RotateCw className="w-5 h-5" />
+                </Button>
+              )}
+
               {/* Fullscreen */}
               <Button
                 variant="ghost"
@@ -1755,6 +1835,27 @@ export const VideoPlayer = ({
           >
             {/* Handle bar */}
             <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-4" />
+
+            {/* Landscape shortcut inside settings panel */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMobileSettings(false);
+                toggleLandscapeLock();
+              }}
+              className={cn(
+                "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all touch-manipulation mb-3",
+                isLandscapeLocked
+                  ? "bg-fox-orange/20 text-fox-orange border border-fox-orange/30"
+                  : "bg-white/5 text-white hover:bg-white/10 border border-white/[0.06]"
+              )}
+            >
+              <span className="flex items-center gap-2.5">
+                <RotateCw className="w-4 h-4" />
+                {isLandscapeLocked ? 'Unlock Orientation' : 'Landscape Mode'}
+              </span>
+              {isLandscapeLocked && <Check className="w-4 h-4" />}
+            </button>
 
             {/* Tab buttons */}
             <div className="flex gap-2 mb-4">

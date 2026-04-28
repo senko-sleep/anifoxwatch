@@ -24,3 +24,10 @@ if (import.meta.env.DEV) {
 startKeepAlive();
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+// Register service worker in production to make mobile feel more app-like.
+if (!import.meta.env.DEV && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}

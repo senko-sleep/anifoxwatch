@@ -118,7 +118,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                                     src={mainSrc}
                                     alt={item.animeTitle}
                                     loading={eager ? 'eager' : 'lazy'}
-                                    {...(eager ? { fetchPriority: 'high' as const } : {})}
+                                    {...(eager ? ({ fetchpriority: 'high' } as unknown as Record<string, string>) : {})}
                                     decoding="async"
                                     referrerPolicy="no-referrer"
                                     className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110"
@@ -138,7 +138,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                                         alt=""
                                         aria-hidden
                                         loading={eager ? 'eager' : 'lazy'}
-                                        {...(eager ? { fetchPriority: 'high' as const } : {})}
+                                        {...(eager ? ({ fetchpriority: 'high' } as unknown as Record<string, string>) : {})}
                                         decoding="async"
                                         referrerPolicy="no-referrer"
                                         className="w-full h-full object-cover"

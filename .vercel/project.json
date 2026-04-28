@@ -1,1 +1,16 @@
-{"orgId":"team_eODorcVyZHSmf4W1sRaAXjVF","projectId":"prj_Sv0JtERRt6FwIhP8SlzkKXBssw1S"}
+{
+  "projectId": "prj_Sv0JtERRt6FwIhP8SlzkKXBssw1S",
+  "orgId": "team_eODorcVyZHSmf4W1sRaAXjVF",
+  "projectName": "anifoxwatch",
+  "settings": {
+    "createdAt": 1769531517760,
+    "framework": "vite",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": null,
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

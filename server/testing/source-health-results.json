@@ -1,0 +1,164 @@
+[
+  {
+    "name": "AnimeFLV",
+    "health": true,
+    "healthMs": 3140,
+    "searchCount": 12,
+    "searchMs": 549,
+    "streamSources": 1,
+    "streamMs": 924,
+    "errors": [],
+    "streamUrl": "https://streamwish.to/e/7xj8vx4vwwzf"
+  },
+  {
+    "name": "AnimeKai",
+    "health": true,
+    "healthMs": 1648,
+    "searchCount": 29,
+    "searchMs": 336,
+    "streamSources": 1,
+    "streamMs": 2643,
+    "errors": [],
+    "streamUrl": "https://rrr.shop21pro.site/pklk/c6/h9ac41b5fc66bd2c7fc5f1a108d3b84f84b63a77ba28a"
+  },
+  {
+    "name": "AnimePahe",
+    "health": true,
+    "healthMs": 1695,
+    "searchCount": 0,
+    "searchMs": 43,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "9Anime",
+    "health": false,
+    "healthMs": 10029,
+    "searchCount": 0,
+    "searchMs": 10016,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "Consumet",
+    "health": false,
+    "healthMs": 678,
+    "searchCount": 0,
+    "searchMs": 170,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "Gogoanime",
+    "health": false,
+    "healthMs": 332,
+    "searchCount": 0,
+    "searchMs": 79,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "AllAnime",
+    "health": true,
+    "healthMs": 842,
+    "searchCount": 20,
+    "searchMs": 335,
+    "streamSources": 0,
+    "streamMs": 668,
+    "errors": []
+  },
+  {
+    "name": "Miruro",
+    "health": true,
+    "healthMs": 1677,
+    "searchCount": 0,
+    "searchMs": 274,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "Kaido",
+    "health": false,
+    "healthMs": 5012,
+    "searchCount": 0,
+    "searchMs": 10021,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "Zoro",
+    "health": false,
+    "healthMs": 615,
+    "searchCount": 0,
+    "searchMs": 308,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "Aniwave",
+    "health": false,
+    "healthMs": 376,
+    "searchCount": 0,
+    "searchMs": 198,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "Anix",
+    "health": false,
+    "healthMs": 95,
+    "searchCount": 0,
+    "searchMs": 9,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "DirectDownload",
+    "health": false,
+    "healthMs": 1477,
+    "searchCount": 0,
+    "searchMs": 171,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "KickassAnime",
+    "health": true,
+    "healthMs": 539,
+    "searchCount": 0,
+    "searchMs": 53,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "YugenAnime",
+    "health": true,
+    "healthMs": 470,
+    "searchCount": 0,
+    "searchMs": 190,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  },
+  {
+    "name": "AnimeSuge",
+    "health": false,
+    "healthMs": 156,
+    "searchCount": 0,
+    "searchMs": 17,
+    "streamSources": "skip",
+    "streamMs": 0,
+    "errors": []
+  }
+]

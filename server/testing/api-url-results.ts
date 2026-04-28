@@ -152,7 +152,10 @@ async function main(): Promise<void> {
     console.log(JSON.stringify(report, null, 2));
 }
 
-main().catch((e) => {
-    console.error(e);
-    process.exit(1);
-});
+// Avoid running live fetches (and process.exit) when Vitest imports this module for unit tests.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    main().catch((e) => {
+        console.error(e);
+        process.exit(1);
+    });
+}

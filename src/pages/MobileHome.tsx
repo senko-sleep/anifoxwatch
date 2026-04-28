@@ -119,11 +119,10 @@ function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>[
   };
 
   if (!slides.length) {
-    // Graceful fallback while heroAnime loads or filters out
     return (
       <div
-        className="relative w-full bg-zinc-900/50 animate-pulse"
-        style={{ height: isLandscape ? 'clamp(180px, 42vh, 260px)' : 'clamp(300px, 78vw, 440px)' }}
+        className="mx-4 rounded-2xl shimmer"
+        style={{ height: isLandscape ? 'clamp(180px, 42vh, 260px)' : 'clamp(320px, 62vh, 480px)' }}
       />
     );
   }
@@ -139,10 +138,9 @@ function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>[
 
   return (
     <div
-      className="relative w-full select-none overflow-hidden"
+      className="mx-4 relative select-none overflow-hidden rounded-2xl"
       style={{
-        // Smaller viewport-based height, no max-width constraint
-        height: isLandscape ? '42vh' : '52vh',
+        height: isLandscape ? '42vh' : 'clamp(320px, 62vh, 480px)',
         overscrollBehaviorX: 'contain',
         touchAction: 'pan-y',
       }}
@@ -183,17 +181,17 @@ function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>[
         );
       })}
 
-      {/* ── Gradient layers (stronger + taller for overlay legibility) ─── */}
+      {/* ── Gradient layers ─── */}
       <div className="pointer-events-none absolute inset-0 z-[2]">
         <div
           className="absolute inset-0"
           style={{
             background:
-              'linear-gradient(to top, #080a0f 0%, #080a0f 28%, rgba(8,10,15,0.9) 50%, rgba(8,10,15,0.3) 72%, transparent 88%)',
+              'linear-gradient(to top, #080a0f 0%, #080a0f 32%, rgba(8,10,15,0.92) 52%, rgba(8,10,15,0.35) 72%, transparent 90%)',
           }}
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#080a0f]/55 via-transparent to-transparent" />
-        <div className="absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-[#080a0f]/65 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#080a0f]/60 via-[#080a0f]/15 to-transparent" />
+        <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-[#080a0f]/70 to-transparent" />
       </div>
 
       {/* Film grain */}
@@ -204,8 +202,8 @@ function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>[
 
       {/* Orange glow */}
       <div
-        className="pointer-events-none absolute bottom-0 left-0 z-[3] w-[65%] h-[55%] opacity-[0.18]"
-        style={{ background: 'radial-gradient(ellipse at 15% 100%, hsl(28 95% 55% / 1) 0%, transparent 65%)' }}
+        className="pointer-events-none absolute bottom-0 left-0 z-[3] w-full h-[50%] opacity-[0.15]"
+        style={{ background: 'radial-gradient(ellipse at 20% 100%, hsl(28 95% 55% / 1) 0%, transparent 60%)' }}
       />
 
       {/* ── SPOTLIGHT badge — top left ────────────────────────── */}
@@ -218,83 +216,53 @@ function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>[
         )}
       </div>
 
-      {/* ── Poster card — top right (matches desktop design) ─── */}
-      <div
-        className={cn(
-          'absolute top-3 right-3 z-[6] transition-all duration-300',
-          panelVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
-        )}
-        onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
-      >
-        <div className="relative w-[72px] aspect-[2/3] rounded-xl overflow-hidden shadow-2xl shadow-black/60 ring-1 ring-white/15">
-          {anime.coverImage?.large || anime.coverImage?.extraLarge ? (
-            <img
-              src={anime.coverImage?.extraLarge || anime.coverImage?.large}
-              alt={title}
-              className="w-full h-full object-cover"
-              loading="eager"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <div className="w-full h-full bg-zinc-800" />
-          )}
-          {rating && (
-            <div className="absolute top-1.5 right-1.5 flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/75 backdrop-blur-sm text-[9px] font-bold text-amber-300">
-              <Star className="w-2 h-2 fill-amber-400 text-amber-400" />{rating}
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* ── Overlaid content — bottom of hero ─────────────────── */}
       <div
         className={cn(
-          'absolute inset-x-0 bottom-0 z-[5] px-4 pb-5 transition-all duration-300 ease-out',
+          'absolute inset-x-0 bottom-0 z-[5] px-4 pb-6 transition-all duration-300 ease-out',
           panelVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
         )}
       >
-        {/* Title — first thing in the content block */}
+        {/* Title */}
         <h1
-          className="font-display font-bold leading-[1.15] tracking-tight text-white line-clamp-2 mb-2 drop-shadow-lg"
-          style={{ fontSize: 'clamp(20px, 5.5vw, 26px)' }}
+          className="font-display font-bold leading-[1.15] tracking-tight text-white line-clamp-2 mb-2.5 drop-shadow-lg"
+          style={{ fontSize: 'clamp(22px, 6vw, 30px)' }}
         >
           {title}
         </h1>
 
-        {/* Metadata — single row, dot-separated, no redundant borders */}
-        <div className="flex items-center gap-2 mb-3 text-[11px] text-zinc-300">
+        {/* Metadata row */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-4 text-[11px]">
           {rating && (
-            <span className="inline-flex items-center gap-1 font-bold text-amber-300">
+            <span className="inline-flex items-center gap-1 font-bold text-amber-300 bg-amber-400/10 px-2 py-0.5 rounded-full">
               <Star className="w-3 h-3 fill-amber-400 text-amber-400" />{rating}
             </span>
           )}
-          {rating && <span className="text-white/20">·</span>}
-          <span className="font-semibold uppercase tracking-wide text-white/80">{formatLabel}</span>
-          {epCount && <><span className="text-white/20">·</span><span>{epCount}</span></>}
-          {runtime && <><span className="text-white/20">·</span><span className="inline-flex items-center gap-0.5"><Clock className="w-3 h-3 opacity-50" />{runtime}</span></>}
-          <span className="text-white/20">·</span>
-          <span className="inline-flex items-center gap-0.5 font-semibold text-sky-300">
-            <Captions className="w-3 h-3" />Sub
+          <span className="font-semibold uppercase tracking-wide text-white/70 bg-white/10 px-2 py-0.5 rounded-full">{formatLabel}</span>
+          {epCount && <span className="text-zinc-400 bg-white/[0.07] px-2 py-0.5 rounded-full">{epCount}</span>}
+          {seasonLabel && <span className="text-zinc-400 bg-white/[0.07] px-2 py-0.5 rounded-full">{seasonLabel}</span>}
+          <span className="inline-flex items-center gap-0.5 font-semibold text-sky-300 bg-sky-400/10 px-2 py-0.5 rounded-full">
+            <Captions className="w-3 h-3" />Sub+Dub
           </span>
         </div>
 
         {/* CTA buttons */}
-        <div className="flex gap-2 mb-3">
+        <div className="flex gap-2.5 mb-4">
           <button
             onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
-            className="flex-1 flex items-center justify-center gap-2 bg-fox-orange text-white text-[13px] font-bold h-11 rounded-2xl shadow-lg shadow-fox-orange/35 active:scale-[0.97] transition-transform touch-manipulation"
+            className="flex-1 flex items-center justify-center gap-2 bg-fox-orange text-white text-[13px] font-bold h-11 rounded-2xl shadow-lg shadow-fox-orange/40 active:scale-[0.97] transition-transform touch-manipulation"
           >
             <Play className="w-4 h-4 fill-white" />Watch Now
           </button>
           <button
             onClick={() => navigate(`/browse?q=${encodeURIComponent(title)}`)}
-            className="flex items-center justify-center gap-1 text-[13px] font-semibold text-white/90 h-11 px-4 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/15 active:scale-[0.97] transition-transform touch-manipulation"
+            className="flex items-center justify-center gap-1.5 text-[13px] font-semibold text-white/90 h-11 px-4 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/15 active:scale-[0.97] transition-transform touch-manipulation"
           >
             Details<ChevronRight className="w-3.5 h-3.5 opacity-60" />
           </button>
         </div>
 
-        {/* Dots — below the buttons where they belong */}
+        {/* Slide dots */}
         {count > 1 && (
           <div className="flex items-center justify-center gap-[5px]" role="tablist" aria-label="Slide navigation">
             {slides.slice(0, 8).map((_, i) => (
@@ -309,8 +277,8 @@ function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>[
                 <span className={cn(
                   'block rounded-full transition-all duration-300',
                   i === idx
-                    ? 'w-5 h-[4px] bg-fox-orange shadow-[0_0_5px] shadow-fox-orange/60'
-                    : 'w-[4px] h-[4px] bg-white/30'
+                    ? 'w-6 h-[3px] bg-fox-orange shadow-[0_0_6px] shadow-fox-orange/70'
+                    : 'w-[3px] h-[3px] bg-white/25 hover:bg-white/50'
                 )} />
               </button>
             ))}
@@ -356,9 +324,9 @@ function MobileSection({
 
 // ─── Skeleton row ──────────────────────────────────────────────────────────────
 const SkeletonRow = () => (
-  <div className="flex gap-2.5 overflow-hidden px-4">
+  <div className="flex gap-2.5 overflow-hidden">
     {[...Array(5)].map((_, i) => (
-      <div key={i} className="w-[7.5rem] shrink-0 aspect-[2/3] rounded-xl bg-white/[0.05] animate-pulse" />
+      <div key={i} className="w-[7.5rem] shrink-0 aspect-[2/3] rounded-xl shimmer" />
     ))}
   </div>
 );
@@ -632,27 +600,9 @@ export const MobileHome = () => {
       {/* Hero (banner-only, swipeable, auto-advancing) */}
       <MobileHero heroAnime={heroAnime} />
 
-      {/* Category chips */}
-      <div className="px-4 mt-4 mb-1">
-        <div
-          className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4"
-          style={{ scrollbarWidth: 'none' }}
-        >
-          {CATEGORIES.map((c) => (
-            <Link
-              key={c.label}
-              to={c.link}
-              className="shrink-0 text-[11px] font-semibold text-zinc-300 bg-white/[0.05] border border-white/[0.08] px-3 py-2 rounded-full active:scale-95 transition-transform touch-manipulation whitespace-nowrap hover:border-fox-orange/40 hover:text-fox-orange"
-            >
-              {c.label}
-            </Link>
-          ))}
-        </div>
-      </div>
-
       {/* Main feed */}
       <main
-        className="space-y-5 pt-3"
+        className="space-y-6 pt-4"
         style={{ paddingBottom: 'calc(56px + env(safe-area-inset-bottom) + 8px)' }}
       >
         {/* Continue Watching */}

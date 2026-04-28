@@ -87,6 +87,13 @@
     text-size-adjust: 100%;
   }
 
+  /* Mobile-first sizing: slightly tighter typographic scale */
+  @media (max-width: 640px) {
+    html {
+      font-size: 15px;
+    }
+  }
+
   body {
     @apply text-foreground font-sans antialiased;
     font-family: 'Inter', system-ui, sans-serif;
@@ -100,8 +107,6 @@
     min-height: 100vh;
     min-height: 100dvh;
     overflow-x: hidden;
-    /* Safe area for notched phones */
-    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
 
   /* Subtle film grain — sits behind app content */

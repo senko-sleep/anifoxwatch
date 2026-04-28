@@ -1,0 +1,53 @@
+{
+    "name": "anifoxwatch-api",
+    "version": "1.0.0",
+    "type": "module",
+    "scripts": {
+        "dev": "tsx src/index.ts",
+        "dev:optimized": "tsx watch src/index-optimized.ts",
+        "build": "tsc --project tsconfig.json",
+        "start": "tsx src/index.ts",
+        "start:prod": "node dist/index.js",
+        "start:optimized": "node dist/index-optimized.js",
+        "start:api": "tsx src/index.ts",
+        "deploy:cloudrun": "powershell -NoProfile -ExecutionPolicy Bypass -File ./cloud-run/deploy.ps1",
+        "deploy:fly": "flyctl deploy",
+        "test": "vitest run --config vitest.config.ts",
+        "test:api:urls": "tsx testing/api-url-results.ts",
+        "test:hero": "tsx testing/test-hero-spotlight.ts",
+        "test:cloudrun": "tsx testing/test-cloudrun.ts",
+        "test:smoke": "tsx testing/test-cloudrun.ts",
+        "test:stream": "node testing/test-100-sources.js",
+        "test:stream:smoke": "tsx testing/smoke-streaming.ts",
+        "postinstall": "patch-package"
+    },
+    "dependencies": {
+        "@consumet/extensions": "^1.8.8",
+        "@types/pg": "^8.20.0",
+        "aniwatch": "^2.27.9",
+        "axios": "^1.6.8",
+        "cheerio": "^1.0.0-rc.12",
+        "cli-highlight": "^2.1.11",
+        "cors": "^2.8.5",
+        "dotenv": "^16.4.5",
+        "express": "^4.19.2",
+        "hono": "^4.11.7",
+        "patch-package": "^8.0.1",
+        "pg": "^8.20.0",
+        "puppeteer": "^22.15.0",
+        "serverless-http": "^4.0.0",
+        "tsx": "^4.7.2",
+        "uuid": "^9.0.1"
+    },
+    "devDependencies": {
+        "@types/cors": "^2.8.17",
+        "@types/express": "^4.17.21",
+        "@types/node": "^20.12.7",
+        "@types/uuid": "^9.0.8",
+        "typescript": "^5.4.5",
+        "vitest": "^1.4.0"
+    },
+    "overrides": {
+        "iconv-lite": "^0.6.3"
+    }
+}

@@ -1,9 +1,11 @@
 /**
- * Hero spotlight: AniList metadata + MyAnimeList v2 banner_image/synopsis when MAL_CLIENT_ID is set
- * (X-MAL-CLIENT-ID), then Jikan fallback for synopsis. Cached server-side.
+ * Hero spotlight: Multi-source racing metadata with fallbacks
+ * Races AniList, Jikan (MAL), Kitsu, and Anime-Planet for fastest reliable response
+ * Enriches with MAL banner_image/synopsis when MAL_CLIENT_ID is set
  */
 
 import { logger } from '../utils/logger.js';
+import { raceAnimeMetadata } from './anime-metadata-racer.js';
 
 const ANILIST_URL = 'https://graphql.anilist.co';
 const JIKAN_BASE = 'https://api.jikan.moe/v4/anime';
@@ -257,39 +259,50 @@ function recencyScore(m: Record<string, unknown>): number {
 }
 
 /**
- * Pulls current-season + recent anime from AniList, merges MAL banner_image + synopsis when
+ * Pulls current-season + recent anime from racing sources, merges MAL banner_image + synopsis when
  * MAL_CLIENT_ID is set, requires a final banner URL, enriches synopsis via Jikan if still thin.
  */
 export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
   const currentYear = new Date().getFullYear();
   const recentYear = currentYear - 1;
-  const formats = ['TV', 'MOVIE', 'ONA'];
 
-  const raw: Record<string, unknown>[] = [];
+  // Use the racer to get anime data from multiple sources in parallel
+  let raw: Record<string, unknown>[] = [];
 
-  // Priority 1: Currently airing, sorted by trending
-  // Priority 2: This year + last year, sorted by trending
-  // Priority 3: This year + last year, sorted by popularity (catch popular completed shows)
-  // Priority 4: Global trending fallback (in case recent queries return too few with banners)
-  const queries: Array<[number, number, string, AniListPageFilters]> = [
-    [1, 50, 'TRENDING_DESC', { status: 'RELEASING', format_in: formats }],
-    [1, 50, 'TRENDING_DESC', { startDate_greater: recentYear * 10000, format_in: formats }],
-    [2, 50, 'TRENDING_DESC', { startDate_greater: recentYear * 10000, format_in: formats }],
-    [1, 50, 'POPULARITY_DESC', { startDate_greater: recentYear * 10000, format_in: formats }],
-    [1, 50, 'TRENDING_DESC', {}], // global fallback
-  ];
+  try {
+    const result = await raceAnimeMetadata(1, 100, {
+      status: 'RELEASING',
+      startDate_greater: recentYear * 10000,
+      format_in: ['TV', 'MOVIE', 'ONA']
+    });
+    
+    // Convert to the expected format
+    raw = result.data as unknown as Record<string, unknown>[];
+    logger.info(`[HeroSpotlight] Racer returned ${raw.length} anime from ${result.source}`, { source: result.source }, 'HeroSpotlight');
+  } catch (e) {
+    logger.error('[HeroSpotlight] All sources failed, falling back to AniList sequential', e as Error, undefined, 'HeroSpotlight');
+    
+    // Fallback to sequential AniList if racer fails
+    const formats = ['TV', 'MOVIE', 'ONA'];
+    const queries: Array<[number, number, string, AniListPageFilters]> = [
+      [1, 50, 'TRENDING_DESC', { status: 'RELEASING', format_in: formats }],
+      [1, 50, 'TRENDING_DESC', { startDate_greater: recentYear * 10000, format_in: formats }],
+      [1, 50, 'TRENDING_DESC', {}], // global fallback
+    ];
 
-  for (const [page, perPage, sort, filters] of queries) {
-    try {
-      const chunk = await anilistPage(page, perPage, sort, filters);
-      raw.push(...chunk);
-      await new Promise((r) => setTimeout(r, 120));
-    } catch (e) {
-      logger.warn('[HeroSpotlight] AniList page failed', { page, sort, filters, err: String(e) }, 'HeroSpotlight');
+    for (const [page, perPage, sort, filters] of queries) {
+      try {
+        const chunk = await anilistPage(page, perPage, sort, filters);
+        raw.push(...chunk);
+        await new Promise((r) => setTimeout(r, 120));
+      } catch (e) {
+        logger.warn('[HeroSpotlight] AniList page failed', { page, sort, filters, err: String(e) }, 'HeroSpotlight');
+      }
     }
   }
+
   if (raw.length === 0) {
-    throw new Error('AniList returned no media for hero spotlight');
+    throw new Error('No anime data available from any source');
   }
 
   const sorted = dedupeById(raw);

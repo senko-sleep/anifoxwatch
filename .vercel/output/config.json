@@ -1,0 +1,21 @@
+{
+  "version": 3,
+  "routes": [
+    {
+      "src": "^/health$",
+      "dest": "/server/src/index.ts"
+    },
+    {
+      "src": "^/api/(.*)$",
+      "dest": "/server/src/index.ts"
+    },
+    {
+      "src": "^/(.*)$",
+      "dest": "/dist/$1"
+    }
+  ],
+  "framework": {
+    "version": "6.4.2"
+  },
+  "crons": []
+}

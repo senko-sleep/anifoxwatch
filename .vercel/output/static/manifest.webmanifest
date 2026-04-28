@@ -1,0 +1,20 @@
+{
+  "name": "AniFox Watch",
+  "short_name": "AniFox",
+  "description": "Stream anime in HD with multiple sources and automatic failover.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#F37A1F",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

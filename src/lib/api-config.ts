@@ -2,7 +2,8 @@
  * API Configuration for AniStream Hub
  * 
  * Automatically switches between different API deployments:
- * - Local Development: Express server on localhost:3001
+ * - Local Development: Express API on `127.0.0.1:3001`, reached from the browser via Vite’s same-origin
+ *   proxy (`/api/*`, `/health`) when `VITE_USE_LOCAL_API=true`.
  * - Vercel: Node API from this repo (`/api/*` on your *.vercel.app deployment)
  * - Production: Configured in .env.production
  */
@@ -21,8 +22,12 @@ export interface ApiConfig {
  */
 export const API_DEPLOYMENTS = {
     local: 'http://localhost:3001',
-    /** Express API deployed with the frontend on Vercel (see root `vercel.json`). */
-    vercel: 'https://anifoxwatch.vercel.app',
+    /**
+     * Vercel (and most SPA hosts): the API is served from the same origin via `/api/*`
+     * (see root `vercel.json`). Keep empty here so production defaults can use
+     * `window.location.origin` (your current deployment domain) instead of a hardcoded app.
+     */
+    vercel: '',
     firebase: '/api',
     custom: '',
     /** Optional HiAnime REST host for status checks (same shape as VITE_ANIWATCH_API_URL). */
@@ -70,35 +75,41 @@ export function apiUrl(path: string): string {
     return base ? `${base}${normalized}` : normalized;
 }
 
-export function getApiConfig(): ApiConfig {
-    if (import.meta.env.DEV) {
-        if (import.meta.env.VITE_USE_LOCAL_API === 'true') {
-            // Use local API explicitly on localhost:3001
-            return {
-                deployment: 'local',
-                baseUrl: API_DEPLOYMENTS.local,
-                timeout: 45000,
-                retries: 3
-            };
-        }
-
-        const devExplicit = import.meta.env.VITE_DEV_API_URL as string | undefined;
-        if (devExplicit && String(devExplicit).trim()) {
-            return configFromUrl(String(devExplicit).trim());
-        }
-
-        const remote = import.meta.env.VITE_API_URL as string | undefined;
-        if (remote && String(remote).trim()) {
-            return configFromUrl(String(remote).trim());
-        }
-
-        // Default to local API in development
+/**
+ * Resolve dev API config from env-like values (extracted for unit tests).
+ * Precedence: `VITE_USE_LOCAL_API=true` → same-origin (empty base) → `VITE_DEV_API_URL` → `VITE_API_URL` → localhost:3001.
+ */
+export function resolveDevApiConfig(env: ImportMetaEnv): ApiConfig {
+    if (env.VITE_USE_LOCAL_API === 'true') {
         return {
             deployment: 'local',
-            baseUrl: API_DEPLOYMENTS.local,
-            timeout: 30000,
-            retries: 3
+            baseUrl: '',
+            timeout: 45000,
+            retries: 3,
         };
+    }
+
+    const devExplicit = env.VITE_DEV_API_URL as string | undefined;
+    if (devExplicit && String(devExplicit).trim()) {
+        return configFromUrl(String(devExplicit).trim());
+    }
+
+    const remote = env.VITE_API_URL as string | undefined;
+    if (remote && String(remote).trim()) {
+        return configFromUrl(String(remote).trim());
+    }
+
+    return {
+        deployment: 'local',
+        baseUrl: API_DEPLOYMENTS.local,
+        timeout: 30000,
+        retries: 3,
+    };
+}
+
+export function getApiConfig(): ApiConfig {
+    if (import.meta.env.DEV) {
+        return resolveDevApiConfig(import.meta.env);
     }
 
     // ─── Production / preview: respect VITE_API_URL from .env.production etc. ───
@@ -107,15 +118,17 @@ export function getApiConfig(): ApiConfig {
         return configFromUrl(String(envApiUrl).trim());
     }
 
-    const isFirebaseHosting = typeof window !== 'undefined' && (
-        window.location.hostname.includes('firebaseapp.com') ||
-        window.location.hostname.includes('web.app')
-    );
+    const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+    const isFirebaseHosting = hostname.includes('firebaseapp.com') || hostname.includes('web.app');
+
+    // In production, default to same-origin so the frontend always hits the co-deployed BFF.
+    // This fixes deployments on arbitrary Vercel domains (preview URLs, forks, custom domains).
+    const sameOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
     if (isFirebaseHosting) {
         return {
-            deployment: 'vercel',
-            baseUrl: API_DEPLOYMENTS.vercel,
+            deployment: 'firebase',
+            baseUrl: API_DEPLOYMENTS.firebase,
             timeout: 30000,
             retries: 3
         };
@@ -123,7 +136,7 @@ export function getApiConfig(): ApiConfig {
 
     return {
         deployment: 'vercel',
-        baseUrl: API_DEPLOYMENTS.vercel,
+        baseUrl: sameOrigin.replace(/\/$/, ''),
         timeout: 30000,
         retries: 3
     };

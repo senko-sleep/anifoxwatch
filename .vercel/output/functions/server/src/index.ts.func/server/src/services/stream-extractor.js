@@ -1,0 +1,331 @@
+/**
+ * Stream Extractor Service
+ * Uses puppeteer to extract actual working stream URLs from anime sites
+ * by capturing network requests with valid tokens
+ */
+import puppeteer from 'puppeteer';
+import { logger } from '../utils/logger.js';
+class StreamExtractor {
+    browser = null;
+    browserLaunchPromise = null;
+    /**
+     * Get or create browser instance (singleton)
+     */
+    async getBrowser() {
+        if (this.browser && this.browser.connected) {
+            return this.browser;
+        }
+        if (this.browserLaunchPromise) {
+            return this.browserLaunchPromise;
+        }
+        this.browserLaunchPromise = puppeteer.launch({
+            headless: true,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--disable-gpu',
+                '--window-size=1920,1080',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--js-flags="--max-old-space-size=256"'
+            ]
+        });
+        this.browser = await this.browserLaunchPromise;
+        this.browserLaunchPromise = null;
+        logger.info('[StreamExtractor] Browser launched');
+        return this.browser;
+    }
+    /**
+     * Create a new page with proper settings
+     */
+    async createPage() {
+        const browser = await this.getBrowser();
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+        await page.setViewport({ width: 1920, height: 1080 });
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        });
+        return page;
+    }
+    /**
+     * Extract streams from a Zoro-style watch site (9anime, Kaido, etc.)
+     */
+    async extractFrom9Anime(animeSlug, episodeId, watchBaseUrl = 'https://9animetv.to') {
+        const url = `${watchBaseUrl.replace(/\/$/, '')}/watch/${animeSlug}?ep=${episodeId}`;
+        logger.info(`[StreamExtractor] Extracting from watch site (${watchBaseUrl}): ${url}`);
+        const page = await this.createPage();
+        const streams = [];
+        const subtitles = [];
+        try {
+            // Enable request interception to capture m3u8 URLs
+            await page.setRequestInterception(true);
+            const capturedM3u8s = new Set();
+            const capturedSubtitles = new Set();
+            const looksLikeHls = (reqUrl) => {
+                const u = reqUrl.toLowerCase();
+                if (u.includes('subtitle') || u.includes('thumb'))
+                    return false;
+                return (u.includes('.m3u8') ||
+                    u.includes('/hls/') ||
+                    u.includes('application/x-mpegurl') ||
+                    /\/playlist\.?[a-z0-9]*$/i.test(reqUrl));
+            };
+            page.on('request', (request) => {
+                const reqUrl = request.url();
+                if (looksLikeHls(reqUrl)) {
+                    capturedM3u8s.add(reqUrl);
+                    logger.info(`[StreamExtractor] Captured m3u8: ${reqUrl.substring(0, 100)}...`);
+                }
+                // Capture subtitle requests
+                if (reqUrl.includes('.vtt') || reqUrl.includes('.srt') || reqUrl.includes('subtitle')) {
+                    capturedSubtitles.add(reqUrl);
+                }
+                request.continue();
+            });
+            page.on('response', async (response) => {
+                const respUrl = response.url();
+                // Capture sources from API responses
+                if (respUrl.includes('getSources') || respUrl.includes('sources')) {
+                    try {
+                        const text = await response.text();
+                        // Try to extract m3u8 URLs from JSON response
+                        const m3u8Matches = text.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g);
+                        if (m3u8Matches) {
+                            m3u8Matches.forEach(url => capturedM3u8s.add(url));
+                        }
+                    }
+                    catch { }
+                }
+            });
+            const isHiAnimeFamily = /aniwatchtv\.to|hianime|zoro\.to|9anime/i.test(watchBaseUrl) ||
+                /aniwatchtv\.to|hianime/i.test(url);
+            // HiAnime pages keep long-polling; networkidle2 often never resolves. Use DOM + extra soak time.
+            await page.goto(url, {
+                waitUntil: isHiAnimeFamily ? 'domcontentloaded' : 'networkidle2',
+                timeout: isHiAnimeFamily ? 60_000 : 45_000,
+            });
+            await page.waitForSelector('iframe', { timeout: 20_000 }).catch(() => { });
+            await this.delay(isHiAnimeFamily ? 14_000 : 5000);
+            // Try clicking play button if video is paused
+            try {
+                const playBtn = await page.$('.play-btn, .jw-icon-display, [class*="play"], .vjs-big-play-button');
+                if (playBtn) {
+                    await playBtn.click();
+                    await this.delay(3000);
+                }
+            }
+            catch { }
+            // Try to get the iframe src and navigate to it directly
+            const iframeSrc = await page.$eval('iframe', (el) => el.src).catch(() => null);
+            if (iframeSrc && iframeSrc.includes('embed')) {
+                logger.info(`[StreamExtractor] Found embed iframe: ${iframeSrc.substring(0, 80)}...`);
+                // Open the iframe in a new page to capture its network requests
+                const embedPage = await this.createPage();
+                await embedPage.setRequestInterception(true);
+                embedPage.on('request', (request) => {
+                    const reqUrl = request.url();
+                    if (looksLikeHls(reqUrl)) {
+                        capturedM3u8s.add(reqUrl);
+                        logger.info(`[StreamExtractor] Captured from embed: ${reqUrl.substring(0, 100)}...`);
+                    }
+                    request.continue();
+                });
+                try {
+                    await embedPage.goto(iframeSrc, {
+                        waitUntil: isHiAnimeFamily ? 'domcontentloaded' : 'networkidle0',
+                        timeout: isHiAnimeFamily ? 45_000 : 30_000,
+                    });
+                    await this.delay(isHiAnimeFamily ? 15_000 : 8000);
+                    // Try to get video src directly
+                    const videoSrc = await embedPage.evaluate(() => {
+                        const video = document.querySelector('video');
+                        return video?.src || video?.currentSrc;
+                    });
+                    if (videoSrc && videoSrc.includes('.m3u8')) {
+                        capturedM3u8s.add(videoSrc);
+                    }
+                }
+                catch (e) {
+                    logger.warn(`[StreamExtractor] Embed page error: ${e}`);
+                }
+                finally {
+                    await embedPage.close();
+                }
+            }
+            // Convert captured URLs to streams
+            for (const m3u8Url of capturedM3u8s) {
+                streams.push({
+                    url: m3u8Url,
+                    quality: this.detectQuality(m3u8Url),
+                    type: 'hls'
+                });
+            }
+            for (const subUrl of capturedSubtitles) {
+                subtitles.push({
+                    url: subUrl,
+                    lang: this.detectSubtitleLang(subUrl)
+                });
+            }
+            logger.info(`[StreamExtractor] Extracted ${streams.length} streams, ${subtitles.length} subtitles`);
+            return {
+                success: streams.length > 0,
+                streams,
+                subtitles,
+                error: streams.length === 0 ? 'No streams found' : undefined
+            };
+        }
+        catch (error) {
+            logger.error(`[StreamExtractor] Extraction failed: ${error.message}`);
+            return {
+                success: false,
+                streams: [],
+                subtitles: [],
+                error: error.message
+            };
+        }
+        finally {
+            await page.close();
+        }
+    }
+    /** Same player layout as 9animetv; uses kaido.to watch URLs */
+    extractFromKaido(animeSlug, episodeId) {
+        return this.extractFrom9Anime(animeSlug, episodeId, 'https://kaido.to');
+    }
+    /**
+     * Extract stream from embed URL directly (rapid-cloud, megacloud, etc.)
+     */
+    async extractFromEmbed(embedUrl) {
+        logger.info(`[StreamExtractor] Extracting from embed: ${embedUrl.substring(0, 80)}...`);
+        const page = await this.createPage();
+        const streams = [];
+        const subtitles = [];
+        try {
+            await page.setRequestInterception(true);
+            const capturedM3u8s = new Set();
+            page.on('request', (request) => {
+                const reqUrl = request.url();
+                if (reqUrl.includes('.m3u8') && !reqUrl.includes('subtitles')) {
+                    capturedM3u8s.add(reqUrl);
+                    logger.info(`[StreamExtractor] Captured: ${reqUrl.substring(0, 100)}...`);
+                }
+                request.continue();
+            });
+            // Set referer to the embed's origin
+            const embedOrigin = new URL(embedUrl).origin;
+            await page.setExtraHTTPHeaders({
+                'Referer': embedOrigin,
+                'Origin': embedOrigin
+            });
+            await page.goto(embedUrl, {
+                waitUntil: 'networkidle0',
+                timeout: 45000
+            });
+            // Wait for video to load
+            await this.delay(10000);
+            // Try to click play
+            try {
+                await page.click('.play-btn, [class*="play"], .jw-icon-display').catch(() => { });
+                await this.delay(5000);
+            }
+            catch { }
+            // Get video src
+            const videoSrc = await page.evaluate(() => {
+                const video = document.querySelector('video');
+                return video?.src || video?.currentSrc;
+            });
+            if (videoSrc && videoSrc.includes('.m3u8')) {
+                capturedM3u8s.add(videoSrc);
+            }
+            // Check page content for m3u8 URLs
+            const pageContent = await page.content();
+            const m3u8Matches = pageContent.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/g);
+            if (m3u8Matches) {
+                m3u8Matches.forEach(url => {
+                    if (!url.includes('subtitles')) {
+                        capturedM3u8s.add(url);
+                    }
+                });
+            }
+            for (const m3u8Url of capturedM3u8s) {
+                streams.push({
+                    url: m3u8Url,
+                    quality: this.detectQuality(m3u8Url),
+                    type: 'hls'
+                });
+            }
+            return {
+                success: streams.length > 0,
+                streams,
+                subtitles,
+                error: streams.length === 0 ? 'No streams found from embed' : undefined
+            };
+        }
+        catch (error) {
+            logger.error(`[StreamExtractor] Embed extraction failed: ${error.message}`);
+            return {
+                success: false,
+                streams: [],
+                subtitles: [],
+                error: error.message
+            };
+        }
+        finally {
+            await page.close();
+        }
+    }
+    /**
+     * Try multiple extraction methods and return first working stream
+     */
+    async extractWithFallbacks(animeSlug, episodeId) {
+        logger.info(`[StreamExtractor] Starting extraction with fallbacks for ${animeSlug} ep ${episodeId}`);
+        const result = await this.extractFrom9Anime(animeSlug, episodeId);
+        if (result.success) {
+            return result;
+        }
+        return {
+            success: false,
+            streams: [],
+            subtitles: [],
+            error: 'All extraction methods failed'
+        };
+    }
+    detectQuality(url) {
+        if (url.includes('1080') || url.includes('fhd'))
+            return '1080p';
+        if (url.includes('720') || url.includes('hd'))
+            return '720p';
+        if (url.includes('480') || url.includes('sd'))
+            return '480p';
+        if (url.includes('360'))
+            return '360p';
+        return 'auto';
+    }
+    detectSubtitleLang(url) {
+        if (url.includes('english') || url.includes('eng'))
+            return 'English';
+        if (url.includes('spanish') || url.includes('spa'))
+            return 'Spanish';
+        return 'Unknown';
+    }
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    /**
+     * Close browser instance
+     */
+    async close() {
+        if (this.browser) {
+            await this.browser.close();
+            this.browser = null;
+            logger.info('[StreamExtractor] Browser closed');
+        }
+    }
+}
+// Export singleton instance
+export const streamExtractor = new StreamExtractor();
+//# sourceMappingURL=stream-extractor.js.map

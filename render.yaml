@@ -22,6 +22,12 @@ services:
         value: https://anifoxwatch-ci33.onrender.com
       - key: CORS_ORIGIN
         value: "*"
+      # HiAnime REST API (deploy server/aniwatch-api/ to Railway, paste URL here)
+      - key: HIANIME_REST_URL
+        value: ""
+      # CF Worker fallback proxy for CDN segments blocked from Render's IP
+      - key: DEFAULT_REMOTE_STREAM_PROXY
+        value: https://anifoxwatch-api.anya-bot.workers.dev/api/stream/proxy
       # Optional — enriches hero section banners/synopsis:
       # - key: MAL_CLIENT_ID
       #   value: your_mal_client_id_here

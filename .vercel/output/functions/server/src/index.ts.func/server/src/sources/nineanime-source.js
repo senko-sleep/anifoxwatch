@@ -1,0 +1,674 @@
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import { BaseAnimeSource } from './base-source.js';
+import { logger } from '../utils/logger.js';
+import { streamExtractor } from '../services/stream-extractor.js';
+/**
+ * 9Anime Source - Web scraper for 9animetv.to
+ *
+ * Strategy:
+ * - Scrapes 9animetv.to directly for anime metadata, episodes, and servers
+ * - Uses Puppeteer to extract streaming links directly from the page (scraping logic)
+ * - Falls back to kaido.to with the same slug/embed shape when 9animetv.to fails
+ */
+export class NineAnimeSource extends BaseAnimeSource {
+    name = '9Anime';
+    baseUrl = 'https://9animetv.to';
+    client;
+    // Smart caching with TTL
+    cache = new Map();
+    cacheTTL = {
+        search: 3 * 60 * 1000, // 3 min
+        anime: 15 * 60 * 1000, // 15 min
+        episodes: 10 * 60 * 1000, // 10 min
+        stream: 2 * 60 * 60 * 1000, // 2 hours
+        servers: 60 * 60 * 1000, // 1 hour
+    };
+    constructor() {
+        super();
+        this.client = axios.create({
+            timeout: 15000,
+            headers: {
+                'Accept': 'text/html,application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            }
+        });
+        // Note: Cache cleanup is done on-demand in getCached/setCache
+        // setInterval is not allowed in Cloudflare Workers global scope
+    }
+    // ============ CACHING ============
+    getCached(key) {
+        const entry = this.cache.get(key);
+        if (entry && entry.expires > Date.now()) {
+            return entry.data;
+        }
+        this.cache.delete(key);
+        return null;
+    }
+    setCache(key, data, ttl) {
+        this.cache.set(key, { data, expires: Date.now() + ttl });
+    }
+    cleanupCache() {
+        const now = Date.now();
+        for (const [key, value] of this.cache.entries()) {
+            if (value.expires < now)
+                this.cache.delete(key);
+        }
+    }
+    // ============ DATA MAPPING ============
+    mapAnimeFromScrape(el, $) {
+        const title = el.find('.film-name a, .name a').text().trim();
+        const url = el.find('.film-name a, .name a').attr('href') || '';
+        const id = url.split('/watch/')[1]?.split('?')[0] || '';
+        const image = el.find('img').attr('data-src') || el.find('img').attr('src') || '';
+        const type = el.find('.fdi-item').first().text().trim() || 'TV';
+        const subText = el.find('.tick-sub').text().trim();
+        const dubText = el.find('.tick-dub').text().trim();
+        const subCount = parseInt(subText) || 0;
+        const dubCount = parseInt(dubText) || 0;
+        // Extract genres from the card's detail/tooltip elements
+        const genres = [];
+        el.find('.fd-infor .fdi-item a, .film-detail .fd-infor a').each((_, genreEl) => {
+            const genre = $(genreEl).text().trim();
+            if (genre && !genre.match(/^\d+$/) && genre.length < 30) {
+                genres.push(genre);
+            }
+        });
+        // Extract description from tooltip or detail text
+        const description = el.find('.film-detail .description, .description').text().trim()
+            || el.find('.desi-description').text().trim()
+            || '';
+        return {
+            id: `9anime-${id}`,
+            title,
+            image,
+            cover: image,
+            description,
+            type: this.mapType(type),
+            status: 'Completed',
+            episodes: subCount,
+            episodesAired: subCount,
+            duration: '24m',
+            genres,
+            studios: [],
+            subCount,
+            dubCount,
+            isMature: false,
+            source: this.name
+        };
+    }
+    mapType(type) {
+        const t = (type || '').toUpperCase();
+        if (t.includes('MOVIE'))
+            return 'Movie';
+        if (t.includes('OVA'))
+            return 'OVA';
+        if (t.includes('ONA'))
+            return 'ONA';
+        if (t.includes('SPECIAL'))
+            return 'Special';
+        return 'TV';
+    }
+    mapStatus(status) {
+        const s = (status || '').toLowerCase();
+        if (s.includes('ongoing') || s.includes('airing') || s.includes('releasing'))
+            return 'Ongoing';
+        if (s.includes('upcoming') || s.includes('not_yet'))
+            return 'Upcoming';
+        return 'Completed';
+    }
+    normalizeQuality(quality) {
+        if (!quality)
+            return 'auto';
+        const q = quality.toLowerCase();
+        if (q.includes('1080') || q.includes('fhd') || q.includes('full'))
+            return '1080p';
+        if (q.includes('720') || q.includes('hd'))
+            return '720p';
+        if (q.includes('480') || q.includes('sd'))
+            return '480p';
+        if (q.includes('360'))
+            return '360p';
+        return 'auto';
+    }
+    // ============ PUPPETEER SCRAPING ============
+    async launchBrowser() {
+        let puppeteer;
+        try {
+            // @ts-ignore
+            const puppeteerModule = 'puppeteer';
+            puppeteer = (await import(puppeteerModule)).default;
+        }
+        catch (e) {
+            throw new Error('Puppeteer is not available in this environment');
+        }
+        return puppeteer.launch({
+            headless: true, // Use headless for server
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--js-flags="--max-old-space-size=256"'
+            ]
+        });
+    }
+    async delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    /**
+     * Extract stream URLs from embed page using Puppeteer
+     */
+    async extractStreamFromEmbed(browser, embedUrl, referer, signal) {
+        if (signal?.aborted)
+            throw new Error('Aborted');
+        const sources = [];
+        const page = await browser.newPage();
+        try {
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            // Intercept network requests
+            await page.setRequestInterception(true);
+            const capturedM3U8s = [];
+            page.on('request', (req) => {
+                const url = req.url();
+                if (url.includes('.m3u8') && !url.includes('subtitles')) {
+                    capturedM3U8s.push(url);
+                }
+                req.continue();
+            });
+            page.on('response', async (response) => {
+                const url = response.url();
+                if (url.includes('getSources') || url.includes('source')) {
+                    try {
+                        const text = await response.text();
+                        try {
+                            const data = JSON.parse(text);
+                            if (data.sources && Array.isArray(data.sources)) {
+                                data.sources.forEach((s) => {
+                                    const src = s.file || s.url || s.src;
+                                    if (src)
+                                        capturedM3U8s.push(src);
+                                });
+                            }
+                        }
+                        catch { }
+                    }
+                    catch { }
+                }
+            });
+            if (signal?.aborted)
+                throw new Error('Aborted');
+            // Navigate to embed with referer
+            await page.setExtraHTTPHeaders({ 'Referer': referer });
+            await page.goto(embedUrl, {
+                waitUntil: 'networkidle0',
+                timeout: 30000
+            });
+            // Wait for player to initialize
+            await this.delayWithSignal(3000, signal);
+            // Try to click play
+            try {
+                await page.click('.play-btn, .vjs-big-play-button, [class*="play"]').catch(() => { });
+                await this.delayWithSignal(2000, signal);
+            }
+            catch { }
+            // Check video element
+            const videoSrc = await page.evaluate(() => {
+                const video = document.querySelector('video');
+                return video?.src || video?.currentSrc || null;
+            });
+            if (videoSrc && videoSrc.includes('.m3u8')) {
+                capturedM3U8s.push(videoSrc);
+            }
+            // Check HTML for m3u8 URLs (Regex Fallback)
+            const html = await page.content();
+            const m3u8Regex = /https?:\/\/[^\s"'<>\\]+\.m3u8[^\s"'<>\\]*/g;
+            const matches = html.match(m3u8Regex);
+            if (matches) {
+                matches.forEach(url => {
+                    if (!url.includes('subtitles')) {
+                        capturedM3U8s.push(url);
+                    }
+                });
+            }
+            // Dedupe and format
+            const uniqueUrls = [...new Set(capturedM3U8s)];
+            uniqueUrls.forEach(url => {
+                sources.push({
+                    url,
+                    quality: 'auto',
+                    isM3U8: url.includes('.m3u8'),
+                    isDASH: url.includes('.mpd')
+                });
+            });
+        }
+        catch (error) {
+            logger.error(`Puppeteer extraction failed for ${embedUrl}`, error, {}, this.name);
+        }
+        finally {
+            await page.close();
+        }
+        return sources;
+    }
+    async getStreamsFromPuppeteer(episodeId, serverId, signal) {
+        if (signal?.aborted)
+            throw new Error('Aborted');
+        let browser = null;
+        try {
+            const [animeSlug, epParam] = episodeId.split('?');
+            const epId = epParam?.replace('ep=', '') || serverId;
+            const episodeUrl = `${this.baseUrl}/watch/${animeSlug}?ep=${epId}`;
+            logger.info(`Puppeteer scraping: ${episodeUrl}`, undefined, this.name);
+            browser = await this.launchBrowser();
+            const serverUrl = `${this.baseUrl}/ajax/episode/sources?id=${serverId}`;
+            const sourcesResponse = await this.client.get(serverUrl, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Referer': episodeUrl
+                },
+                signal
+            });
+            if (!sourcesResponse.data?.link) {
+                throw new Error('No embed link found');
+            }
+            const embedUrl = sourcesResponse.data.link;
+            logger.info(`Found embed URL: ${embedUrl}`, undefined, this.name);
+            const sources = await this.extractStreamFromEmbed(browser, embedUrl, episodeUrl, signal);
+            await browser.close();
+            browser = null;
+            if (sources.length > 0) {
+                return {
+                    sources,
+                    subtitles: [],
+                    source: this.name,
+                    headers: { Referer: 'https://iframe.cool/' }
+                };
+            }
+            return null;
+        }
+        catch (error) {
+            if (error instanceof Error && (error.name === 'AbortError' || error.message === 'Aborted'))
+                throw error;
+            logger.error('Puppeteer scraping failed', error, {}, this.name);
+            if (browser)
+                await browser.close();
+            return null;
+        }
+    }
+    async delayWithSignal(ms, signal) {
+        if (signal?.aborted)
+            throw new Error('Aborted');
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(resolve, ms);
+            signal?.addEventListener('abort', () => {
+                clearTimeout(timeout);
+                reject(new Error('Aborted'));
+            }, { once: true });
+        });
+    }
+    // ============ 9ANIME SCRAPING METHODS ============
+    async healthCheck(options) {
+        try {
+            const response = await this.client.get(`${this.baseUrl}/home`, {
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
+            this.isAvailable = response.status === 200;
+            return this.isAvailable;
+        }
+        catch {
+            return false;
+        }
+    }
+    async search(query, page = 1, filters, options) {
+        const cacheKey = `9anime-search:${query}:${page}`;
+        const cached = this.getCached(cacheKey);
+        if (cached)
+            return cached;
+        try {
+            const response = await this.client.get(`${this.baseUrl}/search`, {
+                params: { keyword: query, page },
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
+            const $ = cheerio.load(response.data);
+            const results = [];
+            $('.flw-item').each((i, el) => {
+                const anime = this.mapAnimeFromScrape($(el), $);
+                if (anime.title) {
+                    results.push(anime);
+                }
+            });
+            const hasNextPage = $('.pagination .page-item.active').next('.page-item').length > 0;
+            const totalPages = parseInt($('.pagination .page-item:not(.next):last').text()) || 1;
+            const result = {
+                results,
+                totalPages,
+                currentPage: page,
+                hasNextPage,
+                source: this.name
+            };
+            this.setCache(cacheKey, result, this.cacheTTL.search);
+            return result;
+        }
+        catch (error) {
+            this.handleError(error, 'search');
+            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
+        }
+    }
+    async getAnime(id, options) {
+        const cacheKey = `9anime-anime:${id}`;
+        const cached = this.getCached(cacheKey);
+        if (cached)
+            return cached;
+        try {
+            const animeSlug = id.replace('9anime-', '');
+            const response = await this.client.get(`${this.baseUrl}/watch/${animeSlug}`, {
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
+            const $ = cheerio.load(response.data);
+            const title = $('h2.film-name').text().trim();
+            const image = $('.film-poster img').attr('src') || '';
+            const description = $('.film-description .text').text().trim() || 'No description available.';
+            const type = $('.item-title:contains("Type:")').next('.item-content').text().trim();
+            const status = $('.item-title:contains("Status:")').next('.item-content').text().trim();
+            const anime = {
+                id: `9anime-${animeSlug}`,
+                title,
+                image,
+                cover: image,
+                description,
+                type: this.mapType(type),
+                status: this.mapStatus(status),
+                episodes: 0,
+                episodesAired: 0,
+                duration: '24m',
+                genres: [],
+                studios: [],
+                subCount: 0,
+                dubCount: 0,
+                isMature: false,
+                source: this.name
+            };
+            $('.item-title:contains("Genres:")').next('.item-content').find('a').each((i, el) => {
+                anime.genres?.push($(el).text().trim());
+            });
+            this.setCache(cacheKey, anime, this.cacheTTL.anime);
+            return anime;
+        }
+        catch (error) {
+            this.handleError(error, 'getAnime');
+            return null;
+        }
+    }
+    async getEpisodes(animeId, options) {
+        const cacheKey = `9anime-episodes:${animeId}`;
+        const cached = this.getCached(cacheKey);
+        if (cached)
+            return cached;
+        try {
+            const animeSlug = animeId.replace('9anime-', '');
+            const numericId = animeSlug.match(/-(\d+)$/)?.[1] || '';
+            if (!numericId) {
+                logger.warn(`Could not extract numeric ID from: ${animeSlug}`, undefined, this.name);
+                return [];
+            }
+            const response = await this.client.get(`${this.baseUrl}/ajax/episode/list/${numericId}`, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Referer': `${this.baseUrl}/watch/${animeSlug}`
+                },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
+            if (!response.data?.html) {
+                return [];
+            }
+            const $ = cheerio.load(response.data.html);
+            const episodes = [];
+            $('.ep-item').each((i, el) => {
+                const $el = $(el);
+                const epId = $el.attr('data-id') || '';
+                const epNumber = parseInt($el.attr('data-number') || '0');
+                const epTitle = $el.attr('title') || `Episode ${epNumber}`;
+                if (epId && epNumber > 0) {
+                    episodes.push({
+                        id: `${animeSlug}?ep=${epId}`,
+                        number: epNumber,
+                        title: epTitle,
+                        isFiller: false,
+                        hasSub: true,
+                        hasDub: true
+                    });
+                }
+            });
+            this.setCache(cacheKey, episodes, this.cacheTTL.episodes);
+            return episodes;
+        }
+        catch (error) {
+            this.handleError(error, 'getEpisodes');
+            return [];
+        }
+    }
+    async getEpisodeServers(episodeId, options) {
+        const cacheKey = `9anime-servers:${episodeId}`;
+        const cached = this.getCached(cacheKey);
+        if (cached)
+            return cached;
+        try {
+            const epNumericId = episodeId.split('ep=')[1] || episodeId;
+            const response = await this.client.get(`${this.baseUrl}/ajax/episode/servers`, {
+                params: { episodeId: epNumericId },
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Referer': this.baseUrl
+                },
+                signal: options?.signal,
+                timeout: options?.timeout || 5000
+            });
+            if (!response.data?.html) {
+                return [
+                    { name: 'hd-1', url: '', type: 'sub' },
+                    { name: 'hd-2', url: '', type: 'sub' }
+                ];
+            }
+            const $ = cheerio.load(response.data.html);
+            const servers = [];
+            $('.servers-sub .server-item').each((i, el) => {
+                const serverId = $(el).attr('data-id') || '';
+                const serverName = $(el).text().trim();
+                if (serverId) {
+                    servers.push({ name: serverName, url: serverId, type: 'sub' });
+                }
+            });
+            $('.servers-dub .server-item').each((i, el) => {
+                const serverId = $(el).attr('data-id') || '';
+                const serverName = $(el).text().trim();
+                if (serverId) {
+                    servers.push({ name: serverName, url: serverId, type: 'dub' });
+                }
+            });
+            if (servers.length === 0) {
+                servers.push({ name: 'hd-1', url: '', type: 'sub' }, { name: 'hd-2', url: '', type: 'sub' });
+            }
+            this.setCache(cacheKey, servers, this.cacheTTL.servers);
+            return servers;
+        }
+        catch (error) {
+            this.handleError(error, 'getEpisodeServers');
+            return [
+                { name: 'hd-1', url: '', type: 'sub' },
+                { name: 'hd-2', url: '', type: 'sub' }
+            ];
+        }
+    }
+    async getStreamingLinks(episodeId, server = 'hd-1', category = 'sub', options) {
+        const cacheKey = `9anime-stream:${episodeId}:${category}`;
+        const cached = this.getCached(cacheKey);
+        if (cached)
+            return cached;
+        // Strip query params from episode ID
+        episodeId = episodeId.split('?')[0];
+        if (!episodeId.includes('?ep=')) {
+            return { sources: [], subtitles: [] };
+        }
+        const [animeSlug, epPart] = episodeId.split('?');
+        const epNum = epPart?.replace('ep=', '')?.trim() || '';
+        if (!animeSlug || !epNum)
+            return { sources: [], subtitles: [] };
+        try {
+            // 1) Try native 9anime extraction via Puppeteer — this is what dev uses
+            const result9 = await Promise.race([
+                streamExtractor.extractFrom9Anime(animeSlug, epNum),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('9anime extractor timeout')), 22000))
+            ]).catch(() => ({ success: false, streams: [] }));
+            if (result9.success && result9.streams?.length > 0) {
+                const streamData = this.buildStreamData(result9, 'https://9animetv.to/');
+                logger.info(`9Anime Puppeteer got ${streamData.sources.length} sources for ${episodeId}`, undefined, this.name);
+                this.setCache(cacheKey, streamData, this.cacheTTL.stream);
+                this.handleSuccess();
+                return streamData;
+            }
+            // 2) Fallback: kaido.to (same slug/ep format, different domain — may not be IP-blocked)
+            logger.info(`9animetv.to failed for ${episodeId}, trying kaido.to`, undefined, this.name);
+            const resultKaido = await Promise.race([
+                streamExtractor.extractFromKaido(animeSlug, epNum),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('kaido extractor timeout')), 22000))
+            ]).catch(() => ({ success: false, streams: [] }));
+            if (resultKaido.success && resultKaido.streams?.length > 0) {
+                const streamData = this.buildStreamData(resultKaido, 'https://kaido.to/');
+                logger.info(`Kaido.to Puppeteer got ${streamData.sources.length} sources for ${episodeId}`, undefined, this.name);
+                this.setCache(cacheKey, streamData, this.cacheTTL.stream);
+                this.handleSuccess();
+                return streamData;
+            }
+            logger.warn(`9Anime: no sources found for ${episodeId} from 9animetv.to or kaido.to`, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        }
+        catch (error) {
+            this.handleError(error, 'getStreamingLinks');
+            return { sources: [], subtitles: [] };
+        }
+    }
+    buildStreamData(result, referer) {
+        return {
+            sources: result.streams.map((s) => ({
+                url: s.url,
+                quality: this.normalizeQuality(s.quality || 'auto'),
+                isM3U8: s.type === 'hls' || s.url?.includes('.m3u8'),
+            })),
+            subtitles: (result.subtitles || []).map((sub) => ({
+                url: sub.url,
+                lang: sub.lang,
+                label: sub.lang
+            })),
+            headers: { Referer: referer },
+            source: this.name
+        };
+    }
+    async getTrending(page = 1, options) {
+        const cacheKey = `9anime-trending:${page}`;
+        const cached = this.getCached(cacheKey);
+        if (cached)
+            return cached;
+        try {
+            const response = await this.client.get(`${this.baseUrl}/home`, {
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
+            });
+            const $ = cheerio.load(response.data);
+            const results = [];
+            $('.block_area_trending .flw-item, .trending-list .flw-item').each((i, el) => {
+                if (i < 10) {
+                    const anime = this.mapAnimeFromScrape($(el), $);
+                    if (anime.title) {
+                        results.push({ ...anime, status: 'Ongoing' });
+                    }
+                }
+            });
+            if (results.length === 0) {
+                $('.block_area:first .flw-item').each((i, el) => {
+                    if (i < 10) {
+                        const anime = this.mapAnimeFromScrape($(el), $);
+                        if (anime.title) {
+                            results.push({ ...anime, status: 'Ongoing' });
+                        }
+                    }
+                });
+            }
+            this.setCache(cacheKey, results, 10 * 60 * 1000);
+            return results;
+        }
+        catch (error) {
+            this.handleError(error, 'getTrending');
+            return [];
+        }
+    }
+    async getLatest(page = 1, options) {
+        const cacheKey = `9anime-latest:${page}`;
+        const cached = this.getCached(cacheKey);
+        if (cached)
+            return cached;
+        try {
+            const response = await this.client.get(`${this.baseUrl}/recently-updated?page=${page}`, {
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
+            const $ = cheerio.load(response.data);
+            const results = [];
+            $('.flw-item').each((i, el) => {
+                const anime = this.mapAnimeFromScrape($(el), $);
+                if (anime.title) {
+                    results.push({ ...anime, status: 'Ongoing' });
+                }
+            });
+            this.setCache(cacheKey, results, 3 * 60 * 1000);
+            return results;
+        }
+        catch (error) {
+            this.handleError(error, 'getLatest');
+            return [];
+        }
+    }
+    async getTopRated(page = 1, limit = 10, options) {
+        const cacheKey = `9anime-topRated:${page}:${limit}`;
+        const cached = this.getCached(cacheKey);
+        if (cached)
+            return cached;
+        try {
+            const response = await this.client.get(`${this.baseUrl}/most-popular?page=${page}`, {
+                headers: { 'Accept': 'text/html' },
+                signal: options?.signal,
+                timeout: options?.timeout || 15000
+            });
+            const $ = cheerio.load(response.data);
+            const results = [];
+            $('.flw-item').each((i, el) => {
+                if (i < limit) {
+                    const anime = this.mapAnimeFromScrape($(el), $);
+                    if (anime.title) {
+                        results.push({
+                            rank: (page - 1) * limit + i + 1,
+                            anime
+                        });
+                    }
+                }
+            });
+            this.setCache(cacheKey, results, 15 * 60 * 1000);
+            return results;
+        }
+        catch (error) {
+            this.handleError(error, 'getTopRated');
+            return [];
+        }
+    }
+}
+//# sourceMappingURL=nineanime-source.js.map

@@ -47,6 +47,11 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const anime = heroAnime[currentIndex];
   const count = heroAnime.length;
 
+  const displayGenres = useMemo(
+    () => anime ? normalizeAnimeGenresForDisplay(anime.genres) : [],
+    [anime?.genres]
+  );
+
   useEffect(() => {
     heroAnime.slice(0, 5).forEach((a) => {
       if (a.bannerImage) {
@@ -108,11 +113,6 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
     anime.duration != null && anime.duration > 0 ? `${anime.duration} min` : null;
   const epCountLabel = anime.episodes != null && anime.episodes > 0 ? `${anime.episodes} eps` : null;
 
-  const displayGenres = useMemo(
-    () => normalizeAnimeGenresForDisplay(anime.genres),
-    [anime.genres]
-  );
-
   const synopsis = heroSynopsis(anime);
   const posterSrc = anime.coverImage?.extraLarge || anime.coverImage?.large || '';
 
@@ -129,14 +129,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
       >
         {/* Background slides */}
         <div
-          className="relative w-full sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]"
-          style={{
-            height: isMobile
-              ? isLandscape
-                ? '38vh'         // landscape phone: use viewport height so it doesn't eat the screen
-                : 'clamp(200px, 46vw, 320px)' // portrait phone
-              : undefined,
-          }}
+          className="relative w-full h-[160px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]"
         >
 
           {heroAnime.map((a, idx) => {
@@ -169,7 +162,8 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
             {/* Left fade — softer on mobile since content is bottom-anchored */}
             <div className="absolute inset-0 bg-gradient-to-r from-[#0c0e14]/75 via-[#0c0e14]/30 to-transparent sm:from-[#0c0e14] sm:via-[#0c0e14]/65 sm:to-transparent" />
             {/* Bottom fade — strong on mobile for text legibility */}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent" style={{ background: 'linear-gradient(to top, #0c0e14 0%, #0c0e1490 22%, transparent 60%)' }} />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent sm:hidden" style={{ background: 'linear-gradient(to top, #0c0e14 0%, #0c0e14cc 35%, #0c0e1460 60%, transparent 100%)' }} />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent hidden sm:block" style={{ background: 'linear-gradient(to top, #0c0e14 0%, #0c0e1490 22%, transparent 60%)' }} />
             {/* Right vignette to blend poster */}
             <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-[#0c0e14]/70 via-transparent to-transparent" />
             {/* Top edge */}
@@ -185,46 +179,46 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
           {/* ── Content panel ─────────────────────────────────────── */}
           <div className="pointer-events-none absolute inset-0 z-[5] flex items-end lg:items-center">
-            <div className="w-full flex items-end lg:items-center justify-between px-4 pb-5 sm:px-7 sm:pb-8 lg:px-10 lg:pb-0 gap-4">
+            <div className="w-full flex items-end lg:items-center justify-between px-3 pb-2 sm:px-7 sm:pb-8 lg:px-10 lg:pb-0 gap-2 sm:gap-4">
 
               {/* Left: text content */}
               <div
                 className={cn(
-                  'pointer-events-auto flex flex-col gap-2.5 sm:gap-3.5 max-w-[min(30rem,88vw)] sm:max-w-[min(34rem,56%)] lg:max-w-[min(38rem,52%)] xl:max-w-[42rem] transition-all ease-out',
+                  'pointer-events-auto flex flex-col gap-1 sm:gap-3.5 max-w-[min(28rem,95vw)] sm:max-w-[min(34rem,56%)] lg:max-w-[min(38rem,52%)] xl:max-w-[42rem] transition-all ease-out',
                   contentVisible ? 'translate-y-0 opacity-100 duration-500' : 'translate-y-3 opacity-0 duration-200'
                 )}
               >
-                {/* Spotlight label */}
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.24em] text-fox-orange sm:text-[10px]">
-                    <Sparkles className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-fox-orange/80" />
+                {/* Spotlight label — mobile: single line, desktop: full */}
+                <div className="flex items-center gap-1 sm:gap-2">
+                  <span className="flex items-center gap-0.5 text-[7px] font-bold uppercase tracking-[0.18em] text-fox-orange sm:text-[10px]">
+                    <Sparkles className="h-2 w-2 sm:h-3.5 sm:w-3.5 text-fox-orange/80" />
                     Spotlight
                   </span>
                   {seasonLabel && (
                     <>
-                      <span className="text-zinc-700 text-[10px]">·</span>
-                      <span className="text-[9px] sm:text-[10px] text-zinc-500 uppercase tracking-wide">{seasonLabel}</span>
+                      <span className="text-zinc-700 text-[8px] sm:text-[10px]">·</span>
+                      <span className="text-[7px] sm:text-[10px] text-zinc-500 uppercase tracking-wide">{seasonLabel}</span>
                     </>
                   )}
                 </div>
 
                 {/* Title */}
                 <h1
-                  className="font-display text-lg font-bold leading-[1.15] tracking-tight text-white drop-shadow-[0_2px_24px_rgba(0,0,0,0.9)] sm:text-2xl md:text-3xl lg:text-[1.9rem] xl:text-[2.2rem]"
+                  className="font-display text-sm font-bold leading-[1.2] tracking-tight text-white drop-shadow-[0_2px_24px_rgba(0,0,0,0.9)] line-clamp-2 sm:line-clamp-none sm:text-2xl md:text-3xl lg:text-[1.9rem] xl:text-[2.2rem]"
                   style={{ textWrap: 'balance' } as CSSProperties}
                 >
                   {title}
                 </h1>
 
                 {/* Metadata row */}
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
                   {rating && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-950/50 px-2 py-0.5 text-[10px] font-bold text-amber-300 backdrop-blur-sm sm:text-[11px]">
-                      <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
+                    <span className="inline-flex items-center gap-0.5 sm:gap-1 rounded-full border border-amber-500/30 bg-amber-950/50 px-1.5 sm:px-2 py-0.5 text-[8px] font-bold text-amber-300 backdrop-blur-sm sm:text-[11px]">
+                      <Star className="h-2 w-2 sm:h-2.5 sm:w-2.5 fill-amber-400 text-amber-400" />
                       {rating}
                     </span>
                   )}
-                  <span className="rounded-full border border-white/[0.1] bg-white/[0.07] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-200 backdrop-blur-sm sm:text-[11px]">
+                  <span className="rounded-full border border-white/[0.1] bg-white/[0.07] px-1.5 sm:px-2 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-zinc-200 backdrop-blur-sm sm:text-[11px]">
                     {formatLabel}
                   </span>
                   {runtimeLabel && (
@@ -278,29 +272,30 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                   >
                     <p>{synopsis}</p>
                   </div>
-                  {/* Fade hint at bottom when content overflows */}
                   <div className="pointer-events-none absolute bottom-0 left-0 right-2 h-4 bg-gradient-to-t from-[#0c0e14]/80 to-transparent" />
                 </div>
 
                 {/* CTA buttons */}
-                <div className="flex items-center gap-2 pt-1 sm:pt-1.5">
+                <div className="flex items-center gap-1.5 sm:gap-2 pt-0.5 sm:pt-1.5">
                   <Button
                     onClick={() =>
                       navigate(watchPath, {
                         state: { from: location.pathname + location.search },
                       })
                     }
-                    className="h-8 gap-1.5 rounded-full bg-fox-orange px-4 text-xs font-semibold text-white shadow-lg shadow-fox-orange/30 ring-1 ring-white/10 hover:bg-fox-orange/90 sm:h-10 sm:px-6 sm:text-sm sm:gap-2 transition-all duration-200 hover:scale-[1.03] hover:shadow-fox-orange/45"
+                    className="h-6 sm:h-10 gap-1 sm:gap-2 rounded-full bg-fox-orange px-2.5 sm:px-6 text-[10px] font-semibold text-white shadow-lg shadow-fox-orange/30 ring-1 ring-white/10 hover:bg-fox-orange/90 sm:text-sm transition-all duration-200 hover:scale-[1.03] hover:shadow-fox-orange/45"
                   >
-                    <Play className="h-3 w-3 fill-white sm:h-3.5 sm:w-3.5" />
-                    Watch Now
+                    <Play className="h-2 w-2 sm:h-3.5 sm:w-3.5 fill-white" />
+                    Watch
                   </Button>
                   <Button
                     variant="outline"
-                    className="h-8 gap-1.5 rounded-full border-white/[0.12] bg-white/[0.06] px-3 text-xs font-medium text-zinc-200 backdrop-blur-sm hover:bg-white/[0.1] hover:border-white/20 hover:text-white sm:h-10 sm:px-5 sm:text-sm transition-all duration-200"
+                    className="h-6 sm:h-10 gap-1 sm:gap-1.5 rounded-full border-white/[0.12] bg-white/[0.06] px-2 sm:px-5 text-[10px] font-medium text-zinc-200 backdrop-blur-sm hover:bg-white/[0.1] hover:border-white/20 hover:text-white sm:text-sm transition-all duration-200"
                     onClick={() => navigate(watchPath, { state: { from: location.pathname + location.search } })}
                   >
-                    <BookmarkPlus className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                    <ChevronRight className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5" />
+                    <span className="sm:hidden">Details</span>
+                    <BookmarkPlus className="hidden sm:block h-3.5 w-3.5" />
                     <span className="hidden sm:inline">Watchlist</span>
                   </Button>
                   <Link
@@ -389,21 +384,21 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
             </div>
           </div>
 
-          {/* Slide dots — pinned bottom-center */}
-          <div className="pointer-events-auto absolute bottom-0 inset-x-0 z-[6] flex items-center justify-center gap-0.5">
+          {/* Slide dots */}
+          <div className="pointer-events-auto absolute bottom-0 inset-x-0 z-[6] flex items-center justify-center gap-0.5 pb-1 sm:pb-0">
             {heroAnime.slice(0, 12).map((_, idx) => (
               <button
                 key={idx}
                 type="button"
                 onClick={() => goToSlide(idx)}
-                className="p-2 touch-manipulation flex items-center justify-center"
+                className="p-1 sm:p-2 touch-manipulation flex items-center justify-center"
                 aria-label={`Slide ${idx + 1}`}
               >
                 <span className={cn(
                   'block rounded-full transition-all duration-300',
                   idx === currentIndex
-                    ? 'w-5 h-1 bg-fox-orange shadow-[0_0_5px_1px] shadow-fox-orange/60'
-                    : 'w-1 h-1 bg-white/25 hover:bg-white/50'
+                    ? 'w-3 h-[3px] bg-fox-orange shadow-[0_0_4px_1px] shadow-fox-orange/60 sm:w-5 sm:h-1'
+                    : 'w-[3px] h-[3px] bg-white/25 hover:bg-white/50 sm:w-1 sm:h-1'
                 )} />
               </button>
             ))}
