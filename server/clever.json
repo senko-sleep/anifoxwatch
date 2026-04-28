@@ -1,14 +1,15 @@
 {
+  "name": "anifoxwatch-api",
   "build": {
     "type": "nodejs",
-    "build-command": "npm run build",
+    "build-command": "cd server && npm install && npm run build",
     "build-env": {
       "NODE_ENV": "production"
     }
   },
   "deploy": {
     "type": "nodejs",
-    "start-command": "node dist/index.js",
+    "start-command": "node server/dist/index.js",
     "env": {
       "NODE_ENV": "production"
     }
