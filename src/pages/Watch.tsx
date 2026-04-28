@@ -26,6 +26,7 @@ import {
   RefreshCw,
   Maximize2,
   MonitorPlay,
+  RotateCw,
 } from 'lucide-react';
 
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -135,12 +136,37 @@ const Watch = () => {
   // Cinema mode state for layout adaptation
   const [isCinemaMode, setIsCinemaMode] = useState(false);
 
+  // Mobile landscape mode
+  const [isLandscapeLocked, setIsLandscapeLocked] = useState(false);
+
   // (Mobile overlay state removed — mobile now uses inline page layout)
 
   // Helper to detect mobile
   const isMobile = useCallback(() => {
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
   }, []);
+
+  // Landscape mode handler
+  const handleLandscapeMode = useCallback(async () => {
+    if (!isMobile()) return;
+    try {
+      if (isLandscapeLocked) {
+        if ((screen.orientation as any).unlock) {
+          (screen.orientation as any).unlock();
+        }
+        setIsLandscapeLocked(false);
+      } else {
+        if (screen.orientation && (screen.orientation as any).lock) {
+          await (screen.orientation as any).lock('landscape');
+        }
+        setIsLandscapeLocked(true);
+        playerRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+    } catch (e) {
+      console.warn('[Watch] Landscape lock failed:', e);
+      playerRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [isMobile, isLandscapeLocked]);
 
   // Data fetching
   const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
@@ -154,7 +180,10 @@ const Watch = () => {
   // The backend defaults to 'auto' when no server is specified.
   // Only pass a server param when the user has explicitly chosen one.
   const [userPickedServer, setUserPickedServer] = useState(false);
-  const streamServer = userPickedServer ? (selectedServer || undefined) : undefined;
+  // Treat 'default' as no server preference — avoids a double-fetch when auto-select picks it
+  const streamServer = userPickedServer && selectedServer && selectedServer.toLowerCase() !== 'default'
+    ? selectedServer
+    : undefined;
   const {
     data: streamData,
     isLoading: streamLoading,
@@ -216,25 +245,19 @@ const Watch = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodes]);
 
-  // Auto-select default server (neko_senko) when servers are loaded
+  // Auto-select default server (neko_senko preferred) when servers are loaded
   useEffect(() => {
     if (!servers?.length || serversLoading) return;
-    if (userPickedServer) return; // Don't override if user already picked one
+    if (userPickedServer) return;
 
-    // Filter out 'default' placeholder servers
-    const realServers = servers.filter(s => s.name.toLowerCase() !== 'default');
-    if (realServers.length === 0) return;
-
-    // Try to find neko_senko first
-    const nekoSenko = realServers.find(s => s.name.toLowerCase().includes('neko_senko'));
-    // Filter servers by current audio type (sub/dub)
-    const audioTypeServers = realServers.filter(s => 
+    // Filter servers by current audio type (sub/dub), fall back to all servers
+    const audioTypeServers = servers.filter(s =>
       audioType === 'dub' ? s.type === 'dub' : s.type === 'sub'
     );
-    const targetServers = audioTypeServers.length > 0 ? audioTypeServers : realServers;
+    const targetServers = audioTypeServers.length > 0 ? audioTypeServers : servers;
 
-    // Select neko_senko if available in target servers, otherwise first available
-    const defaultServer = targetServers.find(s => s.name.toLowerCase().includes('neko_senko')) 
+    // Prefer neko_senko, otherwise pick the first available server (including 'default')
+    const defaultServer = targetServers.find(s => s.name.toLowerCase().includes('neko_senko'))
       || targetServers[0];
 
     if (defaultServer) {
@@ -247,10 +270,10 @@ const Watch = () => {
 
 
 
-  // Auto-failover on stream error — skip placeholder "default" servers
+  // Auto-failover on stream error
   useEffect(() => {
     if (!streamError || !servers?.length) return;
-    const realServers = servers.filter(s => s.name.toLowerCase() !== 'default');
+    const realServers = servers;
     if (realServers.length === 0 || serverRetryCount >= realServers.length) return;
     const currentIndex = realServers.findIndex(s => s.name === selectedServer);
     const nextServer = realServers[(currentIndex + 1) % realServers.length];
@@ -325,8 +348,8 @@ const Watch = () => {
       return;
     }
 
-    // If we've exhausted sources, fail over to next real server (skip 'default' placeholder)
-    const realServers = (servers || []).filter(s => s.name.toLowerCase() !== 'default');
+    // If we've exhausted sources, fail over to next server
+    const realServers = servers || [];
     if (realServers.length && serverRetryCount < realServers.length) {
       const currentIndex = realServers.findIndex(s => s.name === selectedServer);
       const nextServer = realServers[(currentIndex + 1) % realServers.length];
@@ -354,10 +377,13 @@ const Watch = () => {
     return () => clearTimeout(t);
   }, [streamLoading, selectedEpisode]);
 
-  // Auto-fallback: if dub stream returned no sources, silently switch to sub
+  // Auto-fallback: if dub stream returned no sources OR server fell back to sub
   useEffect(() => {
     if (audioType !== 'dub' || streamLoading) return;
-    if (streamData && streamData.sources?.length === 0) {
+    if (!streamData) return;
+    const noSources = streamData.sources?.length === 0;
+    const serverServedSub = (streamData as Record<string, unknown>).dubFallback === true;
+    if (noSources || serverServedSub) {
       console.log('[Watch] No dub sources for this episode, falling back to sub');
       toast.info('Dub not available for this episode — switching to Sub');
       setAudioType('sub');
@@ -562,6 +588,22 @@ const Watch = () => {
 
 
   if (animeLoading) {
+    if (isMobile()) {
+      return (
+        <div className="min-h-screen bg-zinc-950 flex flex-col">
+          <div className="w-full bg-zinc-900 aspect-[16/9] shimmer" />
+          <div className="px-3 py-3 bg-zinc-900/80 border-b border-white/[0.05]">
+            <div className="h-8 w-full rounded-lg shimmer" />
+          </div>
+          <div className="px-3 pt-4 space-y-2">
+            <div className="h-4 w-28 rounded shimmer mb-3" />
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="h-[58px] rounded-xl shimmer" />
+            ))}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <Navbar />
@@ -603,6 +645,34 @@ const Watch = () => {
   }
 
   if (episodesLoading || (episodesFetching && episodes === undefined)) {
+    if (isMobile()) {
+      return (
+        <div className="min-h-screen bg-zinc-950 flex flex-col">
+          <div className="w-full bg-zinc-900 aspect-[16/9] relative overflow-hidden">
+            {anime?.image && (
+              <img src={anime.image} alt="" className="w-full h-full object-cover blur-lg opacity-30 scale-110" />
+            )}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex flex-col items-center gap-2">
+                <div className="relative w-10 h-10">
+                  <div className="absolute inset-0 rounded-full border-[3px] border-fox-orange/20" />
+                  <div className="absolute inset-0 rounded-full border-[3px] border-transparent border-t-fox-orange animate-spin" />
+                </div>
+                <p className="text-white/60 text-xs">Loading episodes…</p>
+              </div>
+            </div>
+          </div>
+          <div className="px-3 py-3 bg-zinc-900/80 border-b border-white/[0.05]">
+            <div className="h-8 w-full rounded-lg shimmer" />
+          </div>
+          <div className="px-3 pt-4 space-y-2">
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-[58px] rounded-xl shimmer" />
+            ))}
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex flex-col bg-background">
         <Navbar />
@@ -723,13 +793,19 @@ const Watch = () => {
         {/* Full-width player — edge to edge, no side gaps */}
         <div className="w-full bg-black sticky top-0 z-20" ref={playerRef}>
           <div className="relative w-full aspect-[16/9]">
-            {streamLoading ? (
-              <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 className="w-9 h-9 animate-spin text-fox-orange" />
-                  <p className="text-white/70 text-xs">Loading stream…</p>
+          {streamLoading ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-zinc-950 overflow-hidden">
+                {anime?.image && (
+                  <img src={anime.image} alt="" className="absolute inset-0 w-full h-full object-cover scale-110 blur-xl opacity-25 pointer-events-none" />
+                )}
+                <div className="relative flex flex-col items-center gap-3">
+                  <div className="relative w-12 h-12">
+                    <div className="absolute inset-0 rounded-full border-[3px] border-fox-orange/20" />
+                    <div className="absolute inset-0 rounded-full border-[3px] border-transparent border-t-fox-orange animate-spin" />
+                  </div>
+                  <p className="text-white/70 text-xs font-medium">Loading stream…</p>
                   {streamSlowWarning && (
-                    <p className="text-white/40 text-[10px] text-center max-w-[200px]">Server warming up — may take ~30 s</p>
+                    <p className="text-white/40 text-[10px] text-center max-w-[180px]">Server warming up — may take ~30 s</p>
                   )}
                 </div>
               </div>
@@ -806,6 +882,17 @@ const Watch = () => {
                   >DUB</button>
                 )}
               </div>
+              {/* Landscape mode */}
+              <button
+                onClick={handleLandscapeMode}
+                title={isLandscapeLocked ? 'Unlock orientation' : 'Watch in landscape'}
+                className={cn(
+                  "w-8 h-8 flex items-center justify-center rounded-lg touch-manipulation transition-colors shrink-0",
+                  isLandscapeLocked ? "bg-fox-orange/20 text-fox-orange" : "bg-white/5 text-white/60 active:bg-white/10"
+                )}
+              >
+                <RotateCw className="w-4 h-4" />
+              </button>
               {/* Prev/Next */}
               <div className="flex items-center gap-1 shrink-0">
                 <button onClick={handlePrevEpisode} disabled={!hasPrev}
@@ -839,47 +926,58 @@ const Watch = () => {
 
           {/* Episode List — right below the player where it belongs */}
           <div className="px-3 pt-3 pb-2">
-            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2.5">
               Episodes <span className="text-zinc-600">{episodes?.length || 0}</span>
             </p>
-            <div className="space-y-1">
+            <div className="space-y-1.5">
               {episodes?.map((ep) => {
                 const progress = getEpisodeProgress(ep.number);
+                const isActive = selectedEpisode === ep.id;
                 return (
                   <button
                     key={ep.id}
                     onClick={() => handleEpisodeSelect(ep.id, ep.number)}
                     className={cn(
-                      "w-full rounded-xl text-left relative overflow-hidden touch-manipulation active:scale-[0.98] transition-transform",
-                      selectedEpisode === ep.id ? "bg-fox-orange" : "bg-white/[0.04] active:bg-white/[0.08]"
+                      "w-full rounded-xl text-left relative overflow-hidden touch-manipulation active:scale-[0.98] transition-all duration-150",
+                      isActive
+                        ? "bg-fox-orange shadow-md shadow-fox-orange/30"
+                        : "bg-white/[0.04] active:bg-white/[0.08] border border-white/[0.05]"
                     )}
                   >
-                    <div className="flex items-center gap-3 px-3 py-3 relative z-10">
+                    <div className="flex items-center gap-3 px-3 py-2.5 relative z-10">
                       <span className={cn(
                         "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0",
-                        selectedEpisode === ep.id ? "bg-white/25 text-white" : "bg-white/8 text-white/70"
+                        isActive ? "bg-white/25 text-white" : "bg-white/[0.07] text-white/60"
                       )}>
-                        {selectedEpisode === ep.id ? <Play className="w-3.5 h-3.5 fill-current" /> : ep.number}
+                        {isActive ? <Play className="w-3.5 h-3.5 fill-current" /> : ep.number}
                       </span>
                       <div className="flex-1 min-w-0">
-                        <p className={cn("text-sm font-medium truncate", selectedEpisode === ep.id ? "text-white" : "text-white/85")}>
+                        <p className={cn("text-[13px] font-medium truncate leading-snug", isActive ? "text-white" : "text-white/80")}>
                           {ep.title || `Episode ${ep.number}`}
                         </p>
                         <div className="flex items-center gap-2 mt-0.5">
-                          {ep.hasSub && <span className="text-[10px] text-white/40">SUB</span>}
+                          {ep.hasSub && (
+                            <span className={cn("text-[10px] font-medium", isActive ? "text-white/60" : "text-sky-400/60")}>SUB</span>
+                          )}
                           {(ep.hasDub || (anime?.dubCount != null && ep.number <= anime.dubCount)) && (
-                            <span className="text-[10px] text-green-400/70">DUB</span>
+                            <span className={cn("text-[10px] font-medium", isActive ? "text-white/60" : "text-green-400/60")}>DUB</span>
                           )}
                           {progress > 0 && progress < 0.9 && (
-                            <span className={cn("text-[10px]", selectedEpisode === ep.id ? "text-white/70" : "text-fox-orange")}>{Math.round(progress * 100)}%</span>
+                            <span className={cn("text-[10px] font-semibold", isActive ? "text-white/70" : "text-fox-orange")}>{Math.round(progress * 100)}%</span>
                           )}
-                          {progress >= 0.9 && <span className="text-[10px] text-green-400">Watched</span>}
+                          {progress >= 0.9 && (
+                            <span className={cn("text-[10px] font-semibold", isActive ? "text-white/70" : "text-green-400")}>✓ Watched</span>
+                          )}
                         </div>
                       </div>
                     </div>
-                    {progress > 0 && selectedEpisode !== ep.id && (
-                      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/8">
-                        <div className={cn("h-full", progress >= 0.9 ? "bg-green-500" : "bg-fox-orange")} style={{ width: `${Math.min(100, progress * 100)}%` }} />
+                    {/* Progress bar */}
+                    {progress > 0 && !isActive && (
+                      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/[0.06]">
+                        <div
+                          className={cn("h-full transition-all", progress >= 0.9 ? "bg-green-500" : "bg-fox-orange")}
+                          style={{ width: `${Math.min(100, progress * 100)}%` }}
+                        />
                       </div>
                     )}
                   </button>

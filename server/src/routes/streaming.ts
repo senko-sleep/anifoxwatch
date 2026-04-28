@@ -589,7 +589,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
                 (subDirect.status === 'fulfilled' && subDirect.value?.sources?.length ? subDirect.value : null) ??
                 (subAllAnime.status === 'fulfilled' && subAllAnime.value?.sources?.length ? subAllAnime.value : null);
             if (subFallback?.sources?.length) {
-                streamData = subFallback;
+                streamData = { ...subFallback, category: 'sub', dubFallback: true };
                 logger.info(`[STREAM] Sub fallback succeeded for ${episodeId} (dub unavailable)`, { requestId });
             }
         } catch (e: unknown) {
