@@ -1,14 +1,15 @@
 {
+  "application-root": "server",
   "build": {
     "type": "nodejs",
-    "build-command": "cd server && npm run build",
+    "build-command": "npm run build",
     "build-env": {
       "NODE_ENV": "production"
     }
   },
   "deploy": {
     "type": "nodejs",
-    "start-command": "cd server && node dist/index.js",
+    "start-command": "node dist/index.js",
     "env": {
       "NODE_ENV": "production"
     }
