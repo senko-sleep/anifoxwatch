@@ -3,7 +3,9 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "main": "server/dist/index.js",
   "scripts": {
+    "postinstall": "cd server && npm install && npm run build",
     "dev": "concurrently --names \"API,WEB\" -c \"cyan,magenta\" --kill-others-on-fail \"npm run dev:api\" \"npm run dev:client\"",
     "dev:client": "vite",
     "dev:api": "npm run dev --prefix server",
