@@ -5,7 +5,6 @@
 import { apiUrl } from '@/lib/api-config';
 
 export const ANILIST_GRAPHQL_URL = apiUrl('/api/anilist/graphql');
-const ANILIST_DIRECT_URL = 'https://graphql.anilist.co';
 
 const MIN_SPACING_MS = 850;
 const MAX_429_RETRIES = 5;
@@ -29,11 +28,7 @@ function retryAfterMs(res: Response): number | null {
 async function fetchWith429Retry(init: RequestInit): Promise<Response> {
   let attempt = 0;
   while (true) {
-    let res = await fetch(ANILIST_GRAPHQL_URL, init);
-    // Proxy blocked by AniList (datacenter IP ban) — fall back to direct browser request
-    if (res.status === 403) {
-      res = await fetch(ANILIST_DIRECT_URL, init);
-    }
+    const res = await fetch(ANILIST_GRAPHQL_URL, init);
     if (res.status !== 429) return res;
     if (attempt >= MAX_429_RETRIES) return res;
 

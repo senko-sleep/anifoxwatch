@@ -173,18 +173,40 @@ app.use('/api/monitoring', monitoringRoutes);
 
 // AniList GraphQL proxy — browsers can't call graphql.anilist.co directly due to CORS;
 // route all queries through here so they originate from the server.
+// In-memory stale-while-revalidate cache keyed by request body hash.
+const anilistProxyCache = new Map<string, { data: unknown; at: number }>();
+const ANILIST_CACHE_TTL = 5 * 60 * 1000; // 5 min fresh, stale served forever on failure
+
 app.post('/api/anilist/graphql', async (req: Request, res: Response): Promise<void> => {
+    const cacheKey = JSON.stringify(req.body);
+    const cached = anilistProxyCache.get(cacheKey);
+    const isFresh = cached && Date.now() - cached.at < ANILIST_CACHE_TTL;
+    if (isFresh) {
+        res.set('Cache-Control', 'public, max-age=300');
+        res.set('X-AniList-Cache', 'HIT');
+        res.json(cached.data);
+        return;
+    }
     try {
         const { default: axios } = await import('axios');
         const response = await axios.post('https://graphql.anilist.co', req.body, {
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
             timeout: 10000,
         });
+        anilistProxyCache.set(cacheKey, { data: response.data, at: Date.now() });
         res.set('Cache-Control', 'public, max-age=300');
         res.json(response.data);
-    } catch (err: any) {
-        const status = err?.response?.status || 500;
-        res.status(status).json(err?.response?.data || { error: 'AniList proxy error' });
+    } catch (err: unknown) {
+        const axiosErr = err as { response?: { status?: number; data?: unknown } };
+        // AniList down/blocked — serve stale cache if available
+        if (cached) {
+            res.set('Cache-Control', 'public, max-age=60');
+            res.set('X-AniList-Cache', 'STALE');
+            res.json(cached.data);
+            return;
+        }
+        const status = axiosErr?.response?.status || 500;
+        res.status(status).json(axiosErr?.response?.data || { error: 'AniList proxy error' });
     }
 });
 

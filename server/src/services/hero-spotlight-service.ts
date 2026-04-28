@@ -354,6 +354,14 @@ export function getHeroSpotlightCached(): Promise<HeroSpotlightAnime[]> {
   return fetchHeroSpotlightAnime().then((payload) => {
     memoryCache = { at: Date.now(), payload };
     return payload;
+  }).catch((err) => {
+    // AniList down — serve stale cache indefinitely rather than 500
+    if (memoryCache) {
+      logger.warn('[HeroSpotlight] AniList failed, serving stale cache', { err: String(err) }, 'HeroSpotlight');
+      return memoryCache.payload;
+    }
+    logger.warn('[HeroSpotlight] AniList failed, no cache available', { err: String(err) }, 'HeroSpotlight');
+    return [];
   });
 }
 
