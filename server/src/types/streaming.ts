@@ -10,6 +10,8 @@ export interface VideoSource {
     isDirect?: boolean;
     /** Source URL is bound to the server IP that extracted it (e.g. Streamtape /get_video tokens). Cannot be proxied through serverless. */
     ipLocked?: boolean;
+    /** Source is an embed page (e.g. animekai.to/iframe/TOKEN). Must be rendered as an <iframe>, not HLS. */
+    isEmbed?: boolean;
     originalUrl?: string;
     size?: number;
 }

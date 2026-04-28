@@ -26,6 +26,11 @@ function upstreamJsonLooksSuccessful(fetchResp: { ok: boolean }, text: string): 
 const router = Router();
 
 router.get('/episode/servers', async (req: Request, res: Response) => {
+    // Disable caching - always fetch fresh data
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
     const raw = req.query.animeEpisodeId;
     if (typeof raw !== 'string' || !raw.trim()) {
         res.status(400).json({ status: 400, error: 'animeEpisodeId required' });
@@ -77,6 +82,11 @@ router.get('/episode/servers', async (req: Request, res: Response) => {
 });
 
 router.get('/episode/sources', async (req: Request, res: Response) => {
+    // Disable caching - always fetch fresh data for streaming
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
     const rawEp = req.query.animeEpisodeId;
     if (typeof rawEp !== 'string' || !rawEp.trim()) {
         res.status(400).json({ status: 400, error: 'animeEpisodeId required' });
@@ -137,7 +147,7 @@ router.get('/episode/sources', async (req: Request, res: Response) => {
     }
 
     // Serverless egress / Cloudflare often breaks scrapers; return 200 + empty data so clients
-    // (and api-url-results `response.ok`) don’t see a hard 502 — Watch page still shows “no sources”.
+    // (and api-url-results `response.ok`) don't see a hard 502 — Watch page still shows "no sources".
     res.status(200).json({
         status: 200,
         data: {

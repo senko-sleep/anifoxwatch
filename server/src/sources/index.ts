@@ -3,6 +3,13 @@ export { BaseAnimeSource, type AnimeSource } from './base-source.js';
 // PRIMARY: Direct scrapers (no external API dependency)
 export { AnimePaheDirectSource } from './animepahe-direct-source.js';
 export { AnimeKaiSource } from './animekai-source.js';
+export { AnimeKaiFetchSource } from './animekai-fetch-source.js';
+
+// Alternative streaming sources
+export { GogoanimeBySource } from './gogoanime-by-source.js';
+export { AnikaiSource } from './anikai-source.js';
+export { CrazyAnimeTVSource } from './crazy-animetv-source.js';
+export { AnimenanaSource } from './animenana-source.js';
 
 // Adult/Hentai Sources
 export { WatchHentaiSource } from './watchhentai-source.js';
@@ -22,6 +29,7 @@ export { AnimePaheSource } from './animepahe-source.js';
 export { AnimeSugeSource } from './animesuge-source.js';
 export { KaidoSource } from './kaido-source.js';
 export { AnixSource } from './anix-source.js';
+export { DirectDownloadSource } from './direct-download-source.js';
 
 // Medium Priority Backups
 export { KickassAnimeSource } from './kickassanime-source.js';

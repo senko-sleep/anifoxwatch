@@ -35,7 +35,14 @@ router.get('/health', async (_req: Request, res: Response): Promise<void> => {
  * @route GET /api/sources/health/enhanced
  * @description Get enhanced health status with capabilities and performance metrics
  */
-router.get('/health/enhanced', async (_req: Request, res: Response): Promise<void> => {
+router.get('/health/enhanced', async (req: Request, res: Response): Promise<void> => {
+    // Ensure CORS headers are set
+    const origin = req.headers.origin || '*';
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Request-ID, Range, Accept');
+    
     try {
         const status = sourceManager.getSourceStatus();
         res.json({
@@ -114,6 +121,20 @@ router.post('/preferred', async (req: Request, res: Response): Promise<void> => 
         console.error('Set preferred source error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
+});
+
+/**
+ * @route OPTIONS /api/sources/health/enhanced
+ * @description Handle CORS preflight for enhanced health endpoint
+ */
+router.options('/health/enhanced', (req: Request, res: Response) => {
+    const origin = req.headers.origin || '*';
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Request-ID, Range, Accept');
+    res.set('Access-Control-Max-Age', '86400');
+    res.sendStatus(204);
 });
 
 export default router;

@@ -5,19 +5,74 @@ import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.
 import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js';
 
 const API_URL = 'https://api.allanime.day/api';
+const API_URL_ALT = 'https://allanime.day/api'; // alternate endpoint, less CAPTCHA-blocked
 const CDN_REFERER = 'https://allanime.day';
+// Mobile User-Agent bypasses the CAPTCHA gate on AllAnime's streaming GQL from cloud IPs
+const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36';
 
 /** Decrypt AllAnime's AES-256-GCM encrypted `tobeparsed` responses. */
-function decryptTobeparsed(tbp: string): any {
-    const raw = Buffer.from(tbp, 'base64');
-    const key = createHash('sha256').update('SimtVuagFbGR2K7P').digest();
-    const iv = raw.subarray(0, 12);
-    const tag = raw.subarray(raw.length - 16);
-    const ciphertext = raw.subarray(12, raw.length - 16);
-    const decipher = createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAuthTag(tag);
-    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    return JSON.parse(decrypted.toString('utf-8'));
+function decryptTobeparsed(tbp: string, method?: string): any {
+    try {
+        // First, try parsing as plain JSON (AllAnime may have removed encryption)
+        try {
+            const plain = JSON.parse(tbp);
+            console.log('[AllAnime] Successfully parsed as plain JSON (no encryption)');
+            return plain;
+        } catch {
+            // Not plain JSON, try decryption
+        }
+        
+        const raw = Buffer.from(tbp, 'base64');
+        
+        // Correct key from anipy-cli: "Xot36i3lK3:v1"
+        const key = createHash('sha256').update('Xot36i3lK3:v1').digest();
+        
+        // Correct IV/tag positions from anipy-cli
+        const iv = raw.subarray(1, 13); // IV starts at position 1, length 12
+        const ciphertext = raw.subarray(13, raw.length - 16); // Ciphertext from position 13 to 16 bytes before end
+        const tag = raw.subarray(raw.length - 16); // Tag is last 16 bytes
+        
+        try {
+            const decipher = createDecipheriv('aes-256-gcm', key, iv);
+            decipher.setAuthTag(tag);
+            const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+            const result = JSON.parse(decrypted.toString('utf-8'));
+            console.log(`[AllAnime] Successfully decrypted with key: Xot36i3lK3:v1 (method: ${method || 'unknown'})`);
+            return result;
+        } catch (e) {
+            console.error('[AllAnime] Failed to decrypt with correct key:', (e as Error).message);
+            
+            // Fallback: try old key if new one fails
+            const oldKeys = ['SimtVuagFbGR2K7P', 'P7K2RGbFgauVtmiS'];
+            for (const oldKey of oldKeys) {
+                try {
+                    const oldKeyHash = createHash('sha256').update(oldKey).digest();
+                    const oldDecipher = createDecipheriv('aes-256-gcm', oldKeyHash, iv);
+                    oldDecipher.setAuthTag(tag);
+                    const oldDecrypted = Buffer.concat([oldDecipher.update(ciphertext), oldDecipher.final()]);
+                    const oldResult = JSON.parse(oldDecrypted.toString('utf-8'));
+                    console.log(`[AllAnime] Successfully decrypted with fallback key: ${oldKey}`);
+                    return oldResult;
+                } catch {
+                    continue;
+                }
+            }
+        }
+        
+        // If all keys fail, try parsing base64-decoded as JSON
+        try {
+            const plain = JSON.parse(Buffer.from(tbp, 'base64').toString('utf-8'));
+            console.log('[AllAnime] Successfully parsed base64-decoded as JSON');
+            return plain;
+        } catch {
+            // Try returning the original data structure without decryption
+            console.log('[AllAnime] Returning unmodified data (encryption may have been removed)');
+            return { tobeparsed: tbp };
+        }
+    } catch (e) {
+        console.error('[AllAnime] Failed to decrypt tobeparsed:', (e as Error).message);
+        throw e;
+    }
 }
 
 export class AllAnimeSource extends BaseAnimeSource {
@@ -34,19 +89,39 @@ export class AllAnimeSource extends BaseAnimeSource {
     }
 
     private async gqlQuery(query: string, options?: SourceRequestOptions): Promise<any> {
-        const response = await axios.post(API_URL, { query }, {
-            headers: { 'Content-Type': 'application/json', 'Referer': 'https://allmanga.to/' },
+        const headers = {
+            'Content-Type': 'application/json',
+            'Referer': 'https://allmanga.to/',
+            'Origin': 'https://allmanga.to',
+            // Mobile UA bypasses CAPTCHA on streaming GQL from cloud/datacenter IPs
+            'User-Agent': MOBILE_UA,
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'X-Requested-With': 'XMLHttpRequest',
+        };
+        let response = await axios.post(API_URL, { query }, {
+            headers,
             signal: options?.signal,
             timeout: options?.timeout || 10000
-        });
-        if (response.data.errors?.length) {
+        }).catch(() => null);
+
+        // Fallback to alternate endpoint if primary fails or returns CAPTCHA
+        if (!response || response.data?.errors?.[0]?.message === 'NEED_CAPTCHA') {
+            response = await axios.post(API_URL_ALT, { query }, {
+                headers,
+                signal: options?.signal,
+                timeout: options?.timeout || 10000
+            });
+        }
+        if (response?.data?.errors?.length) {
             throw new Error(response.data.errors[0].message);
         }
-        let data = response.data.data;
+        let data = response?.data?.data;
         // AllAnime now returns encrypted responses for some queries
         if (data?.tobeparsed) {
             try {
-                data = decryptTobeparsed(data.tobeparsed);
+                const method = data._m || 'unknown';
+                data = decryptTobeparsed(data.tobeparsed, method);
             } catch (e) {
                 console.error('[AllAnime] Failed to decrypt tobeparsed:', (e as Error).message);
             }

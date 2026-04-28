@@ -1,9 +1,10 @@
-/**
+le/**
  * AnimeKai Source - Uses @consumet/extensions AnimeKai provider
  * Reliable backup streaming provider
  */
 
 import axios, { AxiosError } from 'axios';
+import * as cheerio from 'cheerio';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
@@ -261,29 +262,137 @@ export class AnimeKaiSource extends BaseAnimeSource {
         ];
     }
 
-    private isBrokenCdn(url: string): boolean {
-        try {
-            const h = new URL(url).hostname;
-            return ['hub26link', 'net22lab', 'streamwish'].some(bad => h.includes(bad));
-        } catch { return false; }
+    /**
+     * Extract streams directly from AnimeKai, bypassing the broken Consumet extraction path.
+     *
+     * Consumet AnimeKai v1.8.8 is broken because:
+     *  1. anikai.to now wraps embeds in /iframe/TOKEN (HTML page) instead of serving megaup URLs
+     *     directly — Consumet tries to call /media/ on the wrapper and gets HTML back.
+     *  2. The User-Agent sent to /media/ must exactly match the one sent to enc-dec.app/dec-mega;
+     *     Consumet uses mismatched values.
+     *
+     * Correct chain:
+     *  fetchEpisodeServers → https://anikai.to/iframe/TOKEN (HTML)
+     *    → parse <iframe src="https://megaup.nl/e/ID">
+     *    → GET megaup.nl/media/ID  (X-Requested-With: XMLHttpRequest, same UA)
+     *    → POST enc-dec.app/api/dec-mega { text, agent: sameUA }
+     *    → sources[].file
+     */
+    private async extractMegaupStream(
+        serverUrl: string,
+        timeoutMs: number
+    ): Promise<VideoSource[]> {
+        const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+
+        // Step 1: fetch anikai.to/iframe/TOKEN  →  parse <iframe src>
+        const iframeResp = await axios.get(serverUrl, {
+            headers: { 'User-Agent': UA },
+            timeout: Math.min(timeoutMs, 10_000),
+        });
+        const $ = cheerio.load(iframeResp.data as string);
+        const megaupEmbedUrl = $('iframe').attr('src') || '';
+        const isMegaupEmbed = /megaup\.(nl|cc|live|to)\//i.test(megaupEmbedUrl);
+
+        // If no iframe src, or iframe src is not a megaup CDN (e.g. Streamtape, other embeds),
+        // return the original server URL as an embed fallback so the browser can play it.
+        if (!megaupEmbedUrl || !isMegaupEmbed) {
+            logger.warn(`AnimeKai: non-megaup embed (${megaupEmbedUrl.slice(0, 60) || 'none'}) — returning embed fallback`, undefined, this.name);
+            return [{ url: serverUrl, quality: 'auto', isM3U8: false, isEmbed: true }];
+        }
+
+        // Step 2: GET megaup /media/ endpoint (returns JSON { status, result: encryptedText })
+        // Vercel/cloud datacenter IPs are blocked by megaup.nl with 403. When direct fetch fails,
+        // fall back to the Cloudflare Worker proxy which has a residential-adjacent IP.
+        const REMOTE_PROXY = process.env.DEFAULT_REMOTE_STREAM_PROXY ||
+            'https://anifoxwatch-api.anya-bot.workers.dev/api/stream/proxy';
+        const MEGAUP_MIRRORS = ['megaup.nl', 'megaup.cc', 'megaup.live', 'megaup.to'];
+        const embedBase = new URL(megaupEmbedUrl).hostname;
+        const mirrorOrder = [
+            embedBase,
+            ...MEGAUP_MIRRORS.filter(m => m !== embedBase),
+        ];
+
+        let encText: string | undefined;
+
+        const fetchMedia = async (mediaUrl: string, referer: string): Promise<string | undefined> => {
+            try {
+                const r = await axios.get(mediaUrl, {
+                    headers: { 'User-Agent': UA, 'Referer': referer, 'X-Requested-With': 'XMLHttpRequest' },
+                    timeout: Math.min(timeoutMs, 10_000),
+                });
+                return r.data?.result;
+            } catch {
+                return undefined;
+            }
+        };
+
+        for (const mirror of mirrorOrder) {
+            const mirrorEmbedUrl = megaupEmbedUrl.replace(embedBase, mirror);
+            const mirrorMediaUrl = mirrorEmbedUrl.replace('/e/', '/media/');
+
+            // Try direct first
+            encText = await fetchMedia(mirrorMediaUrl, mirrorEmbedUrl);
+            if (encText) break;
+
+            // 403 from datacenter IP — retry via CF Worker proxy
+            try {
+                const proxied = `${REMOTE_PROXY}?url=${encodeURIComponent(mirrorMediaUrl)}&referer=${encodeURIComponent(mirrorEmbedUrl)}`;
+                const rp = await axios.get(proxied, { timeout: Math.min(timeoutMs, 12_000) });
+                if (rp.data?.result) { encText = rp.data.result; break; }
+            } catch (e: unknown) {
+                const code = axios.isAxiosError(e) ? e.response?.status : 0;
+                logger.warn(`AnimeKai: ${mirror}/media/ proxy failed (${code})`, undefined, this.name);
+            }
+        }
+
+        if (!encText) {
+            // All megaup mirrors + CF proxy failed (datacenter IP block).
+            // Return the AnimeKai iframe embed URL so the browser can play it client-side.
+            logger.warn(`AnimeKai: no encrypted result — returning embed fallback for ${serverUrl}`, undefined, this.name);
+            return [{
+                url: serverUrl,
+                quality: 'auto',
+                isM3U8: false,
+                isEmbed: true,
+            }];
+        }
+
+        // Step 3: decrypt via enc-dec.app — User-Agent MUST match the one used for /media/
+        const decResp = await axios.post(
+            'https://enc-dec.app/api/dec-mega',
+            { text: encText, agent: UA },
+            { headers: { 'Content-Type': 'application/json', 'User-Agent': UA }, timeout: 12_000 }
+        );
+        const decrypted = decResp.data?.result;
+        if (!decrypted?.sources?.length) return [];
+
+        return (decrypted.sources as Array<{ file?: string; type?: string }>).map((s): VideoSource => ({
+            url: s.file ?? '',
+            quality: 'auto',
+            isM3U8: (s.file ?? '').includes('.m3u8') || s.type === 'hls',
+            isDASH: (s.file ?? '').includes('.mpd'),
+        })).filter(s => s.url);
     }
 
-    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, _server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         const cacheKey = `kai:stream:${episodeId}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
-        if (cached && !cached.sources.some(s => this.isBrokenCdn(s.url))) return cached;
+        if (cached && cached.sources.length > 0) return cached;
 
-        // Strip source prefix added by SourceManager when AnimeKai is a fallback for other sources.
-        // The consumet AnimeKai provider expects its native episode ID (e.g. slug$ep=N$token=KEY).
         let rawEpisodeId = episodeId.replace(/^animekai-/i, '');
+
+        // Parse compound ID format: slug$ep=N$token=... or slug?ep=N
+        // Extract just the slug part for Consumet
+        if (rawEpisodeId.includes('$ep=') || rawEpisodeId.includes('?ep=')) {
+            rawEpisodeId = rawEpisodeId.split(/\$ep=|\?ep=/)[0];
+        }
 
         try {
             const p = await this.getProvider();
             const mod = await import('@consumet/extensions');
             const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
 
-            // If the ID is a bare anime slug (no compound $ep=N$token= format), resolve it to
-            // the first episode ID. This happens for movies synthesized from the anime-level ID.
+            // Resolve bare anime slug → first episode ID
             if (!rawEpisodeId.includes('$ep=') && !rawEpisodeId.includes('?ep=')) {
                 try {
                     const info = await Promise.race([
@@ -292,70 +401,50 @@ export class AnimeKaiSource extends BaseAnimeSource {
                     ]);
                     if (info?.episodes?.length > 0) {
                         rawEpisodeId = info.episodes[0].id;
-                        logger.info(`AnimeKai: resolved bare slug "${episodeId}" → episode id "${rawEpisodeId}"`, undefined, this.name);
+                        logger.info(`AnimeKai: resolved bare slug "${episodeId}" → "${rawEpisodeId}"`, undefined, this.name);
                     }
-                } catch {
-                    // ignore — proceed with bare slug, fetchEpisodeSources may still work
-                }
+                } catch { /* ignore */ }
             }
 
             logger.info(`Fetching ${category} stream from AnimeKai for ${rawEpisodeId}`, undefined, this.name);
 
-            // Try twice — keep total time under SourceManager executeReliably budget
-            for (let attempt = 0; attempt < 2; attempt++) {
-                const data = await Promise.race([
-                    p.fetchEpisodeSources(rawEpisodeId, undefined, subOrDub),
-                    new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 10_000))
-                ]);
+            // Get the list of embed server URLs (anikai.to/iframe/TOKEN entries)
+            const servers: any[] = await Promise.race([
+                p.fetchEpisodeServers(rawEpisodeId, subOrDub),
+                new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 10_000))
+            ]);
 
-                if (!data.sources?.length) {
-                    return { sources: [], subtitles: [] };
+            if (!servers?.length) {
+                logger.warn(`AnimeKai: no servers returned for ${rawEpisodeId}`, undefined, this.name);
+                return { sources: [], subtitles: [] };
+            }
+
+            const timeoutMs = options?.timeout ?? 25_000;
+
+            // Try each server in order until one yields sources
+            for (const sv of servers) {
+                if (!sv?.url) continue;
+                try {
+                    const sources = await this.extractMegaupStream(sv.url, timeoutMs);
+                    if (sources.length > 0) {
+                        const streamData: StreamingData = { sources, subtitles: [], source: this.name };
+                        logger.info(`AnimeKai: ${sources.length} source(s) via ${sv.name} for ${rawEpisodeId}`, undefined, this.name);
+                        this.setCache(cacheKey, streamData, 2 * 60 * 60 * 1000);
+                        return streamData;
+                    }
+                } catch (svErr: unknown) {
+                    const msg = svErr instanceof Error ? svErr.message : String(svErr);
+                    if (isConsumetEmbedDecoderRejected(svErr)) {
+                        logger.warn(`AnimeKai: enc-dec.app rate-limited for server ${sv.name}`, undefined, this.name);
+                    } else {
+                        logger.warn(`AnimeKai: server ${sv.name} failed — ${msg}`, undefined, this.name);
+                    }
                 }
-
-                const hasBrokenUrl = data.sources.some((s: any) => this.isBrokenCdn(s.url));
-                if (hasBrokenUrl && attempt < 1) {
-                    logger.warn(`AnimeKai: Got broken CDN domain on attempt ${attempt + 1}, retrying...`, undefined, this.name);
-                    await new Promise(r => setTimeout(r, 500));
-                    continue;
-                }
-
-                const streamData: StreamingData = {
-                    sources: data.sources.map((s: any): VideoSource => ({
-                        url: s.url,
-                        quality: s.quality?.includes('1080') ? '1080p' : s.quality?.includes('720') ? '720p' : 'auto',
-                        isM3U8: s.isM3U8 || s.url?.includes('.m3u8'),
-                        isDASH: s.url?.includes('.mpd')
-                    })),
-                    subtitles: (data.subtitles || []).map((sub: any) => ({
-                        url: sub.url,
-                        lang: sub.lang || 'Unknown',
-                        label: sub.label || sub.lang
-                    })),
-                    headers: data.headers,
-                    source: this.name
-                };
-
-                logger.info(`AnimeKai: ${streamData.sources.length} sources for ${episodeId}`, undefined, this.name);
-                this.setCache(cacheKey, streamData, 2 * 60 * 60 * 1000);
-                return streamData;
             }
 
             return { sources: [], subtitles: [] };
         } catch (error) {
             const err = error instanceof Error ? error : new Error(String(error));
-            // "Server X not found" means the CDN server is no longer listed on AnimeKai's
-            // episode page (e.g. megaup was removed). This is a soft failure — AnimeKai itself
-            // is still online, it just can't serve this episode via that server. Returning empty
-            // sources here avoids incrementing the consecutive-failure counter and prevents the
-            // source from being incorrectly marked offline.
-            if (isConsumetEmbedDecoderRejected(error)) {
-                logger.warn(
-                    `AnimeKai: remote embed decoder unavailable or rate-limited (Consumet enc-dec); skipping`,
-                    undefined,
-                    this.name,
-                );
-                return { sources: [], subtitles: [] };
-            }
             if (/server .* not found/i.test(err.message)) {
                 logger.warn(`AnimeKai: CDN server unavailable for ${episodeId} — ${err.message}`, undefined, this.name);
                 return { sources: [], subtitles: [] };

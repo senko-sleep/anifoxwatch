@@ -93,17 +93,35 @@ export async function tryFetchHianimeRestStreamingData(opts: {
     category: 'sub' | 'dub';
     explicitServer?: string;
     perAttemptTimeoutMs?: number;
+    /** Hard cap for the whole HiAnime REST discovery loop (multiple servers + fallbacks). */
+    totalBudgetMs?: number;
+    /**
+     * When `?ep=` is a non-numeric embed token, Consumet/remote may still resolve `?ep=<catalogEp>`
+     * (matches catalog episode N from `slug$ep=N$token=...` sent as `ep_num` on `/api/stream/watch`).
+     */
+    catalogEpisodeFallback?: number;
 }): Promise<StreamingData | null> {
     const base = process.env.HIANIME_REST_URL?.replace(/\/$/, '');
-    const { episodeId, category, explicitServer, perAttemptTimeoutMs = 14_000 } = opts;
+    const { episodeId, category, explicitServer, perAttemptTimeoutMs = 14_000, totalBudgetMs = 12_000, catalogEpisodeFallback } = opts;
     const restEpisodeId = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
+    const startedAt = Date.now();
+    const budget = Math.max(2500, totalBudgetMs);
 
     let discovered: string[] | null = null;
-    if (base) {
-        discovered = await fetchHianimeRestEpisodeServerIds(base, restEpisodeId, category, perAttemptTimeoutMs);
-    }
-    if (!discovered?.length) {
-        discovered = await fetchLocalAniwatchEpisodeServerIds(restEpisodeId, category, perAttemptTimeoutMs);
+    {
+        const discoveryBudget = Math.min(6000, Math.max(1500, Math.floor(budget * 0.35)));
+        const elapsed0 = Date.now() - startedAt;
+        if (elapsed0 < budget && base) {
+            discovered = await fetchHianimeRestEpisodeServerIds(base, restEpisodeId, category, discoveryBudget);
+        }
+        const elapsed1 = Date.now() - startedAt;
+        if (elapsed1 < budget && !discovered?.length) {
+            discovered = await fetchLocalAniwatchEpisodeServerIds(
+                restEpisodeId,
+                category,
+                Math.min(discoveryBudget, Math.max(800, budget - elapsed1)),
+            );
+        }
     }
 
     const servers = buildHianimeRestServersToTry({
@@ -112,17 +130,26 @@ export async function tryFetchHianimeRestStreamingData(opts: {
     });
 
     for (const server of servers) {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed >= budget) break;
+
+        const remaining = Math.max(800, budget - elapsed);
+        // Keep each attempt bounded; we may try multiple servers within the total budget.
+        const attemptTimeout = Math.min(perAttemptTimeoutMs, Math.max(1500, Math.floor(remaining / 2)));
+
         let payload: SourcesPayload | null | undefined;
 
+        const timeLeft = () => Math.max(250, budget - (Date.now() - startedAt));
+
         if (base) {
-            payload = await tryRemoteEpisodeSources(base, restEpisodeId, server, category, perAttemptTimeoutMs);
+            payload = await tryRemoteEpisodeSources(base, restEpisodeId, server, category, Math.min(attemptTimeout, timeLeft()));
         }
         if (!payload?.sources?.length) {
             const cc = await fetchConsumetHianimeEpisodeSourcesEnvelope({
                 animeEpisodeId: restEpisodeId,
                 server,
                 category,
-                timeoutMs: perAttemptTimeoutMs + 2000,
+                timeoutMs: Math.min(attemptTimeout, timeLeft()),
             });
             const d = cc?.data as SourcesPayload | undefined;
             if (d?.sources?.length) payload = d;
@@ -132,7 +159,7 @@ export async function tryFetchHianimeRestStreamingData(opts: {
                 animeEpisodeId: restEpisodeId,
                 server,
                 category,
-                timeoutMs: perAttemptTimeoutMs + 2000,
+                timeoutMs: Math.min(attemptTimeout, timeLeft()),
             });
             const d = localJson?.data as SourcesPayload | undefined;
             if (d?.sources?.length) payload = d;
@@ -140,6 +167,31 @@ export async function tryFetchHianimeRestStreamingData(opts: {
 
         const mapped = mapPayloadToStreaming(payload ?? undefined);
         if (mapped) return mapped;
+    }
+
+    const epSeg =
+        restEpisodeId.includes('?ep=') ? restEpisodeId.split('?ep=')[1]?.split('&')[0]?.split('#')[0] ?? '' : '';
+    if (
+        catalogEpisodeFallback != null &&
+        catalogEpisodeFallback > 0 &&
+        epSeg &&
+        !/^\d+$/.test(epSeg)
+    ) {
+        const slug = restEpisodeId.split('?')[0];
+        const alt = `${slug}?ep=${catalogEpisodeFallback}`;
+        if (alt !== restEpisodeId) {
+            const spent = Date.now() - startedAt;
+            const remain = Math.max(1500, budget - spent);
+            if (remain >= 1500) {
+                return tryFetchHianimeRestStreamingData({
+                    episodeId: alt,
+                    category,
+                    explicitServer,
+                    perAttemptTimeoutMs: Math.min(perAttemptTimeoutMs, 8000),
+                    totalBudgetMs: remain,
+                });
+            }
+        }
     }
     return null;
 }

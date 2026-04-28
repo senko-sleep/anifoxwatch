@@ -2,20 +2,16 @@ import {
     AnimeSource,
     AnimePaheDirectSource,
     AnimeKaiSource,
-    NineAnimeSource,
     WatchHentaiSource,
     HanimeSource,
     AkiHSource,
-    ConsumetSource,
     AnimeFLVSource,
     GogoanimeSource,
     AllAnimeSource,
-    KaidoSource,
-    ZoroSource,
-    MiruroSource,
-    AniwaveSource,
-    AnixSource,
-    DirectDownloadSource,
+    GogoanimeBySource,
+    AnikaiSource,
+    CrazyAnimeTVSource,
+    AnimenanaSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -86,6 +82,10 @@ export class SourceManager {
         ['AnimeFLV', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['Gogoanime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['AllAnime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['GogoanimeBy', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['Anikai', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['CrazyAnimeTV', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
+        ['Animenana', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
         ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
@@ -125,43 +125,44 @@ export class SourceManager {
     private sourceSuccessRates: Map<string, { success: number; total: number }> = new Map();
 
     constructor() {
-        // PRIMARY: AnimeFLV — verified working streams (bypasses aniwatch-pkg Cloudflare issues)
-        this.registerSource(new AnimeFLVSource());
-
-        // BACKUP: AnimeKai — verified working HLS streams (sub + dub) via @consumet/extensions
-        this.registerSource(new AnimeKaiSource());
-
-        // BACKUP: AnimePahe — @consumet/extensions
-        this.registerSource(new AnimePaheDirectSource());
-
-        // FALLBACK: External API-based sources
-        this.registerSource(new NineAnimeSource());
-        this.registerSource(new ConsumetSource(process.env.CONSUMET_API_URL || 'https://api.consumet.org', 'gogoanime'));
-
-        // PRODUCTION FALLBACK: Gogoanime (anitaku.pe) — direct HTTP scraper, not Cloudflare-blocked
+        // TIER 1: Verified working streaming sources (April 2025 audit)
+        // Gogoanime (anitaku.to) — returns vibeplayer.site m3u8, fast & reliable
         this.registerSource(new GogoanimeSource());
 
-        // PRODUCTION: AllAnime — GraphQL API + fast4speed.rsvp CDN (accessible from cloud IPs)
+        // AnimeFLV — verified working, returns Streamwish/Streamtape embeds
+        this.registerSource(new AnimeFLVSource());
+
+        // AnimeKai — verified search+episodes, streaming via @consumet/extensions
+        this.registerSource(new AnimeKaiSource());
+
+        // AllAnime — GraphQL API, fast4speed CDN (may CAPTCHA-block from datacenter IPs)
         this.registerSource(new AllAnimeSource());
 
-        // Miruro / aniwatch-style episode IDs (see getStreamingSource $token= routing)
-        this.registerSource(new MiruroSource());
+        // TIER 2: Sources that partially work or need specific conditions
+        // AnimePahe — @consumet/extensions (search returns 0 results currently but kept as fallback)
+        this.registerSource(new AnimePaheDirectSource());
 
-        // BACKUP: Kaido (kaido.to) — used for enrichment + streaming fallback
-        this.registerSource(new KaidoSource());
-
-        // BACKUP: Zoro (zoro.to mirror) — additional streaming fallback
-        this.registerSource(new ZoroSource());
-
-        // New expansions
-        this.registerSource(new AniwaveSource());
-        this.registerSource(new AnixSource());
-        this.registerSource(new DirectDownloadSource());
+        // DISABLED — confirmed dead in April 2025 audit:
+        // 9Anime: timeout on both health and search
+        // Consumet (public API): api.consumet.org returns errors
+        // Miruro: search returns 0 results (hianime CF blocked)
+        // Kaido: health timeout, search timeout
+        // Zoro: 403 Forbidden
+        // Aniwave: 451 Unavailable For Legal Reasons
+        // Anix: DNS ENOTFOUND (anix.to)
+        // DirectDownload: 403 Forbidden
+        // KickassAnime: health OK but search broken (data.map error)
+        // YugenAnime: health OK but search returns 0
+        // AnimeSuge: DNS ENOTFOUND (animesuge.to)
+        // GogoanimeBy: SSL/TLS errors (EPROTO)
+        // CrazyAnimeTV: SSL/TLS errors (EPROTO)
+        // Animenana: SSL/TLS errors (EPROTO)
+        // Anikai: Same as AnimeKai (duplicate)
 
         // Adult sources
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
-        this.registerSource(new AkiHSource());
+        this.registerSource(new AkiHSource()); // Re-enabled - hentai only
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
@@ -173,6 +174,10 @@ export class SourceManager {
         this.sourceRateLimits.set('AnimeFLV', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('Gogoanime', { limit: 60, resetTime: 60000 });
         this.sourceRateLimits.set('AllAnime', { limit: 120, resetTime: 60000 });
+        this.sourceRateLimits.set('GogoanimeBy', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('Anikai', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('CrazyAnimeTV', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('Animenana', { limit: 60, resetTime: 60000 });
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
         this.sourceRateLimits.set('Consumet', { limit: 60, resetTime: 60000 });
@@ -895,6 +900,10 @@ export class SourceManager {
             'Aniwave': 'aniwave-',
             'Aniwatch': 'aniwatch-',
             'Gogoanime': 'gogoanime-',
+            'GogoanimeBy': 'gogoanimeby-',
+            'Anikai': 'anikai-',
+            'CrazyAnimeTV': 'crazyanimetv-',
+            'Animenana': 'animenana-',
             'Consumet': 'consumet-',
             'Zoro': 'zoro-',
             'AnimeSuge': 'animesuge-',
@@ -968,6 +977,10 @@ export class SourceManager {
             { prefix: 'animekai-', source: 'AnimeKai' },
             { prefix: '9anime-', source: '9Anime' },
             { prefix: 'gogoanime-', source: 'Gogoanime' },
+            { prefix: 'gogoanimeby-', source: 'GogoanimeBy' },
+            { prefix: 'anikai-', source: 'Anikai' },
+            { prefix: 'crazyanimetv-', source: 'CrazyAnimeTV' },
+            { prefix: 'animenana-', source: 'Animenana' },
             { prefix: 'allanime-', source: 'AllAnime' },
             { prefix: 'consumet-', source: 'Consumet' },
             { prefix: 'hanime-', source: 'WatchHentai' },
@@ -988,16 +1001,17 @@ export class SourceManager {
             }
         }
 
-        // Miruro / aniwatch embed shape: "slug$ep=N$token=..." (server-side episode key — not plain ?ep=N on hi.anime).
-        if (/\$ep=\d+\$token=/i.test(id)) {
-            const miruro = this.sources.get('Miruro');
-            if (miruro?.isAvailable) return miruro;
-        }
-
-        // Raw Consumet AnimeKai episode IDs have no "animekai-" prefix (see mapAnime vs episode id: ep.id).
+        // Raw Consumet AnimeKai episode IDs: "slug$ep=N$token=KEY" — route to AnimeKai first.
+        // Must be checked before the Miruro branch because both patterns match $ep=N$token=.
         if (this.isAnimeKaiConsumetEpisodeId(id)) {
             const kai = this.sources.get('AnimeKai');
             if (kai?.isAvailable) return kai;
+        }
+
+        // Miruro / aniwatch embed shape: "slug$ep=N$token=..." without a plain numeric ?ep= (no AnimeKai match above).
+        if (/\$ep=\d+\$token=/i.test(id)) {
+            const miruro = this.sources.get('Miruro');
+            if (miruro?.isAvailable) return miruro;
         }
 
         // "{animeSlug}?ep={key}" — HiAnime / aniwatch watch URLs (display episode number OR internal embed token).
@@ -2892,79 +2906,53 @@ export class SourceManager {
             if (isAdultContent && name !== 'WatchHentai' && name !== 'Hanime') continue;
             if (!isAdultContent && (name === 'WatchHentai' || name === 'Hanime')) continue;
             const source = this.sources.get(name) as StreamingSource;
-            if (source?.isAvailable && source.getStreamingLinks && !sourcesToTry.includes(source)) {
+            if (source?.getStreamingLinks && !sourcesToTry.includes(source)) {
                 sourcesToTry.push(source);
             }
         }
 
-        // Tie-break order = constructor registration order (REGISTERED_SOURCE_NAMES).
+        // Dynamic ordering: score each source by success rate + latency, then fall back
+        // to static registration order for sources with no data yet.
         const STREAM_PRIORITY = [...REGISTERED_SOURCE_NAMES];
-        const ordered: StreamingSource[] = [];
-        for (const name of STREAM_PRIORITY) {
-            const s = sourcesToTry.find(x => x.name === name);
-            if (s && !ordered.includes(s)) ordered.push(s);
-        }
-        for (const s of sourcesToTry) {
-            if (!ordered.includes(s)) ordered.push(s);
-        }
+        const scoreSource = (name: string): number => {
+            let score = 0;
+            const rate = this.sourceSuccessRates.get(name);
+            if (rate && rate.total > 3) {
+                score += (rate.success / rate.total) * 50; // 0-50 from success rate
+            } else {
+                score += 25; // no data → neutral
+            }
+            const latencies = this.recentLatencies.get(name);
+            if (latencies && latencies.length > 0) {
+                const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+                score += Math.max(0, 30 - avg / 200); // faster → higher score (up to 30)
+            } else {
+                score += 15; // no data → neutral
+            }
+            // Static priority tiebreaker (lower index = slight bonus)
+            const idx = STREAM_PRIORITY.indexOf(name);
+            if (idx >= 0) score += (STREAM_PRIORITY.length - idx);
+            return score;
+        };
+        const ordered = [...sourcesToTry].sort((a, b) => scoreSource(b.name) - scoreSource(a.name));
         let finalSources = ordered;
 
-        // HiAnime/Miruro embed ids (`slug?ep=<token>`) should not fan out to every scraper —
-        // several providers will launch Puppeteer and keep running long after we've already
-        // decided to give up, which delays HTTP responses and makes the client feel "stuck".
+        // HiAnime/Miruro embed ids (`slug?ep=<token>`) should not fan out to every scraper
         if (isHianimeStyleEpisodeId(episodeId)) {
             const allow = new Set<string>([
-                'Miruro',
-                'Consumet',
                 'AllAnime',
                 'AnimeKai',
                 'Gogoanime',
                 'AnimePahe',
-                'Zoro',
                 'AnimeFLV',
-                'Aniwave',
-                'Anix',
             ]);
             finalSources = finalSources.filter((s) => allow.has(s.name));
         }
 
         console.log(`   📋 Sources to try (priority-ordered): ${finalSources.map(s => s.name).join(', ')}`);
 
-        /** Prefer Miruro + API mirrors for aniwatch-shaped IDs so we do not wait on Puppeteer first. */
-        const buildStreamingPickOrder = (epId: string): string[] => {
-            // HiAnime/Miruro episode keys are usually `slug?ep=<id>` where `<id>` is often NOT numeric
-            // (e.g. Miruro's `$ep=12$token=XXXX` normalizes to `slug?ep=XXXX`).
-            const watchShape = /^[^/?#]+\?ep=[^&?#]+$/i.test(epId);
-            if (!watchShape) return [...STREAM_PRIORITY, 'cross-source'];
-            const preferred = [
-                'Miruro',
-                'Consumet',
-                'AllAnime',
-                'Gogoanime',
-                'AnimePahe',
-                'AnimeKai',
-                'Zoro',
-                '9Anime',
-                'AnimeFLV',
-                'Aniwave',
-                'Anix',
-            ];
-            const seen = new Set<string>();
-            const out: string[] = [];
-            for (const n of preferred) {
-                if (STREAM_PRIORITY.includes(n) && !seen.has(n)) {
-                    out.push(n);
-                    seen.add(n);
-                }
-            }
-            for (const n of STREAM_PRIORITY) {
-                if (!seen.has(n)) {
-                    out.push(n);
-                    seen.add(n);
-                }
-            }
-            out.push('cross-source');
-            return out;
+        const buildStreamingPickOrder = (_epId: string): string[] => {
+            return [...finalSources.map(s => s.name), 'cross-source'];
         };
 
         if (finalSources.length === 0) {
@@ -2982,12 +2970,9 @@ export class SourceManager {
         const allResults: RaceResult[] = [];
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
-            const GRACE_PERIOD = 3000; // Wait up to 3s for a higher-priority source after first success
-            /** Cross-source does search + episodes + stream per provider (~40s worst case). Cap so watch API does not hang. */
-            // Keep watch-page requests bounded: long hangs feel like "infinite loading" in the UI
-            // even though the browser may abort earlier.
-            const CROSS_SOURCE_FALLBACK_MAX_MS = 14_000;
-            const STREAM_GLOBAL_MAX_MS = 18_000;
+            const GRACE_PERIOD = 1500; // Wait 1.5s for a higher-priority source after first success
+            const CROSS_SOURCE_FALLBACK_MAX_MS = 6_000;
+            const STREAM_GLOBAL_MAX_MS = 10_000;
 
             const result = await new Promise<StreamingData>((resolveStream) => {
             let pending = 0;
@@ -3103,13 +3088,8 @@ export class SourceManager {
                 const idToUse = this.resolveStreamingEpisodeId(episodeId, source, primarySource, hasSourcePrefix, rawId);
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
 
-                const usesPuppeteerStream = source.name === '9Anime' || source.name === 'Kaido';
-                const usesMiruroStack = source.name === 'Miruro';
-                const streamReliabilityOpts = usesPuppeteerStream
-                    ? { timeout: 50_000, maxAttempts: 1 }
-                    : usesMiruroStack
-                        ? { timeout: 25_000, maxAttempts: 1 }
-                        : { timeout: 25_000, maxAttempts: 1 };
+                const streamReliabilityOpts = { timeout: 8_000, maxAttempts: 1 };
+                const sourceStart = Date.now();
                 this.executeReliably(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
                     streamReliabilityOpts
@@ -3118,13 +3098,16 @@ export class SourceManager {
                     if (data.sources.length > 0) {
                         console.log(`   ✅ ${source.name} returned ${data.sources.length} sources`);
                         allResults.push({ source: source.name, data, success: true });
+                        this.recordSuccess(source.name, Date.now() - sourceStart);
                     } else {
                         allResults.push({ source: source.name, data, success: false });
+                        this.recordFailure(source.name);
                     }
                 })
                 .catch(err => {
                     console.log(`   ❌ ${source.name} failed: ${(err as Error).message?.substring(0, 80)}`);
                     allResults.push({ source: source.name, data: { sources: [], subtitles: [] } as StreamingData, success: false });
+                    this.recordFailure(source.name);
                 })
                 .finally(onDone);
             }
@@ -3287,7 +3270,7 @@ export class SourceManager {
 
         // Registered sources to try for cross-source fallback (by title search).
         // AllAnime is first: GraphQL API + fast4speed.rsvp CDN accessible from cloud IPs.
-        const consumetSources = ['AllAnime', 'Gogoanime', 'AnimeKai', 'AnimePahe', 'Consumet']
+        const consumetSources = ['Gogoanime', 'AnimeFLV', 'AllAnime', 'AnimeKai', 'AnimePahe']
             .map(n => ({ name: n, src: this.sources.get(n) as StreamingSource }))
             .filter(({ src }) => src?.isAvailable && src.getStreamingLinks);
 
@@ -3335,6 +3318,13 @@ export class SourceManager {
         }
 
         return null;
+    }
+
+    /** Call a specific source by name directly, bypassing the normal routing logic. */
+    async getStreamingLinksFromSource(sourceName: string, episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub'): Promise<StreamingData> {
+        const src = this.sources.get(sourceName) as StreamingSource | undefined;
+        if (!src?.isAvailable || !src.getStreamingLinks) return { sources: [], subtitles: [] };
+        return src.getStreamingLinks(episodeId, server, category).catch(() => ({ sources: [], subtitles: [] }));
     }
 
     /**

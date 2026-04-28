@@ -42,7 +42,12 @@ const DEAD_DOMAINS = [
     'streamable.cloud',
     'streamable.video',
     'streamable.host',
-    'dead-cdn.example'
+    'dead-cdn.example',
+    'ajax.gogocdn.net',
+    'anitaku.pe',
+    'anitaku.so',
+    'anix.to',
+    'animesuge.to',
 ];
 
 /**
@@ -221,6 +226,24 @@ const getProxyBaseUrl = (req: Request): string => {
     return `${protocol}://${host}/api/stream/proxy`;
 };
 
+// In-memory segment cache: stores recently-proxied .ts/.m4s segments to avoid
+// duplicate upstream fetches during HLS playback (seek, quality switch, retry).
+// Capped at ~50 MB; segments evicted LRU-style.
+const SEGMENT_CACHE_MAX_BYTES = 50 * 1024 * 1024;
+const SEGMENT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+interface SegmentCacheEntry { data: Buffer; contentType: string; fetchedAt: number; size: number; }
+const segmentCache = new Map<string, SegmentCacheEntry>();
+let segmentCacheBytes = 0;
+
+function segmentCacheEvict(): void {
+    while (segmentCacheBytes > SEGMENT_CACHE_MAX_BYTES && segmentCache.size > 0) {
+        const oldestKey = segmentCache.keys().next().value;
+        if (!oldestKey) break;
+        const entry = segmentCache.get(oldestKey);
+        if (entry) { segmentCacheBytes -= entry.size; segmentCache.delete(oldestKey); }
+    }
+}
+
 // In-memory stream cache: keeps resolved stream URLs hot between requests within the same
 // Vercel function instance. Avoids hitting AnimeKai on every play/resume/tab-switch.
 const STREAM_CACHE_TTL = 8 * 60 * 1000; // 8 minutes — matches typical stream token lifetime
@@ -336,6 +359,51 @@ async function streamToString(stream: any, maxSize = 5 * 1024 * 1024): Promise<s
 
 /**
  * @route GET /api/stream/servers/:episodeId
+ * @description Quick connectivity check for AnimeKai dependencies (enc-dec.app, animekai.to)
+ */
+router.get('/diag/animekai', async (_req: Request, res: Response): Promise<void> => {
+    const results: Record<string, unknown> = {};
+    try {
+        const r = await fetch('https://enc-dec.app/api/enc-kai?text=hello', { signal: AbortSignal.timeout(5000) });
+        results['enc-dec.app/enc-kai'] = { status: r.status, ok: r.ok };
+    } catch (e: unknown) { results['enc-dec.app/enc-kai'] = { error: String(e) }; }
+
+    try {
+        const r = await fetch('https://animekai.to/', {
+            headers: { 'User-Agent': 'Mozilla/5.0' },
+            signal: AbortSignal.timeout(5000),
+        });
+        results['animekai.to'] = { status: r.status, ok: r.ok };
+    } catch (e: unknown) { results['animekai.to'] = { error: String(e) }; }
+
+    for (const host of ['megaup.nl', 'megaup.cc', 'megaup.live', 'megaup.to']) {
+        try {
+            const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+            const r = await fetch(`https://${host}/`, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(5000) });
+            results[host] = { status: r.status, ok: r.ok };
+        } catch (e: unknown) { results[host] = { error: String(e) }; }
+    }
+
+    // Also test the /media/ endpoint on a known ID
+    const testMediaId = '1sj1b3msWS2JcOLyFrlL5xHpCQ';
+    const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+    for (const host of ['megaup.nl', 'megaup.cc', 'megaup.live']) {
+        const mediaUrl = `https://${host}/media/${testMediaId}`;
+        try {
+            const r = await fetch(mediaUrl, {
+                headers: { 'User-Agent': UA, 'X-Requested-With': 'XMLHttpRequest', 'Referer': `https://${host}/e/${testMediaId}` },
+                signal: AbortSignal.timeout(5000),
+            });
+            const txt = await r.text();
+            const hasResult = txt.includes('"result"');
+            results[`${host}/media/`] = { status: r.status, hasResult };
+        } catch (e: unknown) { results[`${host}/media/`] = { error: String(e) }; }
+    }
+
+    res.json(results);
+});
+
+/**
  * @description Get available streaming servers for an episode
  */
 router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<void> => {
@@ -345,7 +413,13 @@ router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<v
     // Render/nginx may decode %3F→? in paths, splitting "anime-slug?ep=3303" into
     // episodeId="anime-slug" and req.query.ep="3303". Reconstruct the full ID.
     if (req.query.ep && !episodeId.includes('?ep=')) {
-        episodeId = `${episodeId}?ep=${req.query.ep}`;
+        const epParam = String(req.query.ep);
+        if (!/^\d+$/.test(epParam) && !episodeId.startsWith('animekai-')) {
+            const epNum = req.query.ep_num ? String(req.query.ep_num) : '1';
+            episodeId = `animekai-${episodeId}$ep=${epNum}$token=${epParam}`;
+        } else {
+            episodeId = `${episodeId}?ep=${epParam}`;
+        }
     }
 
     const requestId = (req as any).id;
@@ -386,12 +460,18 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     // Render/nginx may decode %3F→? in paths, splitting "anime-slug?ep=3303" into
     // episodeId="anime-slug" and req.query.ep="3303". Reconstruct the full ID.
     if (req.query.ep && !episodeId.includes('?ep=')) {
-        episodeId = `${episodeId}?ep=${req.query.ep}`;
+        const epParam = String(req.query.ep);
+        if (!/^\d+$/.test(epParam) && !episodeId.startsWith('animekai-')) {
+            const epNum = req.query.ep_num ? String(req.query.ep_num) : '1';
+            episodeId = `animekai-${episodeId}$ep=${epNum}$token=${epParam}`;
+        } else {
+            episodeId = `${episodeId}?ep=${epParam}`;
+        }
     }
 
-    // Handle AnimeKai compound IDs: if episodeId is in format slug$ep=N$token=KEY,
-    // add animekai- prefix so the source manager can recognize it
-    if (/^[^$]+\$\d+\$/.test(episodeId) && !episodeId.startsWith('animekai-')) {
+    // Handle AnimeKai compound IDs that arrived with $ delimiters intact
+    // Format: slug$ep=N$token=... or slug$N$token=...
+    if (/^[^$]+\$/.test(episodeId) && !episodeId.startsWith('animekai-')) {
         episodeId = `animekai-${episodeId}`;
     }
 
@@ -439,13 +519,15 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     // Previously three sequential fallbacks each burned 12-14 s before AllAnime ran.
     const parallelAttempts: Promise<any>[] = [];
 
-    if (isHianimeStyleEpisodeId(episodeId)) {
+    // AnimeKai compound IDs should not try HiAnime REST — the token is not a HiAnime ep ID.
+    const isAnimeKaiId = episodeId.startsWith('animekai-');
+    if (!isAnimeKaiId && isHianimeStyleEpisodeId(episodeId)) {
         parallelAttempts.push(
             tryFetchHianimeRestStreamingData({
                 episodeId,
                 category: cat,
                 explicitServer: preferredSource,
-                perAttemptTimeoutMs: 12_000,
+                perAttemptTimeoutMs: 8_000,
                 catalogEpisodeFallback: catalogEpisodeFallbackForRest(episodeId, episodeNum),
             }).catch(() => null)
         );
@@ -456,31 +538,37 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
             .catch(() => null)
     );
 
-    // AllAnime title-based search — start in parallel so it runs concurrently with HiAnime REST,
-    // not sequentially after it. Requires anilistId for a reliable canonical title lookup.
-    if (anilistId != null && episodeNum != null && episodeNum >= 1) {
+    // AllAnime title-based search — runs for any episode with a known number.
+    // When anilistId is present it fetches the canonical title; otherwise it derives
+    // a search title from the slug (sufficient for most AnimeKai anime).
+    if (episodeNum != null && episodeNum >= 1) {
         parallelAttempts.push(
             sourceManager.tryAllAnimeFallback(episodeId, cat, episodeNum, anilistId).catch(() => null)
         );
     }
 
-    streamData = await new Promise<any>((resolve) => {
-        let remaining = parallelAttempts.length;
-        if (remaining === 0) { resolve({ sources: [], subtitles: [] }); return; }
-        let done = false;
-        for (const p of parallelAttempts) {
-            p.then((result: any) => {
-                if (!done && result?.sources?.length > 0) {
-                    done = true;
-                    resolve(result);
-                    return;
-                }
-                if (--remaining === 0 && !done) resolve({ sources: [], subtitles: [] });
-            }).catch(() => {
-                if (--remaining === 0 && !done) resolve({ sources: [], subtitles: [] });
-            });
-        }
-    });
+    streamData = await Promise.race([
+        new Promise<any>((resolve) => {
+            let remaining = parallelAttempts.length;
+            if (remaining === 0) { resolve({ sources: [], subtitles: [] }); return; }
+            let done = false;
+            for (const p of parallelAttempts) {
+                p.then((result: any) => {
+                    if (!done && result?.sources?.length > 0) {
+                        done = true;
+                        resolve(result);
+                        return;
+                    }
+                    if (--remaining === 0 && !done) resolve({ sources: [], subtitles: [] });
+                }).catch(() => {
+                    if (--remaining === 0 && !done) resolve({ sources: [], subtitles: [] });
+                });
+            }
+        }),
+        new Promise<any>((resolve) => {
+            setTimeout(() => resolve({ sources: [], subtitles: [] }), 25000); // 25s timeout
+        })
+    ]);
 
     if (streamData?.sources?.length) {
         logger.info(`[STREAM] Source resolved (${streamData.source || 'unknown'}) for ${episodeId}`, { requestId });
@@ -634,6 +722,11 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 
         response.sources = sourcesToProcess.map((source: VideoSource): VideoSource => {
             const rawUrl = source.originalUrl || source.url;
+            // Embed sources (e.g. animekai.to/iframe/TOKEN) must not be proxied —
+            // they are rendered as iframes in the browser, not fed to the HLS player.
+            if (source.isEmbed) {
+                return { ...source, isDirect: true, originalUrl: rawUrl };
+            }
             if (isDirectPlay(rawUrl)) {
                 return { ...source, isDirect: true, originalUrl: rawUrl };
             }
@@ -703,6 +796,20 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const isSegment = url.includes('.ts') || url.includes('.m4s');
     const isVideo = url.endsWith('.mp4');
 
+    // Segment cache: serve cached .ts/.m4s without hitting upstream
+    if (isSegment && !req.headers.range) {
+        const cached = segmentCache.get(url);
+        if (cached && (Date.now() - cached.fetchedAt) < SEGMENT_CACHE_TTL) {
+            res.set('Content-Type', cached.contentType || 'video/MP2T');
+            res.set('Content-Length', String(cached.size));
+            res.set('Access-Control-Allow-Origin', '*');
+            res.set('Cache-Control', 'public, max-age=86400');
+            res.set('X-Segment-Cache', 'HIT');
+            res.status(200).send(cached.data);
+            return;
+        }
+    }
+
     logger.info(`[PROXY] Proxying ${isM3u8 ? 'manifest' : isVideo ? 'video' : 'resource'} from ${domain}`, {
         domain,
         type: isM3u8 ? 'manifest' : isVideo ? 'video' : 'other',
@@ -727,6 +834,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'net22lab': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'pro25zone': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
             'tech20hub': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+            'vibeplayer': { referer: 'https://anitaku.to/', origin: 'https://anitaku.to' },
+            'otakuhg': { referer: 'https://anitaku.to/', origin: 'https://anitaku.to' },
+            'otakuvid': { referer: 'https://anitaku.to/', origin: 'https://anitaku.to' },
             'gogocdn': { referer: 'https://gogoanime.run/' },
             'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
             'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
@@ -1091,11 +1201,40 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         // Set status code (200 or 206)
         res.status(response.status);
 
-        // Pipe the stream
-        response.data.pipe(res);
+        // For cacheable segments (no Range request), buffer and cache
+        if (isSegment && !req.headers.range && response.status === 200) {
+            const chunks: Buffer[] = [];
+            let totalSize = 0;
+            const MAX_CACHE_SEGMENT = 4 * 1024 * 1024; // 4 MB max per segment
+
+            response.data.on('data', (chunk: Buffer) => {
+                totalSize += chunk.length;
+                if (totalSize <= MAX_CACHE_SEGMENT) chunks.push(chunk);
+            });
+            response.data.on('end', () => {
+                if (totalSize <= MAX_CACHE_SEGMENT && totalSize > 0) {
+                    const buf = Buffer.concat(chunks);
+                    segmentCache.set(url, {
+                        data: buf,
+                        contentType: upstreamContentType || 'video/MP2T',
+                        fetchedAt: Date.now(),
+                        size: buf.length,
+                    });
+                    segmentCacheBytes += buf.length;
+                    segmentCacheEvict();
+                }
+            });
+            response.data.on('error', (err: Error) => {
+                logger.error(`[PROXY] Segment buffer error from ${domain}`, err);
+            });
+            response.data.pipe(res);
+        } else {
+            // Pipe the stream directly for non-segment or Range responses
+            response.data.pipe(res);
+        }
 
         // Handle errors during streaming
-        response.data.on('error', (err: any) => {
+        response.data.on('error', (err: Error) => {
             logger.error(`[PROXY] Stream error from ${domain}`, err);
             if (!res.headersSent) {
                 res.status(502).json({ error: 'Stream error' });

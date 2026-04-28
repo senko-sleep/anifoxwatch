@@ -357,6 +357,12 @@ const startServer = (port: number) => {
 
     server.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
+            if (process.env.ALLOW_PORT_FALLBACK !== '1') {
+                enhancedLogger.fatal(
+                    `Port ${port} is already in use (set ALLOW_PORT_FALLBACK=1 to try the next port; otherwise free the port or change PORT + Vite proxy).`,
+                );
+                process.exit(1);
+            }
             enhancedLogger.warn(`⚠️ Port ${port} is in use, trying ${port + 1}...`);
             startServer(port + 1);
         } else {

@@ -1435,6 +1435,8 @@ export class AniListService {
             id: `anilist-${media.id}`,
             title: media.title.english || media.title.romaji,
             titleJapanese: media.title.native,
+            titleEnglish: media.title.english || undefined,
+            titleRomaji: media.title.romaji || undefined,
             image: media.coverImage.large || media.coverImage.medium,
             cover: media.coverImage.large || media.coverImage.medium,
             banner: media.bannerImage,

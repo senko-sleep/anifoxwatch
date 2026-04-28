@@ -112,8 +112,10 @@ export class MiruroSource extends BaseAnimeSource {
      * much larger (e.g. 94388) and must not trigger a full episode-list fetch before every stream.
      */
     private static readonly DISPLAY_EPISODE_RESOLVE_MAX = 3000;
+    private static readonly PUPPETEER_ENABLED = process.env.ENABLE_MIRO_PUPPETEER === '1';
 
     private async resolveDisplayEpisodeIfNeeded(id: string): Promise<string> {
+        if (!MiruroSource.PUPPETEER_ENABLED) return id;
         if (Date.now() < this.aniwatchSiteBlockedUntil) return id;
 
         const aw = this.toAniwatchEpisodeQuery(id);
@@ -369,7 +371,7 @@ export class MiruroSource extends BaseAnimeSource {
         if (fromAniwatch.sources.length > 0) return fromAniwatch;
         const fromConsumet = await this.tryConsumetHianime(resolvedEpisodeId, server, category, options);
         if (fromConsumet.sources.length > 0) return fromConsumet;
-        return this.tryPuppeteerAniwatchTv(resolvedEpisodeId, category);
+        return this.tryPuppeteerAniwatchTv(resolvedEpisodeId, category, options);
     }
 
     /**
@@ -379,7 +381,20 @@ export class MiruroSource extends BaseAnimeSource {
     private async tryPuppeteerAniwatchTv(
         episodeId: string,
         category: 'sub' | 'dub',
+        options?: SourceRequestOptions,
     ): Promise<StreamingData> {
+        // Puppeteer extraction can run long and — worse — keep running after upstream timeouts,
+        // delaying Express responses. Only use it when we still have budget on the caller signal.
+        if (options?.signal?.aborted) return { sources: [], subtitles: [] };
+
+        // Default OFF: headless extraction is CPU-heavy and is not safely cancellable from Node.
+        // It can block the event loop long enough that clients see "no bytes" timeouts even when
+        // the rest of the stack has already given up. Enable explicitly when you want this path.
+        if (process.env.ENABLE_MIRO_PUPPETEER !== '1') {
+            logger.warn(`[Miruro/puppeteer] disabled (set ENABLE_MIRO_PUPPETEER=1 to enable)`, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        }
+
         if (Date.now() < this.aniwatchSiteBlockedUntil) {
             logger.warn(`[Miruro/puppeteer] skipping — aniwatchtv.to Cloudflare-blocked`, undefined, this.name);
             return { sources: [], subtitles: [] };
@@ -418,6 +433,77 @@ export class MiruroSource extends BaseAnimeSource {
             };
         } catch (e) {
             logger.warn(`[Miruro/puppeteer] ${(e as Error).message?.slice(0, 120)}`, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        }
+    }
+
+    private async fetchWithPuppeteer(slug: string, category: 'sub' | 'dub', options?: SourceRequestOptions): Promise<StreamingData> {
+        if (!MiruroSource.PUPPETEER_ENABLED) {
+            logger.warn(`[Miruro/puppeteer] disabled (set ENABLE_MIRO_PUPPETEER=1 to enable)`, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        }
+
+        try {
+            logger.info(`[Miruro/puppeteer] attempting to fetch with Puppeteer`, undefined, this.name);
+            
+            // Import puppeteer dynamically
+            const puppeteer = await import('puppeteer');
+            
+            const browser = await puppeteer.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+            
+            const page = await browser.newPage();
+            
+            // Set user agent to avoid detection
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+            
+            const url = `${this.baseUrl}/watch/${slug}`;
+            await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+            
+            // Wait for video player to load
+            await page.waitForSelector('video, iframe', { timeout: 10000 }).catch(() => {});
+            
+            // Extract video sources from page
+            const sources = await page.evaluate(() => {
+                const results: Array<{ url: string; quality: string }> = [];
+                
+                // Check for video tags
+                const videos = document.querySelectorAll('video');
+                videos.forEach(video => {
+                    const src = video.getAttribute('src');
+                    if (src) results.push({ url: src, quality: 'auto' });
+                });
+                
+                // Check for iframes
+                const iframes = document.querySelectorAll('iframe');
+                iframes.forEach(iframe => {
+                    const src = iframe.getAttribute('src');
+                    if (src && src.includes('http')) results.push({ url: src, quality: 'embed' });
+                });
+                
+                return results;
+            });
+            
+            await browser.close();
+            
+            if (sources.length > 0) {
+                logger.info(`[Miruro/puppeteer] Found ${sources.length} sources`, undefined, this.name);
+                return {
+                    sources: sources.map(s => ({
+                        url: s.url,
+                        quality: s.quality as any,
+                        isM3U8: s.url.includes('.m3u8')
+                    })),
+                    subtitles: []
+                };
+            }
+            
+            logger.warn(`[Miruro/puppeteer] No sources found`, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        } catch (error) {
+            logger.error(`[Miruro/puppeteer] Error: ${(error as Error).message}`, error as Error, undefined, this.name);
             return { sources: [], subtitles: [] };
         }
     }

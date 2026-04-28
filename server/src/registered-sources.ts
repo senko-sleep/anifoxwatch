@@ -5,19 +5,12 @@
  * Keep in sync with `registerSource(new …Source())` calls in `services/source-manager.ts`.
  */
 export const REGISTERED_SOURCE_NAMES: readonly string[] = [
-    'AnimeKai',
-    'AnimePahe',
-    '9Anime',
-    'Consumet',
-    'AnimeFLV',
     'Gogoanime',
+    'AnimeFLV',
+    'AnimeKai',
     'AllAnime',
-    'Miruro',
-    'Kaido',
-    'Zoro',
+    'AnimePahe',
     'WatchHentai',
     'Hanime',
     'AkiH',
-    'Aniwave',
-    'Anix',
 ];

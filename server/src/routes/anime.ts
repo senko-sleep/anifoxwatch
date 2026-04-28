@@ -95,6 +95,38 @@ router.get('/search-all', async (req: Request, res: Response): Promise<void> => 
 });
 
 /**
+ * @route GET /api/anime/resolve
+ * @query id - AniList id in the form "anilist-12345"
+ * @description Resolve AniList entries to a playable streaming id when available.
+ */
+router.get('/resolve', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const id = String(req.query.id || '').trim();
+        const m = /^anilist-(\d+)$/i.exec(id);
+        if (!m) {
+            res.status(400).json({ error: 'Query parameter "id" must be an AniList id (anilist-12345)' });
+            return;
+        }
+        const numericId = parseInt(m[1], 10);
+        if (!Number.isFinite(numericId)) {
+            res.status(400).json({ error: 'Invalid AniList id' });
+            return;
+        }
+
+        const streamingId = await sourceManager.resolveAniListToStreamingId(numericId);
+        if (!streamingId) {
+            res.status(404).json({ error: 'No streaming match found', id });
+            return;
+        }
+
+        res.json({ id, streamingId });
+    } catch (error) {
+        console.error('Resolve error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
  * @route GET /api/anime/trending
  * @query page - Page number (default: 1)
  * @query source - Preferred source (optional)

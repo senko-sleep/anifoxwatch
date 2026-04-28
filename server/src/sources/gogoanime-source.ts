@@ -6,8 +6,8 @@ import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js
 
 export class GogoanimeSource extends BaseAnimeSource {
     name = 'Gogoanime';
-    baseUrl = 'https://anitaku.pe';
-    ajaxUrl = 'https://ajax.gogocdn.net/ajax';
+    baseUrl = 'https://anitaku.to';
+    private readonly fallbackDomains = ['https://gogoanimehd.to', 'https://gogoanimes.fi'];
 
     constructor() {
         super();
@@ -15,12 +15,13 @@ export class GogoanimeSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const response = await axios.get(`${this.baseUrl}/home.html`, {
+            const response = await axios.get(`${this.baseUrl}/search.html?keyword=test`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000
+                timeout: options?.timeout || 5000,
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             });
-            return response.status === 200;
-        } catch (e) {
+            return response.status === 200 && (response.data as string).includes('last_episodes');
+        } catch {
             return false;
         }
     }
@@ -135,43 +136,65 @@ export class GogoanimeSource extends BaseAnimeSource {
             const id = animeId.replace('gogoanime-', '');
             const response = await axios.get(`${this.baseUrl}/category/${id}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: options?.timeout || 10000,
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             });
             const $ = cheerio.load(response.data);
-
-            const movieId = $('#movie_id').val();
-            const alias = $('#alias_anime').val();
-            const defaultEp = $('#default_ep').val();
-            const epEnd = $('#episode_page li').last().find('a').attr('ep_end') || '2000';
-
-            if (!movieId) return [];
-
-            const listUrl = `${this.ajaxUrl}/load-list-episode?ep_start=0&ep_end=${epEnd}&id=${movieId}&default_ep=${defaultEp}&alias=${alias}`;
-            const listResponse = await axios.get(listUrl, {
-                signal: options?.signal,
-                timeout: options?.timeout || 10000
-            });
-            const $list = cheerio.load(listResponse.data);
-
             const episodes: Episode[] = [];
-            $list('li a').each((i, el) => {
-                const epNumStr = $(el).find('.name').text().replace('EP ', '').trim();
-                const epNum = parseFloat(epNumStr);
-                const href = $(el).attr('href')?.trim() || '';
-                const epId = href.startsWith('/') ? href.substring(1) : href;
 
-                episodes.push({
-                    id: epId,
-                    number: epNum || 0,
-                    title: `Episode ${epNum}`,
-                    isFiller: false,
-                    hasSub: true,
-                    hasDub: false,
-                    thumbnail: ''
-                });
-            });
+            // New structure: look for episode links in the page JSON-LD or episode list
+            const scriptContent = $('script:contains("episode_page")').html() || $('script').toArray().map(s => $(s).html()).join('\n');
+            const epEndMatch = scriptContent.match(/ep_end\s*=\s*["'](\d+)["']/) || scriptContent.match(/ep_end["']?\s*:\s*["']?(\d+)/);
+            const totalEps = epEndMatch ? parseInt(epEndMatch[1]) : 0;
 
-            return episodes.reverse();
+            // Also try schema.org data
+            const schemaScript = $('script[type="application/ld+json"]').html();
+            let schemaEps = 0;
+            if (schemaScript) {
+                try {
+                    const schema = JSON.parse(schemaScript);
+                    schemaEps = schema.numberOfEpisodes || 0;
+                } catch { /* ignore */ }
+            }
+
+            const epCount = Math.max(totalEps, schemaEps);
+
+            // If we found an episode count, generate episode list
+            if (epCount > 0) {
+                for (let i = 1; i <= epCount; i++) {
+                    episodes.push({
+                        id: `${id}-episode-${i}`,
+                        number: i,
+                        title: `Episode ${i}`,
+                        isFiller: false,
+                        hasSub: true,
+                        hasDub: false,
+                        thumbnail: '',
+                    });
+                }
+            } else {
+                // Fallback: try fetching ep 1 to verify the show exists, assume a single episode
+                try {
+                    const testR = await axios.get(`${this.baseUrl}/${id}-episode-1`, {
+                        timeout: 5000,
+                        headers: { 'User-Agent': 'Mozilla/5.0' },
+                        validateStatus: s => s < 500,
+                    });
+                    if (testR.status === 200) {
+                        episodes.push({
+                            id: `${id}-episode-1`,
+                            number: 1,
+                            title: 'Episode 1',
+                            isFiller: false,
+                            hasSub: true,
+                            hasDub: false,
+                            thumbnail: '',
+                        });
+                    }
+                } catch { /* ignore */ }
+            }
+
+            return episodes;
         } catch (error) {
             this.handleError(error, 'getEpisodes');
             return [];
@@ -209,7 +232,7 @@ export class GogoanimeSource extends BaseAnimeSource {
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
-        const epId = episodeId.replace(/^gogoanime-/i, '').split('?')[0]; // Strip query params
+        const epId = episodeId.replace(/^gogoanime-/i, '').split('?')[0];
         try {
             const response = await axios.get(`${this.baseUrl}/${epId}`, {
                 signal: options?.signal,
@@ -225,60 +248,73 @@ export class GogoanimeSource extends BaseAnimeSource {
             const sources: VideoSource[] = [];
             const subtitles: Array<{ url: string; lang: string }> = [];
 
-            const iframeSrc = $('#load_anime iframe').attr('src') ||
-                $('.play-video iframe').attr('src') ||
-                $('iframe[src*="vidstreaming"]').attr('src') ||
-                $('iframe[src*="gogocdn"]').attr('src') ||
-                $('iframe[src*="streamani"]').attr('src');
-
-            if (iframeSrc) {
-                let streamingUrl = iframeSrc;
-                if (!streamingUrl.startsWith('http')) {
-                    streamingUrl = `https:${streamingUrl}`;
+            // New anitaku.to structure: server list with data-video attributes
+            const embedUrls: Array<{ name: string; url: string }> = [];
+            $('.anime_muti_link ul li, .anime_video_body_watch_items li').each((_, el) => {
+                const dataVideo = $(el).find('a').attr('data-video') || '';
+                const name = $(el).text().replace('Choose this server', '').trim();
+                if (dataVideo) {
+                    const url = dataVideo.startsWith('http') ? dataVideo : `https:${dataVideo}`;
+                    embedUrls.push({ name, url });
                 }
+            });
 
+            // Fallback: check iframes
+            if (embedUrls.length === 0) {
+                $('iframe').each((_, el) => {
+                    const src = $(el).attr('src');
+                    if (src) {
+                        const url = src.startsWith('http') ? src : `https:${src}`;
+                        embedUrls.push({ name: 'iframe', url });
+                    }
+                });
+            }
+
+            // Extract m3u8 from embed URLs (prioritize vibeplayer/HD servers)
+            const prioritized = [
+                ...embedUrls.filter(e => e.url.includes('vibeplayer')),
+                ...embedUrls.filter(e => !e.url.includes('vibeplayer') && !e.url.includes('dood') && !e.url.includes('myvidplay')),
+                ...embedUrls.filter(e => e.url.includes('dood') || e.url.includes('myvidplay')),
+            ];
+
+            for (const embed of prioritized) {
+                if (sources.length > 0) break;
                 try {
-                    const iframeResponse = await axios.get(streamingUrl, {
+                    const embedResp = await axios.get(embed.url, {
                         signal: options?.signal,
-                        timeout: options?.timeout || 15000,
+                        timeout: 8000,
                         headers: {
                             'Referer': this.baseUrl,
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                            'Accept': 'text/html,*/*;q=0.8'
-                        }
+                        },
                     });
+                    const html = typeof embedResp.data === 'string' ? embedResp.data : JSON.stringify(embedResp.data);
 
-                    const iframeHtml = typeof iframeResponse.data === 'string'
-                        ? iframeResponse.data
-                        : JSON.stringify(iframeResponse.data);
-
-                    // Try to find m3u8 first (HLS stream), then mp4
-                    const m3u8Matches = [...iframeHtml.matchAll(/["']([^"']*\.m3u8[^"']*?)["']/g)];
-                    const mp4Match = iframeHtml.match(/file:\s*["']([^"']*\.mp4[^"']*)["']/);
-
+                    // Extract m3u8 URLs
+                    const m3u8Matches = [...html.matchAll(/["']([^"']*\.m3u8[^"']*?)["']/g)]
+                        .map(m => m[1])
+                        .filter(u => u.startsWith('http') && !u.includes('thumb') && !u.includes('poster'));
                     if (m3u8Matches.length > 0) {
-                        // Filter out obviously wrong URLs and pick the best one
-                        const validM3u8 = m3u8Matches
-                            .map(m => m[1])
-                            .filter(u => u.startsWith('http') && !u.includes('thumb') && !u.includes('poster'));
-                        if (validM3u8.length > 0) {
-                            sources.push({
-                                url: validM3u8[0],
-                                quality: 'auto',
-                                isM3U8: true
-                            });
-                        }
-                    }
+                        // Parse subtitle from URL query param
+                        const subMatch = embed.url.match(/[?&]sub=(https?[^&]+)/) || embed.url.match(/[?&]caption_1=(https?[^&]+)/);
+                        if (subMatch) subtitles.push({ url: decodeURIComponent(subMatch[1]), lang: 'English' });
 
-                    if (sources.length === 0 && mp4Match) {
                         sources.push({
-                            url: mp4Match[1],
-                            quality: '720p',
-                            isM3U8: false
+                            url: m3u8Matches[0],
+                            quality: 'auto',
+                            isM3U8: true,
                         });
                     }
+
+                    // Fallback: mp4
+                    if (sources.length === 0) {
+                        const mp4Match = html.match(/file:\s*["'](https?[^"']*\.mp4[^"']*)["']/);
+                        if (mp4Match) {
+                            sources.push({ url: mp4Match[1], quality: '720p', isM3U8: false });
+                        }
+                    }
                 } catch {
-                    // If iframe fetch fails, don't add the iframe URL as a source (it's not playable)
+                    // Try next embed
                 }
             }
 
