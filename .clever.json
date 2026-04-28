@@ -8,7 +8,7 @@
   },
   "deploy": {
     "type": "nodejs",
-    "start-command": "cd server && node dist/index.js",
+    "start-command": "node server/dist/index.js",
     "env": {
       "NODE_ENV": "production"
     }
