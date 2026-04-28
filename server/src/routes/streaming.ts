@@ -220,8 +220,10 @@ function isDeadDomain(url: string): boolean {
 
 // Base URL for proxy - used to rewrite stream URLs
 const getProxyBaseUrl = (req: Request): string => {
-    const isProduction = process.env.NODE_ENV === 'production';
-    const protocol = isProduction ? 'https' : req.protocol;
+    // Clever Cloud (and most reverse proxies) terminate TLS at the LB and forward
+    // via HTTP internally, setting X-Forwarded-Proto to the original scheme.
+    const forwarded = req.get('x-forwarded-proto');
+    const protocol = forwarded === 'https' || process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
     const host = req.get('host');
     return `${protocol}://${host}/api/stream/proxy`;
 };
