@@ -97,6 +97,42 @@ const DEAD_DOMAINS = new Set([
     'animesuge.to',
 ]);
 
+/**
+ * Known ad / tracking CDN domains. HLS segments from these hosts are
+ * ad blobs (images, tracking pixels) disguised as video — they cause
+ * `fragParsingError` because they aren't valid MPEG-TS / fMP4.
+ */
+const AD_CDN_DOMAINS = [
+    'ibyteimg.com',       // ByteDance / TikTok ad CDN
+    'ad-site-i18n',       // ByteDance ad path component
+    'doubleclick.net',
+    'googlesyndication.com',
+    'googleadservices.com',
+    'adsrvr.org',
+    'adnxs.com',
+    'moatads.com',
+    'serving-sys.com',
+];
+
+function isAdCdnUrl(url: string): boolean {
+    const lower = url.toLowerCase();
+    return AD_CDN_DOMAINS.some(d => lower.includes(d));
+}
+
+/** Content-types that are definitely NOT valid video segment data. */
+const NON_VIDEO_CONTENT_TYPES = [
+    'text/html',
+    'text/xml',
+    'application/json',
+    'image/gif',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/svg',
+    'text/javascript',
+    'application/javascript',
+];
+
 /** Domains to skip DNS/local checks and forward straight to the remote proxy. */
 const ISP_BLOCKED_DOMAINS = new Set([
     'tech20hub.site',
@@ -341,6 +377,35 @@ const rewriteM3u8Content = (
         return proxyUrl(abs, proxyBase, referer);
     }).join('\n');
 };
+
+/**
+ * Validate an m3u8 manifest: reject playlists whose segments point to
+ * known ad CDNs (e.g. ibyteimg.com). Returns `true` when the manifest
+ * is poisoned and should be rejected.
+ */
+function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
+    const urlNoQuery = originalUrl.split('?')[0].split('#')[0];
+    const baseUrl = urlNoQuery.substring(0, urlNoQuery.lastIndexOf('/') + 1);
+
+    const segmentUrls: string[] = [];
+    for (const line of content.split('\n')) {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) continue;
+        const abs = t.startsWith('http') ? t : `${baseUrl}${t}`;
+        segmentUrls.push(abs);
+    }
+
+    if (segmentUrls.length === 0) return false;
+
+    // If > 50% of segments are from ad CDNs, the manifest is poisoned
+    const adCount = segmentUrls.filter(u => isAdCdnUrl(u)).length;
+    const ratio = adCount / segmentUrls.length;
+    if (ratio > 0.3) {
+        logger.warn(`[PROXY] Ad-poisoned manifest detected: ${adCount}/${segmentUrls.length} segments from ad CDNs`, { originalUrl });
+        return true;
+    }
+    return false;
+}
 
 async function streamToString(stream: any, maxSize = 5 * 1024 * 1024): Promise<string> {
     const chunks: Buffer[] = [];
@@ -1038,6 +1103,18 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     if (isUpstreamM3u8) {
         try {
             const content = await streamToString(proxyResponse.data);
+
+            // Reject manifests whose segments resolve to known ad CDNs
+            if (isAdPoisonedManifest(content, url)) {
+                res.status(502).json({
+                    error: 'Ad-poisoned manifest',
+                    reason: 'ad_cdn_segments',
+                    domain,
+                    message: 'HLS manifest contains segments from ad/tracking CDNs instead of real video data',
+                });
+                return;
+            }
+
             const rewritten = rewriteM3u8Content(content, url, proxyBase, refererParam || refererCombos[0]?.referer);
             res.set('Content-Type', 'application/vnd.apple.mpegurl');
             res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -1054,6 +1131,28 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     // ---------- Video/binary content ----------
+
+    // Guard: reject responses from ad CDN domains (ad blobs disguised as segments)
+    if (isAdCdnUrl(url)) {
+        proxyResponse.data?.resume?.();
+        logger.warn(`[PROXY] Blocked ad CDN segment: ${domain}`, { url: url.substring(0, 200), requestId });
+        res.status(502).json({ error: 'Ad CDN content blocked', reason: 'ad_cdn', domain });
+        return;
+    }
+
+    // Guard: reject non-video content types when the request looks like a segment
+    const expectingVideoSegment = isSegment || (!isM3u8 && !isVideo && !url.includes('.vtt') && !url.includes('.srt'));
+    if (expectingVideoSegment && upstreamCt) {
+        const ctLower = upstreamCt.toLowerCase();
+        const isBadContentType = NON_VIDEO_CONTENT_TYPES.some(bad => ctLower.includes(bad));
+        if (isBadContentType) {
+            proxyResponse.data?.resume?.();
+            logger.warn(`[PROXY] Non-video content type for segment: ${upstreamCt}`, { domain, url: url.substring(0, 200), requestId });
+            res.status(502).json({ error: 'Non-video content received', reason: 'bad_content_type', contentType: upstreamCt, domain });
+            return;
+        }
+    }
+
     if (proxyResponse.headers['content-length'] && !proxyResponse.headers['content-encoding']) {
         res.set('Content-Length', proxyResponse.headers['content-length']);
     }

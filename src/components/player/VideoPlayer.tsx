@@ -368,6 +368,11 @@ export const VideoPlayer = ({
         });
       });
 
+      // Track repeated fragParsingError — ad-poisoned streams produce these
+      // endlessly because the segments are images/ad blobs, not MPEG-TS.
+      let fragParseErrorCount = 0;
+      const FRAG_PARSE_ERROR_THRESHOLD = 3;
+
       hls.on(Hls.Events.ERROR, (_, data) => {
         playerLog('error', 'HLS error', {
           type: data.type,
@@ -376,6 +381,21 @@ export const VideoPlayer = ({
           url: data.url?.substring(0, 100),
           response: data.response
         });
+
+        // Count fragParsingError regardless of fatal flag — ad-poisoned
+        // streams produce many non-fatal ones before the fatal one fires.
+        if (data.details === 'fragParsingError') {
+          fragParseErrorCount++;
+          playerLog('warn', `fragParsingError count: ${fragParseErrorCount}/${FRAG_PARSE_ERROR_THRESHOLD}`);
+
+          if (fragParseErrorCount >= FRAG_PARSE_ERROR_THRESHOLD) {
+            playerLog('error', 'Too many fragment parsing errors — stream is serving non-video content (ad-poisoned). Requesting source switch.');
+            hls.destroy();
+            setError('Stream is corrupted (non-video content). Switching to another server…');
+            onError?.('frag_parsing_error');
+            return;
+          }
+        }
 
         if (data.fatal) {
           switch (data.type) {
@@ -392,8 +412,16 @@ export const VideoPlayer = ({
               }
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
-              playerLog('warn', 'Media error, attempting recovery');
-              hls.recoverMediaError();
+              // If we already have parse errors, don't keep recovering — escalate
+              if (fragParseErrorCount >= 2) {
+                playerLog('error', 'Media error with prior frag parsing errors — escalating to source switch');
+                hls.destroy();
+                setError('Stream is corrupted. Switching to another server…');
+                onError?.('frag_parsing_error');
+              } else {
+                playerLog('warn', 'Media error, attempting recovery');
+                hls.recoverMediaError();
+              }
               break;
             default:
               setError('An unexpected error occurred. Try a different server.');

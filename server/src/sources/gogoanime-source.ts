@@ -14,6 +14,75 @@ export class GogoanimeSource extends BaseAnimeSource {
         super();
     }
 
+    /**
+     * Known ad CDN domains — m3u8 playlists whose segments resolve to these
+     * hosts are serving ad blobs, not video data (causes fragParsingError).
+     */
+    private static readonly AD_CDN_PATTERNS = [
+        'ibyteimg.com',
+        'ad-site-i18n',
+        'doubleclick.net',
+        'googlesyndication.com',
+    ];
+
+    /**
+     * Validate that an m3u8 URL actually serves real video segments, not ad blobs.
+     * Fetches the playlist and checks that segment URLs don't resolve to known ad CDNs.
+     */
+    private async isAdPoisonedM3u8(m3u8Url: string, options?: SourceRequestOptions): Promise<boolean> {
+        try {
+            const resp = await axios.get(m3u8Url, {
+                signal: options?.signal,
+                timeout: 5000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Referer': this.baseUrl,
+                },
+            });
+            const playlist = typeof resp.data === 'string' ? resp.data : '';
+            if (!playlist) return false;
+
+            // For master playlists (contain #EXT-X-STREAM-INF), fetch first variant
+            if (playlist.includes('#EXT-X-STREAM-INF')) {
+                const lines = playlist.split('\n');
+                for (const line of lines) {
+                    const t = line.trim();
+                    if (!t || t.startsWith('#')) continue;
+                    const variantUrl = t.startsWith('http') ? t : new URL(t, m3u8Url).href;
+                    // Check the first variant playlist
+                    return this.isAdPoisonedM3u8(variantUrl, options);
+                }
+                return false;
+            }
+
+            // Media playlist — check segment URLs
+            const segmentUrls: string[] = [];
+            for (const line of playlist.split('\n')) {
+                const t = line.trim();
+                if (!t || t.startsWith('#')) continue;
+                const abs = t.startsWith('http') ? t : new URL(t, m3u8Url).href;
+                segmentUrls.push(abs);
+            }
+
+            if (segmentUrls.length === 0) return false;
+
+            const adCount = segmentUrls.filter(u => {
+                const lower = u.toLowerCase();
+                return GogoanimeSource.AD_CDN_PATTERNS.some(p => lower.includes(p));
+            }).length;
+
+            const ratio = adCount / segmentUrls.length;
+            if (ratio > 0.3) {
+                logger.warn(`Gogoanime: Ad-poisoned m3u8 detected (${adCount}/${segmentUrls.length} ad segments)`, undefined, this.name);
+                return true;
+            }
+            return false;
+        } catch {
+            return false; // On error, assume OK
+        }
+    }
+
+
      async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
          try {
              const response = await axios.get(`${this.baseUrl}/search.html?keyword=test`, {
@@ -434,14 +503,20 @@ export class GogoanimeSource extends BaseAnimeSource {
                         .map(m => m[1])
                         .filter(u => u.startsWith('http') && !u.includes('thumb') && !u.includes('poster'));
                     if (m3u8Matches.length > 0) {
-                        const subMatch = embed.url.match(/[?&]sub=(https?[^&]+)/) || embed.url.match(/[?&]caption_1=(https?[^&]+)/);
-                        if (subMatch) subtitles.push({ url: decodeURIComponent(subMatch[1]), lang: 'English' });
+                        // Validate that the m3u8 isn't ad-poisoned before accepting
+                        const isPoisoned = await this.isAdPoisonedM3u8(m3u8Matches[0], options);
+                        if (isPoisoned) {
+                            logger.info(`Gogoanime: Skipping ad-poisoned m3u8 from ${embed.name}`, undefined, this.name);
+                        } else {
+                            const subMatch = embed.url.match(/[?&]sub=(https?[^&]+)/) || embed.url.match(/[?&]caption_1=(https?[^&]+)/);
+                            if (subMatch) subtitles.push({ url: decodeURIComponent(subMatch[1]), lang: 'English' });
 
-                        sources.push({
-                            url: m3u8Matches[0],
-                            quality: 'auto',
-                            isM3U8: true,
-                        });
+                            sources.push({
+                                url: m3u8Matches[0],
+                                quality: 'auto',
+                                isM3U8: true,
+                            });
+                        }
                     }
 
                     if (sources.length === 0) {
