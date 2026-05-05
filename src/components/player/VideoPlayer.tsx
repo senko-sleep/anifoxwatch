@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { PostProxyLoader } from '@/lib/hls-post-loader';
+import { apiUrl } from '@/lib/api-config';
 
 interface VideoSubtitle {
   url: string;
@@ -244,6 +245,26 @@ export const VideoPlayer = ({
     const video = videoRef.current;
     if (!video || !src) return;
 
+    // Many hosts (e.g. StreamTape) block direct media hotlinking and/or require specific headers.
+    // Route cross-origin media through our `/api/stream/proxy` so the server can set Referer/Origin
+    // and handle Range requests reliably.
+    const resolvedSrc = (() => {
+      const s = String(src || '').trim();
+      if (!s) return s;
+      if (s.startsWith('blob:') || s.startsWith('data:')) return s;
+      if (s.includes('/api/stream/proxy?url=')) return s;
+      if (!/^https?:\/\//i.test(s)) return s; // already same-origin (or relative)
+      if (typeof window !== 'undefined') {
+        try {
+          const u = new URL(s);
+          if (u.origin === window.location.origin) return s;
+        } catch {
+          // fall through to proxy
+        }
+      }
+      return `${apiUrl('/api/stream/proxy')}?url=${encodeURIComponent(s)}`;
+    })();
+
     // Reset state
     setIsLoading(true);
     setError(null);
@@ -252,7 +273,7 @@ export const VideoPlayer = ({
     outroCountdownFiredRef.current = false;
 
     playerLog('info', 'Initializing video player', {
-      src: src.substring(0, 100) + '...',
+      src: resolvedSrc.substring(0, 100) + '...',
       isM3U8,
       hlsSupported: Hls.isSupported()
     });
@@ -300,7 +321,7 @@ export const VideoPlayer = ({
         }
       });
 
-      hls.loadSource(src);
+      hls.loadSource(resolvedSrc);
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
@@ -430,14 +451,14 @@ export const VideoPlayer = ({
         // hls.js XHR), rewrite relative segment/key URLs to absolute, then hand iOS a blob URL.
         (async () => {
           try {
-            const res = await fetch(src);
+            const res = await fetch(resolvedSrc);
             if (!res.ok) throw new Error(`Manifest fetch failed: ${res.status}`);
             const manifestText = await res.text();
 
             // Derive the upstream base URL for resolving relative paths.
             // The src may be a proxy URL like /api/stream/proxy?url=<encoded-upstream>.
-            let upstreamBase = src;
-            const proxyUrlMatch = src.match(/[?&]url=([^&]+)/);
+            let upstreamBase = resolvedSrc;
+            const proxyUrlMatch = resolvedSrc.match(/[?&]url=([^&]+)/);
             if (proxyUrlMatch) {
               try { upstreamBase = decodeURIComponent(proxyUrlMatch[1]); } catch { /* keep src */ }
             }
@@ -468,15 +489,15 @@ export const VideoPlayer = ({
             attachNativeHls(blobUrl);
           } catch (err) {
             playerLog('warn', 'Native HLS manifest pre-fetch failed, falling back to direct src', err);
-            attachNativeHls(src);
+            attachNativeHls(resolvedSrc);
           }
         })();
       } else {
-        attachNativeHls(src);
+        attachNativeHls(resolvedSrc);
       }
     } else {
       playerLog('info', 'Using direct video source');
-      video.src = src;
+      video.src = resolvedSrc;
       video.addEventListener('loadedmetadata', () => {
         setIsLoading(false);
 
@@ -525,6 +546,23 @@ export const VideoPlayer = ({
   useEffect(() => {
     if (isM3U8 || !src) return;
 
+    const resolvedSrc = (() => {
+      const s = String(src || '').trim();
+      if (!s) return s;
+      if (s.startsWith('blob:') || s.startsWith('data:')) return s;
+      if (s.includes('/api/stream/proxy?url=')) return s;
+      if (!/^https?:\/\//i.test(s)) return s;
+      if (typeof window !== 'undefined') {
+        try {
+          const u = new URL(s);
+          if (u.origin === window.location.origin) return s;
+        } catch {
+          // fall through
+        }
+      }
+      return `${apiUrl('/api/stream/proxy')}?url=${encodeURIComponent(s)}`;
+    })();
+
     if (cachedBlobUrlRef.current) {
       URL.revokeObjectURL(cachedBlobUrlRef.current);
       cachedBlobUrlRef.current = null;
@@ -540,7 +578,7 @@ export const VideoPlayer = ({
 
     const doBgDownload = async () => {
       try {
-        const resp = await fetch(src, { signal: controller.signal });
+        const resp = await fetch(resolvedSrc, { signal: controller.signal });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
         const blob = await resp.blob();
@@ -1293,16 +1331,16 @@ export const VideoPlayer = ({
         crossOrigin={isM3U8 && !Hls.isSupported() ? undefined : "anonymous"}
         style={{ willChange: 'contents', transform: 'translateZ(0)' }}
       >
-        {subtitles.map((sub, i) => (
-          <track
-            key={i}
-            kind="subtitles"
-            src={sub.url}
-            srcLang={sub.lang}
-            label={sub.label || sub.lang}
-            default={i === 0}
-          />
-        ))}
+       {subtitles.map((sub, i) => (
+         <track
+           key={i}
+           kind="subtitles"
+           src={sub.url}
+           srclang={sub.lang}
+           label={sub.label || sub.lang}
+           default={i === 0}
+         />
+       ))}
       </video>
 
       {/* Position Restored Notification */}
@@ -1626,32 +1664,47 @@ export const VideoPlayer = ({
                 )}
               </Button>
 
-              {/* Volume - Desktop only */}
-              {!isMobile() && (
-                <div className="flex items-center gap-2 group/volume">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={toggleMute}
-                    className="text-white hover:bg-white/20"
-                  >
-                    {isMuted || volume === 0 ? (
-                      <VolumeX className="w-5 h-5" />
-                    ) : (
-                      <Volume2 className="w-5 h-5" />
-                    )}
-                  </Button>
-                  <div className="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-200">
-                    <Slider
-                      value={[isMuted ? 0 : volume]}
-                      max={1}
-                      step={0.01}
-                      onValueChange={handleVolumeChange}
-                      className="w-20"
-                    />
-                  </div>
-                </div>
-              )}
+               {/* Volume - Desktop only */}
+               {!isMobile() && (
+                 <div className="flex items-center gap-2 group/volume">
+                   <Button
+                     variant="ghost"
+                     size="icon"
+                     onClick={toggleMute}
+                     className="text-white hover:bg-white/20"
+                   >
+                     {isMuted || volume === 0 ? (
+                       <VolumeX className="w-5 h-5" />
+                     ) : (
+                       <Volume2 className="w-5 h-5" />
+                     )}
+                   </Button>
+                   <div className="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-200">
+                     <Slider
+                       value={[isMuted ? 0 : volume]}
+                       max={1}
+                       step={0.01}
+                       onValueChange={handleVolumeChange}
+                       className="w-20"
+                     />
+                   </div>
+                 </div>
+               )}
+               {/* Mobile: Subtitles toggle */}
+               {isMobile() && (
+                 <Button
+                   variant="ghost"
+                   size="icon"
+                   onClick={toggleSubtitles}
+                   className={cn(
+                     "text-white hover:bg-white/20",
+                     subtitleEnabled && "text-fox-orange",
+                     subtitles.length === 0 && "opacity-50 cursor-not-allowed"
+                   )}
+                 >
+                   <Subtitles className="w-5 h-5" />
+                 </Button>
+               )}
 
               <span className={cn(
                 "text-white ml-1 md:ml-2",
@@ -1667,21 +1720,49 @@ export const VideoPlayer = ({
               )}
             </div>
 
-            <div className="flex items-center gap-1 md:gap-2">
-              {/* Mobile: settings gear */}
-              {isMobile() && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowMobileSettings(prev => !prev);
-                  }}
-                  className="text-white hover:bg-white/20 h-9 w-9"
-                >
-                  <Settings className="w-5 h-5" />
-                </Button>
-              )}
+          <div className="flex items-center gap-1 md:gap-2">
+            {/* Mobile: settings gear */}
+            {isMobile() && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMobileSettings(prev => !prev);
+                }}
+                className="text-white hover:bg-white/20 h-9 w-9"
+              >
+                <Settings className="w-5 h-5" />
+              </Button>
+            )}
+            {/* Mobile: Subtitles toggle */}
+            {isMobile() && subtitles.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSubtitles}
+                className={cn(
+                  "text-white hover:bg-white/20",
+                  subtitleEnabled && "text-fox-orange"
+                )}
+              >
+                <Subtitles className="w-5 h-5" />
+              </Button>
+            )}
+            {/* Mobile: Subtitles toggle */}
+            {isMobile() && subtitles.length > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleSubtitles}
+                className={cn(
+                  "text-white hover:bg-white/20",
+                  subtitleEnabled && "text-fox-orange"
+                )}
+              >
+                <Subtitles className="w-5 h-5" />
+              </Button>
+            )}
 
               {/* Desktop: Subtitles dropdown */}
               {!isMobile() && subtitles.length > 0 && (

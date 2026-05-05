@@ -296,36 +296,51 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                             { maxAttempts: 1, timeout: 15000, retryDelay: 0 }
                         );
                     }
-                    if (data.sources && data.sources.length > 0) {
-                        const referer = data.headers?.Referer || 'https://hianime.to/';
-                        let sources: StreamSource[] = data.sources.map(s => ({
-                            url: s.url,
-                            quality: (s.quality || s.type || 'default') as string,
-                            isM3U8: s.isM3U8 ?? false,
-                        }));
-                        const subtitles: StreamSubtitle[] = (data.subtitles || [])
-                            .map(t => ({ url: t.url, lang: t.lang }));
+                     if (data.sources && data.sources.length > 0) {
+                         const referer = data.headers?.Referer || 'https://hianime.to/';
+                         let sources: StreamSource[] = data.sources.map(s => ({
+                             url: s.url,
+                             quality: (s.quality || s.type || 'default') as string,
+                             isM3U8: s.isM3U8 ?? false,
+                         }));
+                         const subtitles: StreamSubtitle[] = (data.subtitles || [])
+                             .map(t => ({ url: t.url, lang: t.lang }));
 
-                        if (useProxy) {
-                            sources = sources.map(s => ({
-                                ...s,
-                                url: proxyUrl(s.url, proxyBase, referer),
-                                originalUrl: s.url,
-                            }));
-                        }
+                         // Filter out IP-locked sources (Streamtape /get_video URLs) — their
+                         // CDN tokens are bound to the Render server IP and cannot be proxied
+                         // through CF Worker (range requests from a different IP → playback error).
+                         const isIpLocked = (s: StreamSource) => {
+                             if ((s as Record<string, unknown>).ipLocked) return true;
+                             const rawUrl = s.url.toLowerCase();
+                             return (rawUrl.includes('streamtape') || rawUrl.includes('tapecontent')) && rawUrl.includes('get_video');
+                         };
+                         const proxyableSources = sources.filter(s => !isIpLocked(s));
+                         if (proxyableSources.length === 0) {
+                             // All sources were IP-locked, try next server
+                             continue;
+                         }
+                         sources = proxyableSources;
 
-                        c.header('Cache-Control', 'private, max-age=300');
-                        return c.json({
-                            sources,
-                            subtitles: useProxy
-                                ? subtitles.map(sub => ({ ...sub, url: proxyUrl(sub.url, proxyBase, referer) }))
-                                : subtitles,
-                            headers: { Referer: referer },
-                            server,
-                            source: 'hianime',
-                            triedServers: [server],
-                        });
-                    }
+                         if (useProxy) {
+                             sources = sources.map(s => ({
+                                 ...s,
+                                 url: proxyUrl(s.url, proxyBase, referer),
+                                 originalUrl: s.url,
+                             }));
+                         }
+
+                         c.header('Cache-Control', 'private, max-age=300');
+                         return c.json({
+                             sources,
+                             subtitles: useProxy
+                                 ? subtitles.map(sub => ({ ...sub, url: proxyUrl(sub.url, proxyBase, referer) }))
+                                 : subtitles,
+                             headers: { Referer: referer },
+                             server,
+                             source: 'hianime',
+                             triedServers: [server],
+                         });
+                     }
                 } catch { /* try next server */ }
             }
             // Do not return 404 — fall through to Consumet + title-based fallback below.
@@ -378,18 +393,15 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                     if (renderData.sources && renderData.sources.length > 0) {
                         streamData = renderData;
 
-                        // Filter out IP-locked sources (Streamtape /get_video URLs) — their
-                        // CDN tokens are bound to the Render server IP and cannot be proxied
-                        // through CF Worker (range requests from a different IP → playback error).
-                        const isIpLocked = (s: StreamSource) => {
-                            if ((s as Record<string, unknown>).ipLocked) return true;
-                            const rawUrl = unwrapProxied(s.originalUrl || s.url).toLowerCase();
-                            return (rawUrl.includes('streamtape') || rawUrl.includes('tapecontent')) && rawUrl.includes('get_video');
-                        };
-                        const proxyableSources = streamData.sources.filter(s => !isIpLocked(s));
-                        if (proxyableSources.length > 0) {
-                            streamData.sources = proxyableSources;
-                        }
+                         // Filter out IP-locked sources (Streamtape /get_video URLs) — their
+                         // CDN tokens are bound to the Render server IP and cannot be proxied
+                         // through CF Worker (range requests from a different IP → playback error).
+                         const isIpLocked = (s: StreamSource) => {
+                             if ((s as Record<string, unknown>).ipLocked) return true;
+                             const rawUrl = unwrapProxied(s.originalUrl || s.url).toLowerCase();
+                             return (rawUrl.includes('streamtape') || rawUrl.includes('tapecontent')) && rawUrl.includes('get_video');
+                         };
+                         streamData.sources = streamData.sources.filter(s => !isIpLocked(s));
 
                         if (useProxy) {
                             const referer = streamData.headers?.Referer || streamData.headers?.referer;

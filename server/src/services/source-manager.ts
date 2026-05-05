@@ -8,10 +8,8 @@ import {
     AnimeFLVSource,
     GogoanimeSource,
     AllAnimeSource,
-    GogoanimeBySource,
-    AnikaiSource,
-    CrazyAnimeTVSource,
-    AnimenanaSource,
+    AnimeHeavenSource,
+    NineAnimeSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -68,7 +66,7 @@ interface SourceMetadata {
  */
 export class SourceManager {
     private sources: Map<string, StreamingSource> = new Map();
-    private primarySource: string = 'AnimeFLV';
+    private primarySource: string = 'Gogoanime';
     private healthStatus: Map<string, SourceHealth> = new Map();
     private sourceMetadata: Map<string, SourceMetadata> = new Map();
     
@@ -76,10 +74,9 @@ export class SourceManager {
 
     // Source capabilities mapping
     private sourceCapabilities: Map<string, SourceCapabilities> = new Map([
+        ['AnimeHeaven', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['AnimeKai', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['AnimePahe', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['9Anime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
-        ['AnimeFLV', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['Gogoanime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['AllAnime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['GogoanimeBy', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
@@ -124,13 +121,27 @@ export class SourceManager {
     private readonly SUCCESS_RATE_WINDOW = 50; // Number of requests to track
     private sourceSuccessRates: Map<string, { success: number; total: number }> = new Map();
 
+    // Dub availability cache: anilistId -> { hasDub: boolean, source: string, timestamp: number }
+    private dubAvailabilityCache: Map<number, { hasDub: boolean; source: string; timestamp: number }> = new Map();
+    private readonly DUB_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+    // Source offline tracking: name -> { offlineSince: number, errorType: string, minOfflineDuration: number }
+    private sourceOfflineTracking: Map<string, { offlineSince: number; errorType: string; minOfflineDuration: number }> = new Map();
+
+    // Minimum offline durations by error type (ms)
+    private readonly OFFLINE_DURATIONS = {
+        'HTTP_410': 5 * 60 * 1000, // 5 minutes for "Gone" errors (permanent)
+        'TIMEOUT': 30 * 1000,      // 30 seconds for timeouts
+        'HTTP_403': 60 * 1000,     // 1 minute for forbidden
+        'HTTP_500': 45 * 1000,     // 45 seconds for server errors
+        'NETWORK_ERROR': 30 * 1000, // 30 seconds for network issues
+        'DEFAULT': 20 * 1000       // 20 seconds default
+    } as const;
+
     constructor() {
         // TIER 1: Verified working streaming sources (April 2025 audit)
         // Gogoanime (anitaku.to) — returns vibeplayer.site m3u8, fast & reliable
         this.registerSource(new GogoanimeSource());
-
-        // AnimeFLV — verified working, returns Streamwish/Streamtape embeds
-        this.registerSource(new AnimeFLVSource());
 
         // AnimeKai — verified search+episodes, streaming via @consumet/extensions
         this.registerSource(new AnimeKaiSource());
@@ -138,12 +149,28 @@ export class SourceManager {
         // AllAnime — GraphQL API, fast4speed CDN (may CAPTCHA-block from datacenter IPs)
         this.registerSource(new AllAnimeSource());
 
-        // TIER 2: Sources that partially work or need specific conditions
-        // AnimePahe — @consumet/extensions (search returns 0 results currently but kept as fallback)
-        this.registerSource(new AnimePaheDirectSource());
+        // AnimeHeaven - accessible and enhanced for dub content
+        this.registerSource(new AnimeHeavenSource());
+
+        // DISABLED - Dead sources confirmed in April 2025 audit:
+        // AnimeFLV — returning HTTP 410 (gone permanently) and timeouts
+        // AnimePahe — returning 0 search results, endpoints dead
+        // Both waste 10-39 seconds on every request before failing
+        // this.registerSource(new AnimeFLVSource());         // DISABLED: Dead
+        // this.registerSource(new AnimePaheDirectSource());  // DISABLED: Dead
+
+        // DISABLED - Broken dub sources (call localhost or return placeholder data):
+        // AnimeDubTV: returns placeholder data, no real streams
+        // RealDubSource: returns placeholder data, no real streams
+        // NineAnimeDub: non-functional extraction
+        // WorkingDubExtractor: calls localhost:3001 (broken on Vercel)
+        // WorkingDubSource: non-functional scraping
+        // Dub is handled by main sources (Gogoanime, AllAnime) via category parameter
+        
+        // 9Anime — accessible (200 status), known for good dub content
+        this.registerSource(new NineAnimeSource());
 
         // DISABLED — confirmed dead in April 2025 audit:
-        // 9Anime: timeout on both health and search
         // Consumet (public API): api.consumet.org returns errors
         // Miruro: search returns 0 results (hianime CF blocked)
         // Kaido: health timeout, search timeout
@@ -169,23 +196,12 @@ export class SourceManager {
 
         // Configure rate limits for each source (requests per minute)
         this.sourceRateLimits.set('AnimeKai', { limit: 120, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimePahe', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('9Anime', { limit: 100, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeFLV', { limit: 80, resetTime: 60000 });
         this.sourceRateLimits.set('Gogoanime', { limit: 60, resetTime: 60000 });
         this.sourceRateLimits.set('AllAnime', { limit: 120, resetTime: 60000 });
-        this.sourceRateLimits.set('GogoanimeBy', { limit: 60, resetTime: 60000 });
-        this.sourceRateLimits.set('Anikai', { limit: 60, resetTime: 60000 });
-        this.sourceRateLimits.set('CrazyAnimeTV', { limit: 60, resetTime: 60000 });
-        this.sourceRateLimits.set('Animenana', { limit: 60, resetTime: 60000 });
+        this.sourceRateLimits.set('AnimeHeaven', { limit: 60, resetTime: 60000 });
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
-        this.sourceRateLimits.set('Consumet', { limit: 60, resetTime: 60000 });
-        this.sourceRateLimits.set('Kaido', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('Zoro', { limit: 80, resetTime: 60000 });
-        this.sourceRateLimits.set('Miruro', { limit: 60, resetTime: 60000 });
-        this.sourceRateLimits.set('Aniwave', { limit: 60, resetTime: 60000 });
-        this.sourceRateLimits.set('Anix', { limit: 80, resetTime: 60000 });
 
         // Start health monitoring and perform initial health check
         this.startHealthMonitor();
@@ -235,14 +251,30 @@ export class SourceManager {
 
         if (offlineSources.length === 0) return;
 
-        logger.info(`Attempting recovery for ${offlineSources.length} offline sources: ${offlineSources.map(([n]) => n).join(', ')}`, undefined, 'SourceManager');
-        console.log(`🔄 [SourceManager] Recovering ${offlineSources.length} offline sources...`);
+        const now = Date.now();
+        const sourcesToRecover: Array<[string, StreamingSource]> = [];
 
         for (const [name, source] of offlineSources) {
+            const tracking = this.sourceOfflineTracking.get(name);
+            
+            // Skip if minimum offline duration hasn't passed
+            if (tracking && (now - tracking.offlineSince) < tracking.minOfflineDuration) {
+                continue;
+            }
+            
+            sourcesToRecover.push([name, source]);
+        }
+
+        if (sourcesToRecover.length === 0) return;
+
+        logger.info(`Attempting recovery for ${sourcesToRecover.length} offline sources: ${sourcesToRecover.map(([n]) => n).join(', ')}`, undefined, 'SourceManager');
+        console.log(`🔄 [SourceManager] Recovering ${sourcesToRecover.length} offline sources...`);
+
+        for (const [name, source] of sourcesToRecover) {
             try {
                 const isHealthy = await Promise.race([
-                    source.healthCheck({ timeout: 8000 }),
-                    new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 8000))
+                    source.healthCheck({ timeout: 12000 }),
+                    new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 12000))
                 ]);
 
                 if (isHealthy !== false) {
@@ -252,6 +284,7 @@ export class SourceManager {
                         status: 'online',
                         lastCheck: new Date()
                     });
+                    this.sourceOfflineTracking.delete(name); // Clear offline tracking
                     console.log(`   ✅ ${name} recovered`);
                     logger.info(`Source ${name} recovered and marked online`, undefined, 'SourceManager');
                 }
@@ -264,6 +297,7 @@ export class SourceManager {
                     status: 'online',
                     lastCheck: new Date()
                 });
+                this.sourceOfflineTracking.delete(name); // Clear offline tracking
                 console.log(`   ⚡ ${name} recovery inconclusive, re-enabling optimistically`);
                 logger.info(`Source ${name} re-enabled optimistically after inconclusive recovery`, undefined, 'SourceManager');
             }
@@ -328,7 +362,7 @@ export class SourceManager {
         console.log('⏳ [SourceManager] Initializing sources (optimistic availability)...');
         
         // Priority sources that we actively verify
-        const prioritySources = ['AnimeKai', 'AnimePahe'];
+        const prioritySources = ['AnimeKai'];
         
         // Mark ALL sources as available by default - they'll be marked offline only if they fail during actual use
         for (const [name, source] of this.sources.entries()) {
@@ -348,9 +382,9 @@ export class SourceManager {
             try {
                 console.log(`   🔍 Verifying ${name}...`);
                 const isHealthy = await Promise.race([
-                    source.healthCheck({ timeout: 8000 }),
+                    source.healthCheck({ timeout: 12000 }),
                     new Promise<boolean>((resolve) => 
-                        setTimeout(() => resolve(true), 8000) // Default to true on timeout
+                        setTimeout(() => resolve(true), 12000) // Default to true on timeout
                     )
                 ]);
                 
@@ -731,9 +765,35 @@ export class SourceManager {
     }
 
     /**
+     * Mark a source as offline with error type tracking
+     */
+    markSourceOffline(sourceName: string, errorType: string): void {
+        const source = this.sources.get(sourceName);
+        if (!source) return;
+
+        const minOfflineDuration = this.OFFLINE_DURATIONS[errorType as keyof typeof this.OFFLINE_DURATIONS] || this.OFFLINE_DURATIONS.DEFAULT;
+        
+        this.sourceOfflineTracking.set(sourceName, {
+            offlineSince: Date.now(),
+            errorType,
+            minOfflineDuration
+        });
+
+        source.isAvailable = false;
+        this.healthStatus.set(sourceName, {
+            name: sourceName,
+            status: 'offline',
+            lastCheck: new Date()
+        });
+
+        logger.info(`Source ${sourceName} marked offline (${errorType}) for ${minOfflineDuration/1000}s`, undefined, 'SourceManager');
+        console.log(`   ⚠️ ${sourceName} offline (${errorType})`);
+    }
+
+    /**
      * Record failed request for performance tracking
      */
-    recordFailure(sourceName: string): void {
+    recordFailure(sourceName: string, error?: Error): void {
         // Update success rate
         const rate = this.sourceSuccessRates.get(sourceName) || { success: 0, total: 0 };
         rate.total++;
@@ -753,6 +813,29 @@ export class SourceManager {
         metadata.consecutiveFailures++;
         metadata.successRate = rate.success / Math.max(1, rate.total);
         this.sourceMetadata.set(sourceName, metadata);
+        
+        // Determine error type and potentially mark offline
+        if (error) {
+            let errorType = 'DEFAULT';
+            const message = error.message.toLowerCase();
+            
+            if (message.includes('timeout') || message.includes('etimedout')) {
+                errorType = 'TIMEOUT';
+            } else if (message.includes('410') || message.includes('gone')) {
+                errorType = 'HTTP_410';
+            } else if (message.includes('403') || message.includes('forbidden')) {
+                errorType = 'HTTP_403';
+            } else if (message.includes('500') || message.includes('internal server error')) {
+                errorType = 'HTTP_500';
+            } else if (message.includes('enotfound') || message.includes('network') || message.includes('econnreset')) {
+                errorType = 'NETWORK_ERROR';
+            }
+            
+            // Mark offline after 3 consecutive failures of the same error type
+            if (metadata.consecutiveFailures >= 3) {
+                this.markSourceOffline(sourceName, errorType);
+            }
+        }
         
         // Mark source unavailable after too many consecutive failures
         if (metadata.consecutiveFailures >= 5) {
@@ -2890,13 +2973,14 @@ export class SourceManager {
 
         const sourcesToTry: StreamingSource[] = [];
         
-        // Add primary source first: matching prefix or any available for raw slug
-        // Removed isAvailable check to try all sources even if health check failed
+        // Add primary source first, but honor the offline hold-down window. Retrying
+        // known-bad sources inside the same stream request is what made recovery
+        // attempts burn the entire client timeout.
         const primaryMatchesId = primarySource && hasSourcePrefix && primarySource.getStreamingLinks;
-        if (primaryMatchesId && !sourcesToTry.includes(primarySource!)) {
+        if (primaryMatchesId && primarySource!.isAvailable && !sourcesToTry.includes(primarySource!)) {
             sourcesToTry.push(primarySource!);
         }
-        if (primarySource?.getStreamingLinks && !sourcesToTry.includes(primarySource)) {
+        if (primarySource?.isAvailable && primarySource.getStreamingLinks && !sourcesToTry.includes(primarySource)) {
             sourcesToTry.push(primarySource);
         }
 
@@ -2906,7 +2990,7 @@ export class SourceManager {
             if (isAdultContent && name !== 'WatchHentai' && name !== 'Hanime') continue;
             if (!isAdultContent && (name === 'WatchHentai' || name === 'Hanime')) continue;
             const source = this.sources.get(name) as StreamingSource;
-            if (source?.getStreamingLinks && !sourcesToTry.includes(source)) {
+            if (source?.isAvailable && source.getStreamingLinks && !sourcesToTry.includes(source)) {
                 sourcesToTry.push(source);
             }
         }
@@ -2949,6 +3033,17 @@ export class SourceManager {
             finalSources = finalSources.filter((s) => allow.has(s.name));
         }
 
+        // AnimeKai compound ids (`animekai-slug$ep=N$token=...`) cannot be reused as-is across
+        // other scrapers (they'll waste time 404ing/timeouting). For these, prefer:
+        // - direct AnimeKai extraction
+        // - cross-source title-based fallback (uses episodeNum)
+        const isAnimeKaiCompound =
+            episodeId.toLowerCase().startsWith('animekai-') &&
+            (episodeId.includes('$token=') || episodeId.includes('$ep='));
+        if (isAnimeKaiCompound) {
+            finalSources = finalSources.filter((s) => s.name === 'AnimeKai');
+        }
+
         console.log(`   📋 Sources to try (priority-ordered): ${finalSources.map(s => s.name).join(', ')}`);
 
         const buildStreamingPickOrder = (_epId: string): string[] => {
@@ -2970,9 +3065,13 @@ export class SourceManager {
         const allResults: RaceResult[] = [];
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
-            const GRACE_PERIOD = 1500; // Wait 1.5s for a higher-priority source after first success
-            const CROSS_SOURCE_FALLBACK_MAX_MS = 6_000;
-            const STREAM_GLOBAL_MAX_MS = 10_000;
+            const GRACE_PERIOD = 3000; // Wait 3s for a higher-priority source after first success
+            // Title-search + episodes + extraction often exceeds 10s (especially AnimeFLV/AllAnime),
+            // so allow a longer window; this is the main path for AnimeKai compound IDs.
+            const CROSS_SOURCE_FALLBACK_MAX_MS = 18_000;
+            // Some sources only yield embed/IP-locked streams; still resolve quickly so the UI can fall back.
+            const STREAM_GLOBAL_MAX_MS = 20_000;
+            const ONLY_IP_LOCKED_WAIT_MS = 3_500;
 
             const result = await new Promise<StreamingData>((resolveStream) => {
             let pending = 0;
@@ -3000,11 +3099,15 @@ export class SourceManager {
                     });
                 const proxyableOk = ok.filter(hasProxyableStream);
 
-                // If only IP-locked sources are available and there are still pending
-                // requests (cross-source fallback may return HLS), don't resolve yet.
+                // If only IP-locked/embed-only sources are available and there are still pending
+                // requests (cross-source fallback may return HLS), briefly wait — but don't stall
+                // the UI into a global timeout when no proxyable streams exist.
                 if (!force && proxyableOk.length === 0 && pending > 0) {
-                    console.log(`   ⏳ Only IP-locked sources so far, waiting for ${pending} pending source(s)...`);
-                    return false;
+                    const elapsed = Date.now() - startTime;
+                    if (elapsed < ONLY_IP_LOCKED_WAIT_MS) {
+                        console.log(`   ⏳ Only IP-locked/embed sources so far, waiting for ${pending} pending source(s)...`);
+                        return false;
+                    }
                 }
 
                 const realOk = proxyableOk.length > 0 ? proxyableOk : ok.filter(hasRealStream);
@@ -3182,7 +3285,7 @@ export class SourceManager {
      * Cross-source streaming fallback: when primary source streaming fails,
      * look up the anime on AnimePahe/AnimeKai by title and match the episode by number.
      */
-    private async crossSourceStreamingFallback(
+    async crossSourceStreamingFallback(
         episodeId: string,
         server?: string,
         category: 'sub' | 'dub' = 'sub',
@@ -3268,29 +3371,52 @@ export class SourceManager {
 
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
-        // Registered sources to try for cross-source fallback (by title search).
-        // AllAnime is first: GraphQL API + fast4speed.rsvp CDN accessible from cloud IPs.
-        const consumetSources = ['Gogoanime', 'AnimeFLV', 'AllAnime', 'AnimeKai', 'AnimePahe']
+        // Registered, currently enabled sources to try for cross-source fallback.
+        // Keep dead/unregistered sources out of this path so fallback starts useful
+        // work immediately instead of waiting on sources we already disabled.
+        const dubSources = ['AnimeHeaven', '9Anime', 'Gogoanime', 'AllAnime', 'AnimeKai'];
+        const subSources = ['Gogoanime', 'AllAnime', 'AnimeKai'];
+        const sourceNames = category === 'dub' ? dubSources : subSources;
+        
+        const consumetSources = sourceNames
             .map(n => ({ name: n, src: this.sources.get(n) as StreamingSource }))
             .filter(({ src }) => src?.isAvailable && src.getStreamingLinks);
 
         const crossResults = await Promise.allSettled(
             consumetSources.map(async ({ name: srcName, src }) => {
-                // Consumet (Gogoanime) splits sub and dub into separate entities.
-                let searchTitle = title;
-                if (category === 'dub' && srcName === 'Consumet') {
-                    searchTitle = `${title} dub`;
+                // For dub category, try multiple search strategies
+                // Some sources use "Title dub", others "Title (Dub)", others have separate dub entries
+                const searchTitles = category === 'dub'
+                    ? [`${title} dub`, `${title} (Dub)`, title.replace(/\s+season\s+\d+/i, '') + ' dub']
+                    : [title];
+
+                let searchResult: AnimeSearchResult | null = null;
+                let bestMatch: AnimeBase | null = null;
+
+                for (const searchTitle of searchTitles) {
+                    if (bestMatch) break;
+                    console.log(`   📡 ${srcName} title-search for "${searchTitle}"`);
+                    try {
+                        const result = await Promise.race([
+                            src.search(searchTitle, 1),
+                            new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 10000))
+                        ]);
+                        if (result.results?.length) {
+                            // For dub, prefer titles that contain "dub" or "(Dub)"
+                            const dubResults = category === 'dub'
+                                ? result.results.filter(r => /\b(dub|dubbed)\b/i.test(r.title))
+                                : result.results;
+
+                            searchResult = result;
+                            bestMatch = this.findBestMatch(searchTitle, dubResults.length > 0 ? dubResults : result.results)
+                                ?? (dubResults.length > 0 ? dubResults[0] : result.results[0]);
+                            console.log(`   📺 ${srcName} found: "${bestMatch.title}" (${bestMatch.id})`);
+                            break;
+                        }
+                    } catch { /* try next search title */ }
                 }
 
-                console.log(`   📡 ${srcName} title-search for "${searchTitle}"`);
-                const searchResult = await Promise.race([
-                    src.search(searchTitle, 1),
-                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
-                ]);
-                if (!searchResult.results?.length) throw new Error('no results');
-
-                const bestMatch = this.findBestMatch(searchTitle, searchResult.results) ?? searchResult.results[0];
-                console.log(`   📺 ${srcName} found: "${bestMatch.title}" (${bestMatch.id})`);
+                if (!bestMatch || !searchResult) throw new Error('no results');
 
                 const episodes = await Promise.race([
                     src.getEpisodes!(bestMatch.id, { timeout: 15000 }),
@@ -3301,14 +3427,14 @@ export class SourceManager {
                 const targetEp = episodes.find(e => e.number === targetEpNum);
                 if (!targetEp) throw new Error(`ep ${targetEpNum} not in ${episodes.length} episodes`);
 
-                console.log(`   ⏳ ${srcName}: streaming ep ${targetEpNum} (ID: ${targetEp.id})`);
+                console.log(`   ⏳ ${srcName}: streaming ep ${targetEpNum} (ID: ${targetEp.id}, hasDub=${targetEp.hasDub})`);
                 const streamData = await Promise.race([
                     src.getStreamingLinks!(targetEp.id, server, category, { timeout: 20000 }),
                     new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 20000))
                 ]);
                 if (!streamData.sources.length) throw new Error('no sources');
 
-                console.log(`   ✅ ${srcName}: ${streamData.sources.length} streaming sources`);
+                console.log(`   ✅ ${srcName}: ${streamData.sources.length} streaming sources (${category})`);
                 return streamData;
             })
         );
@@ -3345,7 +3471,7 @@ export class SourceManager {
         if (anilistId) {
             try {
                 const { default: axios } = await import('axios');
-                const query = `query($id:Int){Media(id:$id,type:ANIME){title{romaji english}}}`;
+                const query = `query($id:Int){Media(id:$id,type=ANIME){title{romaji english}}}`;
                 const res = await axios.post<{ data: { Media: { title: { romaji: string; english: string | null } } } }>(
                     'https://graphql.anilist.co',
                     { query, variables: { id: anilistId } },
@@ -3359,19 +3485,44 @@ export class SourceManager {
         if (!title) return null;
 
         const targetEpNum = episodeNum ?? 1;
-        console.log(`[AllAnime fallback] Searching "${title}" ep ${targetEpNum}`);
+        console.log(`[AllAnime fallback] Searching "${title}" ep ${targetEpNum} (${category})`);
+
+        // For dub, try multiple search patterns
+        const searchTitles = category === 'dub'
+            ? [`${title} dub`, `${title} (Dub)`, title.replace(/\s+season\s+\d+/i, '') + ' dub', title]
+            : [title];
+
+        let bestMatch: AnimeBase | null = null;
+
+        for (const searchTitle of searchTitles) {
+            if (bestMatch) break;
+            try {
+                console.log(`[AllAnime fallback] Trying search: "${searchTitle}"`);
+                const searchResult = await Promise.race([
+                    allAnime.search(searchTitle, 1),
+                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 10000))
+                ]);
+
+                if (searchResult.results?.length) {
+                    // For dub, prefer results that contain "dub" in the title
+                    if (category === 'dub') {
+                        const dubResults = searchResult.results.filter(r => /\b(dub|dubbed)\b/i.test(r.title));
+                        bestMatch = this.findBestMatch(searchTitle, dubResults.length > 0 ? dubResults : searchResult.results)
+                            ?? (dubResults.length > 0 ? dubResults[0] : searchResult.results[0]);
+                    } else {
+                        bestMatch = this.findBestMatch(searchTitle, searchResult.results) ?? searchResult.results[0];
+                    }
+                    console.log(`[AllAnime fallback] Found: "${bestMatch.title}" (${bestMatch.id})`);
+                }
+            } catch { /* try next search title */ }
+        }
+
+        if (!bestMatch) {
+            console.log(`[AllAnime fallback] No results for any search pattern`);
+            return null;
+        }
 
         try {
-            const searchResult = await Promise.race([
-                allAnime.search(title, 1),
-                new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
-            ]);
-            if (!searchResult.results?.length) return null;
-
-            // Use scored matching — never blindly pick results[0] which may be the wrong season
-            const bestMatch = this.findBestMatch(title, searchResult.results) ?? searchResult.results[0];
-            console.log(`[AllAnime fallback] Found: "${bestMatch.title}" (${bestMatch.id})`);
-
             const episodes = await Promise.race([
                 allAnime.getEpisodes!(bestMatch.id, { timeout: 15000 }),
                 new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
@@ -3384,14 +3535,14 @@ export class SourceManager {
                 return null;
             }
 
-            console.log(`[AllAnime fallback] Streaming ep ${targetEpNum} (ID: ${targetEp.id})`);
+            console.log(`[AllAnime fallback] Streaming ep ${targetEpNum} (ID: ${targetEp.id}, hasDub=${targetEp.hasDub})`);
             const streamData = await Promise.race([
                 allAnime.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 25000 }),
                 new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 25000))
             ]);
             if (!streamData.sources?.length) return null;
 
-            console.log(`[AllAnime fallback] Got ${streamData.sources.length} source(s)`);
+            console.log(`[AllAnime fallback] Got ${streamData.sources.length} source(s) for ${category}`);
             return streamData;
         } catch (e) {
             console.log(`[AllAnime fallback] Failed: ${(e as Error).message}`);
@@ -3882,6 +4033,7 @@ export class SourceManager {
                 .replace(/\s+/g, ' ')
                 .trim();
 
+        const TYPE_SUFFIX_RE_FB = /\b(specials?|ova|ona|recap|picture\s*drama)\b/i;
         const scoreCandidate = (queryTitle: string, candidateTitle: string) => {
             const q = normalize(queryTitle);
             const c = normalize(candidateTitle);
@@ -3890,7 +4042,12 @@ export class SourceManager {
             const qWords = q.split(' ').filter((w) => w.length >= 3);
             let hits = 0;
             for (const w of qWords) if (c.includes(w)) hits++;
-            return hits / Math.max(1, qWords.length);
+            let score = hits / Math.max(1, qWords.length);
+            // Penalize specials/OVA type-suffix mismatch (different entry entirely)
+            const qHasSuffix = TYPE_SUFFIX_RE_FB.test(queryTitle);
+            const cHasSuffix = TYPE_SUFFIX_RE_FB.test(candidateTitle);
+            if (qHasSuffix !== cHasSuffix) score *= 0.25;
+            return score;
         };
 
         for (const t of uniqueTitles) {
@@ -3899,13 +4056,20 @@ export class SourceManager {
             if (!candidates.length) continue;
 
             const best = candidates
-                .map((c) => ({
-                    c,
-                    s:
+                .map((c) => {
+                    let s =
                         scoreCandidate(anilistData.title, c.title) +
                         (anilistData.titleJapanese ? 0.35 * scoreCandidate(anilistData.titleJapanese, c.title) : 0) +
-                        (c.type === anilistData.type ? 0.25 : 0),
-                }))
+                        (c.type === anilistData.type ? 0.25 : 0);
+                    // Strong penalty when query is TV/Movie but candidate is Special/OVA (or vice versa)
+                    if (anilistData.type && c.type && c.type !== anilistData.type) {
+                        const isMismatchedSpecial =
+                            (c.type === 'Special' || c.type === 'OVA' || c.type === 'ONA') &&
+                            (anilistData.type === 'TV' || anilistData.type === 'Movie');
+                        if (isMismatchedSpecial) s *= 0.3;
+                    }
+                    return { c, s };
+                })
                 .sort((a, b) => b.s - a.s)[0];
 
             if (best?.c?.id && best.s >= 0.34) {
@@ -3933,6 +4097,13 @@ export class SourceManager {
             return null;
         };
 
+        // Detect "specials"/"OVA"/"ONA" type suffixes — these indicate entirely different
+        // entries (e.g. "Baka & Test 2 Specials" vs "Baka & Test").
+        const TYPE_SUFFIX_RE = /\b(specials?|ova|ona|recap|picture\s*drama)\b/i;
+        const hasTypeSuffix1 = TYPE_SUFFIX_RE.test(s1);
+        const hasTypeSuffix2 = TYPE_SUFFIX_RE.test(s2);
+        const typeSuffixMismatch = hasTypeSuffix1 !== hasTypeSuffix2;
+
         const season1 = extractSeason(s1);
         const season2 = extractSeason(s2);
 
@@ -3949,6 +4120,9 @@ export class SourceManager {
             } else if (season1 !== null && season2 === null) {
                 score *= 0.5; // query wants specific season, result has none
             }
+            // Penalize specials/OVA mismatch — "Baka & Test" should NOT match
+            // "Baka & Test 2 Specials" which is a different series entirely.
+            if (typeSuffixMismatch) score *= 0.25;
             return score;
         }
         if (s1.includes(s2)) {
@@ -3960,6 +4134,7 @@ export class SourceManager {
             } else if (season1 !== null && season2 === null) {
                 score *= 0.5;
             }
+            if (typeSuffixMismatch) score *= 0.25;
             return score;
         }
 
@@ -3982,6 +4157,9 @@ export class SourceManager {
             // wrong season doesn't win over a correct match.
             baseScore *= 0.5;
         }
+
+        // Penalize specials/OVA type mismatch
+        if (typeSuffixMismatch) baseScore *= 0.25;
 
         const missingRatio = (words1.length - matchedQueryWords.length) / words1.length;
         const penaltyFactor = 1 - missingRatio * 0.5;
@@ -4014,6 +4192,13 @@ export class SourceManager {
             // Boost when the result's type matches what we're looking for
             if (animeType && anime.type && anime.type === animeType) {
                 score += 0.15;
+            }
+            // Penalize type mismatch: e.g. query is for a TV series but result is Special/OVA
+            if (animeType && anime.type && anime.type !== animeType) {
+                const isMismatchedSpecial =
+                    (anime.type === 'Special' || anime.type === 'OVA' || anime.type === 'ONA') &&
+                    (animeType === 'TV' || animeType === 'Movie');
+                if (isMismatchedSpecial) score *= 0.3;
             }
             if (score > bestScore) {
                 bestScore = score;
@@ -4222,5 +4407,3 @@ export class SourceManager {
 
 // Singleton instance
 export const sourceManager = new SourceManager();
-
-

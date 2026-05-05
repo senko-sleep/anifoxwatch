@@ -14,11 +14,11 @@ interface CircuitBreakerState {
 // Circuit Breaker configuration per source
 const circuitBreakers = new Map<string, CircuitBreakerState>();
 
-// Default circuit breaker settings - optimized for speed
+// Default circuit breaker settings - optimized for reliability with slow sources
 const DEFAULT_CIRCUIT_SETTINGS = {
-    maxFailures: 5, // Allow more failures before tripping - prevents transient errors from killing sources
-    resetTime: 15000, // 15s recovery - fast enough to recover from brief outages
-    timeout: 25000 // 25s timeout — Vercel allows 60s; sources need time on cold starts
+    maxFailures: 3, // Reduce failures before tripping to avoid wasting time on consistently slow sources
+    resetTime: 30000, // 30s recovery - give sources more time to recover
+    timeout: 90000 // 90s timeout — increased significantly for slow sources and Vercel cold starts
 };
 
 // Get or create circuit breaker for a source

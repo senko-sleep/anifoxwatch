@@ -190,7 +190,7 @@ export class AnikaiSource extends BaseAnimeSource {
                 try {
                     const embedResp = await axios.get(iframeSrc.startsWith('http') ? iframeSrc : `${this.baseUrl}${iframeSrc}`, {
                         signal: options?.signal,
-                        timeout: 8000,
+                        timeout: 15000,
                         headers: { 'Referer': this.baseUrl }
                     });
                     const html = embedResp.data;

@@ -16,5 +16,16 @@
     "sourceMap": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "testing", "aniwatch-api"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "testing",
+    "aniwatch-api",
+    "src/sources/animedubtv-source.ts",
+    "src/sources/dub-source.ts",
+    "src/sources/nineanime-dub-source.ts",
+    "src/sources/real-dub-source.ts",
+    "src/sources/working-dub-extractor.ts",
+    "src/sources/working-dub-source.ts"
+  ]
 }

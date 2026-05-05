@@ -195,7 +195,10 @@ export class KaidoSource extends BaseAnimeSource {
             $('.server-item').each((i, el) => {
                 const serverName = $(el).text().trim();
                 const serverId = $(el).attr('data-id') || '';
-                const type = $(el).closest('.servers-sub').length > 0 ? 'sub' : 'dub';
+                // Kaido/9anime use .servers-sub and .servers-dub containers
+                const isSub = $(el).closest('.servers-sub').length > 0;
+                const isDub = $(el).closest('.servers-dub').length > 0;
+                const type = isDub ? 'dub' : 'sub';
 
                 servers.push({
                     name: serverName,
@@ -241,7 +244,8 @@ export class KaidoSource extends BaseAnimeSource {
                         url: sub.url, lang: sub.lang, label: sub.lang
                     })),
                     headers: { Referer: 'https://kaido.to/' },
-                    source: this.name
+                    source: this.name,
+                    category
                 };
             }
         } catch {
@@ -266,7 +270,8 @@ export class KaidoSource extends BaseAnimeSource {
                         url: sub.url, lang: sub.lang, label: sub.lang
                     })),
                     headers: { Referer: 'https://9animetv.to/' },
-                    source: this.name
+                    source: this.name,
+                    category
                 };
             }
         } catch {

@@ -12,7 +12,8 @@ describe('API_DEPLOYMENTS URLs', () => {
         expect(API_DEPLOYMENTS.vercel).toBe('');
     });
 
-    it('no cross-host BFF fallback', () => {
+    it('no cross-host BFF fallback in non-browser env', () => {
+        // In Vitest (node), there is no `window.location.origin` so fallback remains null.
         expect(getApiFallbackUrl()).toBeNull();
     });
 });

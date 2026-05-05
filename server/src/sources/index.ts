@@ -18,8 +18,13 @@ export { AkiHSource } from './akih-source.js';
 export { ConsumetSource } from './consumet-source.js';
 export { AniwatchSource } from './aniwatch-source.js';
 export { GogoanimeSource } from './gogoanime-source.js';
+export { AnimeHeavenSource } from './animeheaven-source.js';
 export { NineAnimeSource } from './nineanime-source.js';
 export { AniwaveSource } from './aniwave-source.js';
+
+// Experimental dub-specialized sources are intentionally not exported here.
+// They are not registered by SourceManager and currently do not satisfy the
+// production source interface.
 
 // ===== NEW BACKUP SOURCES (20+ alternatives) =====
 
@@ -46,7 +51,6 @@ export { CrunchyrollSource } from './crunchyroll-source.js';
 // Additional Backups
 export { AnimeOnsenSource } from './animeonsen-source.js';
 export { MarinSource } from './marin-source.js';
-export { AnimeHeavenSource } from './animeheaven-source.js';
 export { AnimeKisaSource } from './animekisa-source.js';
 export { AnimeOwlSource } from './animeowl-source.js';
 export { AnimeLandSource } from './animeland-source.js';

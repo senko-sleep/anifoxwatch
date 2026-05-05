@@ -214,11 +214,10 @@ const Watch = () => {
   );
   const dubProbeHasSources = (dubProbeData?.sources?.length ?? 0) > 0;
   const dubAvailable = useMemo(
-    () =>
-      serversHaveDub ||
-      metadataIndicatesDub ||
-      dubPlaybackWorks ||
-      dubProbeHasSources,
+    () => {
+      // Dub is available if: servers report dub, metadata indicates dub, or active dub playback works
+      return serversHaveDub || metadataIndicatesDub || dubPlaybackWorks || dubProbeHasSources;
+    },
     [serversHaveDub, metadataIndicatesDub, dubPlaybackWorks, dubProbeHasSources]
   );
 
@@ -378,9 +377,11 @@ const Watch = () => {
   }, [streamLoading, selectedEpisode]);
 
   // Auto-fallback: if dub stream returned no sources OR server fell back to sub
+  // BUT: don't auto-fallback if user manually clicked DUB - respect their choice
   useEffect(() => {
     if (audioType !== 'dub' || streamLoading) return;
     if (!streamData) return;
+    if (audioManuallySet) return; // User explicitly chose DUB, don't force them back to SUB
     const noSources = streamData.sources?.length === 0;
     const serverServedSub = (streamData as Record<string, unknown>).dubFallback === true;
     if (noSources || serverServedSub) {
@@ -388,7 +389,7 @@ const Watch = () => {
       toast.info('Dub not available for this episode — switching to Sub');
       setAudioType('sub');
     }
-  }, [audioType, streamLoading, streamData]);
+  }, [audioType, streamLoading, streamData, audioManuallySet]);
 
   // Get best quality source - skip sources that previously failed
   const getVideoSource = useCallback(() => {

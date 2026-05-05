@@ -22,7 +22,7 @@ type SourcesPayload = {
     headers?: { Referer?: string; referer?: string };
 };
 
-function mapPayloadToStreaming(data: SourcesPayload | undefined): StreamingData | null {
+function mapPayloadToStreaming(data: SourcesPayload | undefined, category?: string): StreamingData | null {
     if (!data?.sources?.length) return null;
 
     const hdr = data.headers;
@@ -47,6 +47,7 @@ function mapPayloadToStreaming(data: SourcesPayload | undefined): StreamingData 
         subtitles,
         headers: { Referer: referer },
         source: 'hianime-rest',
+        category: category as 'sub' | 'dub' | undefined,
     };
 }
 
@@ -165,7 +166,7 @@ export async function tryFetchHianimeRestStreamingData(opts: {
             if (d?.sources?.length) payload = d;
         }
 
-        const mapped = mapPayloadToStreaming(payload ?? undefined);
+        const mapped = mapPayloadToStreaming(payload ?? undefined, category);
         if (mapped) return mapped;
     }
 

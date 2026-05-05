@@ -112,20 +112,20 @@ export class AnimeKaiSource extends BaseAnimeSource {
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
-    async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
-        try {
-            const p = await this.getProvider();
-            const res = await Promise.race([
-                p.search('naruto'),
-                new Promise<any>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
-            ]);
-            this.isAvailable = (res.results?.length || 0) > 0;
-            return this.isAvailable;
-        } catch {
-            this.isAvailable = true;
-            return true;
-        }
-    }
+     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
+         try {
+             const p = await this.getProvider();
+             const res = await Promise.race([
+                 p.search('naruto'),
+                 new Promise<any>((_, r) => setTimeout(() => r(new Error('timeout')), 15000)) // Increased from 8000 to 15000
+             ]);
+             this.isAvailable = (res.results?.length || 0) > 0;
+             return this.isAvailable;
+         } catch {
+             this.isAvailable = true;
+             return true;
+         }
+     }
 
     private cleanDescription(raw?: string): string {
         if (!raw) return 'No description available.';
@@ -243,7 +243,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
                 title: ep.title || `Episode ${ep.number || 1}`,
                 isFiller: false,
                 hasSub: true,
-                hasDub: false,
+                hasDub: info.hasDub || false,
                 thumbnail: ep.image
             }));
 
@@ -256,10 +256,25 @@ export class AnimeKaiSource extends BaseAnimeSource {
     }
 
     async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
-        return [
+        const servers: EpisodeServer[] = [
             { name: 'default', url: '', type: 'sub' },
-            { name: 'default', url: '', type: 'dub' }
         ];
+        // Only advertise dub servers if the anime actually has dub content
+        try {
+            const rawId = episodeId.replace(/^animekai-/i, '').split('?')[0].split('$')[0];
+            const p = await this.getProvider();
+            const info = await Promise.race([
+                p.fetchAnimeInfo(rawId),
+                new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
+            ]);
+            if (info?.hasDub) {
+                servers.push({ name: 'default', url: '', type: 'dub' });
+            }
+        } catch {
+            // On error, optimistically include dub — the stream fetch will verify
+            servers.push({ name: 'default', url: '', type: 'dub' });
+        }
+        return servers;
     }
 
     /**
@@ -293,18 +308,23 @@ export class AnimeKaiSource extends BaseAnimeSource {
         const megaupEmbedUrl = $('iframe').attr('src') || '';
         const isMegaupEmbed = /megaup\.(nl|cc|live|to)\//i.test(megaupEmbedUrl);
 
-        // If no iframe src, or iframe src is not a megaup CDN (e.g. Streamtape, other embeds),
-        // return the original server URL as an embed fallback so the browser can play it.
-        if (!megaupEmbedUrl || !isMegaupEmbed) {
-            logger.warn(`AnimeKai: non-megaup embed (${megaupEmbedUrl.slice(0, 60) || 'none'}) — returning embed fallback`, undefined, this.name);
-            return [{ url: serverUrl, quality: 'auto', isM3U8: false, isEmbed: true }];
+        // If no iframe src, return empty
+        if (!megaupEmbedUrl) {
+            logger.warn(`AnimeKai: no iframe src found`, undefined, this.name);
+            return [];
+        }
+        
+        // If not megaup CDN (e.g. Streamtape, Doodstream, etc.), extract as embed instead
+        if (!isMegaupEmbed) {
+            logger.info(`AnimeKai: extracting non-megaup embed: ${megaupEmbedUrl.slice(0, 60)}...`, undefined, this.name);
+            return this.extractEmbedStream(megaupEmbedUrl);
         }
 
         // Step 2: GET megaup /media/ endpoint (returns JSON { status, result: encryptedText })
         // Vercel/cloud datacenter IPs are blocked by megaup.nl with 403. When direct fetch fails,
         // fall back to the Cloudflare Worker proxy which has a residential-adjacent IP.
         const REMOTE_PROXY = process.env.DEFAULT_REMOTE_STREAM_PROXY ||
-            'https://anifoxwatch-api.anya-bot.workers.dev/api/stream/proxy';
+            'https://anifoxwatch.vercel.app/api/stream/proxy';
         const MEGAUP_MIRRORS = ['megaup.nl', 'megaup.cc', 'megaup.live', 'megaup.to'];
         const embedBase = new URL(megaupEmbedUrl).hostname;
         const mirrorOrder = [
@@ -346,15 +366,10 @@ export class AnimeKaiSource extends BaseAnimeSource {
         }
 
         if (!encText) {
-            // All megaup mirrors + CF proxy failed (datacenter IP block).
-            // Return the AnimeKai iframe embed URL so the browser can play it client-side.
-            logger.warn(`AnimeKai: no encrypted result — returning embed fallback for ${serverUrl}`, undefined, this.name);
-            return [{
-                url: serverUrl,
-                quality: 'auto',
-                isM3U8: false,
-                isEmbed: true,
-            }];
+            // All megaup mirrors + proxy failed (datacenter IP block).
+            // Return empty sources so other sources can be tried instead of blocked iframe.
+            logger.warn(`AnimeKai: no encrypted result — returning empty sources for ${serverUrl}`, undefined, this.name);
+            return [];
         }
 
         // Step 3: decrypt via enc-dec.app — User-Agent MUST match the one used for /media/
@@ -371,7 +386,131 @@ export class AnimeKaiSource extends BaseAnimeSource {
             quality: 'auto',
             isM3U8: (s.file ?? '').includes('.m3u8') || s.type === 'hls',
             isDASH: (s.file ?? '').includes('.mpd'),
+            server: 'Megaup',
         })).filter(s => s.url);
+    }
+
+    /**
+     * Extract embed streams from non-megaup CDNs (Streamtape, Doodstream, etc.)
+     * These return as embed URLs that need to be handled by the player's embed support
+     */
+    private extractEmbedStream(embedUrl: string): VideoSource[] {
+        // Determine server name from URL
+        const urlLower = embedUrl.toLowerCase();
+        let serverName = 'Embed';
+        if (urlLower.includes('streamtape')) serverName = 'Streamtape';
+        else if (urlLower.includes('dood')) serverName = 'Doodstream';
+        else if (urlLower.includes('vidcloud')) serverName = 'VidCloud';
+        else if (urlLower.includes('rapid-cloud')) serverName = 'RapidCloud';
+        else if (urlLower.includes('megacloud')) serverName = 'MegaCloud';
+        
+        // Check if this is likely an IP-locked source
+        const isIpLocked = urlLower.includes('streamtape') || 
+                          (urlLower.includes('get_video') && urlLower.includes('streamtape'));
+        
+        return [{
+            url: embedUrl,
+            quality: 'auto',
+            isM3U8: false,
+            isEmbed: true,
+            server: serverName,
+            ipLocked: isIpLocked,
+        }];
+    }
+
+    /**
+     * Scrape server URLs directly from animekai.to website when consumet fails
+     */
+    private async scrapeServersFromWebsite(
+        episodeId: string,
+        category: 'sub' | 'dub',
+        timeoutMs: number
+    ): Promise<Array<{ name: string; url: string }>> {
+        const servers: Array<{ name: string; url: string }> = [];
+        const watchUrl = `https://animekai.to/watch/${episodeId}`;
+        
+        try {
+            const resp = await axios.get(watchUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Referer': 'https://animekai.to/',
+                },
+                timeout: Math.min(timeoutMs, 10_000),
+            });
+            
+            const $ = cheerio.load(resp.data as string);
+            
+            // Look for server buttons/links with data-server or onclick attributes
+            // Filter by category: check data-dub and data-sub attributes
+            $('[data-server], .server-item, .server').each((i, el) => {
+                const serverUrl = $(el).attr('data-server') || $(el).attr('data-link') || '';
+                const serverName = $(el).text().trim() || $(el).attr('title') || `Server ${i + 1}`;
+                
+                // Check if this server is for dub or sub
+                const isDubServer = $(el).attr('data-dub') === 'true' || 
+                                   $(el).hasClass('dub') || 
+                                   $(el).closest('[class*="dub"]').length > 0;
+                const isSubServer = $(el).attr('data-sub') === 'true' || 
+                                   $(el).hasClass('sub') || 
+                                   $(el).closest('[class*="sub"]').length > 0;
+                
+                // Skip if server type doesn't match requested category
+                if (category === 'dub' && !isDubServer) return;
+                if (category === 'sub' && isDubServer) return; // Skip dub servers when requesting sub
+                
+                if (serverUrl && serverUrl.includes('/iframe/')) {
+                    servers.push({ name: serverName + (isDubServer ? ' (Dub)' : ''), url: serverUrl.startsWith('http') ? serverUrl : `https://animekai.to${serverUrl}` });
+                }
+            });
+            
+            // Also look for iframe elements
+            $('iframe').each((i, el) => {
+                const src = $(el).attr('src') || '';
+                if (src && (src.includes('/iframe/') || src.includes('megaup') || src.includes('streamtape'))) {
+                    const fullUrl = src.startsWith('http') ? src : `https://animekai.to${src}`;
+                    // Avoid duplicates
+                    if (!servers.some(s => s.url === fullUrl)) {
+                        servers.push({ name: `Server ${servers.length + 1}`, url: fullUrl });
+                    }
+                }
+            });
+            
+            // Look for links with /iframe/ in href (fallback - these might not have category indicators)
+            // Only use these if we haven't found any category-specific servers yet
+            if (servers.length === 0) {
+                $('a[href*="/iframe/"]').each((i, el) => {
+                    const href = $(el).attr('href') || '';
+                    const linkText = $(el).text().trim() || '';
+                    // Try to detect dub from link text (e.g., "Megaup DUB" or "Server 1 (Dub)")
+                    const isDubLink = linkText.toLowerCase().includes('dub') || 
+                                     linkText.toLowerCase().includes('(dub)');
+                    const isSubLink = linkText.toLowerCase().includes('sub') || 
+                                       linkText.toLowerCase().includes('(sub)');
+                    
+                    // Skip if category doesn't match
+                    if (category === 'dub' && !isDubLink && isSubLink) return;
+                    if (category === 'sub' && isDubLink) return;
+                    
+                    if (href) {
+                        const fullUrl = href.startsWith('http') ? href : `https://animekai.to${href}`;
+                        if (!servers.some(s => s.url === fullUrl)) {
+                            servers.push({ name: linkText || `Server ${servers.length + 1}`, url: fullUrl });
+                        }
+                    }
+                });
+            }
+            
+            logger.info(`AnimeKai: scraped ${servers.length} ${category} servers from website`, undefined, this.name);
+            for (const sv of servers) {
+                logger.info(`  - ${sv.name}: ${sv.url.substring(0, 80)}...`, undefined, this.name);
+            }
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.warn(`AnimeKai: failed to scrape servers from website — ${msg}`, undefined, this.name);
+        }
+        
+        return servers;
     }
 
     async getStreamingLinks(episodeId: string, _server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
@@ -380,11 +519,15 @@ export class AnimeKaiSource extends BaseAnimeSource {
         if (cached && cached.sources.length > 0) return cached;
 
         let rawEpisodeId = episodeId.replace(/^animekai-/i, '');
+        const originalRawEpisodeId = rawEpisodeId;
+        const isConsumetEpisodeId = /\$ep=\d+/i.test(originalRawEpisodeId);
+        const isWatchEpisodeId = /\?ep=/i.test(originalRawEpisodeId);
 
-        // Parse compound ID format: slug$ep=N$token=... or slug?ep=N
-        // Extract just the slug part for Consumet
-        if (rawEpisodeId.includes('$ep=') || rawEpisodeId.includes('?ep=')) {
-            rawEpisodeId = rawEpisodeId.split(/\$ep=|\?ep=/)[0];
+        // Native AnimeKai/Consumet episode IDs already include the episode number
+        // and token (`slug$ep=N$token=...`). Send those straight to the server
+        // lookup; stripping them back to the slug forced a slow dub info lookup.
+        if (isWatchEpisodeId && !isConsumetEpisodeId) {
+            rawEpisodeId = originalRawEpisodeId.split('?ep=')[0];
         }
 
         try {
@@ -393,11 +536,12 @@ export class AnimeKaiSource extends BaseAnimeSource {
             const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
 
             // Resolve bare anime slug → correct episode ID using episodeNum when available
-            if (!rawEpisodeId.includes('$ep=') && !rawEpisodeId.includes('?ep=')) {
+            if (!isConsumetEpisodeId && !isWatchEpisodeId) {
                 try {
+                    const infoTimeoutMs = options?.timeout ?? 25_000;
                     const info = await Promise.race([
-                        p.fetchAnimeInfo(rawEpisodeId),
-                        new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 8_000))
+                        p.fetchAnimeInfo(rawEpisodeId, subOrDub),
+                        new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), infoTimeoutMs))
                     ]);
                     if (info?.episodes?.length > 0) {
                         const epNum = options?.episodeNum;
@@ -420,17 +564,26 @@ export class AnimeKaiSource extends BaseAnimeSource {
             logger.info(`Fetching ${category} stream from AnimeKai for ${rawEpisodeId}`, undefined, this.name);
 
             // Get the list of embed server URLs (anikai.to/iframe/TOKEN entries)
-            const servers: any[] = await Promise.race([
+            const serversTimeoutMs = options?.timeout ?? 25_000;
+            let servers: any[] = await Promise.race([
                 p.fetchEpisodeServers(rawEpisodeId, subOrDub),
-                new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 10_000))
+                new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), serversTimeoutMs))
             ]);
 
+            const timeoutMs = options?.timeout ?? 25_000;
+
+            // Fallback: directly scrape animekai.to for server URLs if consumet returns empty
             if (!servers?.length) {
-                logger.warn(`AnimeKai: no servers returned for ${rawEpisodeId}`, undefined, this.name);
+                logger.warn(`AnimeKai: consumet returned 0 servers, trying direct scrape for ${rawEpisodeId}`, undefined, this.name);
+                servers = await this.scrapeServersFromWebsite(rawEpisodeId, category, timeoutMs);
+            }
+
+            if (!servers?.length) {
+                logger.warn(`AnimeKai: no servers found for ${rawEpisodeId}`, undefined, this.name);
                 return { sources: [], subtitles: [] };
             }
 
-            const timeoutMs = options?.timeout ?? 25_000;
+
 
             // Try each server in order until one yields sources
             for (const sv of servers) {
@@ -438,9 +591,10 @@ export class AnimeKaiSource extends BaseAnimeSource {
                 try {
                     const sources = await this.extractMegaupStream(sv.url, timeoutMs);
                     if (sources.length > 0) {
-                        const streamData: StreamingData = { sources, subtitles: [], source: this.name };
-                        logger.info(`AnimeKai: ${sources.length} source(s) via ${sv.name} for ${rawEpisodeId}`, undefined, this.name);
-                        this.setCache(cacheKey, streamData, 2 * 60 * 60 * 1000);
+                        const streamData: StreamingData = { sources, subtitles: [], source: this.name, category };
+                        logger.info(`AnimeKai: ${sources.length} source(s) via ${sv.name} for ${rawEpisodeId} (${category})`, undefined, this.name);
+                        // Cache for 5 minutes (300s) - megaup URLs expire quickly
+                        this.setCache(cacheKey, streamData, 5 * 60 * 1000);
                         return streamData;
                     }
                 } catch (svErr: unknown) {

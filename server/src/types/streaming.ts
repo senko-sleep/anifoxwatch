@@ -14,6 +14,8 @@ export interface VideoSource {
     isEmbed?: boolean;
     originalUrl?: string;
     size?: number;
+    /** Server/CDN name (e.g. 'Streamtape', 'Megaup', 'VidCloud') */
+    server?: string;
 }
 
 export interface VideoSubtitle {
@@ -30,6 +32,10 @@ export interface StreamingData {
     outro?: { start: number; end: number };
     download?: string;
     source?: string;
+    category?: 'sub' | 'dub' | 'raw';
+    audioLanguage?: string;
+    dubFallback?: boolean;
+    dubUnavailable?: boolean;
 }
 
 export interface EpisodeServer {

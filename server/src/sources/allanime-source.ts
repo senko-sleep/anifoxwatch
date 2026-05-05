@@ -298,7 +298,7 @@ export class AllAnimeSource extends BaseAnimeSource {
                         const clockUrl = `https://allanime.day${raw.replace('clock', 'clock.json')}`;
                         const clockResp = await axios.get(clockUrl, {
                             headers: { 'Referer': 'https://allmanga.to/' },
-                            timeout: 8000,
+                            timeout: 15000,
                             signal: options?.signal,
                         });
                         const links: any[] = clockResp.data?.links || [];
@@ -319,8 +319,9 @@ export class AllAnimeSource extends BaseAnimeSource {
                 sources,
                 subtitles: [],
                 headers: { 'Referer': CDN_REFERER },
-                source: this.name
-            };
+                source: this.name,
+                category
+            } as any;
         } catch (error) {
             this.handleError(error, 'getStreamingLinks');
             return { sources: [], subtitles: [] };

@@ -60,12 +60,9 @@ type StatusFilter = 'all' | 'Ongoing' | 'Completed' | 'Upcoming';
 
 // Genre lists for different content modes
 const SAFE_GENRES = [
-  'Action', 'Adventure', 'Cars', 'Comedy', 'Dementia', 'Demons', 'Drama',
-  'Fantasy', 'Game', 'Harem', 'Historical', 'Horror', 'Isekai', 'Josei', 'Kids',
-  'Magic', 'Martial Arts', 'Mecha', 'Military', 'Music', 'Mystery', 'Parody',
-  'Police', 'Psychological', 'Romance', 'Samurai', 'School', 'Sci-Fi', 'Seinen',
-  'Shoujo', 'Shounen', 'Slice of Life', 'Space',
-  'Sports', 'Super Power', 'Supernatural', 'Thriller', 'Vampire'
+  'Action', 'Adventure', 'Comedy', 'Drama', 'Fantasy', 'Horror',
+  'Mahou Shoujo', 'Mecha', 'Music', 'Mystery', 'Psychological',
+  'Romance', 'Sci-Fi', 'Slice of Life', 'Sports', 'Supernatural', 'Thriller'
 ];
 
 const ADULT_GENRES = [

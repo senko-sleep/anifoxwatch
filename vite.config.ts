@@ -12,13 +12,14 @@ export default defineConfig(({ mode }) => {
 
   return {
     publicDir: 'public',
-    server: {
-      host: "::",
-      port: 8080,
-      strictPort: true,
-      hmr: {
-        overlay: true,
-      },
+  server: {
+    host: "localhost",
+    port: 8081,
+    strictPort: true,
+    hmr: {
+      host: "localhost",
+      overlay: true,
+    },
       proxy: {
         "/api": {
           target: apiProxyTarget,

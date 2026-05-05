@@ -6,10 +6,12 @@
  */
 export const REGISTERED_SOURCE_NAMES: readonly string[] = [
     'Gogoanime',
-    'AnimeFLV',
+    // 'AnimeFLV',        // DISABLED: Dead (HTTP 410, timeouts)
     'AnimeKai',
     'AllAnime',
-    'AnimePahe',
+    'AnimeHeaven',
+    '9Anime',
+    // 'AnimePahe',       // DISABLED: Dead (0 search results)
     'WatchHentai',
     'Hanime',
     'AkiH',

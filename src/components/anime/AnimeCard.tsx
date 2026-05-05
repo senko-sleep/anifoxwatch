@@ -55,11 +55,14 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
   const historyItem = WatchHistory.get().find(h => h.animeId === anime.id);
 
   const needsDetail = isPlaceholderAnimeDescription(anime.description);
+  // Also fetch detail when sub/dub counts are both missing — AniList cards often have
+  // valid descriptions but no audio availability metadata until we hit the streaming API.
+  const missingAudioInfo = (anime.subCount ?? 0) === 0 && (anime.dubCount ?? 0) === 0;
 
   const { data: detailAnime } = useQuery({
     queryKey: queryKeys.anime(navigateId),
     queryFn: () => apiClient.getAnime(navigateId),
-    enabled: hovered && needsDetail,
+    enabled: hovered && (needsDetail || missingAudioInfo),
     staleTime: 10 * 60 * 1000,
   });
 

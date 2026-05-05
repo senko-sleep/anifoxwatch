@@ -202,8 +202,10 @@ export class AnimePaheSource extends BaseAnimeSource {
             return {
                 sources,
                 subtitles,
-                headers: { 'Referer': this.baseUrl }
-            };
+                headers: { 'Referer': this.baseUrl },
+                source: this.name,
+                category: 'sub'
+            } as any;
         } catch (error) {
             this.handleError(error, 'getStreamingLinks');
             return { sources: [], subtitles: [] };

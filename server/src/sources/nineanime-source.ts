@@ -43,6 +43,134 @@ export class NineAnimeSource extends BaseAnimeSource {
         // setInterval is not allowed in Cloudflare Workers global scope
     }
 
+    // ============ DUB CONTENT SEARCH ============
+
+    private async findDubContent(animeSlug: string, epNum: string, options?: SourceRequestOptions): Promise<StreamingData> {
+        try {
+            // Strategy 1: Try to find dub version by searching for anime with "dub" in title
+            const dubSearchQueries = [
+                `${animeSlug} dub`,
+                `${animeSlug} (dub)`,
+                `${animeSlug} english dub`
+            ];
+            
+            for (const query of dubSearchQueries) {
+                logger.info(`9Anime: Searching for dub version with query: ${query}`, undefined, this.name);
+                
+                const searchResult = await this.search(query, 1, undefined, options);
+                if (searchResult.results.length > 0) {
+                    const dubAnime = searchResult.results.find((anime: any) => 
+                        anime.title.toLowerCase().includes('dub') || 
+                        anime.title.toLowerCase().includes('english')
+                    );
+                    
+                    if (dubAnime) {
+                        logger.info(`9Anime: Found dub anime: ${dubAnime.title}`, undefined, this.name);
+                        
+                        // Get episodes for dub anime
+                        const episodes = await this.getEpisodes(dubAnime.id, options);
+                        if (episodes.length > 0) {
+                            const targetEp = episodes.find(ep => ep.number === parseInt(epNum));
+                            if (targetEp) {
+                                logger.info(`9Anime: Found episode ${epNum} for dub anime`, undefined, this.name);
+                                
+                                // Get streaming links for the dub episode
+                                const streamData = await this.getStreamingLinksForEpisode(targetEp.id, 'dub', options);
+                                if (streamData.sources.length > 0) {
+                                    // Validate this is actually dub content
+                                    const isDub = await this.validateDubStream(streamData);
+                                    if (isDub) {
+                                        return {
+                                            sources: streamData.sources,
+                                            subtitles: streamData.subtitles,
+                                            headers: streamData.headers,
+                                            source: streamData.source
+                                        } as StreamingData & { category: 'dub'; audioLanguage: 'en' };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Strategy 2: Try to extract from the original anime and check for dub indicators
+            logger.info(`9Anime: Trying to extract dub from original anime: ${animeSlug}`, undefined, this.name);
+            const originalStreamData = await this.getStreamingLinksForEpisode(`${animeSlug}?ep=${epNum}`, 'dub', options);
+            if (originalStreamData.sources.length > 0) {
+                // Check if any streams have dub indicators
+                const dubStream = originalStreamData.sources.find((source: any) => 
+                    source.url?.toLowerCase().includes('dub') ||
+                    source.url?.toLowerCase().includes('eng') ||
+                    source.quality?.toLowerCase().includes('dub')
+                );
+                
+                if (dubStream) {
+                    return {
+                        sources: [dubStream],
+                        subtitles: originalStreamData.subtitles,
+                        headers: originalStreamData.headers,
+                        source: originalStreamData.source
+                    } as StreamingData & { category: 'dub'; audioLanguage: 'en' };
+                }
+            }
+            
+            return { sources: [], subtitles: [], source: this.name };
+        } catch (error) {
+            logger.error(`9Anime: Error finding dub content: ${error}`, undefined, undefined, this.name);
+            return { sources: [], subtitles: [], source: this.name };
+        }
+    }
+
+    private async getStreamingLinksForEpisode(episodeId: string, category: 'sub' | 'dub', options?: SourceRequestOptions): Promise<StreamingData> {
+        // Use the existing getStreamingLinks logic but without the dub-specific handling
+        const [animeSlug, epPart] = episodeId.split('?');
+        const epNum = epPart?.replace('ep=', '')?.trim() || '';
+        if (!animeSlug || !epNum) return { sources: [], subtitles: [] };
+
+        try {
+            const result9 = await Promise.race([
+                streamExtractor.extractFrom9Anime(animeSlug, epNum),
+                new Promise<{ success: false; streams: never[] }>((_, rej) =>
+                    setTimeout(() => rej(new Error('9anime extractor timeout')), 22000)
+                )
+            ]).catch(() => ({ success: false as const, streams: [] as { url: string; quality: string; type: string }[] }));
+
+            if (result9.success && result9.streams?.length > 0) {
+                const streamData = this.buildStreamData(result9, 'https://9animetv.to/');
+                return streamData;
+            }
+
+            // Fallback to kaido.to
+            const resultKaido = await Promise.race([
+                streamExtractor.extractFromKaido(animeSlug, epNum),
+                new Promise<{ success: false; streams: never[] }>((_, rej) =>
+                    setTimeout(() => rej(new Error('kaido extractor timeout')), 22000)
+                )
+            ]).catch(() => ({ success: false as const, streams: [] as { url: string; quality: string; type: string }[] }));
+
+            if (resultKaido.success && resultKaido.streams?.length > 0) {
+                const streamData = this.buildStreamData(resultKaido, 'https://kaido.to/');
+                return streamData;
+            }
+
+            return { sources: [], subtitles: [] };
+        } catch (error) {
+            logger.error(`9Anime: Error extracting streams: ${error}`, undefined, undefined, this.name);
+            return { sources: [], subtitles: [] };
+        }
+    }
+
+    private async validateDubStream(streamData: StreamingData): Promise<boolean> {
+        // Simple validation: check if any source has dub indicators
+        return streamData.sources.some((source: any) => 
+            source.url?.toLowerCase().includes('dub') ||
+            source.url?.toLowerCase().includes('eng') ||
+            source.url?.toLowerCase().includes('english') ||
+            source.quality?.toLowerCase().includes('dub')
+        );
+    }
+
     // ============ CACHING ============
 
     private getCached<T>(key: string): T | null {
@@ -581,6 +709,20 @@ export class NineAnimeSource extends BaseAnimeSource {
         const epNum = epPart?.replace('ep=', '')?.trim() || '';
         if (!animeSlug || !epNum) return { sources: [], subtitles: [] };
 
+        // For dub category, try to find actual dub content
+        if (category === 'dub') {
+            const dubResult = await this.findDubContent(animeSlug, epNum, options);
+            if (dubResult.sources.length > 0) {
+                this.setCache(cacheKey, dubResult, this.cacheTTL.stream);
+                this.handleSuccess();
+                return dubResult;
+            }
+            
+            // If no dub found, return empty instead of sub fallback
+            logger.info(`9Anime: No dub content found for ${animeSlug} ep ${epNum}`, undefined, this.name);
+            return { sources: [], subtitles: [], source: this.name };
+        }
+
         try {
             // 1) Try native 9anime extraction via Puppeteer — this is what dev uses
             const result9 = await Promise.race([
@@ -636,7 +778,8 @@ export class NineAnimeSource extends BaseAnimeSource {
                 label: sub.lang
             })),
             headers: { Referer: referer },
-            source: this.name
+            source: this.name,
+            category: 'sub'
         };
     }
 
@@ -746,3 +889,5 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
     }
 }
+
+

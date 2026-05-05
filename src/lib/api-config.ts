@@ -146,6 +146,23 @@ export function getApiConfig(): ApiConfig {
  * Secondary BFF URL when the primary fails (no alternate public BFF configured).
  */
 export function getApiFallbackUrl(): string | null {
+    // Explicit override (optional): allow configuring a secondary BFF host without code changes.
+    const envFallback = (import.meta.env.VITE_API_FALLBACK_URL as string | undefined)?.trim();
+    if (envFallback) return envFallback.replace(/\/$/, '');
+
+    // In Node/test environments there is no runtime-origin to fall back to.
+    if (typeof window === 'undefined') return null;
+
+    const sameOrigin = (window.location?.origin || '').replace(/\/$/, '');
+    const primary = (getApiConfig().baseUrl || '').replace(/\/$/, '');
+
+    // If primary is empty or relative, requests already go to the current origin.
+    if (!primary || primary.startsWith('/')) return null;
+
+    // If an external API host is configured (e.g. stale deploy), fall back to same-origin.
+    // This is particularly useful on Vercel where the API is co-deployed with the SPA.
+    if (sameOrigin && primary !== sameOrigin) return sameOrigin;
+
     return null;
 }
 

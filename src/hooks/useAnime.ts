@@ -3,6 +3,7 @@ import { apiClient, SourceHealth, StreamingData, EpisodeServer, ScheduleResponse
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { enrichWithAniListCovers } from '@/lib/anilist-covers';
 import { fetchSeasonalFromAniList } from '@/lib/anilist-home-queries';
+import { searchAniList, browseAniList } from '@/lib/anilist-browse';
 
 // ─── Direct AniList seasonal fallback ────────────────────────────────────────
 // Used when the server-side /api/anime/seasonal returns empty (e.g. AniList
@@ -68,7 +69,7 @@ export function useTopRated(page: number = 1, limit: number = 10, source?: strin
 export function useSearch(query: string, page: number = 1, source?: string, enabled: boolean = true, mode: 'safe' | 'mixed' | 'adult' = 'safe') {
     return useQuery<AnimeSearchResult, Error>({
         queryKey: queryKeys.search(query, page, source, mode),
-        queryFn: () => apiClient.search(query, page, source, mode),
+        queryFn: () => searchAniList(query, page, mode),
         enabled: enabled && query.trim().length >= 2,
         staleTime: 30 * 1000,
         gcTime: 5 * 60 * 1000,
@@ -107,10 +108,9 @@ export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boo
     return useQuery<AnimeSearchResult, Error>({
         queryKey: ['browse', filterKey, page, bypassCache, limit],
         queryFn: async () => {
-            const result = await apiClient.browseAnime(filters, page, bypassCache, limit);
-            const includeAdult = filters.mode === 'adult' || filters.mode === 'mixed';
-            const enrichedResults = await enrichWithAniListCovers(result.results, includeAdult);
-            return { ...result, results: enrichedResults };
+            // Query AniList directly for browse data
+            const result = await browseAniList(filters, page, limit);
+            return result;
         },
         enabled,
         staleTime: bypassCache ? 0 : 2 * 60 * 1000,
