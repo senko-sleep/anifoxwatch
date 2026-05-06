@@ -420,7 +420,12 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
                 const isKnownCdn = hostname.includes('megacloud') || hostname.includes('rapid-cloud') || 
                                  hostname.includes('vidcloud') || hostname.includes('gogocdn') ||
                                  hostname.includes('fast4speed') || hostname.includes('owocdn') ||
-                                 hostname.includes('animekai') || hostname.includes('shop21pro');
+                                 hostname.includes('animekai') || hostname.includes('shop21pro') ||
+                                 hostname.includes('code29wave') || hostname.includes('hub26link') ||
+                                 hostname.includes('hub27link') || hostname.includes('megaup') ||
+                                 hostname.includes('tech20hub') || hostname.includes('lab27core') ||
+                                 hostname.includes('net22lab') || hostname.includes('pro25zone') ||
+                                 hostname.includes('takutakucdn');
                 return !isKnownCdn;
             } catch { return true; }
         }
