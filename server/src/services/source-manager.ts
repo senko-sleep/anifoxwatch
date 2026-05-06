@@ -543,7 +543,7 @@ export class SourceManager {
                     name,
                     'healthCheck',
                     (signal) => source.healthCheck({ signal }),
-                    { timeout: 8000, maxAttempts: 1 }
+                    { timeout: 10000, maxAttempts: 1 }
                 );
 
                 const latency = Date.now() - start;
@@ -2019,7 +2019,7 @@ export class SourceManager {
                 // 1. Search by title instead of guessing ID format
                 const searchResult = await this.executeReliably(name, 'search',
                     (signal) => source.search(strippedTitle, 1, { signal }),
-                    { timeout: 8000 }
+                    { timeout: 12000 }
                 );
                 
                 if (searchResult && searchResult.results?.length > 0) {
@@ -2889,7 +2889,7 @@ export class SourceManager {
                     console.log(`   ⏳ Trying ${source.name} with slug: ${episodeId}`);
                     const servers = await this.executeReliably(source.name, 'getEpisodeServers',
                         (signal) => source.getEpisodeServers!(episodeId, { signal }),
-                        { timeout: 8000 }
+                        { timeout: 12000 }
                     );
                     if (servers && servers.length > 0) {
                         const duration = Date.now() - startTime;
@@ -2928,7 +2928,7 @@ export class SourceManager {
             try {
                 const servers = await this.executeReliably(source.name, 'getEpisodeServers',
                     (signal) => source.getEpisodeServers!(idToUse, { signal }),
-                    { timeout: 8000 }
+                    { timeout: 12000 }
                 );
                 if (servers && servers.length > 0) {
                     const duration = Date.now() - startTime;
@@ -3070,7 +3070,7 @@ export class SourceManager {
             // so allow a longer window; this is the main path for AnimeKai compound IDs.
             const CROSS_SOURCE_FALLBACK_MAX_MS = 18_000;
             // Some sources only yield embed/IP-locked streams; still resolve quickly so the UI can fall back.
-            const STREAM_GLOBAL_MAX_MS = 20_000;
+            const STREAM_GLOBAL_MAX_MS = 25_000;
             const ONLY_IP_LOCKED_WAIT_MS = 3_500;
 
             const result = await new Promise<StreamingData>((resolveStream) => {
@@ -3191,7 +3191,7 @@ export class SourceManager {
                 const idToUse = this.resolveStreamingEpisodeId(episodeId, source, primarySource, hasSourcePrefix, rawId);
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
 
-                const streamReliabilityOpts = { timeout: 8_000, maxAttempts: 1 };
+                const streamReliabilityOpts = { timeout: 12_000, maxAttempts: 1 };
                 const sourceStart = Date.now();
                 this.executeReliably(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
@@ -4033,7 +4033,7 @@ export class SourceManager {
                 .replace(/\s+/g, ' ')
                 .trim();
 
-        const TYPE_SUFFIX_RE_FB = /\b(specials?|ova|ona|recap|picture\s*drama)\b/i;
+        const TYPE_SUFFIX_RE_FB = /\b(specials?|ova|ona|recap|picture\s*drama|mini|shorts?)\b/i;
         const scoreCandidate = (queryTitle: string, candidateTitle: string) => {
             const q = normalize(queryTitle);
             const c = normalize(candidateTitle);
@@ -4099,7 +4099,7 @@ export class SourceManager {
 
         // Detect "specials"/"OVA"/"ONA" type suffixes — these indicate entirely different
         // entries (e.g. "Baka & Test 2 Specials" vs "Baka & Test").
-        const TYPE_SUFFIX_RE = /\b(specials?|ova|ona|recap|picture\s*drama)\b/i;
+        const TYPE_SUFFIX_RE = /\b(specials?|ova|ona|recap|picture\s*drama|mini|shorts?)\b/i;
         const hasTypeSuffix1 = TYPE_SUFFIX_RE.test(s1);
         const hasTypeSuffix2 = TYPE_SUFFIX_RE.test(s2);
         const typeSuffixMismatch = hasTypeSuffix1 !== hasTypeSuffix2;

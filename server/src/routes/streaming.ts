@@ -425,7 +425,7 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
                                  hostname.includes('hub27link') || hostname.includes('megaup') ||
                                  hostname.includes('tech20hub') || hostname.includes('lab27core') ||
                                  hostname.includes('net22lab') || hostname.includes('pro25zone') ||
-                                 hostname.includes('takutakucdn');
+                                 hostname.includes('web24code') || hostname.includes('takutakucdn');
                 return !isKnownCdn;
             } catch { return true; }
         }
@@ -985,6 +985,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         'net22lab': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'pro25zone': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'tech20hub': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+        'web24code': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'gogocdn': { referer: 'https://gogoanime.run/' },
         'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
         'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
@@ -1017,11 +1018,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': combo.referer,
-            'Origin': combo.origin,
             'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'cross-site',
         };
         if (req.headers.range) headers['Range'] = req.headers.range as string;
 

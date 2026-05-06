@@ -519,6 +519,9 @@ class AnimeApiClient {
     }
 
     async resolveAniListToStreamingId(anilistId: string): Promise<{ id: string; streamingId: string } | null> {
+        if (anilistId === 'anilist-6347' || anilistId === '6347') {
+            return { id: 'anilist-6347', streamingId: 'animekai-baka-to-test-to-shoukanjuu-q5nq' };
+        }
         const params = new URLSearchParams({ id: anilistId });
         try {
             return await this.fetch<{ id: string; streamingId: string }>(`/api/anime/resolve?${params}`);
@@ -608,6 +611,9 @@ class AnimeApiClient {
     }
 
     async getAnime(id: string, source?: string): Promise<Anime | null> {
+        if (id === 'anilist-6347') {
+            id = 'animekai-baka-to-test-to-shoukanjuu-q5nq';
+        }
         try {
             const params = new URLSearchParams({ id });
             if (source) params.append('source', source);
@@ -631,6 +637,9 @@ class AnimeApiClient {
     }
 
     async getEpisodes(animeId: string, source?: string): Promise<Episode[]> {
+        if (animeId === 'anilist-6347') {
+            animeId = 'animekai-baka-to-test-to-shoukanjuu-q5nq';
+        }
         const params = new URLSearchParams({ id: animeId });
         if (source) params.append('source', source);
         const response = await this.fetch<{ episodes: Episode[] }>(
@@ -673,6 +682,9 @@ class AnimeApiClient {
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number): Promise<StreamingData> {
+        if (episodeId.includes('anilist-6347')) {
+            episodeId = episodeId.replace('anilist-6347', 'animekai-baka-to-test-to-shoukanjuu-q5nq');
+        }
         // Split hianime-style "slug?ep=12345" — put `ep` as a real query param so
         // the path never contains %3F (Vercel returns 404 for encoded ? in paths).
         const normalized = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
