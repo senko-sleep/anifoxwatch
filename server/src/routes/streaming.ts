@@ -227,8 +227,19 @@ function setProtocolCache(domain: string, protocol: 'http' | 'https'): void {
 // Segment cache (in-memory LRU)
 // ---------------------------------------------------------------------------
 
-const SEGMENT_CACHE_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
-const SEGMENT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const SEGMENT_CACHE_MAX_BYTES = 300 * 1024 * 1024; // 300 MB (up from 50MB)
+const SEGMENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes (up from 5 min)
+
+/**
+ * Global HTTP/HTTPS agents with Keep-Alive enabled to reuse connections
+ * to upstream CDNs, significantly reducing latency for segment requests.
+ */
+const keepAliveAgent = new https.Agent({
+    keepAlive: true,
+    maxSockets: 100,
+    maxFreeSockets: 10,
+    timeout: 60000,
+});
 
 interface SegmentCacheEntry { data: Buffer; contentType: string; fetchedAt: number; size: number; lastUsed: number }
 const segmentCache = new Map<string, SegmentCacheEntry>();
@@ -263,6 +274,51 @@ function segmentCacheSet(url: string, data: Buffer, contentType: string): void {
     segmentCache.set(url, { data, contentType, fetchedAt: Date.now(), lastUsed: Date.now(), size: data.length });
     segmentCacheBytes += data.length;
     segmentCacheEvict();
+}
+
+/**
+ * Predicts the next sequential segment URLs.
+ * Example: segment_10.ts -> [segment_11.ts, segment_12.ts]
+ */
+function predictNextSegments(url: string, count: number): string[] {
+    const results: string[] = [];
+    const match = url.match(/(.*[_-])(\d+)(\.ts|\.m4s|\.mp4)(.*)/);
+    if (!match) return results;
+
+    const [, prefix, numStr, suffix, query] = match;
+    const num = parseInt(numStr, 10);
+    const padLen = numStr.length;
+
+    for (let i = 1; i <= count; i++) {
+        const nextNum = (num + i).toString().padStart(padLen, '0');
+        results.push(`${prefix}${nextNum}${suffix}${query}`);
+    }
+    return results;
+}
+
+/**
+ * Proactively fetches a segment and puts it in the cache.
+ */
+async function preWarmSegment(url: string, combo: { referer: string; origin: string }, refererParam?: string): Promise<void> {
+    try {
+        const headers: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer': combo.referer,
+            'Origin': combo.origin,
+            'Connection': 'keep-alive',
+        };
+        const resp = await axios.get(url, {
+            headers,
+            responseType: 'arraybuffer',
+            timeout: 15000,
+            httpsAgent: keepAliveAgent,
+        });
+        const ct = resp.headers['content-type'] || 'video/MP2T';
+        segmentCacheSet(url, Buffer.from(resp.data), ct);
+        logger.info(`[PRE-WARM] Cached next segment: ${url.split('/').pop()}`);
+    } catch (err) {
+        // Silent failure for pre-warming
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -433,11 +489,19 @@ async function forwardToRemoteProxy(
     const remoteProxy = process.env.REMOTE_PROXY_URL || DEFAULT_REMOTE_STREAM_PROXY;
     const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
     try {
-        const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 50_000, maxRedirects: 5 });
+        const remoteResp = await axios({ 
+            method: 'get', 
+            url: remoteTarget, 
+            responseType: 'stream', 
+            timeout: 50_000, 
+            maxRedirects: 5,
+            httpsAgent: keepAliveAgent // Use keep-alive for remote proxy as well
+        });
         const ct = remoteResp.headers['content-type'] || 'application/vnd.apple.mpegurl';
         res.setHeader('Content-Type', ct);
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache proxied m3u8 for 1 hour
+        res.setHeader('X-Proxy-Source', 'remote');
         res.status(200);
         remoteResp.data.on('error', (err: any) => {
             logger.error(`[PROXY] ${label} pipeline error for ${domain}`, err);
@@ -984,6 +1048,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Try each referer combo
     let proxyResponse: AxiosResponse | null = null;
     let lastProxyError: unknown = null;
+    let winningCombo: { referer: string; origin: string } | null = null;
 
     const makeProxyRequest = (targetUrl: string, combo: { referer: string; origin: string }, relaxedTls: boolean): Promise<AxiosResponse> => {
         const headers: Record<string, string> = {
@@ -1011,7 +1076,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             timeout: 30_000,
             maxRedirects: 5,
             validateStatus: (s: number) => s < 400,
-            ...(agentOptions ? { httpsAgent: new https.Agent(agentOptions) } : {}),
+            httpsAgent: keepAliveAgent, // Use the global keep-alive agent
+            ...(agentOptions ? { httpsAgent: new https.Agent({ ...keepAliveAgent.options, ...agentOptions }) } : {}),
         });
     };
 
@@ -1022,6 +1088,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         try {
             const targetUrl = cachedProtocol === 'http' ? url.replace(/^https:\/\//i, 'http://') : url;
             proxyResponse = await makeProxyRequest(targetUrl, combo, false);
+            winningCombo = combo;
             logger.info(`[PROXY] Success on attempt ${attempt + 1} (${combo.referer})`, { domain, requestId });
             break;
         } catch (err: unknown) {
@@ -1037,6 +1104,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 logger.warn(`[PROXY] TLS error for ${domain} — trying relaxed TLS`, { requestId });
                 try {
                     proxyResponse = await makeProxyRequest(url, combo, true);
+                    winningCombo = combo;
                     logger.info(`[PROXY] Relaxed TLS success for ${domain}`, { domain, requestId });
                     break;
                 } catch (tlsErr: unknown) {
@@ -1054,6 +1122,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                             } else {
                                 setProtocolCache(domain, 'http');
                                 proxyResponse = httpResp;
+                                winningCombo = combo;
                                 logger.info(`[PROXY] HTTP fallback success for ${domain}`, { domain, requestId });
                                 break;
                             }
@@ -1179,11 +1248,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     res.set('Access-Control-Allow-Headers', 'Range');
     res.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
     res.set('Cache-Control', isSegment || isVideo ? 'public, max-age=86400' : 'public, max-age=3600');
+    res.set('X-Segment-Cache', 'MISS');
     res.status(proxyResponse.status);
 
     // Buffer cacheable segments; pipe everything else directly
     if (isSegment && !req.headers.range && proxyResponse.status === 200) {
-        const MAX_CACHE_SEGMENT = 4 * 1024 * 1024;
+        const MAX_CACHE_SEGMENT = 10 * 1024 * 1024; // 10 MB (up from 4MB)
         const chunks: Buffer[] = [];
         let total = 0;
         let overflow = false;
@@ -1197,6 +1267,17 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             if (!overflow && total > 0) {
                 const buf = Buffer.concat(chunks);
                 segmentCacheSet(url!, buf, upstreamCt || 'video/MP2T');
+                
+                // Pre-warm logic: if this looks like a sequential segment (e.g. segment_10.ts),
+                // try to pre-fetch segment_11.ts and segment_12.ts into the cache.
+                try {
+                    const nextSegments = predictNextSegments(url!, 2);
+                    for (const nextUrl of nextSegments) {
+                        if (!segmentCache.has(nextUrl) && winningCombo) {
+                            preWarmSegment(nextUrl, winningCombo, refererParam);
+                        }
+                    }
+                } catch { /* ignore pre-warm errors */ }
             }
         });
         proxyResponse.data.on('error', (err: Error) => logger.error(`[PROXY] Segment buffer error from ${domain}`, err));
