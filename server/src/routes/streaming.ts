@@ -144,6 +144,8 @@ const ISP_BLOCKED_DOMAINS = new Set([
     'megaup.cc',
     'rrr.megaup.cc',
     'hub26link.site',
+    'hub27link.site',
+    'code29wave.site',
 ]);
 
 function isDeadDomain(url: string): boolean {
@@ -1067,9 +1069,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                             const httpResp = await makeProxyRequest(url.replace(/^https:\/\//i, 'http://'), combo, false);
                             const ct = httpResp.headers['content-type'] || '';
                             if (ct.includes('text/html')) {
-                                // ISP block page — drain and skip
+                                // ISP block page — drain and break out of loop completely
                                 httpResp.data?.resume?.();
-                                logger.warn(`[PROXY] HTTP fallback returned HTML (ISP block?) for ${domain}`, { requestId });
+                                logger.warn(`[PROXY] HTTP fallback returned HTML (ISP block) for ${domain}. Skipping remaining combos.`, { requestId });
+                                break; // Break out of referer loop!
                             } else {
                                 setProtocolCache(domain, 'http');
                                 proxyResponse = httpResp;
@@ -1079,9 +1082,17 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                         } catch (httpErr: unknown) {
                             lastProxyError = httpErr;
                             logger.warn(`[PROXY] HTTP fallback failed for ${domain}`, { requestId });
+                            // If HTTP also fails with timeout/connection error, it's a hard block.
+                            break;
                         }
+                    } else {
+                        break; // Not HTTPS, so no HTTP fallback to try. Hard block.
                     }
                 }
+            } else if (errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' || errMsg.includes('timeout')) {
+                // Timeouts are network-level. Changing referer won't fix it.
+                logger.warn(`[PROXY] Network timeout for ${domain}. Skipping remaining combos.`, { requestId });
+                break;
             }
             logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed (${combo.referer}): ${errMsg}`, { requestId });
             if (attempt < refererCombos.length - 1) await new Promise(r => setTimeout(r, 300));
