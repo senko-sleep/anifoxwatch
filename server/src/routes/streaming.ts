@@ -922,7 +922,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     // Fast-path for ISP-blocked domains
-    if (isIspBlockedDomain(domain)) {
+    if (process.env.IS_REMOTE_PROXY !== 'true' && isIspBlockedDomain(domain)) {
         logger.info(`[PROXY] ISP-blocked ${domain} — routing to remote proxy`, { domain, requestId });
         const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'ISP fast-path');
         if (!ok) res.status(502).json({ error: 'ISP-blocked domain unreachable via remote proxy', domain });
