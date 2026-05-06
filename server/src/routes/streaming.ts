@@ -16,13 +16,13 @@ const router = Router();
 
 const DEFAULT_REMOTE_STREAM_PROXY =
     process.env.DEFAULT_REMOTE_STREAM_PROXY ||
-    'https://anifoxwatch.vercel.app/api/stream/proxy';
+    'https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io/api/stream/proxy';
 
 /** How long to wait for a dub result before accepting a sub fallback (ms). */
-const DUB_PATIENCE_MS = 15_000;
+const DUB_PATIENCE_MS = 18_000;
 
 /** Global per-request timeout safety net (ms). */
-const GLOBAL_TIMEOUT_MS = 20_000;
+const GLOBAL_TIMEOUT_MS = 25_000;
 
 // ---------------------------------------------------------------------------
 // Helpers — episode ID normalisation
@@ -124,13 +124,17 @@ const NON_VIDEO_CONTENT_TYPES = [
     'text/html',
     'text/xml',
     'application/json',
+    'text/javascript',
+    'application/javascript',
+];
+
+/** Content-types used for obfuscated video segments. */
+const IMAGE_CONTENT_TYPES = [
     'image/gif',
     'image/png',
     'image/jpeg',
     'image/webp',
     'image/svg',
-    'text/javascript',
-    'application/javascript',
 ];
 
 /** Domains to skip DNS/local checks and forward straight to the remote proxy. */
@@ -139,6 +143,7 @@ const ISP_BLOCKED_DOMAINS = new Set([
     'megaup.nl',
     'megaup.cc',
     'rrr.megaup.cc',
+    'hub26link.site',
 ]);
 
 function isDeadDomain(url: string): boolean {
@@ -397,11 +402,32 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
 
     if (segmentUrls.length === 0) return false;
 
-    // If > 50% of segments are from ad CDNs, the manifest is poisoned
-    const adCount = segmentUrls.filter(u => isAdCdnUrl(u)).length;
+    // Use common ad extensions for segment-level detection
+    const AD_EXTENSIONS = /\.(png|gif|svg|jpg|jpeg|webp|html|js)$/i;
+
+    // A manifest is poisoned if it has a high ratio of ad-domain segments
+    // OR if it contains segments with image extensions on unknown domains.
+    const adCount = segmentUrls.filter(u => {
+        if (isAdCdnUrl(u)) return true;
+        
+        // If it's an image extension, check if it's from a known video provider
+        if (AD_EXTENSIONS.test(u)) {
+            try {
+                const { hostname } = new URL(u);
+                // We use a simplified check here for speed
+                const isKnownCdn = hostname.includes('megacloud') || hostname.includes('rapid-cloud') || 
+                                 hostname.includes('vidcloud') || hostname.includes('gogocdn') ||
+                                 hostname.includes('fast4speed') || hostname.includes('owocdn') ||
+                                 hostname.includes('animekai') || hostname.includes('shop21pro');
+                return !isKnownCdn;
+            } catch { return true; }
+        }
+        return false;
+    }).length;
+
     const ratio = adCount / segmentUrls.length;
     if (ratio > 0.3) {
-        logger.warn(`[PROXY] Ad-poisoned manifest detected: ${adCount}/${segmentUrls.length} segments from ad CDNs`, { originalUrl });
+        logger.warn(`[PROXY] Ad-poisoned manifest detected: ${adCount}/${segmentUrls.length} segments likely ads`, { originalUrl });
         return true;
     }
     return false;
@@ -732,7 +758,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
                 else if (subResults.length > 0) resolve({ ...subResults[0], category: 'sub', dubFallback: true });
                 else resolve({ sources: [], subtitles: [] });
             }
-        }, GLOBAL_TIMEOUT_MS);
+        }, 25_000);
     });
 
     if (streamData?.sources?.length) {
@@ -806,10 +832,6 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
                 let hostname = '';
                 try { hostname = new URL(rawUrl).hostname; } catch { return null; }
 
-                if (isLocalDev && isIspBlockedDomain(hostname)) {
-                    logger.info(`[STREAM] Dev: bypassing blocked domain ${hostname}`, { requestId });
-                    return { ...source, isDirect: true, originalUrl: rawUrl };
-                }
 
                 return { ...source, url: proxyUrl(rawUrl, proxyBase, streamReferer), originalUrl: rawUrl };
             })
@@ -819,9 +841,6 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
             response.subtitles = (streamData.subtitles as VideoSubtitle[])
                 .map((sub): VideoSubtitle => {
                     if (isDirectPlay(sub.url)) return sub;
-                    let hostname = '';
-                    try { hostname = new URL(sub.url).hostname; } catch { return sub; }
-                    if (!req.get('x-forwarded-proto') && isIspBlockedDomain(hostname)) return sub;
                     return { ...sub, url: proxyUrl(sub.url, proxyBase, streamReferer) };
                 });
         }
@@ -1144,12 +1163,40 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const expectingVideoSegment = isSegment || (!isM3u8 && !isVideo && !url.includes('.vtt') && !url.includes('.srt'));
     if (expectingVideoSegment && upstreamCt) {
         const ctLower = upstreamCt.toLowerCase();
-        const isBadContentType = NON_VIDEO_CONTENT_TYPES.some(bad => ctLower.includes(bad));
-        if (isBadContentType) {
+        
+        // Strict block for non-media types (HTML/JSON/JS)
+        if (NON_VIDEO_CONTENT_TYPES.some(bad => ctLower.includes(bad))) {
             proxyResponse.data?.resume?.();
-            logger.warn(`[PROXY] Non-video content type for segment: ${upstreamCt}`, { domain, url: url.substring(0, 200), requestId });
-            res.status(502).json({ error: 'Non-video content received', reason: 'bad_content_type', contentType: upstreamCt, domain });
+            logger.warn(`[PROXY] Blocked strict non-video content type: ${upstreamCt}`, { domain, requestId });
+            res.status(502).json({ error: 'Non-video content type blocked', contentType: upstreamCt, domain });
             return;
+        }
+
+        // Image handling: allow if from known video CDN (obfuscation), block if from ad CDN
+        if (IMAGE_CONTENT_TYPES.some(img => ctLower.includes(img))) {
+            const isKnownCdn = Object.keys(proxyCdnConfig).some(key => domain.includes(key));
+            const isAdDomain = isAdCdnUrl(url);
+
+            if (isAdDomain) {
+                proxyResponse.data?.resume?.();
+                logger.warn(`[PROXY] Blocked ad image segment: ${domain}`, { url: url.substring(0, 100), requestId });
+                res.status(502).json({ error: 'Ad image segment blocked', domain });
+                return;
+            }
+
+            if (!isKnownCdn) {
+                // Potential ad disguised as image on unknown domain - check size
+                const size = parseInt(proxyResponse.headers['content-length'] || '0', 10);
+                if (size > 0 && size < 100 * 1024) { // < 100KB on unknown domain
+                    proxyResponse.data?.resume?.();
+                    logger.warn(`[PROXY] Blocked small unknown image segment (${size} bytes): ${domain}`, { requestId });
+                    res.status(502).json({ error: 'Small unknown image segment blocked', domain });
+                    return;
+                }
+            }
+            
+            // It's likely an obfuscated video segment - allow it
+            logger.info(`[PROXY] Allowing obfuscated image segment (${upstreamCt}) from ${domain}`, { requestId });
         }
     }
 
@@ -1168,11 +1215,21 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     const isOctetStream = upstreamCt === 'application/octet-stream' || upstreamCt === '';
-    const isKnownVideoCdn = domain.includes('fast4speed') || domain.includes('hstorage');
-    if (isOctetStream && isKnownVideoCdn) res.set('Content-Type', 'video/mp4');
-    else if (upstreamCt) res.set('Content-Type', upstreamCt);
-    else if (url.includes('.ts')) res.set('Content-Type', 'video/MP2T');
-    else if (url.endsWith('.mp4')) res.set('Content-Type', 'video/mp4');
+    const isKnownVideoCdn = Object.keys(proxyCdnConfig).some(key => domain.includes(key));
+    const isImage = IMAGE_CONTENT_TYPES.some(img => upstreamCt.toLowerCase().includes(img));
+
+    if (isImage && isKnownVideoCdn) {
+        // Force video content type for obfuscated segments so HLS.js/Player accepts them
+        res.set('Content-Type', 'video/MP2T');
+    } else if (isOctetStream && isKnownVideoCdn) {
+        res.set('Content-Type', 'video/mp4');
+    } else if (upstreamCt) {
+        res.set('Content-Type', upstreamCt);
+    } else if (url.includes('.ts')) {
+        res.set('Content-Type', 'video/MP2T');
+    } else if (url.endsWith('.mp4')) {
+        res.set('Content-Type', 'video/mp4');
+    }
 
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
