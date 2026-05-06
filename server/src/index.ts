@@ -19,23 +19,8 @@ interface ExtendedRequest extends Request {
     withCircuitBreaker?: any;
 }
 
-import compression from 'compression';
-
 const app = express();
 const PORT = process.env.PORT || 3001;
-
-// Gzip compression for all responses
-app.use(compression({
-    level: 6,
-    threshold: 1024,
-    filter: (req: Request, res: Response) => {
-        if (req.headers['x-no-compression']) return false;
-        // Don't compress video segments (binary data) as they are already compressed (MPEG-TS/fMP4)
-        const ct = res.getHeader('Content-Type');
-        if (typeof ct === 'string' && (ct.includes('video/') || ct.includes('mpeg'))) return false;
-        return compression.filter(req, res);
-    }
-}));
 
 // Performance optimizations
 app.set('etag', 'strong');

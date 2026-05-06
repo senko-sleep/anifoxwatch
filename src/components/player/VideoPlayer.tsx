@@ -290,34 +290,34 @@ export const VideoPlayer = ({
         liveSyncDurationCount: 3,
         liveMaxLatencyDurationCount: 5,
         liveDurationInfinity: true,
-        backBufferLength: onMobile ? 30 : 90,
-        maxBufferLength: onMobile ? 40 : 120,
-        maxMaxBufferLength: onMobile ? 60 : 180,
+        backBufferLength: onMobile ? 15 : 30,
+        maxBufferLength: onMobile ? 15 : 30,
+        maxMaxBufferLength: onMobile ? 30 : 60,
         maxBufferHole: 0.5,
         startLevel: -1,
         // Proxied streams through Vercel are 1–3 Mbps; start conservatively
         // so ABR ramps up instead of picking 720p then stalling.
-        abrEwmaDefaultEstimate: onMobile ? 1000000 : 4000000,
+        abrEwmaDefaultEstimate: onMobile ? 800000 : 2500000,
         abrEwmaFastLive: 3,
         abrEwmaSlowLive: 9,
         abrEwmaFastVoD: 3,
         abrEwmaSlowVoD: 9,
         abrMaxWithRealBitrate: true,
         testBandwidth: true,
-        startFragPrefetch: true,
-        fragLoadingMaxRetry: 10,
-        manifestLoadingMaxRetry: 6,
-        levelLoadingMaxRetry: 6,
+        startFragPrefetch: !onMobile,
+        fragLoadingMaxRetry: 5,
+        manifestLoadingMaxRetry: 4,
+        levelLoadingMaxRetry: 4,
         fragLoadingRetryDelay: 500,
         manifestLoadingRetryDelay: 500,
-        fragLoadingTimeOut: 20000,
-        manifestLoadingTimeOut: 15000,
-        levelLoadingTimeOut: 15000,
+        fragLoadingTimeOut: 12000,
+        manifestLoadingTimeOut: 10000,
+        levelLoadingTimeOut: 10000,
         nudgeOffset: 0.1,
-        nudgeMaxRetry: 10,
+        nudgeMaxRetry: 5,
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 25000;
+          xhr.timeout = 15000;
         }
       });
 
