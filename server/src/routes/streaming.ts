@@ -494,6 +494,9 @@ async function forwardToRemoteProxy(
  */
 function reconstructEpisodeId(episodeId: string, query: Record<string, any>): string {
     if (!query.ep || episodeId.includes('?ep=')) return episodeId;
+    // Do not corrupt fully-formed AnimeKai IDs with a stray ?ep=
+    if (episodeId.includes('$ep=') && episodeId.includes('$token=')) return episodeId;
+    
     const epParam = String(query.ep);
     if (!/^\d+$/.test(epParam) && !episodeId.startsWith('animekai-')) {
         const epNum = query.ep_num ? String(query.ep_num) : '1';
@@ -922,14 +925,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     // Fast-path for ISP-blocked domains
-    // If we are already running on a remote server (Clever Cloud, Render, Vercel), do NOT forward again.
-    const isRunningRemote = process.env.IS_REMOTE_PROXY === 'true' || 
-                            process.env.NODE_ENV === 'production' || 
-                            req.hostname.includes('cleverapps.io') || 
-                            req.hostname.includes('vercel.app') || 
-                            req.hostname.includes('onrender.com');
-
-    if (!isRunningRemote && isIspBlockedDomain(domain)) {
+    if (process.env.IS_REMOTE_PROXY !== 'true' && isIspBlockedDomain(domain)) {
         logger.info(`[PROXY] ISP-blocked ${domain} — routing to remote proxy`, { domain, requestId });
         const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'ISP fast-path');
         if (!ok) res.status(502).json({ error: 'ISP-blocked domain unreachable via remote proxy', domain });
