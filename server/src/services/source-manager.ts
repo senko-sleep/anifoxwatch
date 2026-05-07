@@ -4051,7 +4051,17 @@ export class SourceManager {
         };
 
         for (const t of uniqueTitles) {
-            const all = await this.searchAll(t, 1);
+            // Put a timeout on the search itself to prevent single searches hanging
+            let all: AnimeSearchResult | undefined;
+            try {
+                all = await Promise.race([
+                    this.search(t, 1),
+                    new Promise<AnimeSearchResult>((_, reject) => setTimeout(() => reject(new Error('Search timeout')), 10000))
+                ]);
+            } catch (err) {
+                console.log(`[SourceManager] resolveAniListToStreamingId search timeout for title: "${t}"`);
+                continue;
+            }
             const candidates = (all?.results || []).filter((r) => r?.id && !String(r.id).startsWith('anilist-'));
             if (!candidates.length) continue;
 

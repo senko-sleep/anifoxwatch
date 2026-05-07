@@ -113,7 +113,10 @@ router.get('/resolve', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const streamingId = await sourceManager.resolveAniListToStreamingId(numericId);
+        const streamingId = await Promise.race([
+            sourceManager.resolveAniListToStreamingId(numericId),
+            new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Resolve timeout')), 20000))
+        ]);
         if (!streamingId) {
             res.status(404).json({ error: 'No streaming match found', id });
             return;
@@ -792,7 +795,10 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const result = await sourceManager.getAnime(id);
+        const result = await Promise.race([
+            sourceManager.getAnime(id),
+            new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Get anime timeout')), 25000))
+        ]);
 
         if (!result) {
             res.status(404).json({ error: 'Anime not found' });
@@ -820,7 +826,10 @@ router.get('/episodes', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const result = await sourceManager.getEpisodes(id);
+        const result = await Promise.race([
+            sourceManager.getEpisodes(id),
+            new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error('Get episodes timeout')), 25000))
+        ]);
         res.json({ episodes: result });
     } catch (error) {
         console.error('Get episodes error:', error);

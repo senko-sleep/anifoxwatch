@@ -16,8 +16,8 @@ const circuitBreakers = new Map<string, CircuitBreakerState>();
 
 // Default circuit breaker settings - optimized for reliability with slow sources
 const DEFAULT_CIRCUIT_SETTINGS = {
-    maxFailures: 3, // Reduce failures before tripping to avoid wasting time on consistently slow sources
-    resetTime: 30000, // 30s recovery - give sources more time to recover
+    maxFailures: 5, // Increased to 5 to prevent AnimeKai/sources from being knocked offline too quickly by parallel requests
+    resetTime: 15000, // 15s recovery - allow faster recovery from transient network hiccups
     timeout: 90000 // 90s timeout — increased significantly for slow sources and Vercel cold starts
 };
 

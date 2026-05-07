@@ -324,7 +324,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
         // Vercel/cloud datacenter IPs are blocked by megaup.nl with 403. When direct fetch fails,
         // fall back to the Cloudflare Worker proxy which has a residential-adjacent IP.
         const REMOTE_PROXY = process.env.DEFAULT_REMOTE_STREAM_PROXY ||
-            'https://anifoxwatch.vercel.app/api/stream/proxy';
+            'https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io/api/stream/proxy';
         const MEGAUP_MIRRORS = ['megaup.nl', 'megaup.cc', 'megaup.live', 'megaup.to'];
         const embedBase = new URL(megaupEmbedUrl).hostname;
         const mirrorOrder = [
