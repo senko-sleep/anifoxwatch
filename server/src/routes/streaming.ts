@@ -16,7 +16,7 @@ const router = Router();
 
 const DEFAULT_REMOTE_STREAM_PROXY =
     process.env.DEFAULT_REMOTE_STREAM_PROXY ||
-    'https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io/api/stream/proxy';
+    'https://anifoxwatch.vercel.app/api/stream/proxy';
 
 /** How long to wait for a dub result before accepting a sub fallback (ms). */
 const DUB_PATIENCE_MS = 18_000;
