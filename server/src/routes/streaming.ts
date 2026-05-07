@@ -922,7 +922,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     // Fast-path for ISP-blocked domains
-    if (process.env.IS_REMOTE_PROXY !== 'true' && isIspBlockedDomain(domain)) {
+    // If we are already running on a remote server (Clever Cloud, Render, Vercel), do NOT forward again.
+    const isRunningRemote = process.env.IS_REMOTE_PROXY === 'true' || 
+                            process.env.NODE_ENV === 'production' || 
+                            req.hostname.includes('cleverapps.io') || 
+                            req.hostname.includes('vercel.app') || 
+                            req.hostname.includes('onrender.com');
+
+    if (!isRunningRemote && isIspBlockedDomain(domain)) {
         logger.info(`[PROXY] ISP-blocked ${domain} — routing to remote proxy`, { domain, requestId });
         const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'ISP fast-path');
         if (!ok) res.status(502).json({ error: 'ISP-blocked domain unreachable via remote proxy', domain });
