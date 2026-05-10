@@ -35,8 +35,19 @@ async function main() {
             const streams = await source.getStreamingLinks(ep4.id, undefined, 'dub');
             if (streams && streams.sources && streams.sources.length > 0) {
                 console.log(`SUCCESS: Fetched ${streams.sources.length} DUB stream sources!`);
-                console.log(`Stream Quality: ${streams.sources[0].quality}`);
-                console.log(`Is M3U8? ${streams.sources[0].isM3U8}`);
+                const streamUrl = streams.sources[0].url;
+                console.log(`Stream URL: ${streamUrl}`);
+                
+                try {
+                    const { hostname } = new URL(streamUrl);
+                    console.log(`Checking if ${hostname} is resolvable...`);
+                    const dns = await import('dns/promises');
+                    await dns.lookup(hostname);
+                    console.log(`SUCCESS: ${hostname} is resolvable!`);
+                } catch (err: any) {
+                    console.error(`FAILED: ${streamUrl} domain is not resolvable! Error: ${err.message}`);
+                    process.exit(1);
+                }
             } else {
                 console.log('FAILED to fetch dub streams.');
             }

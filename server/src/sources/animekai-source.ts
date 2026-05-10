@@ -381,13 +381,19 @@ export class AnimeKaiSource extends BaseAnimeSource {
         const decrypted = decResp.data?.result;
         if (!decrypted?.sources?.length) return [];
 
-        return (decrypted.sources as Array<{ file?: string; type?: string }>).map((s): VideoSource => ({
-            url: s.file ?? '',
-            quality: 'auto',
-            isM3U8: (s.file ?? '').includes('.m3u8') || s.type === 'hls',
-            isDASH: (s.file ?? '').includes('.mpd'),
-            server: 'Megaup',
-        })).filter(s => s.url);
+        return (decrypted.sources as Array<{ file?: string; type?: string }>).map((s): VideoSource => {
+            let url = s.file ?? '';
+            // Fix dead Megaup CDN domains returned by the API
+            url = url.replace(/https:\/\/(rrr\.)?(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link)\.site\//i, 'https://rrr.megaup.cc/');
+            
+            return {
+                url,
+                quality: 'auto',
+                isM3U8: url.includes('.m3u8') || s.type === 'hls',
+                isDASH: url.includes('.mpd'),
+                server: 'Megaup',
+            };
+        }).filter(s => s.url);
     }
 
     /**
