@@ -412,17 +412,15 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
     // OR if it contains segments with image extensions on unknown domains.
     const adCount = segmentUrls.filter(u => {
         if (isAdCdnUrl(u)) return true;
-        
-        // If it's a known non-video extension, it's an ad segment, period.
-        // Some CDNs like Megaup now serve ads/garbage from their own domains.
         if (AD_EXTENSIONS.test(u)) return true;
-
         return false;
     }).length;
 
     const ratio = adCount / segmentUrls.length;
-    if (ratio > 0.3) {
-        logger.warn(`[PROXY] Ad-poisoned manifest detected: ${adCount}/${segmentUrls.length} segments likely ads`, { originalUrl });
+    const firstFewPoisoned = segmentUrls.slice(0, 3).some(u => isAdCdnUrl(u) || AD_EXTENSIONS.test(u));
+
+    if (ratio > 0.05 || firstFewPoisoned) {
+        logger.warn(`[PROXY] Ad-poisoned manifest detected: ${adCount}/${segmentUrls.length} segments (${(ratio * 100).toFixed(1)}%) or first segments poisoned`, { originalUrl });
         return true;
     }
     return false;
