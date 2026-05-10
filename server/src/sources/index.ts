@@ -62,3 +62,6 @@ export { MiruroSource } from './miruro-source.js';
 // AllAnime: allanime.day GraphQL API + fast4speed.rsvp CDN (cloud-IP accessible)
 export { AllAnimeSource } from './allanime-source.js';
 
+
+// Aniwaves: aniwaves.ru scraper
+export { AniwavesSource } from './aniwaves-source.js';

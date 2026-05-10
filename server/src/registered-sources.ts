@@ -6,7 +6,7 @@
  */
 export const REGISTERED_SOURCE_NAMES: readonly string[] = [
     'Gogoanime',
-    // 'AnimeFLV',        // DISABLED: Dead (HTTP 410, timeouts)
+    'Aniwaves',
     'AnimeKai',
     'AllAnime',
     'AnimeHeaven',

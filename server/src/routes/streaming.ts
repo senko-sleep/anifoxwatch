@@ -336,9 +336,9 @@ function validateDubStream(result: any): boolean {
 
 const getProxyBaseUrl = (req: Request): string => {
     const forwarded = req.get('x-forwarded-proto');
-    if (!forwarded) return 'http://localhost:3001/api/stream/proxy';
-    const protocol = forwarded === 'https' || process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
-    return `${protocol}://${req.get('host')}/api/stream/proxy`;
+    const host = req.get('host') || 'localhost:3001';
+    const protocol = forwarded || (process.env.NODE_ENV === 'production' ? 'https' : 'http');
+    return `${protocol}://${host}/api/stream/proxy`;
 };
 
 const proxyUrl = (url: string, proxyBase: string, referer?: string): string => {
@@ -399,6 +399,12 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
     }
 
     if (segmentUrls.length === 0) return false;
+    
+    // Exception: Megaup use .jpg/.png/.gif for real video segments to bypass blocks
+    const domain = new URL(originalUrl).hostname.toLowerCase();
+    const isMegaup = domain.includes('megaup.') || 
+                     /(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link|shop21pro|burntburst45)\.(site|store)/i.test(domain);
+    if (isMegaup) return false;
 
     // Use common ad extensions for segment-level detection
     // Use common non-video extensions for segment-level detection
@@ -453,7 +459,17 @@ async function forwardToRemoteProxy(
         res.setHeader('Content-Type', ct);
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'no-store');
-        res.status(200);
+
+        // Forward seeking/duration headers
+        if (remoteResp.headers['accept-ranges']) res.setHeader('Accept-Ranges', remoteResp.headers['accept-ranges']);
+        if (remoteResp.headers['content-length']) res.setHeader('Content-Length', remoteResp.headers['content-length']);
+        if (remoteResp.headers['content-range']) res.setHeader('Content-Range', remoteResp.headers['content-range']);
+        if (remoteResp.headers['access-control-expose-headers']) {
+            res.setHeader('Access-Control-Expose-Headers', remoteResp.headers['access-control-expose-headers']);
+        } else {
+            res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+        }
+        res.status(remoteResp.status);
         remoteResp.data.on('error', (err: any) => {
             logger.error(`[PROXY] ${label} pipeline error for ${domain}`, err);
             if (!res.headersSent) res.status(502).end();
@@ -875,6 +891,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     url = unwrapProxyTarget(url);
+    
+    // Fix dead Megaup CDN domains (e.g. lgv.net22lab.site -> lgv.megaup.cc)
+    // These often appear inside variant m3u8 playlists as absolute URLs.
+    url = url.replace(/(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link|shop21pro|burntburst45)\.(site|store)/gi, 'megaup.cc');
 
     if (!/^https?:\/\//i.test(url)) {
         res.status(400).json({ error: 'Invalid streaming URL' });
@@ -958,8 +978,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         }
     }
 
-    // Always include aniwatchtv as a last-resort referer
+    // Always include aniwatchtv and animekai as last-resort referers
     addCombo('https://aniwatchtv.to/', 'https://aniwatchtv.to');
+    addCombo('https://animekai.to/', 'https://animekai.to');
+    if (domain.includes('megaup') || domain.includes('rrr.')) {
+        addCombo('https://megaup.live/', 'https://megaup.live');
+        addCombo('https://megaup.cc/', 'https://megaup.cc');
+        addCombo('https://megaup.to/', 'https://megaup.to');
+    }
 
     // Proxy CDN config lookup for per-domain referers in the proxy route
     const proxyCdnConfig: Record<string, { referer: string; origin?: string }> = {
@@ -973,13 +999,16 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         'netmagcdn': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
         'biananset': { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' },
         'anicdnstream': { referer: 'https://aniwatchtv.to/' },
-        'megaup': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
-        'lab27core': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
-        'code29wave': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
-        'net22lab': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
-        'pro25zone': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
-        'tech20hub': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
-        'web24code': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+        'megaup': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'lab27core': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'code29wave': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'net22lab': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'pro25zone': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'tech20hub': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'web24code': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'burntburst45': { referer: 'https://aniwaves.ru/', origin: 'https://aniwaves.ru' },
+        'burntburst': { referer: 'https://aniwaves.ru/', origin: 'https://aniwaves.ru' },
+        'megaup-stream': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'gogocdn': { referer: 'https://gogoanime.run/' },
         'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
         'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
@@ -1009,7 +1038,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     const makeProxyRequest = (targetUrl: string, combo: { referer: string; origin: string }, relaxedTls: boolean): Promise<AxiosResponse> => {
         const headers: Record<string, string> = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': combo.referer,
@@ -1048,8 +1077,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             const errCode = (err as NodeJS.ErrnoException).code;
             const isTlsError =
                 errCode === 'EPROTO' || errCode === 'ECONNRESET' || errCode === 'ECONNREFUSED' ||
+                errCode === 'CERT_REVOKED' ||
                 errMsg.includes('EPROTO') || errMsg.includes('wrong version number') ||
-                errMsg.includes('socket hang up') || errMsg.includes('alert protocol version');
+                errMsg.includes('socket hang up') || errMsg.includes('alert protocol version') ||
+                errMsg.includes('revoked');
 
             if (isTlsError && cachedProtocol !== 'http') {
                 logger.warn(`[PROXY] TLS error for ${domain} — trying relaxed TLS`, { requestId });
@@ -1205,8 +1236,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             
             // It's likely an obfuscated video segment - allow it
             logger.info(`[PROXY] Allowing obfuscated image segment (${upstreamCt}) from ${domain}`, { requestId });
+            // Set normalized video content type for the Accept-Ranges check below
+            (req as any)._normalizedCt = 'video/MP2T';
         }
     }
+
+    const effectiveCt = (req as any)._normalizedCt || upstreamCt.toLowerCase();
 
     if (proxyResponse.headers['content-length'] && !proxyResponse.headers['content-encoding']) {
         res.set('Content-Length', proxyResponse.headers['content-length']);
@@ -1216,8 +1251,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const hasAcceptRanges = proxyResponse.headers['accept-ranges'];
     if (hasAcceptRanges) {
         res.set('Accept-Ranges', hasAcceptRanges);
-    } else if (upstreamCt.startsWith('video/') || upstreamCt === 'application/octet-stream' ||
-        url.endsWith('.mp4') || url.endsWith('.ts') || url.endsWith('.m4s') ||
+    } else if (effectiveCt.startsWith('video/') || effectiveCt === 'application/octet-stream' ||
+        url.includes('.ts') || url.includes('.m4s') || url.includes('.mp4') ||
         domain.includes('streamtape') || domain.includes('tapecontent')) {
         res.set('Accept-Ranges', 'bytes');
     }

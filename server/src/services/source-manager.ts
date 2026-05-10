@@ -10,6 +10,7 @@ import {
     AllAnimeSource,
     AnimeHeavenSource,
     NineAnimeSource,
+    AniwavesSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -92,6 +93,7 @@ export class SourceManager {
         ['Aniwave', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['Anix', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['DirectDownload', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
+        ['Aniwaves', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'high' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -169,6 +171,9 @@ export class SourceManager {
         
         // 9Anime — accessible (200 status), known for good dub content
         this.registerSource(new NineAnimeSource());
+
+        // Aniwaves — verified AJAX scraping and EchoVideo resolution
+        this.registerSource(new AniwavesSource());
 
         // DISABLED — confirmed dead in April 2025 audit:
         // Consumet (public API): api.consumet.org returns errors
@@ -967,9 +972,13 @@ export class SourceManager {
         const dollar = slug.indexOf('$');
         if (dollar !== -1) slug = slug.slice(0, dollar);
         slug = this.extractRawId(slug);
-        slug = slug.replace(/-(?=[a-z]*\d)[a-z\d]{3,6}$/i, '');
-        const rawSlug = slug.replace(/-\d{4,}$/, '');
-        return rawSlug.replace(/[-_]/g, ' ').trim();
+        
+        // Strip common episode suffixes: -episode-1, -ep-1, -1, etc.
+        slug = slug.replace(/-episode-\d+$/i, '')
+                  .replace(/-ep-\d+$/i, '')
+                  .replace(/-\d+$/i, '');
+        
+        return slug.replace(/[-_]/g, ' ').trim();
     }
 
     /**
@@ -3375,8 +3384,8 @@ export class SourceManager {
         // Registered, currently enabled sources to try for cross-source fallback.
         // Keep dead/unregistered sources out of this path so fallback starts useful
         // work immediately instead of waiting on sources we already disabled.
-        const dubSources = ['AnimeHeaven', '9Anime', 'Gogoanime', 'AllAnime', 'AnimeKai'];
-        const subSources = ['Gogoanime', 'AllAnime', 'AnimeKai'];
+        const dubSources = ['AnimeHeaven', '9Anime', 'Gogoanime', 'AllAnime', 'AnimeKai', 'Aniwaves'];
+        const subSources = ['Gogoanime', 'AllAnime', 'AnimeKai', 'Aniwaves'];
         const sourceNames = category === 'dub' ? dubSources : subSources;
         
         const consumetSources = sourceNames

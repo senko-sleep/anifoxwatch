@@ -2,8 +2,9 @@
  * API Configuration for AniStream Hub
  * 
  * Automatically switches between different API deployments:
- * - Local Development: Express API on `127.0.0.1:3001`, reached from the browser via Vite’s same-origin
- *   proxy (`/api/*`, `/health`) when `VITE_USE_LOCAL_API=true`.
+ * - Local Development: Express API on `127.0.0.1:3001`, reached directly from the browser when
+ *   `VITE_DEV_API_URL=http://localhost:3001`, or through Vite's same-origin proxy when
+ *   `VITE_USE_LOCAL_API=true`.
  * - Vercel: Node API from this repo (`/api/*` on your *.vercel.app deployment)
  * - Production: Configured in .env.production
  */
@@ -57,10 +58,10 @@ function configFromUrl(envApiUrl: string): ApiConfig {
  * Get the current API configuration.
  *
  * Development (`import.meta.env.DEV`):
- * - **`VITE_USE_LOCAL_API=true` (default in `.env.development`):** `baseUrl` is empty so requests use
- *   same-origin paths (`/api/...`). Vite proxies to `127.0.0.1:3001`. Use `npm run dev` (starts API + client).
+ * - **`VITE_DEV_API_URL`:** absolute local override, e.g. `http://localhost:3001`.
+ * - **`VITE_USE_LOCAL_API=true`:** `baseUrl` is empty so requests use same-origin paths (`/api/...`).
+ *   Vite proxies those requests to `127.0.0.1:3001`.
  * - **Remote only:** `VITE_USE_LOCAL_API=false` and set `VITE_API_URL` to a deployed API (for `vite` alone).
- * - **`VITE_DEV_API_URL`:** absolute override (e.g. another port).
  *
  * Production / `vite preview`: uses `VITE_API_URL`, then hosting detection, then the Vercel API default.
  */
