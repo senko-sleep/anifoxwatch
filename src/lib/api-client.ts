@@ -395,6 +395,10 @@ class AnimeApiClient {
                     throw err;
                 }
 
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error(`API returned invalid format (${contentType || 'text/html'}). The server might be down or returning an error page.`);
+                }
                 const data = await response.json();
 
                 // Cache with endpoint-aware TTL
@@ -742,6 +746,10 @@ class AnimeApiClient {
                             continue;
                         }
                         throw err;
+                    }
+                    const contentType = response.headers.get('content-type');
+                    if (!contentType || !contentType.includes('application/json')) {
+                        throw new Error(`Stream API returned invalid format (${contentType || 'text/html'}).`);
                     }
                     return response.json();
                 } catch (e) {

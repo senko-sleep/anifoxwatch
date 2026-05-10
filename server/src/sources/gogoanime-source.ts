@@ -115,7 +115,7 @@ export class GogoanimeSource extends BaseAnimeSource {
 
                 if (id) {
                     results.push({
-                        id: `gogoanime-${id}`,
+                        id: id,
                         title: title,
                         image: image,
                         cover: image,
@@ -565,7 +565,7 @@ export class GogoanimeSource extends BaseAnimeSource {
 
                 if (id) {
                     results.push({
-                        id: `gogoanime-${id}`,
+                        id: id,
                         title: title,
                         image: image,
                         cover: image,

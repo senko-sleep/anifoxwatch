@@ -153,6 +153,10 @@ export function getApiFallbackUrl(): string | null {
     // In Node/test environments there is no runtime-origin to fall back to.
     if (typeof window === 'undefined') return null;
 
+    const hostname = window.location.hostname;
+    const isFirebaseHosting = hostname.includes('firebaseapp.com') || hostname.includes('web.app');
+    if (isFirebaseHosting) return null;
+
     const sameOrigin = (window.location?.origin || '').replace(/\/$/, '');
     const primary = (getApiConfig().baseUrl || '').replace(/\/$/, '');
 

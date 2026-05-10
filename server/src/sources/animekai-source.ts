@@ -144,7 +144,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
 
     private mapAnime(data: any): AnimeBase {
         return {
-            id: `animekai-${data.id}`,
+            id: data.id,
             title: data.title || 'Unknown',
             titleJapanese: data.japaneseTitle,
             image: data.image || '',

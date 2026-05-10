@@ -955,7 +955,8 @@ export class SourceManager {
                 return id.substring(prefix.length);
             }
         }
-        return id;
+        // Also strip common provider prefixes that might not be in knownPrefixes
+        return id.replace(/^(gogoanime|animekai|9anime|aniwave|aniwatch|miruro|allanime)-/i, '');
     }
 
     /**

@@ -989,6 +989,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         'streamtape': { referer: 'https://streamtape.com/', origin: 'https://streamtape.com' },
         'tapecontent': { referer: 'https://streamtape.com/', origin: 'https://streamtape.com' },
         'streamwish': { referer: 'https://streamwish.to/', origin: 'https://streamwish.to' },
+        'takutaku': { referer: 'https://anitaku.to/', origin: 'https://anitaku.to' },
     };
 
     const matchedProxyConfig = Object.entries(proxyCdnConfig).find(([key]) => domain.includes(key));

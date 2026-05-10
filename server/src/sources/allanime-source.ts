@@ -146,7 +146,7 @@ export class AllAnimeSource extends BaseAnimeSource {
         const dubCount = show.availableEpisodesDetail?.dub?.length ?? 0;
         const epCount = Math.max(subCount, dubCount);
         return {
-            id: `allanime-${show._id}`,
+            id: show._id,
             title: show.name || 'Unknown',
             image: show.thumbnail || '',
             cover: show.thumbnail || '',
@@ -228,7 +228,7 @@ export class AllAnimeSource extends BaseAnimeSource {
             const dubSet = new Set(dubEps.map(Number));
 
             return allEpNums.map(epNum => ({
-                id: `allanime-${showId}-${epNum}`,
+                id: `${showId}-${epNum}`,
                 number: epNum,
                 title: `Episode ${epNum}`,
                 isFiller: false,
