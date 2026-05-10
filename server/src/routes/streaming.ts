@@ -139,13 +139,9 @@ const IMAGE_CONTENT_TYPES = [
 
 /** Domains to skip DNS/local checks and forward straight to the remote proxy. */
 const ISP_BLOCKED_DOMAINS = new Set([
-    'tech20hub.site',
-    'megaup.nl',
-    'megaup.cc',
-    'rrr.megaup.cc',
-    'hub26link.site',
-    'hub27link.site',
-    'code29wave.site',
+    'ajax.gogocdn.net',
+    'anitaku.pe',
+    'anitaku.so',
 ]);
 
 function isDeadDomain(url: string): boolean {
@@ -805,7 +801,16 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     };
 
     if (shouldProxy) {
-        const streamReferer = streamData.headers?.Referer || streamData.headers?.referer || 'https://megacloud.blog/';
+        // Determine best referer: source-provided > domain-guessed > default
+        let streamReferer = streamData.headers?.Referer || streamData.headers?.referer;
+        if (!streamReferer) {
+            const sourceName = String(streamData.source || '').toLowerCase();
+            if (sourceName.includes('kai')) streamReferer = 'https://megaup.nl/';
+            else if (sourceName.includes('gogo')) streamReferer = 'https://gogoanime.run/';
+            else if (sourceName.includes('pahe')) streamReferer = 'https://animepahe.ru/';
+            else if (sourceName.includes('watchhentai')) streamReferer = 'https://watchhentai.net/';
+            else streamReferer = 'https://megacloud.blog/'; // Generic fallback
+        }
         const isLocalDev = !req.get('x-forwarded-proto');
 
         response.sources = (streamData.sources as VideoSource[])

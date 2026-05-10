@@ -597,7 +597,15 @@ export class AnimeKaiSource extends BaseAnimeSource {
                 try {
                     const sources = await this.extractMegaupStream(sv.url, timeoutMs);
                     if (sources.length > 0) {
-                        const streamData: StreamingData = { sources, subtitles: [], source: this.name, category };
+                        const streamData: StreamingData = { 
+                            sources, 
+                            subtitles: [], 
+                            source: this.name, 
+                            category,
+                            headers: {
+                                'Referer': 'https://megaup.nl/'
+                            }
+                        };
                         logger.info(`AnimeKai: ${sources.length} source(s) via ${sv.name} for ${rawEpisodeId} (${category})`, undefined, this.name);
                         // Cache for 5 minutes (300s) - megaup URLs expire quickly
                         this.setCache(cacheKey, streamData, 5 * 60 * 1000);
