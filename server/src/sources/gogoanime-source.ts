@@ -293,12 +293,13 @@ export class GogoanimeSource extends BaseAnimeSource {
             } else {
                 // Fallback: try fetching ep 1 to verify the show exists, assume a single episode
                 try {
-                 const testR = await axios.get(`${this.baseUrl}/${id}-episode-1`, {
-                     timeout: 15000, // Increased from 5000 to 15000
-                     headers: { 'User-Agent': 'Mozilla/5.0' },
-                     validateStatus: s => s < 500,
-                 });
-                    if (testR.status === 200) {
+                    const testR = await axios.get(`${this.baseUrl}/${id}-episode-1`, {
+                        timeout: 15000,
+                        headers: { 'User-Agent': 'Mozilla/5.0' },
+                        validateStatus: s => s < 500,
+                    });
+                    if (testR.status === 200 && typeof testR.data === 'string' && 
+                        (testR.data.includes('anime_muti_link') || testR.data.includes('iframe') || testR.data.includes('data-video'))) {
                         episodes.push({
                             id: `${id}-episode-1`,
                             number: 1,

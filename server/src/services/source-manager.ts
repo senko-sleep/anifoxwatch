@@ -1309,7 +1309,7 @@ export class SourceManager {
 
             const results = await Promise.all(searchPromises);
 
-            // Merge results
+            // Merge results and add prefixes if missing
             const combinedResults: AnimeBase[] = [];
             let maxTotalPages = 0;
             let hasNextPage = false;
@@ -1317,7 +1317,18 @@ export class SourceManager {
 
             results.forEach(r => {
                 if (r.results && r.results.length > 0) {
-                    combinedResults.push(...r.results);
+                    // Ensure each result has the source prefix in its ID
+                    const prefixedResults = r.results.map(anime => {
+                        if (!this.hasKnownSourcePrefix(anime.id)) {
+                            return {
+                                ...anime,
+                                id: this.buildSourceId(anime.id, r.sourceName)
+                            };
+                        }
+                        return anime;
+                    });
+                    
+                    combinedResults.push(...prefixedResults);
                     successfulSources.push(r.sourceName);
                 } else {
                     console.log(`⚠️ [SourceManager] No results from ${r.sourceName} for query: "${query}"`);
@@ -3766,8 +3777,9 @@ export class SourceManager {
 
             // Fetch multiple pages to build comprehensive table
             const allAnime: AnimeBase[] = [];
-            // Fetch 10 pages of trending for good coverage (faster build)
-            for (let page = 1; page <= 10; page++) {
+            // Reduced from 10 to 3 pages to lower CPU/memory load in production
+            const pagesToFetch = process.env.NODE_ENV === 'production' ? 3 : 5;
+            for (let page = 1; page <= pagesToFetch; page++) {
                 try {
                     const pageData = await source.getTrending(page);
                     if (pageData && pageData.length > 0) {
@@ -4209,10 +4221,26 @@ export class SourceManager {
 
         for (const anime of results) {
             let score = this.calculateSimilarity(title, anime.title);
+            
             // Boost when the result's type matches what we're looking for
             if (animeType && anime.type && anime.type === animeType) {
                 score += 0.15;
             }
+
+            // Heuristic: Bonus for more episodes (more likely to be the full series)
+            // But only if we're looking for a TV series or something generic
+            if ((animeType === 'TV' || !animeType) && anime.episodes > 1) {
+                score += 0.05;
+            }
+            
+            // Penalty for 1 episode if we expect more (likely a preview or teaser)
+            // Skip for Movies/Specials
+            if ((animeType === 'TV' || !animeType) && anime.episodes === 1 && 
+                !anime.title.toLowerCase().includes('movie') && 
+                !anime.title.toLowerCase().includes('special')) {
+                score -= 0.15;
+            }
+
             // Penalize type mismatch: e.g. query is for a TV series but result is Special/OVA
             if (animeType && anime.type && anime.type !== animeType) {
                 const isMismatchedSpecial =
@@ -4220,6 +4248,7 @@ export class SourceManager {
                     (animeType === 'TV' || animeType === 'Movie');
                 if (isMismatchedSpecial) score *= 0.3;
             }
+            
             if (score > bestScore) {
                 bestScore = score;
                 bestMatch = anime;
@@ -4252,49 +4281,73 @@ export class SourceManager {
                 return this.findBestMatch(title, cached.results, animeType);
             }
 
-            // Prefer AnimeKai (most reliable) → Kaido → 9Anime → any available
-            let source = this.sources.get('AnimeKai');
-            if (!source || !source.isAvailable) {
-                console.log(`   ⚠️ AnimeKai not available, trying Kaido...`);
-                source = this.sources.get('Kaido');
+            const sourcesToTry = [
+                this.sources.get('AnimeKai'),
+                this.sources.get('Kaido'),
+                this.sources.get('9Anime'),
+                this.sources.get('Gogoanime'),
+                this.sources.get('Aniwaves')
+            ].filter(s => s && s.isAvailable) as StreamingSource[];
+
+            let bestMatchOverall: AnimeBase | null = null;
+            let bestScoreOverall = 0;
+
+            // Try sources until we find a good match with more than 1 episode
+            // or we've tried the top 3 sources
+            for (let i = 0; i < Math.min(sourcesToTry.length, 3); i++) {
+                const source = sourcesToTry[i];
+                console.log(`   📡 Trying ${source.name} to search for "${title}"`);
+
+                try {
+                    const searchResult = await this.executeReliably(source.name, 'search', 
+                        (signal) => source.search(title, 1, {}, { signal }), 
+                        { timeout: 12000 }
+                    );
+                    const results = searchResult.results || [];
+                    
+                    if (results.length > 0) {
+                        // Cache the results for this source
+                        this.searchCache.set(`${cacheKey}:${source.name}`, {
+                            results,
+                            timestamp: Date.now()
+                        });
+
+                        const match = this.findBestMatch(title, results, animeType);
+                        if (match) {
+                            // Add prefix
+                            if (!this.hasKnownSourcePrefix(match.id)) {
+                                match.id = this.buildSourceId(match.id, source.name);
+                            }
+
+                            const similarity = this.calculateSimilarity(title, match.title);
+                            
+                            // If it's a very good match and has episodes, we're done
+                            if (similarity > 0.8 && (match.episodes || 0) > 1) {
+                                console.log(`   ✅ Found high-quality match on ${source.name}: ${match.title} (${match.id})`);
+                                return match;
+                            }
+
+                            // Otherwise, keep track of the best one we've seen
+                            if (similarity > bestScoreOverall) {
+                                bestScoreOverall = similarity;
+                                bestMatchOverall = match;
+                            }
+                        }
+                    }
+                } catch (err) {
+                    console.log(`   ⚠️ Search on ${source.name} failed: ${(err as Error).message}`);
+                }
+                
+                // If we found a decent match and we've tried at least 2 sources, stop
+                if (bestMatchOverall && bestScoreOverall > 0.6 && i >= 1) break;
             }
-            if (!source || !source.isAvailable) {
-                console.log(`   ⚠️ Kaido not available, trying 9Anime...`);
-                source = this.sources.get('9Anime');
-            }
 
-            if (!source || !source.isAvailable) {
-                console.log(`   ⚠️ Primary streaming sources not available, using fallback source...`);
-                source = this.getAvailableSource() as StreamingSource | undefined;
-            }
-
-            if (!source) {
-                console.log(`   ❌ No sources available for title search`);
-                return null;
-            }
-            
-            console.log(`   📡 Using ${source.name} to search for "${title}"`);
-
-            // Search with the title
-            const searchResult = await this.executeReliably(source.name, 'search', (signal) => source!.search(title, 1, {}, { signal }), { timeout: 10000 });
-            const results = searchResult.results || [];
-
-            // Cache the results
-            this.searchCache.set(cacheKey, {
-                results,
-                timestamp: Date.now()
-            });
-
-            const bestMatch = this.findBestMatch(title, results, animeType);
-
-            if (bestMatch) {
-                console.log(`   ✅ Found streaming match: ${bestMatch.title} (${bestMatch.id})`);
-                logger.info(`[SourceManager] Found streaming match for "${title}": ${bestMatch.id}`);
-                return bestMatch;
+            if (bestMatchOverall && bestScoreOverall > 0.4) {
+                console.log(`   ✅ Using best found match: ${bestMatchOverall.title} (${bestMatchOverall.id}) with score ${bestScoreOverall.toFixed(2)}`);
+                return bestMatchOverall;
             }
 
             console.log(`   ❌ No streaming match found for "${title}"`);
-            logger.debug(`[SourceManager] No streaming match found for: ${title}`);
             return null;
         } catch (error) {
             logger.warn(`[SourceManager] Failed to find streaming anime for "${title}":`, { error: String(error) });

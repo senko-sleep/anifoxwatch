@@ -60,25 +60,39 @@ class StreamExtractor {
         return this.browser;
     }
 
+    private activePages = 0;
+    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 1 : 2;
+
     /**
      * Create a new page with proper settings
      */
     private async createPage(): Promise<Page> {
-        const browser = await this.getBrowser();
-        const page = await browser.newPage();
+        // Simple concurrency limit
+        while (this.activePages >= this.MAX_CONCURRENT_PAGES) {
+            await this.delay(1000);
+        }
+        this.activePages++;
 
-        await page.setUserAgent(
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-        );
+        try {
+            const browser = await this.getBrowser();
+            const page = await browser.newPage();
 
-        await page.setViewport({ width: 1920, height: 1080 });
+            await page.setUserAgent(
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+            );
 
-        await page.setExtraHTTPHeaders({
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-        });
+            await page.setViewport({ width: 1920, height: 1080 });
 
-        return page;
+            await page.setExtraHTTPHeaders({
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+            });
+
+            return page;
+        } catch (error) {
+            this.activePages--;
+            throw error;
+        }
     }
 
     /**
@@ -243,6 +257,7 @@ class StreamExtractor {
                 error: error.message
             };
         } finally {
+            this.activePages--;
             await page.close();
         }
     }
@@ -342,6 +357,7 @@ class StreamExtractor {
                 error: error.message
             };
         } finally {
+            this.activePages--;
             await page.close();
         }
     }
