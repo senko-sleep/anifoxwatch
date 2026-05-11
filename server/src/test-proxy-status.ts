@@ -35,7 +35,7 @@ async function testProxyStatus() {
     for (let i = 0; i < 3; i++) {
         console.log(`\n🧪 Testing Proxy (Level ${i}): ${currentUrl.substring(0, 100)}...`);
         try {
-            const resp = await axios.get(proxyBase, {
+            const resp: any = await axios.get(proxyBase, {
                 params: { url: currentUrl, referer: 'https://aniwaves.ru/' }
             });
 
@@ -48,18 +48,18 @@ async function testProxyStatus() {
             const contentType = resp.headers['content-type'] || '';
             console.log(`📄 Content-Type: ${contentType}`);
 
-            if (contentType.includes('mpegurl') || currentUrl.includes('.m3u8')) {
-                const content = resp.data;
-                const lines = content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            if (contentType.includes('mpegurl') || (currentUrl && currentUrl.includes('.m3u8'))) {
+                const content: any = resp.data;
+                const lines: string[] = (content as string).split('\n').map((l: string) => l.trim()).filter((l: string) => l.length > 0);
                 
                 // Check for duration info
-                const hasDuration = lines.some(l => l.startsWith('#EXTINF:'));
+                const hasDuration = lines.some((l: string) => l.startsWith('#EXTINF:'));
                 if (hasDuration) {
                     console.log('✅ Found #EXTINF tags (Duration info present)');
                 }
 
                 // Check for VOD/Endlist
-                const hasEndlist = lines.some(l => l.includes('#EXT-X-ENDLIST'));
+                const hasEndlist = lines.some((l: string) => l.includes('#EXT-X-ENDLIST'));
                 if (hasEndlist) {
                     console.log('✅ Found #EXT-X-ENDLIST (Total duration should be known)');
                 } else {
@@ -69,7 +69,7 @@ async function testProxyStatus() {
                 console.log(`📄 Last 5 lines: ${lines.slice(-5).join(' | ')}`);
 
                 // Find next URL
-                const nextUrlPart = lines.find(line => !line.startsWith('#') && line.trim().length > 0);
+                const nextUrlPart: string | undefined = lines.find((line: string) => !line.startsWith('#') && line.trim().length > 0);
                 if (nextUrlPart) {
                     if (nextUrlPart.startsWith('http')) {
                         currentUrl = nextUrlPart;
