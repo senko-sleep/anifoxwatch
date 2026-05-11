@@ -169,7 +169,7 @@ const CDN_CONFIGS: Array<{ pattern: RegExp; configs: CdnCombo[] }> = [
     { pattern: /gogocdn/i, configs: [{ referer: 'https://gogoanime.run/', origin: 'https://gogoanime.run' }, { referer: 'https://gogoanime.ai/', origin: 'https://gogoanime.ai' }] },
     { pattern: /aniwatchtv|megacloud|rapid-cloud/i, configs: [{ referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
     { pattern: /watchhentai/i, configs: [{ referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' }, { referer: 'https://hentai19.net/', origin: 'https://hentai19.net' }] },
-    { pattern: /megaup|tech20hub|lab27core|code29wave|net22lab|pro25zone/i, configs: [{ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' }, { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
+    { pattern: /megaup|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|burntburst45|rrr\./i, configs: [{ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' }, { referer: 'https://animekai.to/', origin: 'https://animekai.to' }, { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
 ];
 
 function getCdnConfigs(hostname: string): CdnCombo[] {
@@ -1009,6 +1009,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         'burntburst45': { referer: 'https://aniwaves.ru/', origin: 'https://aniwaves.ru' },
         'burntburst': { referer: 'https://aniwaves.ru/', origin: 'https://aniwaves.ru' },
         'megaup-stream': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+        'hub26link': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'hub27link': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'rrr.': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'gogocdn': { referer: 'https://gogoanime.run/' },
         'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
         'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
@@ -1122,7 +1125,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 logger.warn(`[PROXY] Network timeout for ${domain}. Skipping remaining combos.`, { requestId });
                 break;
             }
-            logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed (${combo.referer}): ${errMsg}`, { requestId });
+            const status = (err as any).response?.status;
+            logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed (${combo.referer}): ${errMsg}${status ? ` (Status: ${status})` : ''}`, { requestId });
             if (attempt < refererCombos.length - 1) await new Promise(r => setTimeout(r, 300));
         }
     }
