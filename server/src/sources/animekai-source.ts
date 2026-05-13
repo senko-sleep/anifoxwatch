@@ -384,7 +384,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
         return (decrypted.sources as Array<{ file?: string; type?: string }>).map((s): VideoSource => {
             let url = s.file ?? '';
             // Fix dead Megaup CDN domains returned by the API
-            url = url.replace(/(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link|shop21pro|burntburst45|zone30data|cdn31link|cdn32media|site33host|app34cdn)\.(site|store|click|buzz)/gi, 'megaup.cc');
+            url = url.replace(/(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media)\d+(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop)/gi, 'megaup.cc');
             
             return {
                 url,

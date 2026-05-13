@@ -360,18 +360,10 @@ export const VideoPlayer = ({
         }
       });
 
-      hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
-        playerLog('info', `Fragment loaded`, {
-          sn: data.frag.sn,
-          duration: data.frag.duration?.toFixed(2) + 's',
-          size: (data.frag.stats.total / 1024).toFixed(1) + 'KB'
-        });
-      });
-
-      // Track repeated fragParsingError — ad-poisoned streams produce these
-      // endlessly because the segments are images/ad blobs, not MPEG-TS.
-      let fragParseErrorCount = 0;
-      const FRAG_PARSE_ERROR_THRESHOLD = 3;
+      // Track repeated fragLoadError — if CDN segments keep failing (502s from
+      // dead CDN subdomains like rjp.megaup.cc), escalate to server switch.
+      let fragLoadErrorCount = 0;
+      const FRAG_LOAD_ERROR_THRESHOLD = 4; // After 4 consecutive frag load failures, switch source
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         playerLog('error', 'HLS error', {
@@ -397,6 +389,21 @@ export const VideoPlayer = ({
           }
         }
 
+        // Track non-fatal fragLoadError (e.g. proxy 502 on segments)
+        // Reset counter on successful frag load
+        if (data.details === 'fragLoadError' || data.details === 'fragLoadTimeOut') {
+          fragLoadErrorCount++;
+          playerLog('warn', `fragLoadError count: ${fragLoadErrorCount}/${FRAG_LOAD_ERROR_THRESHOLD}`);
+
+          if (fragLoadErrorCount >= FRAG_LOAD_ERROR_THRESHOLD) {
+            playerLog('error', 'Too many fragment load errors — CDN segments unreachable. Requesting source switch.');
+            hls.destroy();
+            setError('Video segments cannot be loaded (CDN error). Switching to another server…');
+            onError?.('frag_load_error');
+            return;
+          }
+        }
+
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
@@ -404,8 +411,16 @@ export const VideoPlayer = ({
                 setError('Failed to load video manifest. The stream may be unavailable.');
                 onError?.('manifest_load_error');
               } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
-                playerLog('warn', 'Fragment load error, attempting recovery via startLoad');
-                hls.startLoad();
+                // If we've already had many frag load errors, don't keep retrying
+                if (fragLoadErrorCount >= 4) {
+                  playerLog('error', 'Fatal frag load error after repeated failures — requesting source switch');
+                  hls.destroy();
+                  setError('Cannot load video segments. Switching to another server…');
+                  onError?.('frag_load_error');
+                } else {
+                  playerLog('warn', 'Fragment load error, attempting recovery via startLoad');
+                  hls.startLoad();
+                }
               } else {
                 playerLog('warn', 'Network error, attempting recovery via startLoad');
                 hls.startLoad();
@@ -430,6 +445,16 @@ export const VideoPlayer = ({
               break;
           }
         }
+      });
+
+      // Reset frag load error counter on successful fragment load
+      hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
+        fragLoadErrorCount = 0; // Reset on success
+        playerLog('info', `Fragment loaded`, {
+          sn: data.frag.sn,
+          duration: data.frag.duration?.toFixed(2) + 's',
+          size: (data.frag.stats.total / 1024).toFixed(1) + 'KB'
+        });
       });
 
       hlsRef.current = hls;

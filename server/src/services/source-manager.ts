@@ -1083,6 +1083,7 @@ export class SourceManager {
             { prefix: 'watchhentai-series/', source: 'WatchHentai' },
             { prefix: 'watchhentai-videos/', source: 'WatchHentai' },
             { prefix: 'animeflv-', source: 'AnimeFLV' },
+            { prefix: 'aniwaves-', source: 'Aniwaves' },
         ];
 
         for (const { prefix, source } of prefixes) {

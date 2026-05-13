@@ -403,12 +403,12 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
     // Exception: Megaup use .jpg/.png/.gif for real video segments to bypass blocks
     const domain = new URL(originalUrl).hostname.toLowerCase();
     const isMegaup = domain.includes('megaup') || 
-                     /(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link|shop21pro|burntburst45|zone30data|cdn31link|cdn32media|site33host|app34cdn)\.(site|store|click|buzz)/i.test(domain) ||
+                     /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media)\d+(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop)/i.test(domain) ||
                      /rrr\./i.test(domain);
     if (isMegaup) return false;
     
     // Also check if segments themselves are from megaup CDN
-    const hasMegaupSegments = segmentUrls.some(u => /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst/i.test(u));
+    const hasMegaupSegments = segmentUrls.some(u => /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst|xm8/i.test(u));
     if (hasMegaupSegments) return false;
 
     // Use common ad extensions for segment-level detection
@@ -683,11 +683,46 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         const tryResolve = () => {
             if (resolved) return;
 
-            if (dubResults.length > 0) {
+            // Score streams — prefer sources that DON'T use megaup CDN (which is
+            // frequently dead/403). Higher score = better.
+            const scoreCdnReliability = (result: any): number => {
+                const urls: string[] = (result?.sources || []).map((s: any) => s.url || '');
+                const firstUrl = urls[0] || '';
+                // megaup CDN (rjp.megaup.cc, rrr.megaup.cc, etc.) is unreliable
+                if (/megaup\.(cc|nl|live|to)/.test(firstUrl) || /web24code\.site|cdn31link\.site/.test(firstUrl)) return 0;
+                // Non-megaup CDNs (burntburst, echovideo, gogoanime etc) are reliable
+                return 10;
+            };
+
+            // Sort candidates by CDN reliability
+            const sortedDub = [...dubResults].sort((a, b) => scoreCdnReliability(b) - scoreCdnReliability(a));
+
+            if (sortedDub.length > 0) {
+                const best = sortedDub[0];
+                const bestScore = scoreCdnReliability(best);
+
+                // If the best result uses a reliable CDN, resolve immediately
+                if (bestScore > 0) {
+                    resolved = true;
+                    if (timerHandle) clearTimeout(timerHandle);
+                    logger.info(`[STREAM] Preferred source found for ${episodeId}: ${best.source ?? 'unknown'} (score=${bestScore})`, { requestId });
+                    resolve(best);
+                    return;
+                }
+
+                // If all we have is megaup CDN and nothing better has arrived yet,
+                // wait a bit for non-megaup sources — but only if there are still
+                // pending attempts that might return a better source.
+                if (remainingDub > 0) {
+                    // Don't resolve yet — let other attempts finish
+                    return;
+                }
+
+                // All dub attempts done and only megaup. Use it as last resort.
                 resolved = true;
                 if (timerHandle) clearTimeout(timerHandle);
-                logger.info(`[STREAM] Dub source found for ${episodeId}`, { requestId });
-                resolve(dubResults[0]);
+                logger.warn(`[STREAM] Only megaup CDN available for ${episodeId}. Using as fallback.`, { requestId });
+                resolve(best);
                 return;
             }
 
@@ -896,10 +931,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     url = unwrapProxyTarget(url);
+
+    // Preserve the original URL before any rewrites — the remote proxy (Vercel)
+    // might have better connectivity to the original CDN domain.
+    const originalUrlBeforeRewrite = url;
     
     // Fix dead Megaup CDN domains (e.g. lgv.net22lab.site -> lgv.megaup.cc)
     // These often appear inside variant m3u8 playlists as absolute URLs.
-    url = url.replace(/(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link|shop21pro|burntburst45|zone30data|cdn31link|cdn32media|site33host|app34cdn)\.(site|store|click|buzz)/gi, 'megaup.cc');
+    url = url.replace(/(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media)\d+(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop)/gi, 'megaup.cc');
 
     if (!/^https?:\/\//i.test(url)) {
         res.status(400).json({ error: 'Invalid streaming URL' });
@@ -1019,6 +1058,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         'megaup-stream': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'hub26link': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
         'hub27link': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
+        'xm8.': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+        'pro25zone': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'rrr.': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'gogocdn': { referer: 'https://gogoanime.run/' },
         'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
@@ -1077,6 +1118,53 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         });
     };
 
+    /**
+     * CDN subdomain rotation: when a megaup CDN segment fails (e.g. rjp.megaup.cc 502),
+     * try alternative subdomains and base domains that are known to serve the same content.
+     */
+    const MEGAUP_SUBDOMAIN_ALTERNATIVES = ['rrr', 'xm8', 'prjp', 'cdn', 'stream', 'media', 'rjp'];
+    const MEGAUP_BASE_ALTERNATIVES = ['megaup.cc', 'megaup.nl', 'megaup.live', 'megaup.to'];
+    
+    const buildCdnRotationUrls = (failedUrl: string): string[] => {
+        if (!isMegaupDomain || isM3u8) return [];
+        try {
+            const u = new URL(failedUrl);
+            const parts = u.hostname.split('.');
+            if (parts.length < 3) return []; // No subdomain to rotate
+            
+            const currentSub = parts[0];
+            const currentBase = parts.slice(1).join('.');
+            const urls: string[] = [];
+
+            // 1. Try different subdomains on the current base domain
+            for (const sub of MEGAUP_SUBDOMAIN_ALTERNATIVES) {
+                if (sub === currentSub) continue;
+                const newUrl = new URL(failedUrl);
+                newUrl.hostname = `${sub}.${currentBase}`;
+                urls.push(newUrl.toString());
+            }
+
+            // 2. Try different base domains with the current subdomain
+            for (const base of MEGAUP_BASE_ALTERNATIVES) {
+                if (base === currentBase) continue;
+                const newUrl = new URL(failedUrl);
+                newUrl.hostname = `${currentSub}.${base}`;
+                urls.push(newUrl.toString());
+            }
+
+            // 3. Try cross-combinations (most reliable subdomains on most reliable base domains)
+            const commonSub = 'rrr';
+            for (const base of MEGAUP_BASE_ALTERNATIVES) {
+                if (base === currentBase && commonSub === currentSub) continue;
+                const newUrl = new URL(failedUrl);
+                newUrl.hostname = `${commonSub}.${base}`;
+                if (!urls.includes(newUrl.toString())) urls.push(newUrl.toString());
+            }
+
+            return urls;
+        } catch { return []; }
+    };
+
     for (let attempt = 0; attempt < refererCombos.length; attempt++) {
         const combo = refererCombos[attempt];
         const cachedProtocol = getProtocolCache(domain);
@@ -1090,12 +1178,30 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             lastProxyError = err;
             const errMsg = err instanceof Error ? err.message : String(err);
             const errCode = (err as NodeJS.ErrnoException).code;
+            const status = (err as any).response?.status;
             const isTlsError =
                 errCode === 'EPROTO' || errCode === 'ECONNRESET' || errCode === 'ECONNREFUSED' ||
                 errCode === 'CERT_REVOKED' ||
                 errMsg.includes('EPROTO') || errMsg.includes('wrong version number') ||
                 errMsg.includes('socket hang up') || errMsg.includes('alert protocol version') ||
                 errMsg.includes('revoked');
+
+            // CDN subdomain rotation for 403/502/503 or connection errors on megaup segment requests
+            // 403 = CDN access denied (common when segment tokens expire or CDN blocks region)
+            if (isMegaupDomain && isSegment && !isM3u8 && (status === 403 || status === 502 || status === 503 || errCode === 'ECONNREFUSED' || errCode === 'ECONNRESET')) {
+                const altUrls = buildCdnRotationUrls(url);
+                let rotationSuccess = false;
+                for (const altUrl of altUrls) {
+                    try {
+                        proxyResponse = await makeProxyRequest(altUrl, combo, false);
+                        const altDomain = new URL(altUrl).hostname;
+                        logger.info(`[PROXY] CDN rotation success: ${domain} → ${altDomain}`, { requestId });
+                        rotationSuccess = true;
+                        break;
+                    } catch { /* try next subdomain */ }
+                }
+                if (rotationSuccess) break;
+            }
 
             if (isTlsError && cachedProtocol !== 'http') {
                 logger.warn(`[PROXY] TLS error for ${domain} — trying relaxed TLS`, { requestId });
@@ -1132,21 +1238,36 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                         break; // Not HTTPS, so no HTTP fallback to try. Hard block.
                     }
                 }
+            } else if (status === 403 && isMegaupDomain) {
+                // CDN access denied — no referer will fix this. Break immediately.
+                logger.warn(`[PROXY] CDN 403 for ${domain}. Skipping remaining referer combos.`, { requestId });
+                break;
             } else if (errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' || errMsg.includes('timeout')) {
                 // Timeouts are network-level. Changing referer won't fix it.
                 logger.warn(`[PROXY] Network timeout for ${domain}. Skipping remaining combos.`, { requestId });
                 break;
             }
-            const status = (err as any).response?.status;
             logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed (${combo.referer}): ${errMsg}${status ? ` (Status: ${status})` : ''}`, { requestId });
             if (attempt < refererCombos.length - 1) await new Promise(r => setTimeout(r, 300));
         }
     }
 
     if (!proxyResponse) {
-        logger.info(`[PROXY] All local attempts failed for ${domain} — trying remote proxy`, { domain, requestId });
-        const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'Remote fallback');
-        if (!ok) {
+        // Try remote proxy with BOTH the rewritten URL and the original URL.
+        // The remote proxy (Vercel/Render) may have better network connectivity
+        // to the original CDN domain that's ISP-blocked locally.
+        const urlsToTry = [url];
+        if (originalUrlBeforeRewrite !== url) urlsToTry.push(originalUrlBeforeRewrite);
+
+        let remoteOk = false;
+        for (const tryUrl of urlsToTry) {
+            const tryDomain = (() => { try { return new URL(tryUrl).hostname; } catch { return domain; } })();
+            logger.info(`[PROXY] Trying remote proxy for ${tryDomain}`, { domain: tryDomain, requestId });
+            remoteOk = await forwardToRemoteProxy(res, tryUrl, refererParam, tryDomain, requestId, 'Remote fallback');
+            if (remoteOk) break;
+        }
+
+        if (!remoteOk) {
             const err = lastProxyError;
             const errMsg = err instanceof Error ? err.message : String(err);
             const errCode = (err as NodeJS.ErrnoException | undefined)?.code;
@@ -1189,7 +1310,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
-            const rewritten = rewriteM3u8Content(content, url, proxyBase, refererParam || refererCombos[0]?.referer);
+            // Normalize dead CDN domain aliases inside the manifest content itself.
+            // e.g. rjp.web24code.site → rjp.megaup.cc so the proxy rotation logic can handle failures.
+            const normalizedContent = content.replace(
+                /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media)\d+(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop)/gi,
+                'megaup.cc'
+            );
+
+            const rewritten = rewriteM3u8Content(normalizedContent, url, proxyBase, refererParam || refererCombos[0]?.referer);
             res.set('Content-Type', 'application/vnd.apple.mpegurl');
             res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
             res.set('Pragma', 'no-cache');

@@ -507,6 +507,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                 'lightningspark':{ referer: 'https://megacloud.blog/',   origin: 'https://megacloud.blog' },
                 'megacloud':    { referer: 'https://megacloud.blog/',    origin: 'https://megacloud.blog' },
                 'pro25zone':    { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
+                'xm8.':         { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'code29wave':   { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'net22lab':     { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'megaup':       { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
