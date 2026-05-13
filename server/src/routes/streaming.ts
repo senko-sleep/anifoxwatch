@@ -402,9 +402,14 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
     
     // Exception: Megaup use .jpg/.png/.gif for real video segments to bypass blocks
     const domain = new URL(originalUrl).hostname.toLowerCase();
-    const isMegaup = domain.includes('megaup.') || 
-                     /(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link|shop21pro|burntburst45)\.(site|store)/i.test(domain);
+    const isMegaup = domain.includes('megaup') || 
+                     /(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link|shop21pro|burntburst45|zone30data|cdn31link|cdn32media|site33host|app34cdn)\.(site|store|click|buzz)/i.test(domain) ||
+                     /rrr\./i.test(domain);
     if (isMegaup) return false;
+    
+    // Also check if segments themselves are from megaup CDN
+    const hasMegaupSegments = segmentUrls.some(u => /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst/i.test(u));
+    if (hasMegaupSegments) return false;
 
     // Use common ad extensions for segment-level detection
     // Use common non-video extensions for segment-level detection
@@ -894,7 +899,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     
     // Fix dead Megaup CDN domains (e.g. lgv.net22lab.site -> lgv.megaup.cc)
     // These often appear inside variant m3u8 playlists as absolute URLs.
-    url = url.replace(/(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link|shop21pro|burntburst45)\.(site|store)/gi, 'megaup.cc');
+    url = url.replace(/(web24code|lab27core|code29wave|net22lab|pro25zone|tech20hub|hub26link|hub27link|shop21pro|burntburst45|zone30data|cdn31link|cdn32media|site33host|app34cdn)\.(site|store|click|buzz)/gi, 'megaup.cc');
 
     if (!/^https?:\/\//i.test(url)) {
         res.status(400).json({ error: 'Invalid streaming URL' });
@@ -908,7 +913,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
     const domain = urlObj.hostname;
     const isM3u8 = url.includes('.m3u8');
-    const isSegment = url.includes('.ts') || url.includes('.m4s');
+    // Megaup CDNs use obfuscated extensions (.gif, .jpg, .png) for real video segments
+    const isMegaupDomain = /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst/i.test(domain);
+    const hasObfuscatedExt = /\.(gif|jpg|jpeg|png|webp)$/i.test(urlObj.pathname);
+    const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt);
     const isVideo = url.endsWith('.mp4');
 
     // Serve cached segments without hitting upstream
@@ -1045,6 +1053,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': combo.referer,
+            'Origin': combo.origin || combo.referer.replace(/\/$/, ''),
             'Connection': 'keep-alive',
         };
         if (req.headers.range) headers['Range'] = req.headers.range as string;
@@ -1053,12 +1062,15 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             ? { rejectUnauthorized: false, ciphers: 'DEFAULT:@SECLEVEL=0' }
             : undefined;
 
+        // Use shorter timeout for segments (they should be fast) vs manifests
+        const timeoutMs = (isSegment && !isM3u8) ? 15_000 : 30_000;
+
         return axios({
             method: 'get',
             url: targetUrl,
             responseType: 'stream',
             headers,
-            timeout: 30_000,
+            timeout: timeoutMs,
             maxRedirects: 5,
             validateStatus: (s: number) => s < 400,
             ...(agentOptions ? { httpsAgent: new https.Agent(agentOptions) } : {}),
