@@ -95,6 +95,18 @@ const DEAD_DOMAINS = new Set([
     'anitaku.so',
     'anix.to',
     'animesuge.to',
+    'code29wave.site',
+    'lab27core.site',
+    'net22lab.site',
+    'pro25zone.site',
+    'tech20hub.site',
+    'web24code.site',
+    'hub26link.site',
+    'hub27link.site',
+    'shop21pro.site',
+    'burntburst45.site',
+    'xm8.site',
+    'rrr.site',
 ]);
 
 /**
@@ -937,14 +949,6 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     url = unwrapProxyTarget(url);
 
-    // Preserve the original URL before any rewrites — the remote proxy (Vercel)
-    // might have better connectivity to the original CDN domain.
-    const originalUrlBeforeRewrite = url;
-    
-    // Fix dead Megaup CDN domains (e.g. lgv.net22lab.site -> lgv.megaup.cc)
-    // These often appear inside variant m3u8 playlists as absolute URLs.
-    url = url.replace(/(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi, 'megaup.cc');
-
     if (!/^https?:\/\//i.test(url)) {
         res.status(400).json({ error: 'Invalid streaming URL' });
         return;
@@ -956,9 +960,31 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         return;
     }
     const domain = urlObj.hostname;
+
+    // Check for dead domains BEFORE any rewrite to reject them immediately
+    if (isDeadDomain(url)) {
+        res.status(502).json({ error: 'Dead domain', reason: 'dead_domain', domain });
+        return;
+    }
+
+    // Preserve the original URL before any rewrites — the remote proxy (Vercel)
+    // might have better connectivity to the original CDN domain.
+    const originalUrlBeforeRewrite = url;
+
+    // Fix dead Megaup CDN domains by rewriting them to megaup.cc
+    // Pattern: sub.domain.tld where domain matches known dead patterns (e.g., code29wave.site)
+    // Example: p36.code29wave.site/path -> p36.megaup.cc/path
+    try {
+        const deadCdnMatch = domain.match(/^([a-z0-9]+)\.(code|lab|web|net|pro|tech|hub|shop|burnt|xm8|rrr)[\w-]*\.(site|click|buzz|online|top|xyz|store)$/i);
+        if (deadCdnMatch) {
+            url = `https://${deadCdnMatch[1]}.megaup.cc${urlObj.pathname}${urlObj.search}`;
+            urlObj = new URL(url); // Update urlObj after rewrite
+            logger.info(`[PROXY] Rewrote dead CDN domain: ${domain} -> ${urlObj.hostname}`, { requestId });
+        }
+    } catch { /* not a valid URL yet, will fail validation later */ }
     const isM3u8 = url.includes('.m3u8');
-    // Megaup CDNs use obfuscated extensions (.gif, .jpg, .png) for real video segments
-    const isMegaupDomain = /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst|xm8|rrr\.|rrr\d+/i.test(domain);
+    // Megaup CDN uses obfuscated extensions (.gif, .jpg, .png) for real video segments
+    const isMegaupDomain = /megaup\.(cc|nl|live|to)/i.test(domain);
     const hasObfuscatedExt = /\.(gif|jpg|jpeg|png|webp)$/i.test(urlObj.pathname);
     const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt);
     const isVideo = url.endsWith('.mp4');
@@ -1341,10 +1367,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             }
 
             // Normalize dead CDN domain aliases inside the manifest content itself.
-            // e.g. rjp.web24code.site → rjp.megaup.cc so the proxy rotation logic can handle failures.
+            // e.g. rjp.web24code.site/path → rjp.megaup.cc/path so the proxy rotation logic can handle failures.
             const normalizedContent = content.replace(
-                /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi,
-                'megaup.cc'
+                /https?:\/\/([a-z0-9-]+)\.(web\d*code|lab\d*core|code\d*wave|net\d*lab|pro\d*zone|tech\d*hub|hub\d*link|shop\d*pro|burnt\d*burst|xm8\d*|rrr\d*|rrr|xm8|web\d*|lab\d*|code\d*|net\d*|pro\d*|tech\d*|hub\d*|shop\d*|burnt\d*)\.(site|store|click|buzz|online|top|xyz|shop)\//gi,
+                'https://$1.megaup.cc/'
             );
 
             const rewritten = rewriteM3u8Content(normalizedContent, url, proxyBase, refererParam || refererCombos[0]?.referer);

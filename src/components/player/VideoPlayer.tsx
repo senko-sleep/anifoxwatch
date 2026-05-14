@@ -363,6 +363,7 @@ export const VideoPlayer = ({
       // Track repeated fragLoadError — if CDN segments keep failing (502s from
       // dead CDN subdomains like rjp.megaup.cc), escalate to server switch.
       let fragLoadErrorCount = 0;
+      let fragParseErrorCount = 0;
       const FRAG_LOAD_ERROR_THRESHOLD = 4; // After 4 consecutive frag load failures, switch source
 
       hls.on(Hls.Events.ERROR, (_, data) => {
