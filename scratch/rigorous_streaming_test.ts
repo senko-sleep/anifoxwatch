@@ -15,7 +15,7 @@ async function testEpisode(animeTitle: string, ep: any, attempt: number = 1): Pr
         const referer = streamData.headers?.Referer || streamData.headers?.referer || '';
         
         // 2. Proxy Manifest Test
-        const proxyUrl = `http://localhost:3001/api/stream/proxy?url=${encodeURIComponent(source.url)}&referer=${encodeURIComponent(referer)}`;
+        const proxyUrl = `http://localhost:3002/api/stream/proxy?url=${encodeURIComponent(source.url)}&referer=${encodeURIComponent(referer)}`;
         const resp = await axios.get(proxyUrl, { timeout: 15000 });
         
         if (resp.status !== 200) throw new Error(`Proxy manifest failed with ${resp.status}`);
@@ -45,7 +45,9 @@ async function testEpisode(animeTitle: string, ep: any, attempt: number = 1): Pr
         
         if (segmentUrl) {
             const proxiedSegment = segmentUrl.startsWith('http') ? segmentUrl : new URL(segmentUrl, proxyUrl).toString();
-            const segResp = await axios.get(proxiedSegment, { timeout: 15000, responseType: 'arraybuffer' });
+            // Ensure segment URL also points to the new proxy port if it was relative
+            const finalSegmentUrl = proxiedSegment.replace(':3001', ':3002');
+            const segResp = await axios.get(finalSegmentUrl, { timeout: 15000, responseType: 'arraybuffer' });
             if (segResp.status !== 200) throw new Error(`Segment fetch failed with ${segResp.status}`);
             console.log(`      [EP ${ep.number}] ✅ Pass (${segResp.data.byteLength} bytes)`);
         } else if (manifest.includes('#EXT-X-STREAM-INF')) {

@@ -1159,36 +1159,33 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const MEGAUP_SUBDOMAIN_ALTERNATIVES = ['rrr', 'xm8', 'cdn', 'stream'];
     const MEGAUP_BASE_ALTERNATIVES = ['megaup.cc', 'megaup.nl', 'megaup.to', 'megaup.live', 'megaup.net', 'megaup.org'];
     
+    // In-memory blacklist for failing mirrors (lasts 60s)
+    const mirrorBlacklist = new Map<string, number>();
+    const MIRROR_BLACKLIST_TTL = 60 * 1000;
+
     const buildCdnRotationUrls = (failedUrl: string): string[] => {
         if (!isMegaupDomain) return [];
-        // manifests can be rotated on megaup as they share the same tokens/paths
         try {
             const u = new URL(failedUrl);
             const parts = u.hostname.split('.');
-            if (parts.length < 3) return []; // No subdomain to rotate
-            
             const currentSub = parts[0];
             const currentBase = parts.slice(1).join('.');
-            const urls: string[] = [];
 
-            // 1. Try different subdomains on the current base domain (max 2)
-            const reliableSubs = MEGAUP_SUBDOMAIN_ALTERNATIVES.filter(s => s !== currentSub).slice(0, 2);
-            for (const sub of reliableSubs) {
-                const newUrl = new URL(failedUrl);
-                newUrl.hostname = `${sub}.${currentBase}`;
-                urls.push(newUrl.toString());
-            }
-
-            // 2. Try the most reliable subdomain on different base domains
-            const commonSub = 'rrr';
+            const alternatives: string[] = [];
             for (const base of MEGAUP_BASE_ALTERNATIVES) {
-                if (base === currentBase) continue;
-                const newUrl = new URL(failedUrl);
-                newUrl.hostname = `${commonSub}.${base}`;
-                if (!urls.includes(newUrl.toString())) urls.push(newUrl.toString());
-            }
+                for (const sub of MEGAUP_SUBDOMAIN_ALTERNATIVES) {
+                    const altHostname = `${sub}.${base}`;
+                    if (altHostname === u.hostname) continue;
+                    
+                    // Skip blacklisted mirrors
+                    if ((mirrorBlacklist.get(altHostname) || 0) > Date.now()) continue;
 
-            return urls.slice(0, 5); // Limit total mirrors to prevent spamming
+                    const newUrl = new URL(failedUrl);
+                    newUrl.hostname = altHostname;
+                    alternatives.push(newUrl.toString());
+                }
+            }
+            return alternatives.sort(() => Math.random() - 0.5).slice(0, 5);
         } catch { return []; }
     };
 
@@ -1254,8 +1251,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                         rotationSuccess = true;
                         break;
                     } catch (altErr: any) {
+                        const altDomain = new URL(altUrl).hostname;
                         const altStatus = altErr.response?.status;
-                        logger.warn(`[PROXY] Rotation mirror ${new URL(altUrl).hostname} failed: ${altStatus || altErr.code || altErr.message}`, { requestId });
+                        mirrorBlacklist.set(altDomain, Date.now() + MIRROR_BLACKLIST_TTL);
+                        logger.warn(`[PROXY] Rotation mirror ${altDomain} failed (${altStatus || altErr.code}) — blacklisting`, { requestId });
                     }
                 }
                 if (rotationSuccess) break;
