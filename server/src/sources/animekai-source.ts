@@ -384,7 +384,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
         return (decrypted.sources as Array<{ file?: string; type?: string }>).map((s): VideoSource => {
             let url = s.file ?? '';
             // Fix dead Megaup CDN domains returned by the API
-            url = url.replace(/(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media)\d+(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop)/gi, 'megaup.cc');
+            url = url.replace(/(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi, 'megaup.cc');
             
             return {
                 url,
@@ -541,12 +541,17 @@ export class AnimeKaiSource extends BaseAnimeSource {
             const mod = await import('@consumet/extensions');
             const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
 
-            // Resolve bare anime slug → correct episode ID using episodeNum when available
-            if (!isConsumetEpisodeId && !isWatchEpisodeId) {
+            // Resolve bare anime slug → correct episode ID using episodeNum when available.
+            // If the request is for DUB but we have a Consumet episode ID (which contains a token),
+            // the token might be specifically for the SUB stream. We MUST re-resolve the episode
+            // to get the correct DUB token, otherwise it will just serve the SUB stream.
+            if ((!isConsumetEpisodeId && !isWatchEpisodeId) || (category === 'dub' && isConsumetEpisodeId)) {
+                // If it's a consumet ID, extract the base slug
+                const searchSlug = isConsumetEpisodeId ? rawEpisodeId.split('$ep=')[0] : rawEpisodeId;
                 try {
                     const infoTimeoutMs = options?.timeout ?? 25_000;
                     const info = await Promise.race([
-                        p.fetchAnimeInfo(rawEpisodeId, subOrDub),
+                        p.fetchAnimeInfo(searchSlug, subOrDub),
                         new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), infoTimeoutMs))
                     ]);
                     if (info?.episodes?.length > 0) {

@@ -19,7 +19,7 @@ const DEFAULT_REMOTE_STREAM_PROXY =
     'https://anifoxwatch.vercel.app/api/stream/proxy';
 
 /** How long to wait for a dub result before accepting a sub fallback (ms). */
-const DUB_PATIENCE_MS = 18_000;
+const DUB_PATIENCE_MS = 5_000; // Reduced from 18s to 5s for faster fallback
 
 /** Global per-request timeout safety net (ms). */
 const GLOBAL_TIMEOUT_MS = 25_000;
@@ -169,7 +169,7 @@ const CDN_CONFIGS: Array<{ pattern: RegExp; configs: CdnCombo[] }> = [
     { pattern: /gogocdn/i, configs: [{ referer: 'https://gogoanime.run/', origin: 'https://gogoanime.run' }, { referer: 'https://gogoanime.ai/', origin: 'https://gogoanime.ai' }] },
     { pattern: /aniwatchtv|megacloud|rapid-cloud/i, configs: [{ referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
     { pattern: /watchhentai/i, configs: [{ referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' }, { referer: 'https://hentai19.net/', origin: 'https://hentai19.net' }] },
-    { pattern: /megaup|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|burntburst45|rrr\./i, configs: [{ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' }, { referer: 'https://animekai.to/', origin: 'https://animekai.to' }, { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
+    { pattern: /megaup|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|burntburst45|rrr\.|xm8\./i, configs: [{ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' }, { referer: 'https://animekai.to/', origin: 'https://animekai.to' }, { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
 ];
 
 function getCdnConfigs(hostname: string): CdnCombo[] {
@@ -199,6 +199,7 @@ async function isDomainResolvable(hostname: string): Promise<boolean> {
         return true;
     } catch (error: any) {
         const unresolvable = ['ENOTFOUND', 'EAI_AGAIN', 'ENODATA'].includes(error.code);
+        if (unresolvable) logger.warn(`[PROXY] DNS lookup failed for ${hostname}: ${error.code}`);
         dnsCache.set(hostname, { resolvable: !unresolvable, checkedAt: Date.now() });
         return !unresolvable;
     }
@@ -401,14 +402,11 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
     if (segmentUrls.length === 0) return false;
     
     // Exception: Megaup use .jpg/.png/.gif for real video segments to bypass blocks
-    const domain = new URL(originalUrl).hostname.toLowerCase();
-    const isMegaup = domain.includes('megaup') || 
-                     /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media)\d+(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop)/i.test(domain) ||
-                     /rrr\./i.test(domain);
-    if (isMegaup) return false;
+    const isMegaupPattern = /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|live|cc|nl)/i.test(originalUrl);
+    if (isMegaupPattern) return false;
     
     // Also check if segments themselves are from megaup CDN
-    const hasMegaupSegments = segmentUrls.some(u => /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst|xm8/i.test(u));
+    const hasMegaupSegments = segmentUrls.some(u => /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst|xm8|rrr\.|rrr\d+/i.test(u));
     if (hasMegaupSegments) return false;
 
     // Use common ad extensions for segment-level detection
@@ -688,8 +686,13 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
             const scoreCdnReliability = (result: any): number => {
                 const urls: string[] = (result?.sources || []).map((s: any) => s.url || '');
                 const firstUrl = urls[0] || '';
-                // megaup CDN (rjp.megaup.cc, rrr.megaup.cc, etc.) is unreliable
-                if (/megaup\.(cc|nl|live|to)/.test(firstUrl) || /web24code\.site|cdn31link\.site/.test(firstUrl)) return 0;
+                const isDub = result?._category === 'dub' || result?.category === 'dub' || firstUrl.toLowerCase().includes('dub');
+                
+                // megaup CDN (rjp.megaup.cc, rrr.megaup.cc, etc.) is unreliable but often our only source for DUB
+                if (/megaup\.(cc|nl|live|to)/.test(firstUrl) || /web24code\.site|cdn31link\.site/.test(firstUrl)) {
+                    return isDub ? 8 : 0; // Give DUB a chance to resolve quickly
+                }
+                
                 // Non-megaup CDNs (burntburst, echovideo, gogoanime etc) are reliable
                 return 10;
             };
@@ -920,10 +923,12 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
  *   blocking. Supports Range requests for seeking.
  */
 router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
-    let url = req.query.url as string | undefined;
+    let url = (req.query.url || req.body.url) as string | undefined;
     const requestId = (req as any).id;
     const proxyBase = getProxyBaseUrl(req);
-    const refererParam = req.query.referer as string | undefined;
+    const refererParam = (req.query.referer || req.body.referer) as string | undefined;
+
+    if (url) logger.info(`[PROXY] Request: ${url.substring(0, 100)}${url.length > 100 ? '...' : ''} (Referer: ${refererParam})`, { requestId });
 
     if (!url || typeof url !== 'string') {
         res.status(400).json({ error: 'URL parameter is required' });
@@ -938,7 +943,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     
     // Fix dead Megaup CDN domains (e.g. lgv.net22lab.site -> lgv.megaup.cc)
     // These often appear inside variant m3u8 playlists as absolute URLs.
-    url = url.replace(/(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media)\d+(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop)/gi, 'megaup.cc');
+    url = url.replace(/(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi, 'megaup.cc');
 
     if (!/^https?:\/\//i.test(url)) {
         res.status(400).json({ error: 'Invalid streaming URL' });
@@ -953,7 +958,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const domain = urlObj.hostname;
     const isM3u8 = url.includes('.m3u8');
     // Megaup CDNs use obfuscated extensions (.gif, .jpg, .png) for real video segments
-    const isMegaupDomain = /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst/i.test(domain);
+    const isMegaupDomain = /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst|xm8|rrr\.|rrr\d+/i.test(domain);
     const hasObfuscatedExt = /\.(gif|jpg|jpeg|png|webp)$/i.test(urlObj.pathname);
     const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt);
     const isVideo = url.endsWith('.mp4');
@@ -1059,7 +1064,6 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         'hub26link': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
         'hub27link': { referer: 'https://animekai.to/', origin: 'https://animekai.to' },
         'xm8.': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
-        'pro25zone': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'rrr.': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'gogocdn': { referer: 'https://gogoanime.run/' },
         'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
@@ -1122,7 +1126,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
      * CDN subdomain rotation: when a megaup CDN segment fails (e.g. rjp.megaup.cc 502),
      * try alternative subdomains and base domains that are known to serve the same content.
      */
-    const MEGAUP_SUBDOMAIN_ALTERNATIVES = ['rrr', 'xm8', 'prjp', 'cdn', 'stream', 'media', 'rjp'];
+    const MEGAUP_SUBDOMAIN_ALTERNATIVES = ['rrr', 'xm8', 'prjp', 'cdn', 'stream', 'media', 'rjp', 'rrr1', 'rrr2', 'rrr3', 'xm8-1', 'xm8-2'];
     const MEGAUP_BASE_ALTERNATIVES = ['megaup.cc', 'megaup.nl', 'megaup.live', 'megaup.to'];
     
     const buildCdnRotationUrls = (failedUrl: string): string[] => {
@@ -1175,10 +1179,31 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             logger.info(`[PROXY] Success on attempt ${attempt + 1} (${combo.referer})`, { domain, requestId });
             break;
         } catch (err: unknown) {
+            const status = (err as any).response?.status;
+            // If it failed with Range header, try once more WITHOUT Range for segments
+            if (req.headers.range && isSegment && !isM3u8 && (status === 502 || status === 403 || status === 416)) {
+                try {
+                    logger.warn(`[PROXY] Segment failed with Range (${status}) — retrying without Range`, { requestId });
+                    proxyResponse = await axios({
+                        method: 'get',
+                        url: url,
+                        responseType: 'stream',
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                            'Referer': combo.referer,
+                            'Origin': combo.origin || combo.referer.replace(/\/$/, ''),
+                        },
+                        timeout: 15000,
+                        validateStatus: (s) => s < 400
+                    });
+                    logger.info(`[PROXY] Success without Range for ${domain}`, { requestId });
+                    break;
+                } catch { /* proceed to normal rotation */ }
+            }
+            
             lastProxyError = err;
             const errMsg = err instanceof Error ? err.message : String(err);
             const errCode = (err as NodeJS.ErrnoException).code;
-            const status = (err as any).response?.status;
             const isTlsError =
                 errCode === 'EPROTO' || errCode === 'ECONNRESET' || errCode === 'ECONNREFUSED' ||
                 errCode === 'CERT_REVOKED' ||
@@ -1190,15 +1215,20 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             // 403 = CDN access denied (common when segment tokens expire or CDN blocks region)
             if (isMegaupDomain && isSegment && !isM3u8 && (status === 403 || status === 502 || status === 503 || errCode === 'ECONNREFUSED' || errCode === 'ECONNRESET')) {
                 const altUrls = buildCdnRotationUrls(url);
+                logger.warn(`[PROXY] Megaup error ${status || errCode} on ${domain} — attempting rotation through ${altUrls.length} mirrors`, { requestId });
                 let rotationSuccess = false;
                 for (const altUrl of altUrls) {
                     try {
-                        proxyResponse = await makeProxyRequest(altUrl, combo, false);
                         const altDomain = new URL(altUrl).hostname;
+                        logger.info(`[PROXY] Trying rotation mirror: ${altDomain}`, { requestId });
+                        proxyResponse = await makeProxyRequest(altUrl, combo, false);
                         logger.info(`[PROXY] CDN rotation success: ${domain} → ${altDomain}`, { requestId });
                         rotationSuccess = true;
                         break;
-                    } catch { /* try next subdomain */ }
+                    } catch (altErr: any) {
+                        const altStatus = altErr.response?.status;
+                        logger.warn(`[PROXY] Rotation mirror ${new URL(altUrl).hostname} failed: ${altStatus || altErr.code || altErr.message}`, { requestId });
+                    }
                 }
                 if (rotationSuccess) break;
             }
@@ -1313,7 +1343,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             // Normalize dead CDN domain aliases inside the manifest content itself.
             // e.g. rjp.web24code.site → rjp.megaup.cc so the proxy rotation logic can handle failures.
             const normalizedContent = content.replace(
-                /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media)\d+(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop)/gi,
+                /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi,
                 'megaup.cc'
             );
 
@@ -1466,6 +1496,17 @@ router.options('/proxy', (_req: Request, res: Response) => {
     res.set('Access-Control-Allow-Headers', 'Range, Origin, Accept');
     res.set('Access-Control-Max-Age', '86400');
     res.sendStatus(204);
+});
+
+/**
+ * @route POST /api/stream/proxy
+ * @description Proxy HLS manifests and media segments via POST (for long URLs).
+ */
+router.post('/proxy', (req, res, next) => {
+    // The GET handler now handles both query and body
+    const getHandler = router.stack.find(s => s.route?.path === '/proxy' && (s.route as any)?.methods?.get)?.handle;
+    if (getHandler) return getHandler(req, res, next);
+    res.status(404).end();
 });
 
 export default router;

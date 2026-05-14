@@ -335,12 +335,13 @@ export class GogoanimeSource extends BaseAnimeSource {
             if (response.status === 200) {
                 const $ = cheerio.load(response.data);
                 $('.anime_muti_link ul li').each((i, el) => {
-                    const serverName = $(el).find('a').text().trim();
+                    const serverName = $(el).find('a').text().trim().replace('Choose this server', '').trim();
+                    const isDub = $(el).find('.iconlayer-DUB').length > 0;
                     if (serverName) {
                         servers.push({
                             name: serverName,
                             url: '',
-                            type: 'sub'
+                            type: isDub ? 'dub' : 'sub'
                         });
                     }
                 });
@@ -396,7 +397,7 @@ export class GogoanimeSource extends BaseAnimeSource {
 
         // ── DUB: Try dedicated dub URL first ──────────────────────────────
         if (isDubRequest) {
-            // Gogoanime hosts dub episodes at a separate slug: <anime>-dub-episode-<N>
+            // 1) Native Gogoanime slug: <anime>-episode-<N> → <anime>-dub-episode-<N>
             const dubEpId = epId.replace(/-episode-(\d+)$/, '-dub-episode-$1');
             if (dubEpId !== epId) {
                 const dubResult = await this.tryDubUrl(dubEpId, options);
@@ -410,9 +411,46 @@ export class GogoanimeSource extends BaseAnimeSource {
                 }
             }
 
-            // Fallback: search for a separate "(Dub)" entry on Gogoanime
+            // 2) Cross-source ID (HiAnime slug$ep=N$token=..., AnimeKai compound, etc.)
+            //    Extract the anime slug and episode number, then try Gogoanime-native dub URLs.
+            if (dubEpId === epId) {
+                // Extract slug: strip tokens, params, suffixes
+                let crossSlug = epId
+                    .replace(/^(animekai-|miruro-|kaido-)/i, '')
+                    .replace(/\$token=.+$/, '')       // strip token
+                    .replace(/\$ep=\d+$/, '')          // strip $ep=N
+                    .replace(/\?ep=.+$/, '')           // strip ?ep=TOKEN
+                    .replace(/-[a-z0-9]*[0-9][a-z0-9]*$/, ''); // strip HiAnime hash suffix (e.g. -8lj0, ensures at least one digit)
+                // Extract episode number from the original ID
+                let crossEpNum = '1';
+                const epMatch = episodeId.match(/\$ep=(\d+)/) || episodeId.match(/[?&]ep=(\d+)/) || episodeId.match(/-episode-(\d+)/);
+                if (epMatch) crossEpNum = epMatch[1];
+
+                // Try multiple slug patterns for dub
+                const slugVariants = [
+                    `${crossSlug}-dub-episode-${crossEpNum}`,
+                    `${crossSlug}-episode-${crossEpNum}`,  // some dub entries don't have "-dub-" in the URL
+                ];
+                for (const variant of slugVariants) {
+                    console.log(`   🔍 Gogoanime: Trying cross-source dub URL: ${variant}`);
+                    const dubResult = await this.tryDubUrl(variant, options);
+                    if (dubResult.sources.length > 0) {
+                        logger.info(`Gogoanime: Dub stream found via cross-source URL: ${variant}`, undefined, this.name);
+                        return {
+                            ...dubResult,
+                            category: 'dub',
+                            audioLanguage: 'en',
+                        } as StreamingData & { category: 'dub'; audioLanguage: 'en' };
+                    }
+                }
+            }
+
+            // 3) Fallback: search for a separate "(Dub)" entry on Gogoanime
             const animeTitle = epId
                 .replace(/-episode-\d+$/, '')
+                .replace(/\$.*$/, '')          // strip AnimeKai tokens
+                .replace(/\?.*$/, '')          // strip HiAnime params
+                .replace(/-[a-z0-9]{4,5}$/, '') // strip hash suffix
                 .replace(/-/g, ' ')
                 .replace(/\b\w/g, c => c.toUpperCase());
             const searchResult = await this.searchForDubVersion(animeTitle, epId, options);
@@ -420,6 +458,17 @@ export class GogoanimeSource extends BaseAnimeSource {
                 logger.info(`Gogoanime: Dub stream found via title search`, undefined, this.name);
                 return {
                     ...searchResult,
+                    category: 'dub',
+                    audioLanguage: 'en',
+                } as StreamingData & { category: 'dub'; audioLanguage: 'en' };
+            }
+
+            // 4) Fallback: try to extract dub from the regular episode page
+            const regularDubResult = await this.extractDubFromRegularPage(epId, options);
+            if (regularDubResult.sources.length > 0) {
+                logger.info(`Gogoanime: Dub stream found embedded in regular page`, undefined, this.name);
+                return {
+                    ...regularDubResult,
                     category: 'dub',
                     audioLanguage: 'en',
                 } as StreamingData & { category: 'dub'; audioLanguage: 'en' };
@@ -463,8 +512,16 @@ export class GogoanimeSource extends BaseAnimeSource {
 
             const embedUrls: Array<{ name: string; url: string }> = [];
             $('.anime_muti_link ul li, .anime_video_body_watch_items li').each((_, el) => {
-                const dataVideo = $(el).find('a').attr('data-video') || '';
+                const a = $(el).find('a');
+                const dataVideo = a.attr('data-video') || '';
                 const name = $(el).text().replace('Choose this server', '').trim();
+                const isDub = a.find('.iconlayer-DUB').length > 0;
+                
+                // If it's a DUB request, only take DUB servers. 
+                // If it's a SUB request, only take SUB servers (unless no SUB servers exist).
+                if (isDubRequest && !isDub) return;
+                if (!isDubRequest && isDub) return;
+
                 if (dataVideo) {
                     const url = dataVideo.startsWith('http') ? dataVideo : `https:${dataVideo}`;
                     embedUrls.push({ name, url });
@@ -649,7 +706,13 @@ export class GogoanimeSource extends BaseAnimeSource {
                 
                 if (dubAnimeId) {
                     // Try to get the episode from the dub version
-                    const epNum = originalEpId.match(/-episode-(\d+)/)?.[1] || '1';
+                    // Handle common ID formats: anime-episode-N, anime$ep=N, anime?ep=N
+                    let epNum = '1';
+                    const epMatch = originalEpId.match(/-episode-(\d+)/) || 
+                                   originalEpId.match(/\$ep=(\d+)/) || 
+                                   originalEpId.match(/[?&]ep=(\d+)/);
+                    if (epMatch) epNum = epMatch[1];
+                    
                     const dubEpId = `${dubAnimeId}-episode-${epNum}`;
                     const dubResult = await this.tryDubUrl(dubEpId, options);
                     if (dubResult.sources.length > 0) {
@@ -672,16 +735,34 @@ export class GogoanimeSource extends BaseAnimeSource {
         // Extract embed URLs
         const embedUrls: Array<{ name: string; url: string }> = [];
         $('.anime_muti_link ul li, .anime_video_body_watch_items li').each((_, el) => {
-            const dataVideo = $(el).find('a').attr('data-video') || '';
+            const a = $(el).find('a');
+            const dataVideo = a.attr('data-video') || '';
             const name = $(el).text().replace('Choose this server', '').trim();
+            const isDub = a.find('.iconlayer-DUB').length > 0;
+            
+            // This function is often called for DUB specific paths, but let's be safe.
+            // If the page contains both, we should prefer DUB if it was requested.
+            // Since this helper doesn't know the requested category directly, 
+            // but is mostly used for DUB fallbacks, we'll check if a DUB icon exists.
+            
             if (dataVideo) {
                 const url = dataVideo.startsWith('http') ? dataVideo : `https:${dataVideo}`;
-                embedUrls.push({ name, url });
+                // Keep track of which ones are DUB
+                (embedUrls as any).push({ name, url, isDub });
             }
         });
         
+        // Prioritize DUB embeds if we are in a DUB-seeking path
+        const prioritizedEmbeds = [
+            ...(embedUrls as any).filter((e: any) => e.isDub),
+            ...(embedUrls as any).filter((e: any) => !e.isDub)
+        ];
+
         // Extract m3u8 from embed URLs
-        for (const embed of embedUrls) {
+        // If the episode slug contains '-dub-', the entire page IS the dub content —
+        // skip audio validation (HLS manifests rarely contain language metadata for anime).
+        const isDubPage = epId.includes('-dub-');
+        for (const embed of prioritizedEmbeds) {
             try {
                 const embedResp = await axios.get(embed.url, {
                     signal: options?.signal,
@@ -698,15 +779,29 @@ export class GogoanimeSource extends BaseAnimeSource {
                     .filter(u => u.startsWith('http') && !u.includes('thumb') && !u.includes('poster'));
                 
                 if (m3u8Matches.length > 0) {
-                    // Validate this is actually a dub stream
-                    const isDubStream = await this.validateDubStream(m3u8Matches[0], options);
-                    if (isDubStream) {
-                        sources.push({
-                            url: m3u8Matches[0],
-                            quality: 'auto',
-                            isM3U8: true,
-                        });
-                        break; // Found a valid dub stream
+                    if (isDubPage) {
+                        // Trust the dub URL — the page is dedicated dub content
+                        // Skip ad-poison check too; dub pages from Gogoanime are reliable
+                        const isPoisoned = await this.isAdPoisonedM3u8(m3u8Matches[0], options);
+                        if (!isPoisoned) {
+                            sources.push({
+                                url: m3u8Matches[0],
+                                quality: 'auto',
+                                isM3U8: true,
+                            });
+                            break;
+                        }
+                    } else {
+                        // Non-dub page: validate this is actually a dub stream
+                        const isDubStream = await this.validateDubStream(m3u8Matches[0], options);
+                        if (isDubStream) {
+                            sources.push({
+                                url: m3u8Matches[0],
+                                quality: 'auto',
+                                isM3U8: true,
+                            });
+                            break;
+                        }
                     }
                 }
             } catch {
@@ -768,8 +863,14 @@ export class GogoanimeSource extends BaseAnimeSource {
             // Extract embed URLs using the same logic as regular streaming
             const embedUrls: Array<{ name: string; url: string }> = [];
             $('.anime_muti_link ul li, .anime_video_body_watch_items li').each((_, el) => {
-                const dataVideo = $(el).find('a').attr('data-video') || '';
+                const a = $(el).find('a');
+                const dataVideo = a.attr('data-video') || '';
                 const name = $(el).text().replace('Choose this server', '').trim();
+                const isDub = a.find('.iconlayer-DUB').length > 0;
+                
+                // For this function (extractDubFromRegularPage), we specifically want DUB servers
+                if (!isDub) return;
+
                 if (dataVideo) {
                     const url = dataVideo.startsWith('http') ? dataVideo : `https:${dataVideo}`;
                     embedUrls.push({ name, url });

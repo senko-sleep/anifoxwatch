@@ -3020,6 +3020,17 @@ export class SourceManager {
         // Dynamic ordering: score each source by success rate + latency, then fall back
         // to static registration order for sources with no data yet.
         const STREAM_PRIORITY = [...REGISTERED_SOURCE_NAMES];
+        
+        // Prioritize AllAnime for DUB requests since it explicitly tracks sub/dub availability
+        // and provides highly reliable dub filtering, unlike AnimeKai which often returns sub labeled as dub.
+        if (category === 'dub') {
+            const allAnimeIdx = STREAM_PRIORITY.indexOf('AllAnime');
+            if (allAnimeIdx > -1) {
+                STREAM_PRIORITY.splice(allAnimeIdx, 1);
+                STREAM_PRIORITY.unshift('AllAnime'); // Put AllAnime first for dubs!
+            }
+        }
+        
         const scoreSource = (name: string): number => {
             let score = 0;
             const rate = this.sourceSuccessRates.get(name);
@@ -3038,15 +3049,23 @@ export class SourceManager {
             // Static priority tiebreaker (lower index = slight bonus)
             const idx = STREAM_PRIORITY.indexOf(name);
             if (idx >= 0) score += (STREAM_PRIORITY.length - idx);
+            
+            // Absolute priority override for AllAnime dubs
+            if (category === 'dub' && name === 'AllAnime') {
+                score += 500; 
+            }
+            // Absolute penalty for AnimeKai dubs (false positives)
+            if (category === 'dub' && name === 'AnimeKai') {
+                score -= 100;
+            }
+            
             return score;
         };
         const ordered = [...sourcesToTry].sort((a, b) => scoreSource(b.name) - scoreSource(a.name));
         let finalSources = ordered;
 
-        // HiAnime/Miruro embed ids (`slug?ep=<token>`) should not fan out to every scraper
         if (isHianimeStyleEpisodeId(episodeId)) {
             const allow = new Set<string>([
-                'AllAnime',
                 'AnimeKai',
                 'Gogoanime',
                 'AnimePahe',
@@ -3055,21 +3074,40 @@ export class SourceManager {
             finalSources = finalSources.filter((s) => allow.has(s.name));
         }
 
-        // AnimeKai compound ids (`animekai-slug$ep=N$token=...`) cannot be reused as-is across
-        // other scrapers (they'll waste time 404ing/timeouting). For these, prefer:
+        // AnimeKai compound ids (`animekai-slug$ep=N$token=...`) prefer:
         // - direct AnimeKai extraction
         // - cross-source title-based fallback (uses episodeNum)
         const isAnimeKaiCompound =
             episodeId.toLowerCase().startsWith('animekai-') &&
             (episodeId.includes('$token=') || episodeId.includes('$ep='));
+        
+        // If it's an AnimeKai compound ID, we MUST include AnimeKai, 
+        // but we don't necessarily want to exclude others if we have a fallback strategy.
+        // However, other scrapers can't use this ID directly.
         if (isAnimeKaiCompound) {
-            finalSources = finalSources.filter((s) => s.name === 'AnimeKai');
+            const kai = finalSources.find(s => s.name === 'AnimeKai');
+            if (kai) {
+                // Ensure AnimeKai is first
+                finalSources = [kai, ...finalSources.filter(s => s.name !== 'AnimeKai')];
+            }
         }
 
         console.log(`   📋 Sources to try (priority-ordered): ${finalSources.map(s => s.name).join(', ')}`);
 
         const buildStreamingPickOrder = (_epId: string): string[] => {
-            return [...finalSources.map(s => s.name), 'cross-source'];
+            const sources = finalSources.map(s => s.name);
+            
+            // For DUB on a HiAnime ID: AnimeKai's DUB token re-resolution is fast (~3s)
+            // and reliable after the fix. Keep it high-priority. Cross-source is a fallback
+            // for when AnimeKai fails (Aniwaves/Gogoanime title search).
+            if (category === 'dub' && isHianimeStyleEpisodeId(_epId)) {
+                // Prioritize fixed AnimeKai DUB resolution and Gogoanime/Aniwaves fallbacks
+                const preferred = ['AnimeKai', 'Gogoanime', 'Aniwaves', 'AllAnime'];
+                const others = sources.filter(s => !preferred.includes(s));
+                return [...preferred, ...others, 'cross-source'];
+            }
+            
+            return [...sources, 'cross-source'];
         };
 
         if (finalSources.length === 0) {
@@ -3396,8 +3434,8 @@ export class SourceManager {
         // Registered, currently enabled sources to try for cross-source fallback.
         // Keep dead/unregistered sources out of this path so fallback starts useful
         // work immediately instead of waiting on sources we already disabled.
-        const dubSources = ['AnimeHeaven', '9Anime', 'Gogoanime', 'AllAnime', 'AnimeKai', 'Aniwaves'];
-        const subSources = ['Gogoanime', 'AllAnime', 'AnimeKai', 'Aniwaves'];
+        const dubSources = ['Gogoanime', 'AnimeHeaven', '9Anime', 'AllAnime', 'AnimeKai', 'Aniwaves'];
+        const subSources = ['Gogoanime', 'AnimePahe', 'AllAnime', 'AnimeKai', 'Aniwaves'];
         const sourceNames = category === 'dub' ? dubSources : subSources;
         
         const consumetSources = sourceNames
@@ -3408,8 +3446,9 @@ export class SourceManager {
             consumetSources.map(async ({ name: srcName, src }) => {
                 // For dub category, try multiple search strategies
                 // Some sources use "Title dub", others "Title (Dub)", others have separate dub entries
+                const cleanTitle = title.replace(/\s+\d+(st|nd|rd|th)\s+season/i, '').replace(/\s+season\s+\d+/i, '').trim();
                 const searchTitles = category === 'dub'
-                    ? [`${title} dub`, `${title} (Dub)`, title.replace(/\s+season\s+\d+/i, '') + ' dub']
+                    ? [`${title} dub`, `${title} (Dub)`, `${cleanTitle} dub`, title]
                     : [title];
 
                 let searchResult: AnimeSearchResult | null = null;

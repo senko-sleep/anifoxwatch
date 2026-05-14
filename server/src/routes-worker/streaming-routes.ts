@@ -73,8 +73,14 @@ function isDeadDomain(url: string): boolean {
  * Rewrite m3u8 content to proxy all segment URLs
  */
 const rewriteM3u8Content = (content: string, originalUrl: string, proxyBase: string, referer?: string): string => {
+    // Normalize dead Megaup CDN domains inside the manifest content
+    const normalized = content.replace(
+        /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi,
+        'megaup.cc'
+    );
+
     const baseUrl = originalUrl.substring(0, originalUrl.lastIndexOf('/') + 1);
-    const lines = content.split('\n');
+    const lines = normalized.split('\n');
 
     return lines.map(line => {
         const trimmedLine = line.trim();
@@ -475,13 +481,16 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
         const url = body.url;
         if (!url) return c.json({ error: 'URL is required in request body' }, 400);
 
-        return handleProxyRequest(c, url);
+        return handleProxyRequest(c, url, body.referer);
     });
 
     // Shared proxy handler
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    async function handleProxyRequest(c: Context<any>, url: string) {
+    async function handleProxyRequest(c: Context<any>, rawUrl: string, bodyReferer?: string) {
         const proxyBase = getProxyBaseUrl(c);
+        
+        // Fix dead Megaup CDN domains (e.g. lgv.net22lab.site -> lgv.megaup.cc)
+        const url = rawUrl.replace(/(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi, 'megaup.cc');
 
         // Basic validation: require http(s) URL
         if (!/^https?:\/\//i.test(url)) {
@@ -491,7 +500,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
         // Extract domain and optional referer hint from query params
         const urlObj = new URL(url);
         const domain = urlObj.hostname;
-        const refererParam = c.req.query('referer');
+        const refererParam = bodyReferer || c.req.query('referer');
 
         if (isDeadDomain(url)) {
             return c.json({ error: 'Dead domain', reason: 'dead_domain', domain }, 502);
@@ -508,6 +517,7 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
                 'megacloud':    { referer: 'https://megacloud.blog/',    origin: 'https://megacloud.blog' },
                 'pro25zone':    { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'xm8.':         { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
+                'rrr.':         { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'code29wave':   { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'net22lab':     { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },
                 'megaup':       { referer: 'https://megaup.nl/',         origin: 'https://megaup.nl' },

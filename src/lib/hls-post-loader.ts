@@ -42,7 +42,8 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
           
           // Use POST request for long URLs (>1000 chars to be safe)
           if (actualUrl.length > 1000) {
-            this.loadViaPost(proxyBase, actualUrl, context, config, callbacks);
+            const referer = urlParams.get('referer') || '';
+            this.loadViaPost(proxyBase, actualUrl, referer, context, config, callbacks);
             return;
           }
         }
@@ -68,6 +69,7 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
   private loadViaPost(
     proxyUrl: string,
     actualUrl: string,
+    referer: string,
     context: Hls.LoaderContext,
     config: Hls.LoaderConfiguration,
     callbacks: Hls.LoaderCallbacks<Hls.LoaderContext>
@@ -124,7 +126,7 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
       callbacks.onTimeout(stats, context);
     };
 
-    // Send POST request with URL in body
-    xhr.send(JSON.stringify({ url: actualUrl }));
+    // Send POST request with URL and Referer in body
+    xhr.send(JSON.stringify({ url: actualUrl, referer }));
   }
 }
