@@ -4,9 +4,9 @@ import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js';
 
-const API_URL = 'https://api.allanime.day/api';
-const API_URL_ALT = 'https://allanime.day/api'; // alternate endpoint, less CAPTCHA-blocked
-const CDN_REFERER = 'https://allanime.day';
+const API_URL = 'https://api.allanime.to/api';
+const API_URL_ALT = 'https://allanime.to/api'; // alternate endpoint, less CAPTCHA-blocked
+const CDN_REFERER = 'https://allanime.to';
 // Mobile User-Agent bypasses the CAPTCHA gate on AllAnime's streaming GQL from cloud IPs
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 12; Pixel 6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Mobile Safari/537.36';
 

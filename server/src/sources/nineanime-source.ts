@@ -698,8 +698,7 @@ export class NineAnimeSource extends BaseAnimeSource {
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;
 
-        // Strip query params from episode ID
-        episodeId = episodeId.split('?')[0];
+        // Do not strip query params as NineAnime IDs use them for episode resolution
 
         if (!episodeId.includes('?ep=')) {
             return { sources: [], subtitles: [] };

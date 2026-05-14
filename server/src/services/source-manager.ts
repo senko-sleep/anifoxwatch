@@ -73,6 +73,8 @@ export class SourceManager {
     
     private sourceOrder: string[] = [...REGISTERED_SOURCE_NAMES];
 
+    // ============ SOURCE MANAGEMENT METHODS ============
+
     // Source capabilities mapping
     private sourceCapabilities: Map<string, SourceCapabilities> = new Map([
         ['AnimeHeaven', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
@@ -3013,6 +3015,12 @@ export class SourceManager {
 
         logger.streamingStart('unknown', episodeId, 'multi-source', { server, category });
 
+        // Ensure we have episode number for fallback matching
+        if (episodeNum === undefined) {
+            const m = /\$ep=(\d+)/i.exec(episodeId) || /\?ep=(\d+)/i.exec(episodeId) || /ep-(\d+)/i.exec(episodeId);
+            episodeNum = m ? parseInt(m[1], 10) : 1;
+        }
+
         // Determine primary source from episode ID
         const primarySource = this.getStreamingSource(episodeId);
         console.log(`   📡 Primary source: ${primarySource?.name || 'none'}`);
@@ -3159,16 +3167,16 @@ export class SourceManager {
         const allResults: RaceResult[] = [];
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
-            const GRACE_PERIOD = 3000; // Wait 3s for a higher-priority source after first success
-            // Title-search + episodes + extraction often exceeds 10s (especially AnimeFLV/AllAnime),
-            // so allow a longer window; this is the main path for AnimeKai compound IDs.
-            const CROSS_SOURCE_FALLBACK_MAX_MS = 18_000;
-            // Some sources only yield embed/IP-locked streams; still resolve quickly so the UI can fall back.
-            const STREAM_GLOBAL_MAX_MS = 25_000;
-            const ONLY_IP_LOCKED_WAIT_MS = 3_500;
+        const GRACE_PERIOD = 3000;
+        const CROSS_SOURCE_FALLBACK_MAX_MS = 18_000;
+        const STREAM_GLOBAL_MAX_MS = 25_000;
+        const ONLY_IP_LOCKED_WAIT_MS = 3_500;
 
-            const result = await new Promise<StreamingData>((resolveStream) => {
-            let pending = 0;
+        // Use existing priority from above
+        const localPriority = STREAM_PRIORITY;
+
+        const result = await new Promise<StreamingData>((resolveStream) => {
+            let pending = pickOrder.length;
 
             const pickBestAndResolve = (force = false) => {
                 if (resolved) return;
@@ -3285,7 +3293,8 @@ export class SourceManager {
             }, STREAM_GLOBAL_MAX_MS);
 
             for (const source of finalSources) {
-                pending++;
+                // If the source is already resolved via another parallel branch, skip
+                if (resolved) break;
                 const idToUse = this.resolveStreamingEpisodeId(episodeId, source, primarySource, hasSourcePrefix, rawId);
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
 
@@ -3313,8 +3322,7 @@ export class SourceManager {
                 .finally(onDone);
             }
 
-            // Cross-source title-based fallback (lower priority, runs in parallel; time-boxed — full uncapped run can exceed 35s)
-            pending++;
+            // Cross-source title-based fallback
             Promise.race([
                 this.crossSourceStreamingFallback(episodeId, server, category, episodeNum, anilistId),
                 new Promise<StreamingData | null>((resolve) =>
