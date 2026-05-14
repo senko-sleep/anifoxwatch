@@ -346,7 +346,9 @@ export class AnimeKaiSource extends BaseAnimeSource {
             }
         };
 
-        for (const mirror of mirrorOrder) {
+        // Limit the number of mirrors tried to prevent spamming
+        const mirrorsToTry = mirrorOrder.slice(0, 2);
+        for (const mirror of mirrorsToTry) {
             const mirrorEmbedUrl = megaupEmbedUrl.replace(embedBase, mirror);
             const mirrorMediaUrl = mirrorEmbedUrl.replace('/e/', '/media/');
 
@@ -357,7 +359,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
             // 403 from datacenter IP — retry via CF Worker proxy
             try {
                 const proxied = `${REMOTE_PROXY}?url=${encodeURIComponent(mirrorMediaUrl)}&referer=${encodeURIComponent(mirrorEmbedUrl)}`;
-                const rp = await axios.get(proxied, { timeout: Math.min(timeoutMs, 12_000) });
+                const rp = await axios.get(proxied, { timeout: Math.min(timeoutMs, 10_000) });
                 if (rp.data?.result) { encText = rp.data.result; break; }
             } catch (e: unknown) {
                 const code = axios.isAxiosError(e) ? e.response?.status : 0;
@@ -596,8 +598,9 @@ export class AnimeKaiSource extends BaseAnimeSource {
 
 
 
-            // Try each server in order until one yields sources
-            for (const sv of servers) {
+            // Try up to 3 servers in order until one yields sources
+            const serversToTry = servers.slice(0, 3);
+            for (const sv of serversToTry) {
                 if (!sv?.url) continue;
                 try {
                     const sources = await this.extractMegaupStream(sv.url, timeoutMs);

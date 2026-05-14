@@ -1021,8 +1021,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     if (process.env.IS_REMOTE_PROXY !== 'true' && isIspBlockedDomain(domain)) {
         logger.info(`[PROXY] ISP-blocked ${domain} — routing to remote proxy`, { domain, requestId });
         const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'ISP fast-path');
-        if (!ok) res.status(502).json({ error: 'ISP-blocked domain unreachable via remote proxy', domain });
-        return;
+        if (ok) return;
+        logger.warn(`[PROXY] Remote proxy failed for ISP-blocked ${domain} — falling back to local rotation`, { requestId });
     }
 
     const isResolvable = await isDomainResolvable(domain);
@@ -1156,11 +1156,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
      * CDN subdomain rotation: when a megaup CDN segment fails (e.g. rjp.megaup.cc 502),
      * try alternative subdomains and base domains that are known to serve the same content.
      */
-    const MEGAUP_SUBDOMAIN_ALTERNATIVES = ['rrr', 'xm8', 'prjp', 'cdn', 'stream', 'media', 'rjp', 'rrr1', 'rrr2', 'rrr3', 'xm8-1', 'xm8-2'];
-    const MEGAUP_BASE_ALTERNATIVES = ['megaup.cc', 'megaup.nl', 'megaup.live', 'megaup.to'];
+    const MEGAUP_SUBDOMAIN_ALTERNATIVES = ['rrr', 'xm8', 'cdn', 'stream'];
+    const MEGAUP_BASE_ALTERNATIVES = ['megaup.cc', 'megaup.nl', 'megaup.to', 'megaup.live', 'megaup.net', 'megaup.org'];
     
     const buildCdnRotationUrls = (failedUrl: string): string[] => {
-        if (!isMegaupDomain || isM3u8) return [];
+        if (!isMegaupDomain) return [];
+        // manifests can be rotated on megaup as they share the same tokens/paths
         try {
             const u = new URL(failedUrl);
             const parts = u.hostname.split('.');
@@ -1170,32 +1171,24 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             const currentBase = parts.slice(1).join('.');
             const urls: string[] = [];
 
-            // 1. Try different subdomains on the current base domain
-            for (const sub of MEGAUP_SUBDOMAIN_ALTERNATIVES) {
-                if (sub === currentSub) continue;
+            // 1. Try different subdomains on the current base domain (max 2)
+            const reliableSubs = MEGAUP_SUBDOMAIN_ALTERNATIVES.filter(s => s !== currentSub).slice(0, 2);
+            for (const sub of reliableSubs) {
                 const newUrl = new URL(failedUrl);
                 newUrl.hostname = `${sub}.${currentBase}`;
                 urls.push(newUrl.toString());
             }
 
-            // 2. Try different base domains with the current subdomain
-            for (const base of MEGAUP_BASE_ALTERNATIVES) {
-                if (base === currentBase) continue;
-                const newUrl = new URL(failedUrl);
-                newUrl.hostname = `${currentSub}.${base}`;
-                urls.push(newUrl.toString());
-            }
-
-            // 3. Try cross-combinations (most reliable subdomains on most reliable base domains)
+            // 2. Try the most reliable subdomain on different base domains
             const commonSub = 'rrr';
             for (const base of MEGAUP_BASE_ALTERNATIVES) {
-                if (base === currentBase && commonSub === currentSub) continue;
+                if (base === currentBase) continue;
                 const newUrl = new URL(failedUrl);
                 newUrl.hostname = `${commonSub}.${base}`;
                 if (!urls.includes(newUrl.toString())) urls.push(newUrl.toString());
             }
 
-            return urls;
+            return urls.slice(0, 5); // Limit total mirrors to prevent spamming
         } catch { return []; }
     };
 
@@ -1244,13 +1237,13 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             // CDN subdomain rotation for 403/502/503 or connection errors on megaup segment requests
             // 403 = CDN access denied (common when segment tokens expire or CDN blocks region)
             if (isMegaupDomain && isSegment && !isM3u8 && (
-                status === 403 || status === 502 || status === 503 || 
+                status === 403 || status === 502 || status === 503 || status === 504 ||
                 errCode === 'ECONNREFUSED' || errCode === 'ECONNRESET' || 
                 errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' ||
-                errCode === 'ENOTFOUND' || errMsg.includes('timeout')
+                errCode === 'ENOTFOUND' || errMsg.includes('timeout') || errMsg.includes('502')
             )) {
                 const altUrls = buildCdnRotationUrls(url);
-                logger.warn(`[PROXY] Megaup error ${status || errCode || 'timeout'} on ${domain} — attempting rotation through ${altUrls.length} mirrors`, { requestId });
+                logger.warn(`[PROXY] Megaup error ${status || errCode || 'timeout'} on ${domain} — attempting rotation through ${altUrls.length} mirrors`, { requestId, isM3u8 });
                 let rotationSuccess = false;
                 for (const altUrl of altUrls) {
                     try {
@@ -1266,6 +1259,20 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                     }
                 }
                 if (rotationSuccess) break;
+            }
+
+            // Also try rotation for MANIFESTS on megaup if they fail with 502/504
+            if (isMegaupDomain && isM3u8 && (status === 502 || status === 504 || status === 503)) {
+                const altUrls = buildCdnRotationUrls(url);
+                logger.warn(`[PROXY] Megaup manifest error ${status} on ${domain} — attempting rotation`, { requestId });
+                for (const altUrl of altUrls) {
+                    try {
+                        proxyResponse = await makeProxyRequest(altUrl, combo, false);
+                        logger.info(`[PROXY] Megaup manifest rotation success: ${domain} → ${new URL(altUrl).hostname}`, { requestId });
+                        break;
+                    } catch { /* try next */ }
+                }
+                if (proxyResponse) break;
             }
 
             if (isTlsError && cachedProtocol !== 'http') {

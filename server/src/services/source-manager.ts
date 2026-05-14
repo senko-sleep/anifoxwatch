@@ -1758,7 +1758,31 @@ export class SourceManager {
                     if (streamingId) {
                         console.log(`   ✅ Resolved anilist-${numericId} → ${streamingId}`);
                         const episodes = await this.getEpisodes(streamingId);
-                        if (episodes && episodes.length > 0) {
+                        
+                        // If we got only 1 episode but AniList says it's a TV series (expected >1 eps),
+                        // the resolution might have picked a preview or a different entry.
+                        // Force a fallback search in this case.
+                        if (episodes.length === 1 && !streamingId.includes('movie')) {
+                            try {
+                                const anilistData = await anilistService.getAnimeById(numericId);
+                                if ((anilistData?.episodes || 0) > 1 || anilistData?.type === 'TV') {
+                                    console.log(`   ⚠️ Only 1 episode found for resolved ${streamingId} (expected more). Trying fallback search...`);
+                                    // Clear cache to allow re-resolution
+                                    this.anilistStreamingIdCache.delete(numericId);
+                                    // We'll let it fall through to the title-based search below by not returning here
+                                } else {
+                                    if (episodes.length > 0) {
+                                        timer.end();
+                                        return episodes;
+                                    }
+                                }
+                            } catch {
+                                if (episodes.length > 0) {
+                                    timer.end();
+                                    return episodes;
+                                }
+                            }
+                        } else if (episodes && episodes.length > 0) {
                             timer.end();
                             return episodes;
                         }
@@ -2977,6 +3001,16 @@ export class SourceManager {
         const startTime = Date.now();
         
         console.log(`🎬 [SourceManager] getStreamingLinks called: ${episodeId} (server: ${server}, category: ${category})`);
+        
+        // Cache check
+        const cacheKey = `${episodeId}:${server}:${category}:${anilistId || ''}`;
+        const cached = this.streamingLinksCache.get(cacheKey);
+        if (cached && cached.timestamp > Date.now() - this.STREAMING_LINKS_CACHE_TTL && cached.data.sources.length > 0) {
+            console.log(`   ✅ Using cached streaming links for ${episodeId}`);
+            timer.end();
+            return cached.data;
+        }
+
         logger.streamingStart('unknown', episodeId, 'multi-source', { server, category });
 
         // Determine primary source from episode ID
@@ -3186,6 +3220,10 @@ export class SourceManager {
                     best.data.sources[0]?.quality || 'unknown', duration);
                 timer.end();
                 console.log(`   ✅ Picked stream source: ${best.source} (${best.data.sources.length} URLs, ${duration}ms)`);
+                
+                // Cache the result to prevent loops on player retries
+                this.streamingLinksCache.set(cacheKey, { data: best.data, timestamp: Date.now() });
+                
                 resolveStream(best.data);
                 return true;
             };
@@ -4023,6 +4061,10 @@ export class SourceManager {
     private anilistStreamingIdCache: Map<number, { streamingId: string; timestamp: number }> = new Map();
     private readonly ANILIST_STREAMING_ID_TTL = 30 * 60 * 1000; // 30 minutes
 
+    // Race result cache for streaming links to prevent "looping" issues when players retry.
+    private streamingLinksCache: Map<string, { data: StreamingData; timestamp: number }> = new Map();
+    private readonly STREAMING_LINKS_CACHE_TTL = 30 * 1000; // 30 seconds
+
     /**
      * Resolve an AniList id to a playable streaming id.
      * Uses multiple title variants + multi-source search as fallback.
@@ -4210,10 +4252,17 @@ export class SourceManager {
             return score;
         }
 
-        // Word-based matching
-        const words1 = s1.split(/\s+/).filter(w => w.length > 2);
-        const words2 = s2.split(/\s+/).filter(w => w.length > 2);
+        // Word-based matching with stop-word filtering
+        const STOP_WORDS = new Set(['season', 'series', 'part', 'vol', 'volume', 'cour', 'edition', 'version', 'episode', 'episodes', 'anime', 'animation']);
+        
+        const words1 = s1.split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
+        const words2 = s2.split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
         const matchedQueryWords = words1.filter(w => words2.includes(w));
+        
+        // If NO meaningful words match (after stop-word filtering), it's not a match.
+        // This prevents "Classroom of the Elite S4" from matching "IDOLiSH7 S4".
+        if (matchedQueryWords.length === 0 && words1.length > 0 && words2.length > 0) return 0;
+        
         let baseScore = matchedQueryWords.length / Math.max(words1.length, words2.length);
 
         // Apply season matching bonus/penalty
@@ -4278,7 +4327,7 @@ export class SourceManager {
             if ((animeType === 'TV' || !animeType) && anime.episodes === 1 && 
                 !anime.title.toLowerCase().includes('movie') && 
                 !anime.title.toLowerCase().includes('special')) {
-                score -= 0.15;
+                score -= 0.45; // Increased penalty from 0.15 to 0.45
             }
 
             // Penalize type mismatch: e.g. query is for a TV series but result is Special/OVA
