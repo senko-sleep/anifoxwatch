@@ -154,6 +154,10 @@ const ISP_BLOCKED_DOMAINS = new Set([
     'ajax.gogocdn.net',
     'anitaku.pe',
     'anitaku.so',
+    'megaup.cc',
+    'megaup.nl',
+    'megaup.live',
+    'megaup.to',
 ]);
 
 function isDeadDomain(url: string): boolean {
@@ -961,12 +965,6 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
     const domain = urlObj.hostname;
 
-    // Check for dead domains BEFORE any rewrite to reject them immediately
-    if (isDeadDomain(url)) {
-        res.status(502).json({ error: 'Dead domain', reason: 'dead_domain', domain });
-        return;
-    }
-
     // Preserve the original URL before any rewrites — the remote proxy (Vercel)
     // might have better connectivity to the original CDN domain.
     const originalUrlBeforeRewrite = url;
@@ -982,6 +980,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             logger.info(`[PROXY] Rewrote dead CDN domain: ${domain} -> ${urlObj.hostname}`, { requestId });
         }
     } catch { /* not a valid URL yet, will fail validation later */ }
+
+    // Check for dead domains AFTER rewrite to catch any that couldn't be fixed
+    if (isDeadDomain(url)) {
+        res.status(502).json({ error: 'Dead domain', reason: 'dead_domain', domain });
+        return;
+    }
     const isM3u8 = url.includes('.m3u8');
     // Megaup CDN uses obfuscated extensions (.gif, .jpg, .png) for real video segments
     const isMegaupDomain = /megaup\.(cc|nl|live|to)/i.test(domain);
@@ -1239,9 +1243,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
             // CDN subdomain rotation for 403/502/503 or connection errors on megaup segment requests
             // 403 = CDN access denied (common when segment tokens expire or CDN blocks region)
-            if (isMegaupDomain && isSegment && !isM3u8 && (status === 403 || status === 502 || status === 503 || errCode === 'ECONNREFUSED' || errCode === 'ECONNRESET')) {
+            if (isMegaupDomain && isSegment && !isM3u8 && (
+                status === 403 || status === 502 || status === 503 || 
+                errCode === 'ECONNREFUSED' || errCode === 'ECONNRESET' || 
+                errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' ||
+                errCode === 'ENOTFOUND' || errMsg.includes('timeout')
+            )) {
                 const altUrls = buildCdnRotationUrls(url);
-                logger.warn(`[PROXY] Megaup error ${status || errCode} on ${domain} — attempting rotation through ${altUrls.length} mirrors`, { requestId });
+                logger.warn(`[PROXY] Megaup error ${status || errCode || 'timeout'} on ${domain} — attempting rotation through ${altUrls.length} mirrors`, { requestId });
                 let rotationSuccess = false;
                 for (const altUrl of altUrls) {
                     try {

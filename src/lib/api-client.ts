@@ -180,6 +180,8 @@ export interface StreamingData {
     intro?: { start: number; end: number };
     outro?: { start: number; end: number };
     source: string;
+    /** If true, the backend returned a SUB stream because the requested DUB was unavailable. */
+    dubFallback?: boolean;
 }
 
 export interface EpisodeServer {
