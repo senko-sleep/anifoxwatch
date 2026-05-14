@@ -482,7 +482,24 @@ export class GogoanimeSource extends BaseAnimeSource {
 
         // ── SUB: Normal sub extraction ─────────────────────────────────────
         try {
-            const response = await axios.get(`${this.baseUrl}/${epId}`, {
+            // Reconstruct episode URL if epId doesn't have -episode-
+            let subEpId = epId;
+            if (!subEpId.includes('-episode-')) {
+                let crossSlug = epId
+                    .replace(/^(animekai-|miruro-|kaido-)/i, '')
+                    .replace(/\$token=.+$/, '')
+                    .replace(/\$ep=\d+$/, '')
+                    .replace(/-[a-z0-9]*[0-9][a-z0-9]*$/, '');
+                    
+                let crossEpNum = '1';
+                const epMatch = episodeId.match(/\$ep=(\d+)/) || episodeId.match(/[?&]ep=(\d+)/);
+                if (epMatch) crossEpNum = epMatch[1];
+                
+                subEpId = `${crossSlug}-episode-${crossEpNum}`;
+            }
+
+            console.log(`   🔍 Gogoanime: Trying SUB URL: ${subEpId}`);
+            let response = await axios.get(`${this.baseUrl}/${subEpId}`, {
                 signal: options?.signal,
                 timeout: options?.timeout || 15000,
                 headers: {
@@ -492,6 +509,20 @@ export class GogoanimeSource extends BaseAnimeSource {
                 },
                 validateStatus: (status) => status < 500
             });
+            
+            if (response.status === 404 && subEpId !== epId) {
+                // fallback to bare epId if the reconstructed one fails
+                response = await axios.get(`${this.baseUrl}/${epId}`, {
+                    signal: options?.signal,
+                    timeout: options?.timeout || 15000,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'Referer': this.baseUrl
+                    },
+                    validateStatus: (status) => status < 500
+                });
+            }
 
             if (response.status === 404) {
                 return {

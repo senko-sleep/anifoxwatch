@@ -600,7 +600,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 
     const { category, proxy: useProxy = 'true' } = req.query;
     const explicitServer = normalizeStreamServerQuery(req.query.server);
-    const episodeNum = req.query.ep_num ? parseInt(String(req.query.ep_num), 10) || undefined : undefined;
+    const episodeNum = (req.query.ep_num || req.query.ep) ? parseInt(String(req.query.ep_num || req.query.ep), 10) || undefined : undefined;
     const anilistId = req.query.anilist_id ? parseInt(String(req.query.anilist_id), 10) || undefined : undefined;
     const requestId = (req as any).id;
     const shouldProxy = useProxy !== 'false';
