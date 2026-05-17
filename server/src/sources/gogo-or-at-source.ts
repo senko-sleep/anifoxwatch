@@ -150,6 +150,9 @@ export class GogoOrAtSource extends BaseAnimeSource {
                 const href = $(el).attr('href');
                 if (href && href.includes('-episode-')) {
                     const epSlug = href.split('/').filter(Boolean).pop() || '';
+                    if (!epSlug.toLowerCase().startsWith(`${slug.toLowerCase()}-episode-`)) {
+                        return;
+                    }
                     const epMatch = epSlug.match(/-episode-(\d+)/i);
                     const epNum = epMatch ? parseInt(epMatch[1], 10) : i + 1;
                     

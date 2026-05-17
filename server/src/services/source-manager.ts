@@ -1427,6 +1427,61 @@ export class SourceManager {
         }));
     }
 
+    private async enrichStreamingAnimeWithAniList(anime: AnimeBase): Promise<AnimeBase> {
+        if (!anime?.title || anime.source === 'AniList' || anime.id.toLowerCase().startsWith('anilist-')) {
+            return anime;
+        }
+
+        try {
+            const anilistData = await Promise.race([
+                anilistService.searchByTitle(anime.title, Boolean(anime.isMature)),
+                new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000))
+            ]);
+            if (!anilistData) return anime;
+
+            return {
+                ...anime,
+                title: anime.title || anilistData.title,
+                titleJapanese: anilistData.titleJapanese || anime.titleJapanese,
+                titleEnglish: anilistData.titleEnglish || anime.titleEnglish,
+                titleRomaji: anilistData.titleRomaji || anime.titleRomaji,
+                image: anilistData.image || anime.image,
+                cover: anilistData.cover || anime.cover,
+                banner: anilistData.banner || anime.banner,
+                description: anilistData.description || anime.description,
+                type: anilistData.type || anime.type,
+                status: anilistData.status || anime.status,
+                rating: anilistData.rating ?? anime.rating,
+                episodes: anilistData.episodes || anime.episodes,
+                episodesAired: anilistData.episodes || anime.episodesAired,
+                duration: anilistData.duration || anime.duration,
+                genres: anilistData.genres?.length ? anilistData.genres : anime.genres,
+                studios: anilistData.studios?.length ? anilistData.studios : anime.studios,
+                season: anilistData.season || anime.season,
+                year: anilistData.year || anime.year,
+                isMature: anilistData.isMature ?? anime.isMature,
+            };
+        } catch (error) {
+            logger.warn(`[SourceManager] AniList metadata enrichment failed`, {
+                id: anime.id,
+                title: anime.title,
+                error: String(error)
+            });
+            return anime;
+        }
+    }
+
+    private needsAniListMetadataEnrichment(anime: AnimeBase): boolean {
+        if (!anime?.title || anime.source === 'AniList' || anime.id.toLowerCase().startsWith('anilist-')) {
+            return false;
+        }
+        return !anime.year ||
+            !anime.rating ||
+            !anime.description ||
+            !anime.genres?.length ||
+            anime.genres.some((genre) => genre.startsWith('#'));
+    }
+
     /**
      * Light normalization for search dedup — preserves season/part/cour info
      * so "Spy x Family" and "Spy x Family Season 3" stay separate entries.
@@ -1598,6 +1653,11 @@ export class SourceManager {
         const memCached = animeCache.get(id);
         if (memCached) {
             logger.info(`[SourceManager] Memory cache hit for anime: ${id}`);
+            if (this.needsAniListMetadataEnrichment(memCached)) {
+                const enriched = await this.enrichStreamingAnimeWithAniList(memCached);
+                animeCache.set(id, enriched);
+                return enriched;
+            }
             return memCached;
         }
 
@@ -1607,6 +1667,12 @@ export class SourceManager {
                 const cached = await AnimeCache.getAnime(id);
                 if (cached) {
                     logger.info(`[SourceManager] Database cache hit for anime: ${id}`);
+                    if (this.needsAniListMetadataEnrichment(cached)) {
+                        const enriched = await this.enrichStreamingAnimeWithAniList(cached);
+                        animeCache.set(id, enriched);
+                        AnimeCache.setAnime(enriched).catch(() => {});
+                        return enriched;
+                    }
                     animeCache.set(id, cached); // Cache in memory for instant next access
                     return cached;
                 }
@@ -1715,16 +1781,17 @@ export class SourceManager {
             try {
                 const result = await this.executeReliably(source.name, 'getAnime', (signal) => source.getAnime(id, { signal }));
                 if (result && result.title && result.title !== 'Unknown') {
+                    const enriched = await this.enrichStreamingAnimeWithAniList(result);
                     // Cache the result in memory (instant access)
-                    animeCache.set(id, result);
+                    animeCache.set(id, enriched);
                     
                     // Cache the result if database is available
                     if (process.env.POSTGRES_URL) {
-                        AnimeCache.setAnime(result).catch((err: Error) => 
+                        AnimeCache.setAnime(enriched).catch((err: Error) => 
                             logger.warn(`[SourceManager] Failed to cache anime:`, { error: err.message })
                         );
                     }
-                    return result;
+                    return enriched;
                 }
             } catch (error) {
                 console.log(`[SourceManager] getAnime failed for ${source.name}:`, (error as Error).message);
@@ -4499,20 +4566,19 @@ export class SourceManager {
                 return this.findBestMatch(title, cached.results, animeType);
             }
 
-            const sourcesToTry = [
-                this.sources.get('GogoOrAt'),
-                this.sources.get('Kaido'),
-                this.sources.get('9Anime'),
-                this.sources.get('Gogoanime'),
-                this.sources.get('Aniwaves')
-            ].filter(s => s && s.isAvailable) as StreamingSource[];
+            const sourceNamesToTry = animeType === 'Movie'
+                ? ['Aniwaves', 'GogoOrAt', 'Kaido', '9Anime', 'Gogoanime']
+                : ['GogoOrAt', 'Kaido', '9Anime', 'Gogoanime', 'Aniwaves'];
+            const sourcesToTry = sourceNamesToTry
+                .map((name) => this.sources.get(name))
+                .filter(s => s && s.isAvailable) as StreamingSource[];
 
             let bestMatchOverall: AnimeBase | null = null;
             let bestScoreOverall = 0;
 
-            // Try sources until we find a good match with more than 1 episode
-            // or we've tried the top 3 sources
-            for (let i = 0; i < Math.min(sourcesToTry.length, 3); i++) {
+            // Try sources until we find a good match with enough episode coverage
+            // or we've tried the top sources for this media type.
+            for (let i = 0; i < Math.min(sourcesToTry.length, animeType === 'Movie' ? 5 : 3); i++) {
                 const source = sourcesToTry[i];
                 console.log(`   📡 Trying ${source.name} to search for "${title}"`);
 
@@ -4539,8 +4605,12 @@ export class SourceManager {
 
                             const similarity = this.calculateSimilarity(title, match.title);
                             
-                            // If it's a very good match and has episodes, we're done
-                            if (similarity > 0.8 && (match.episodes || 0) > 1) {
+                            const hasEnoughEpisodeCoverage = animeType === 'Movie'
+                                ? (match.episodes || 0) <= 1
+                                : (match.episodes || 0) > 1;
+
+                            // If it's a very good match and has plausible episode coverage, we're done.
+                            if (similarity > 0.8 && hasEnoughEpisodeCoverage) {
                                 console.log(`   ✅ Found high-quality match on ${source.name}: ${match.title} (${match.id})`);
                                 return match;
                             }
