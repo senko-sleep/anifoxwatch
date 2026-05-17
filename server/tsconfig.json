@@ -26,6 +26,9 @@
     "src/sources/nineanime-dub-source.ts",
     "src/sources/real-dub-source.ts",
     "src/sources/working-dub-extractor.ts",
-    "src/sources/working-dub-source.ts"
+    "src/sources/working-dub-source.ts",
+    "src/utils/browser-pool.ts",
+    "src/services/resolver-queue.ts",
+    "src/services/cache-prewarmer.ts"
   ]
 }
