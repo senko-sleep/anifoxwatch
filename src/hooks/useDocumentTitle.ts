@@ -2,10 +2,12 @@ import { useEffect } from 'react';
 
 const SITE_NAME = 'AniFox';
 
-export function useDocumentTitle(title?: string) {
+export function useDocumentTitle(title?: string, appendSiteName = true) {
   useEffect(() => {
     const prev = document.title;
-    document.title = title ? `${title} — ${SITE_NAME}` : SITE_NAME;
+    document.title = title
+      ? appendSiteName ? `${title} — ${SITE_NAME}` : title
+      : SITE_NAME;
     return () => { document.title = prev; };
-  }, [title]);
+  }, [title, appendSiteName]);
 }

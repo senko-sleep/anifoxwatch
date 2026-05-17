@@ -222,7 +222,7 @@ const Watch = () => {
   );
 
   // Dynamic page title
-  useDocumentTitle(anime?.title ? `${anime.title} — EP ${selectedEpisodeNum}` : 'Watch');
+  useDocumentTitle(anime?.title ?? 'Watch', Boolean(anime?.title) ? false : true);
 
   // Initialize episode from URL or first episode (runs once on mount)
   useEffect(() => {
