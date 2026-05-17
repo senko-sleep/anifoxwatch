@@ -880,17 +880,21 @@ const Watch = () => {
                 animeSeason={anime?.season}
                 onBack={() => navigate(backUrl)}
               />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
-                <div className="text-center p-6">
-                  <AlertCircle className="w-10 h-10 text-yellow-500 mx-auto mb-3" />
-                  <p className="text-white font-medium text-sm">No stream available</p>
-                  <Button size="sm" className="mt-3 bg-fox-orange" onClick={() => { setServerRetryCount(0); refetchStream(); }}>
-                    <RefreshCw className="w-4 h-4 mr-2" />Retry
-                  </Button>
-                </div>
-              </div>
-            )}
+) : (
+               <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
+                 <div className="text-center p-6">
+                   <AlertCircle className="w-10 h-10 text-yellow-500 mx-auto mb-3" />
+                   <p className="text-white font-medium text-sm">No stream available</p>
+                   <Button size="sm" className="mt-3 bg-fox-orange" onClick={() => { 
+                     setServerRetryCount(0); 
+                     setSourceRetryIndex(0);
+                     refetchStream(); 
+                   }}>
+                     <RefreshCw className="w-4 h-4 mr-2" />Retry
+                   </Button>
+                 </div>
+               </div>
+             )}
           </div>
         </div>
 
@@ -1000,14 +1004,18 @@ const Watch = () => {
                         <p className={cn("text-[13px] font-medium truncate leading-snug", isActive ? "text-white" : "text-white/80")}>
                           {ep.title || `Episode ${ep.number}`}
                         </p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {ep.hasSub && (
-                            <span className={cn("text-[10px] font-medium", isActive ? "text-white/60" : "text-sky-400/60")}>SUB</span>
-                          )}
-                          {(ep.hasDub || (anime?.dubCount != null && ep.number <= anime.dubCount)) && (
-                            <span className={cn("text-[10px] font-medium", isActive ? "text-white/60" : "text-green-400/60")}>DUB</span>
-                          )}
-                          {progress > 0 && progress < 0.9 && (
+<div className="flex items-center gap-2 mt-0.5">
+                           {ep.hasSub !== false && (
+                             <span className={cn("text-[10px] font-medium", isActive ? "text-white/60" : "text-sky-400/60")}>SUB</span>
+                           )}
+                           {(() => {
+                             const effectiveDubCount = anime?.dubCount ?? 0;
+                             const epHasDub = ep.hasDub || dubAvailable || (effectiveDubCount > 0 && ep.number <= effectiveDubCount);
+                             return epHasDub ? (
+                               <span className={cn("text-[10px] font-medium", isActive ? "text-white/60" : "text-green-400/60")}>DUB</span>
+                             ) : null;
+                           })()}
+                           {progress > 0 && progress < 0.9 && (
                             <span className={cn("text-[10px] font-semibold", isActive ? "text-white/70" : "text-fox-orange")}>{Math.round(progress * 100)}%</span>
                           )}
                           {progress >= 0.9 && (
@@ -1172,15 +1180,16 @@ const Watch = () => {
                           </p>
                         </div>
                         <div className="flex flex-col w-full gap-3">
-                          <Button
-                            variant="default"
-                            className="w-full bg-fox-orange hover:bg-fox-orange/90"
-                            onClick={() => {
-                              setServerRetryCount(0);
-                              setSelectedServer('');
-                              refetchStream();
-                            }}
-                          >
+<Button
+                             variant="default"
+                             className="w-full bg-fox-orange hover:bg-fox-orange/90"
+                             onClick={() => {
+                               setServerRetryCount(0);
+                               setSourceRetryIndex(0);
+                               setSelectedServer('');
+                               refetchStream();
+                             }}
+                           >
                             <RefreshCw className="w-4 h-4 mr-2" />
                             Retry Connection
                           </Button>

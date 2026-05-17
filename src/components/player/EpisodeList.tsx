@@ -251,12 +251,14 @@ export function EpisodeList({
                       }
                     </p>
 
-                    {(() => {
-                      // Per-episode dub accuracy: use dubCount cutoff when per-ep flag is ambiguous
-                      const effectiveDubCount = dubCount ?? anime?.dubCount ?? 0;
-                      const epHasDub = episode.hasDub || (effectiveDubCount > 0 && episode.number <= effectiveDubCount);
-                      const epHasSub = episode.hasSub || !epHasDub;
-                      return (
+{(() => {
+                       // Per-episode dub accuracy: use dubCount cutoff when per-ep flag is ambiguous
+                       const effectiveDubCount = dubCount ?? anime?.dubCount ?? 0;
+                       // Prefer serversHaveDub (from server list) over unreliable per-ep hasDub
+                       // serversHaveDub indicates the source actually has dub servers available
+                       const epHasDub = episode.hasDub || serversHaveDub || (effectiveDubCount > 0 && episode.number <= effectiveDubCount);
+                       const epHasSub = episode.hasSub !== false; // hasSub is typically always true if source supports it
+                       return (
                         <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                           {epHasSub && (
                             <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
