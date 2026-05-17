@@ -1688,6 +1688,8 @@ export class SourceManager {
                         studios: anilistData.studios,
                         season: anilistData.season,
                         year: anilistData.year,
+                        image: anilistData.image || streamingMatch.image,
+                        cover: anilistData.cover || streamingMatch.cover,
                     };
                 }
 
