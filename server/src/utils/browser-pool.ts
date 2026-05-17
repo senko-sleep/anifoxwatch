@@ -25,7 +25,7 @@ class BrowserPool {
                     '--single-process',
                     '--disable-gpu'
                 ],
-            },
+            } as any,
         });
 
         // Error handling

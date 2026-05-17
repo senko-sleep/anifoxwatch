@@ -25,7 +25,7 @@ const customAxios = axios.create({
         'Sec-Fetch-Site': 'none',
         'Cache-Control': 'max-age=0',
     },
-    timeout: 15000,
+    timeout: 25000,
 });
 
 function axiosConfigFullUrl(cfg: AxiosError['config']): string {
@@ -296,7 +296,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
     private async extractMegaupStream(
         serverUrl: string,
         timeoutMs: number
-    ): Promise<VideoSource[]> {
+    ): Promise<{ sources: VideoSource[]; subtitles: { url: string; lang: string }[] }> {
         const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
 
         // Step 1: fetch anikai.to/iframe/TOKEN  →  parse <iframe src>
@@ -311,13 +311,13 @@ export class AnimeKaiSource extends BaseAnimeSource {
         // If no iframe src, return empty
         if (!megaupEmbedUrl) {
             logger.warn(`AnimeKai: no iframe src found`, undefined, this.name);
-            return [];
+            return { sources: [], subtitles: [] };
         }
         
         // If not megaup CDN (e.g. Streamtape, Doodstream, etc.), extract as embed instead
         if (!isMegaupEmbed) {
             logger.info(`AnimeKai: extracting non-megaup embed: ${megaupEmbedUrl.slice(0, 60)}...`, undefined, this.name);
-            return this.extractEmbedStream(megaupEmbedUrl);
+            return { sources: this.extractEmbedStream(megaupEmbedUrl), subtitles: [] };
         }
 
         // Step 2: GET megaup /media/ endpoint (returns JSON { status, result: encryptedText })
@@ -371,7 +371,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
             // All megaup mirrors + proxy failed (datacenter IP block).
             // Return empty sources so other sources can be tried instead of blocked iframe.
             logger.warn(`AnimeKai: no encrypted result — returning empty sources for ${serverUrl}`, undefined, this.name);
-            return [];
+            return { sources: [], subtitles: [] };
         }
 
         // Step 3: decrypt via enc-dec.app — User-Agent MUST match the one used for /media/
@@ -381,13 +381,11 @@ export class AnimeKaiSource extends BaseAnimeSource {
             { headers: { 'Content-Type': 'application/json', 'User-Agent': UA }, timeout: 12_000 }
         );
         const decrypted = decResp.data?.result;
-        if (!decrypted?.sources?.length) return [];
+        if (!decrypted?.sources?.length) return { sources: [], subtitles: [] };
 
-        return (decrypted.sources as Array<{ file?: string; type?: string }>).map((s): VideoSource => {
+        const sources = (decrypted.sources as Array<{ file?: string; type?: string }>).map((s): VideoSource => {
             let url = s.file ?? '';
-            // Fix dead Megaup CDN domains returned by the API
-            url = url.replace(/(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi, 'megaup.cc');
-            
+            url = url.replace(/(code|lab|web|net|pro|tech|hub|shop|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|data|link|media|host|cdn|file|store|link)\d*\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi, 'megaup.cc');
             return {
                 url,
                 quality: 'auto',
@@ -396,6 +394,17 @@ export class AnimeKaiSource extends BaseAnimeSource {
                 server: 'Megaup',
             };
         }).filter(s => s.url);
+
+        // Extract subtitle URLs from decrypted response
+        const rawSubs = (decrypted as any)?.subtitles;
+        const subtitles: Array<{ url: string; lang: string }> = [];
+        if (Array.isArray(rawSubs)) {
+            for (const sub of rawSubs) {
+                if (sub?.url) subtitles.push({ url: sub.url, lang: sub.lang || 'Unknown' });
+            }
+        }
+
+        return { sources, subtitles };
     }
 
     /**
@@ -435,7 +444,17 @@ export class AnimeKaiSource extends BaseAnimeSource {
         timeoutMs: number
     ): Promise<Array<{ name: string; url: string }>> {
         const servers: Array<{ name: string; url: string }> = [];
-        const watchUrl = `https://animekai.to/watch/${episodeId}`;
+        
+        // Convert consumet-style ID (slug$ep=N$token=TOKEN) to native watch URL (slug?ep=TOKEN)
+        let formattedId = episodeId;
+        if (formattedId.includes('$token=')) {
+            const parts = formattedId.split('$token=');
+            const slugPart = parts[0].split('$ep=')[0]; // Strip $ep=N
+            const token = parts[1];
+            formattedId = `${slugPart}?ep=${token}`;
+        }
+        
+        const watchUrl = `https://animekai.to/watch/${formattedId}`;
         
         try {
             const resp = await axios.get(watchUrl, {
@@ -547,7 +566,7 @@ export class AnimeKaiSource extends BaseAnimeSource {
             // If the request is for DUB but we have a Consumet episode ID (which contains a token),
             // the token might be specifically for the SUB stream. We MUST re-resolve the episode
             // to get the correct DUB token, otherwise it will just serve the SUB stream.
-            if ((!isConsumetEpisodeId && !isWatchEpisodeId) || (category === 'dub' && isConsumetEpisodeId)) {
+            if (!isConsumetEpisodeId || (category === 'dub' && isConsumetEpisodeId)) {
                 // If it's a consumet ID, extract the base slug
                 const searchSlug = isConsumetEpisodeId ? rawEpisodeId.split('$ep=')[0] : rawEpisodeId;
                 try {
@@ -603,11 +622,11 @@ export class AnimeKaiSource extends BaseAnimeSource {
             for (const sv of serversToTry) {
                 if (!sv?.url) continue;
                 try {
-                    const sources = await this.extractMegaupStream(sv.url, timeoutMs);
+                    const { sources, subtitles } = await this.extractMegaupStream(sv.url, timeoutMs);
                     if (sources.length > 0) {
                         const streamData: StreamingData = { 
                             sources, 
-                            subtitles: [], 
+                            subtitles: subtitles || [],
                             source: this.name, 
                             category,
                             headers: {

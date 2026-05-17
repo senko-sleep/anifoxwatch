@@ -36,8 +36,10 @@ const KNOWN_ORIGINS = [
     'http://localhost:5173',
     'http://localhost:5174',
     'http://localhost:3000',
-        'http://localhost:3001',
+    'http://localhost:3001',
+    'http://localhost:8081',
     'http://127.0.0.1:5173',
+    'http://127.0.0.1:8081',
 ];
 const CORS_ALLOWED = process.env.CORS_ORIGIN || '*';
 
@@ -333,19 +335,11 @@ const startServer = async (port: number) => {
 
     server.on('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
-            // Auto-incrementing ports breaks the Vite dev proxy (defaults to :3001) and looks like random 500s.
-            // Opt in only when you intentionally run off-default and will point Vite at `VITE_API_PROXY_TARGET`.
-            if (process.env.ALLOW_PORT_FALLBACK !== '1') {
-                console.error(
-                    `❌ Port ${port} is already in use. Another process is bound to this port, so the API cannot start.\n` +
-                        `Fix: stop the other listener on port ${port}, or set PORT to a free port and set Vite's VITE_API_PROXY_TARGET / VITE_API_PROXY_PORT to match.\n` +
-                        `Rare escape hatch: ALLOW_PORT_FALLBACK=1`,
-                );
-                process.exit(1);
-            }
-
-            console.log(`⚠️  Port ${port} is in use, trying ${port + 1}...`);
-            startServer(port + 1);
+            console.error(
+                `❌ Port ${port} is already in use. Another process is bound to this port, so the API cannot start.\n` +
+                    `Fix: stop the other listener on port ${port} (netstat -ano | findstr :${port}) or run 'npm run dev' which kills it automatically.`
+            );
+            process.exit(1);
         } else {
             console.error('SERVER ERROR:', err);
         }

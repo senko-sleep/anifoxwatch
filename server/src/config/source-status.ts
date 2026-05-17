@@ -1,0 +1,95 @@
+
+/**
+ * AUTO-GENERATED SOURCE STATUS
+ * Last Updated: 2026-05-15T20:27:00.468Z
+ */
+
+export const SOURCE_STATUS = {
+    "working": [
+        {
+            "name": "GogoAnime",
+            "url": "https://gogoanime3.co",
+            "strength": "DUB/SUB",
+            "status": "Stable",
+            "notes": "Last verified: 2026-05-15"
+        },
+        {
+            "name": "Miruro",
+            "url": "https://www.miruro.tv",
+            "strength": "Metadata/DUB",
+            "status": "Stable",
+            "notes": "Last verified: 2026-05-15"
+        },
+        {
+            "name": "AnimePahe",
+            "url": "https://animepahe.ru",
+            "strength": "Small Size/HD",
+            "status": "Stable",
+            "notes": "Last verified: 2026-05-15"
+        },
+        {
+            "name": "AnimeHeaven",
+            "url": "https://animeheaven.me",
+            "strength": "DUB Specialist",
+            "status": "Stable",
+            "notes": "Last verified: 2026-05-15"
+        },
+        {
+            "name": "KickAssAnime",
+            "url": "https://kickassanime.am",
+            "strength": "High Quality",
+            "status": "Stable",
+            "notes": "Last verified: 2026-05-15"
+        },
+        {
+            "name": "AllAnime",
+            "url": "https://allanime.site",
+            "reason": "Intermittent API failures",
+            "status": "Stable",
+            "notes": "Last verified: 2026-05-15"
+        },
+        {
+            "name": "AnimeKai",
+            "url": "https://animekai.to",
+            "reason": "Megaup CDNs are dead",
+            "status": "Stable",
+            "notes": "Last verified: 2026-05-15"
+        },
+        {
+            "name": "Aniwaves",
+            "url": "https://aniwaves.ru",
+            "reason": "Timeout",
+            "status": "Stable",
+            "notes": "Last verified: 2026-05-15"
+        }
+    ],
+    "experimental": [
+        {
+            "name": "HiAnime (AniWatch)",
+            "url": "https://hianime.to",
+            "reason": "ECONNABORTED",
+            "status": "Blocked/Unstable",
+            "notes": "Last attempt: 2026-05-15"
+        },
+        {
+            "name": "Wcofun",
+            "url": "https://www.wcofun.net",
+            "reason": "Timeout",
+            "status": "Blocked/Unstable",
+            "notes": "Last attempt: 2026-05-15"
+        }
+    ],
+    "obsolete": [
+        "Animesuge.to",
+        "4Anime.gg",
+        "Anicrush.to",
+        "Kaido.to",
+        "KissAnime",
+        "AnimixPlay",
+        "Masterani",
+        "AnimeUltima",
+        "9Anime.to"
+    ]
+};
+
+export type SourceStatus = typeof SOURCE_STATUS;

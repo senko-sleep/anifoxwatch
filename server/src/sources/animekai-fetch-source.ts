@@ -50,7 +50,7 @@ export class AnimeKaiFetchSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const data = await this.fetchJson<{ results?: unknown[] }>('/search?keyword=naruto', { ...options, timeout: 5000 });
+            const data = await this.fetchJson<{ results?: unknown[] }>('/search?keyword=naruto', { ...options, timeout: 25000 });
             return Array.isArray((data as any)?.results) || (data as any)?.success === true;
         } catch {
             return false;

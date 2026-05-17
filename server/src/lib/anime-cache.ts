@@ -4,6 +4,7 @@ export class AnimeCache {
   private static CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
 
   static async getAnime(id: string): Promise<any | null> {
+    if (!process.env.POSTGRES_URL) return null;
     try {
       const pool = getPool();
       const result = await pool.query(
@@ -44,6 +45,7 @@ export class AnimeCache {
   }
 
   static async setAnime(anime: any): Promise<void> {
+    if (!process.env.POSTGRES_URL) return;
     try {
       const pool = getPool();
       await pool.query(
@@ -105,6 +107,7 @@ export class AnimeCache {
   }
 
   static async getEpisodes(animeId: string): Promise<any[] | null> {
+    if (!process.env.POSTGRES_URL) return null;
     try {
       const pool = getPool();
       const result = await pool.query(
@@ -130,6 +133,7 @@ export class AnimeCache {
   }
 
   static async setEpisodes(animeId: string, episodes: any[]): Promise<void> {
+    if (!process.env.POSTGRES_URL) return;
     try {
       const pool = getPool();
       const client = await pool.connect();
@@ -163,6 +167,7 @@ export class AnimeCache {
   }
 
   static async getSourcePreference(animeId: string): Promise<string | null> {
+    if (!process.env.POSTGRES_URL) return null;
     try {
       const pool = getPool();
       const result = await pool.query(
@@ -179,6 +184,7 @@ export class AnimeCache {
   }
 
   static async setSourcePreference(animeId: string, source: string): Promise<void> {
+    if (!process.env.POSTGRES_URL) return;
     try {
       const pool = getPool();
       await pool.query(

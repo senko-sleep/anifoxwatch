@@ -12,7 +12,7 @@ export class YugenAnimeSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -34,7 +34,7 @@ export class YugenAnimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/discover`, {
                 params: { q: query, page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -89,7 +89,7 @@ export class YugenAnimeSource extends BaseAnimeSource {
             const animeId = id.replace('yugenanime-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -135,7 +135,7 @@ export class YugenAnimeSource extends BaseAnimeSource {
             const id = animeId.replace('yugenanime-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${id}/watch`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -175,7 +175,7 @@ export class YugenAnimeSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/watch/${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -187,7 +187,7 @@ export class YugenAnimeSource extends BaseAnimeSource {
             if (embedUrl) {
                 const embedResponse = await axios.get(embedUrl.startsWith('http') ? embedUrl : `https:${embedUrl}`, {
                     signal: options?.signal,
-                    timeout: options?.timeout || 10000,
+                    timeout: 25000,
                     headers: this.getHeaders()
                 });
 
@@ -228,7 +228,7 @@ export class YugenAnimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/trending`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -275,7 +275,7 @@ export class YugenAnimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/latest`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

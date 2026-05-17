@@ -77,12 +77,12 @@ export class MiruroSource extends BaseAnimeSource {
      * For `slug$ep=N$token=KEY` embeds, sites sometimes resolve streams with either the token or the display ep#.
      * Try both so at least one matches the upstream episode table.
      */
-    private episodeIdVariantsForStreaming(id: string): { aniwatch: string[]; consumet: string[] } {
+    private episodeIdVariantsForStreaming(id: string, explicitEpNum?: number): { aniwatch: string[]; consumet: string[] } {
         const raw = this.stripPrefix(id);
         const tok = /^(.+)\$ep=(\d+)\$token=(.+)$/i.exec(raw);
         if (tok) {
             const slug = tok[1];
-            const epNum = tok[2];
+            const epNum = explicitEpNum ? String(explicitEpNum) : tok[2];
             const tokenKey = tok[3];
             const aw = [`${slug}?ep=${tokenKey}`, `${slug}?ep=${epNum}`];
             const cc = [`${slug}$episode$${tokenKey}`, `${slug}$episode$${epNum}`];
@@ -91,9 +91,22 @@ export class MiruroSource extends BaseAnimeSource {
                 consumet: [...new Set(cc)],
             };
         }
+        
+        const aniwatch = [this.toAniwatchEpisodeQuery(id)];
+        if (explicitEpNum) {
+            const slug = raw.split('?')[0].split('$')[0];
+            aniwatch.push(`${slug}?ep=${explicitEpNum}`);
+        }
+
+        const consumet = [this.toConsumetEpId(id)];
+        if (explicitEpNum) {
+            const slug = raw.split('?')[0].split('$')[0];
+            consumet.push(`${slug}$episode$${explicitEpNum}`);
+        }
+
         return {
-            aniwatch: [this.toAniwatchEpisodeQuery(id)],
-            consumet: [this.toConsumetEpId(id)],
+            aniwatch: [...new Set(aniwatch)],
+            consumet: [...new Set(consumet)],
         };
     }
 
@@ -222,7 +235,7 @@ export class MiruroSource extends BaseAnimeSource {
 
         try {
             const res = await axios.get(`${this.baseUrl}/details/${slug}`, {
-                timeout: options?.timeout || 12000,
+                timeout: 25000,
                 signal: options?.signal,
                 headers: { 'User-Agent': 'Mozilla/5.0', Referer: `${this.baseUrl}/` },
             });
@@ -303,7 +316,7 @@ export class MiruroSource extends BaseAnimeSource {
     private async scrapeEpisodesFromMiruro(slug: string, options?: SourceRequestOptions): Promise<Episode[]> {
         const res = await axios.get(`${this.baseUrl}/watch/${slug}`, {
             signal: options?.signal,
-            timeout: options?.timeout || 12000,
+            timeout: 25000,
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 Referer: `${this.baseUrl}/`,
@@ -463,7 +476,7 @@ export class MiruroSource extends BaseAnimeSource {
             await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
             
             // Wait for video player to load
-            await page.waitForSelector('video, iframe', { timeout: 10000 }).catch(() => {});
+            await page.waitForSelector('video, iframe', { timeout: 25000 }).catch(() => {});
             
             // Extract video sources from page
             const sources = await page.evaluate(() => {
@@ -520,7 +533,7 @@ export class MiruroSource extends BaseAnimeSource {
             return { sources: [], subtitles: [] };
         }
 
-        const { aniwatch: epQueries } = this.episodeIdVariantsForStreaming(episodeId);
+        const { aniwatch: epQueries } = this.episodeIdVariantsForStreaming(episodeId, options?.episodeNum);
         const cat: 'sub' | 'dub' | 'raw' = category === 'dub' ? 'dub' : 'sub';
         const prefer = this.normalizeAniwatchServer(server);
         /** Prefer requested embed, then same rotation as REST discovery when one id is missing for dub/sub. */
@@ -603,7 +616,7 @@ export class MiruroSource extends BaseAnimeSource {
         try {
             const mod = await getConsumetMod();
             const subOrDub = category === 'dub' ? mod.SubOrSub.DUB : mod.SubOrSub.SUB;
-            const { consumet: consumetIds } = this.episodeIdVariantsForStreaming(episodeId);
+            const { consumet: consumetIds } = this.episodeIdVariantsForStreaming(episodeId, _options?.episodeNum);
 
             const serversToTry = server
                 ? [this.mapStreamServerToConsumet(server, mod)]

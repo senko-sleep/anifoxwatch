@@ -12,7 +12,7 @@ export class AnimeDAOSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -34,7 +34,7 @@ export class AnimeDAOSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/search.html`, {
                 params: { keyword: query },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -87,7 +87,7 @@ export class AnimeDAOSource extends BaseAnimeSource {
             const animeId = id.replace('animedao-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${animeId}.html`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -130,7 +130,7 @@ export class AnimeDAOSource extends BaseAnimeSource {
             const id = animeId.replace('animedao-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${id}.html`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -167,7 +167,7 @@ export class AnimeDAOSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/watch/${episodeId}.html`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -177,7 +177,7 @@ export class AnimeDAOSource extends BaseAnimeSource {
             if (iframeSrc) {
                 const embedResponse = await axios.get(iframeSrc.startsWith('http') ? iframeSrc : `https:${iframeSrc}`, {
                     signal: options?.signal,
-                    timeout: options?.timeout || 10000,
+                    timeout: 25000,
                     headers: this.getHeaders()
                 });
 
@@ -198,7 +198,7 @@ export class AnimeDAOSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/popular.html`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -244,7 +244,7 @@ export class AnimeDAOSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/latest.html`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

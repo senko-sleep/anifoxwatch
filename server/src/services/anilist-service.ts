@@ -175,16 +175,21 @@ export class AniListService {
         const staleData = staleEntry?.data as T | undefined;
 
         try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+
             const response = await fetch(ANILIST_API_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     Accept: 'application/json',
-                    // AniList may reject datacenter requests without a descriptive UA (e.g. Cloudflare Workers).
                     'User-Agent': 'AniFoxWatch/1.0 (+https://anifoxwatch.web.app)',
                 },
                 body: JSON.stringify({ query, variables }),
+                signal: controller.signal
             });
+            
+            clearTimeout(timeoutId);
 
             if (!response.ok) {
                 const errorText = await response.text();

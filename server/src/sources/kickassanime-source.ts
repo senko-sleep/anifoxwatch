@@ -13,7 +13,7 @@ export class KickassAnimeSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -35,7 +35,7 @@ export class KickassAnimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}/search`, {
                 params: { q: query },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const data = response.data || [];
@@ -77,7 +77,7 @@ export class KickassAnimeSource extends BaseAnimeSource {
             const slug = id.replace('kickassanime-', '');
             const response = await axios.get(`${this.apiUrl}/show/${slug}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const data = response.data;
@@ -116,7 +116,7 @@ export class KickassAnimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}/show/${slug}/episodes`, {
                 params: { lang: 'en-US' },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const data = response.data || [];
@@ -141,7 +141,7 @@ export class KickassAnimeSource extends BaseAnimeSource {
             const [showSlug, epSlug] = episodeId.split('/');
             const response = await axios.get(`${this.apiUrl}/show/${showSlug}/episode/${epSlug}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -163,7 +163,7 @@ export class KickassAnimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}/show/${showSlug}/episode/${epSlug}/source`, {
                 params: { server: server || 'duck' },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -195,7 +195,7 @@ export class KickassAnimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}/trending`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const data = response.data || [];
@@ -229,7 +229,7 @@ export class KickassAnimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}/recent`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const data = response.data || [];

@@ -6,13 +6,14 @@ import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js
 
 export class AnimeHeavenSource extends BaseAnimeSource {
     name = 'AnimeHeaven';
-    baseUrl = 'https://animeheaven.ru';
+    baseUrl = 'https://animeheaven.me';
 
      async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
          try {
              const response = await axios.get(this.baseUrl, {
                  signal: options?.signal,
-                 timeout: options?.timeout || 15000, // Increased from 5000 to 15000
+                 timeout: 25000,
+
                  headers: this.getHeaders()
              });
              return response.status === 200;
@@ -130,7 +131,7 @@ export class AnimeHeavenSource extends BaseAnimeSource {
             const id = animeId.replace('animeheaven-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${id}.html`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -172,7 +173,7 @@ export class AnimeHeavenSource extends BaseAnimeSource {
 
             const response = await axios.get(`${this.baseUrl}/watch/${episodeId}.html`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -196,7 +197,7 @@ export class AnimeHeavenSource extends BaseAnimeSource {
                 const embedUrl = iframeSrc.startsWith('http') ? iframeSrc : `https:${iframeSrc}`;
                 const embedResponse = await axios.get(embedUrl, {
                     signal: options?.signal,
-                    timeout: options?.timeout || 10000,
+                    timeout: 25000,
                     headers: this.getHeaders()
                 });
 
@@ -219,7 +220,7 @@ export class AnimeHeavenSource extends BaseAnimeSource {
             
             const response = await axios.get(`${this.baseUrl}/watch/${episodeId}.html`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             
@@ -284,7 +285,7 @@ export class AnimeHeavenSource extends BaseAnimeSource {
                     try {
                         const embedResponse = await axios.get(embedUrl, {
                             signal: options?.signal,
-                            timeout: options?.timeout || 10000,
+                            timeout: 25000,
                             headers: this.getHeaders()
                         });
 
@@ -335,7 +336,7 @@ export class AnimeHeavenSource extends BaseAnimeSource {
         try {
             const response = await axios.get(m3u8Url, {
                 signal: options?.signal,
-                timeout: 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -362,7 +363,7 @@ export class AnimeHeavenSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/popular.php`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -409,7 +410,7 @@ export class AnimeHeavenSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/latest.php`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

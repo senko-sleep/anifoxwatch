@@ -12,7 +12,7 @@ export class CrunchyrollSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -34,7 +34,7 @@ export class CrunchyrollSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}/content/v2/discover/search`, {
                 params: { q: query, n: 20, start: (page - 1) * 20, type: 'series' },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             
@@ -77,7 +77,7 @@ export class CrunchyrollSource extends BaseAnimeSource {
             const seriesId = id.replace('crunchyroll-', '');
             const response = await axios.get(`${this.apiUrl}/content/v2/cms/series/${seriesId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             
@@ -117,7 +117,7 @@ export class CrunchyrollSource extends BaseAnimeSource {
             const seriesId = animeId.replace('crunchyroll-', '');
             const response = await axios.get(`${this.apiUrl}/content/v2/cms/series/${seriesId}/seasons`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -127,7 +127,7 @@ export class CrunchyrollSource extends BaseAnimeSource {
             for (const season of seasons) {
                 const epResponse = await axios.get(`${this.apiUrl}/content/v2/cms/seasons/${season.id}/episodes`, {
                     signal: options?.signal,
-                    timeout: options?.timeout || 10000,
+                    timeout: 25000,
                     headers: this.getHeaders()
                 });
 
@@ -163,7 +163,7 @@ export class CrunchyrollSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.apiUrl}/content/v2/cms/objects/${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -176,7 +176,7 @@ export class CrunchyrollSource extends BaseAnimeSource {
 
             const streamResponse = await axios.get(streams, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -217,7 +217,7 @@ export class CrunchyrollSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}/content/v2/discover/browse`, {
                 params: { sort_by: 'popularity', n: 20, start: (page - 1) * 20 },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -252,7 +252,7 @@ export class CrunchyrollSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}/content/v2/discover/browse`, {
                 params: { sort_by: 'newly_added', n: 20, start: (page - 1) * 20 },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 

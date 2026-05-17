@@ -12,7 +12,7 @@ export class AnimeSugeSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -35,7 +35,7 @@ export class AnimeSugeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/search`, {
                 params: { keyword: query, page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -92,7 +92,7 @@ export class AnimeSugeSource extends BaseAnimeSource {
             const animeId = id.replace('animesuge-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -139,7 +139,7 @@ export class AnimeSugeSource extends BaseAnimeSource {
             const id = animeId.replace('animesuge-', '');
             const response = await axios.get(`${this.baseUrl}/ajax/episode/list/${id}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
             });
 
@@ -173,7 +173,7 @@ export class AnimeSugeSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/ajax/episode/servers/${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
             });
 
@@ -203,7 +203,7 @@ export class AnimeSugeSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/ajax/episode/sources/${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
             });
 
@@ -218,7 +218,7 @@ export class AnimeSugeSource extends BaseAnimeSource {
             // Extract from embed
             const embedResponse = await axios.get(embedUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -247,7 +247,7 @@ export class AnimeSugeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/most-popular`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -294,7 +294,7 @@ export class AnimeSugeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/recently-updated`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

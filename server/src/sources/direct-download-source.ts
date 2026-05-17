@@ -16,7 +16,7 @@ export class DirectDownloadSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000
+                timeout: 25000
             });
             return response.status === 200;
         } catch {
@@ -29,7 +29,7 @@ export class DirectDownloadSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/api`, {
                 params: { m: 'search', q: query, l: 20 },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             
             const data = response.data.data;
@@ -72,7 +72,7 @@ export class DirectDownloadSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/api`, {
                 params: { m: 'release_id', id: animeId },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             
             const data = response.data.data;
@@ -107,7 +107,7 @@ export class DirectDownloadSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/api`, {
                 params: { m: 'release_id', id: id, s: 0 },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             
             const data = response.data.data;
@@ -144,7 +144,7 @@ export class DirectDownloadSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/api`, {
                 params: { m: 'release_id', id: animeId, s: session },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             
             const data = response.data.data;
@@ -187,7 +187,7 @@ export class DirectDownloadSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/api`, {
                 params: { m: 'airing', page: page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             
             const data = response.data.data;

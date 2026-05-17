@@ -45,7 +45,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
             const response = await axios.get(this.baseUrl, {
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 signal: options?.signal,
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
             });
@@ -117,7 +117,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             const results = this.parseAnimeItems($);
@@ -149,7 +149,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
 
@@ -193,7 +193,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
 
@@ -279,7 +279,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                     'Accept-Language': 'en-US,en;q=0.5',
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
 
             const html = response.data;
@@ -315,7 +315,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                     'Referer': 'https://watchhentai.net/',
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
 
             const playerHtml = playerResponse.data;
@@ -432,7 +432,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             
@@ -487,7 +487,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
                                 : `${this.baseUrl}/series/`;
                             const response = await axios.get(url, {
                                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                                timeout: 15000
+                                timeout: 25000
                             });
                             const $ = cheerio.load(response.data);
                             const items = this.parseAnimeItems($);
@@ -684,7 +684,7 @@ export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSour
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             const results = this.parseAnimeItems($);

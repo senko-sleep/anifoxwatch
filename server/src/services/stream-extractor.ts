@@ -61,7 +61,7 @@ class StreamExtractor {
     }
 
     private activePages = 0;
-    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 1 : 2;
+    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 4 : 8;
 
     /**
      * Create a new page with proper settings
@@ -69,7 +69,7 @@ class StreamExtractor {
     private async createPage(): Promise<Page> {
         // Simple concurrency limit
         while (this.activePages >= this.MAX_CONCURRENT_PAGES) {
-            await this.delay(1000);
+            await this.delay(500);
         }
         this.activePages++;
 
@@ -156,19 +156,24 @@ class StreamExtractor {
                 }
             });
 
-            const isHiAnimeFamily =
-                /aniwatchtv\.to|hianime|zoro\.to|9anime/i.test(watchBaseUrl) ||
-                /aniwatchtv\.to|hianime/i.test(url);
+            const isHiAnimeFamily = 
+                /aniwatch|hianime|zoro\.to|9anime|aniwave/i.test(watchBaseUrl) ||
+                /aniwatch|hianime|aniwave/i.test(url);
 
             // HiAnime pages keep long-polling; networkidle2 often never resolves. Use DOM + extra soak time.
-            await page.goto(url, {
-                waitUntil: isHiAnimeFamily ? 'domcontentloaded' : 'networkidle2',
-                timeout: isHiAnimeFamily ? 60_000 : 45_000,
-            });
+            try {
+                await page.goto(url, {
+                    waitUntil: isHiAnimeFamily ? 'domcontentloaded' : 'networkidle2',
+                    timeout: isHiAnimeFamily ? 60_000 : 60_000,
+                });
+            } catch (navError: any) {
+                logger.warn(`[StreamExtractor] 9Anime page navigation timeout, proceeding: ${navError.message}`);
+            }
 
             await page.waitForSelector('iframe', { timeout: 20_000 }).catch(() => {});
 
-            await this.delay(isHiAnimeFamily ? 14_000 : 5000);
+            // Reduced soak time from 14s to 8s for faster resolution
+            await this.delay(isHiAnimeFamily ? 8_000 : 5000);
 
             // Try clicking play button if video is paused
             try {
@@ -205,7 +210,13 @@ class StreamExtractor {
                         timeout: isHiAnimeFamily ? 45_000 : 30_000,
                     });
 
-                    await this.delay(isHiAnimeFamily ? 15_000 : 8000);
+                    // Dynamic polling to avoid unnecessary delay when stream is already captured
+                    let m3u8WaitTime = 0;
+                    const maxWait = isHiAnimeFamily ? 10_000 : 8000;
+                    while (capturedM3u8s.size === 0 && m3u8WaitTime < maxWait) {
+                        await this.delay(200);
+                        m3u8WaitTime += 200;
+                    }
 
                     // Try to get video src directly
                     const videoSrc = await embedPage.evaluate(() => {
@@ -219,15 +230,22 @@ class StreamExtractor {
                 } catch (e) {
                     logger.warn(`[StreamExtractor] Embed page error: ${e}`);
                 } finally {
+                    this.activePages--;
                     await embedPage.close();
                 }
             }
 
             // Convert captured URLs to streams
             for (const m3u8Url of capturedM3u8s) {
+                // Normalize Megaup mirror domains to megaup.cc for better proxy stability
+                const normalizedUrl = m3u8Url.replace(
+                    /([a-z0-9-]+)\.(code|lab|web|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\d*\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi,
+                    '$1.megaup.cc'
+                );
+
                 streams.push({
-                    url: m3u8Url,
-                    quality: this.detectQuality(m3u8Url),
+                    url: normalizedUrl,
+                    quality: this.detectQuality(normalizedUrl),
                     type: 'hls'
                 });
             }
@@ -298,25 +316,39 @@ class StreamExtractor {
                 'Origin': embedOrigin
             });
 
-            await page.goto(embedUrl, {
-                waitUntil: 'networkidle0',
-                timeout: 45000
-            });
-
-            // Wait for video to load
-            await this.delay(10000);
-
-            // Try to click play
             try {
-                await page.click('.play-btn, [class*="play"], .jw-icon-display').catch(() => { });
-                await this.delay(5000);
-            } catch { }
+                await page.goto(embedUrl, {
+                    waitUntil: 'networkidle2',
+                    timeout: 60000
+                });
+
+                // Wait for video to load or m3u8 to be captured (dynamic polling)
+                let m3u8WaitTime = 0;
+                while (capturedM3u8s.size === 0 && m3u8WaitTime < 10000) {
+                    await this.delay(200);
+                    m3u8WaitTime += 200;
+                }
+
+                if (capturedM3u8s.size === 0) {
+                    // Try to click play
+                    try {
+                        await page.click('.play-btn, [class*="play"], .jw-icon-display').catch(() => { });
+                        let playWaitTime = 0;
+                        while (capturedM3u8s.size === 0 && playWaitTime < 5000) {
+                            await this.delay(200);
+                            playWaitTime += 200;
+                        }
+                    } catch { }
+                }
+            } catch (navError: any) {
+                logger.warn(`[StreamExtractor] Embed page navigation timeout, but proceeding with captured streams: ${navError.message}`);
+            }
 
             // Get video src
             const videoSrc = await page.evaluate(() => {
                 const video = document.querySelector('video');
                 return video?.src || video?.currentSrc;
-            });
+            }).catch(() => null);
 
             if (videoSrc && videoSrc.includes('.m3u8')) {
                 capturedM3u8s.add(videoSrc);

@@ -10,7 +10,7 @@ export class AnimeSaturnSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const response = await axios.get(this.baseUrl, { signal: options?.signal, timeout: options?.timeout || 5000, headers: this.getHeaders() });
+            const response = await axios.get(this.baseUrl, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             return response.status === 200;
         } catch { return false; }
     }
@@ -26,7 +26,7 @@ export class AnimeSaturnSource extends BaseAnimeSource {
 
     async search(query: string, page: number = 1, _filters?: Record<string, unknown>, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         try {
-            const response = await axios.get(`${this.baseUrl}/animelist`, { params: { search: query }, signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/animelist`, { params: { search: query }, signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
             $('.anime-card, .item-archivio').each((i, el) => {
@@ -45,7 +45,7 @@ export class AnimeSaturnSource extends BaseAnimeSource {
     async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         try {
             const animeId = id.replace('animesaturn-', '');
-            const response = await axios.get(`${this.baseUrl}/anime/${animeId}`, { signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/anime/${animeId}`, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const title = $('h1, .anime-title').first().text().trim();
             const image = $('.cover img, .locandina img').attr('src') || '';
@@ -59,7 +59,7 @@ export class AnimeSaturnSource extends BaseAnimeSource {
     async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         try {
             const id = animeId.replace('animesaturn-', '');
-            const response = await axios.get(`${this.baseUrl}/anime/${id}`, { signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/anime/${id}`, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const episodes: Episode[] = [];
             $('.episodi a, .episode-item').each((i, el) => {
@@ -77,13 +77,13 @@ export class AnimeSaturnSource extends BaseAnimeSource {
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         try {
-            const response = await axios.get(`${this.baseUrl}/ep/${episodeId}`, { signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/ep/${episodeId}`, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const sources: VideoSource[] = [];
             const iframeSrc = $('iframe').attr('src');
             if (iframeSrc) {
                 const embedUrl = iframeSrc.startsWith('http') ? iframeSrc : `https:${iframeSrc}`;
-                const embedResponse = await axios.get(embedUrl, { signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+                const embedResponse = await axios.get(embedUrl, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
                 const m3u8Match = embedResponse.data.match(/file:\s*["']([^"']*\.m3u8[^"']*)["']/);
                 if (m3u8Match) { sources.push({ url: m3u8Match[1], quality: 'auto', isM3U8: true }); }
             }
@@ -93,7 +93,7 @@ export class AnimeSaturnSource extends BaseAnimeSource {
 
     async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         try {
-            const response = await axios.get(`${this.baseUrl}/topanime`, { signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/topanime`, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
             $('.anime-card, .item-archivio').slice(0, 20).each((i, el) => {
@@ -109,7 +109,7 @@ export class AnimeSaturnSource extends BaseAnimeSource {
 
     async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         try {
-            const response = await axios.get(this.baseUrl, { signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(this.baseUrl, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
             $('.anime-card, .item-archivio').slice(0, 20).each((i, el) => {

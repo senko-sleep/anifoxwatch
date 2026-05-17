@@ -33,7 +33,7 @@ export class NineAnimeSource extends BaseAnimeSource {
     constructor() {
         super();
         this.client = axios.create({
-            timeout: 15000,
+            timeout: 25000,
             headers: {
                 'Accept': 'text/html,application/json',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -132,7 +132,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             const result9 = await Promise.race([
                 streamExtractor.extractFrom9Anime(animeSlug, epNum),
                 new Promise<{ success: false; streams: never[] }>((_, rej) =>
-                    setTimeout(() => rej(new Error('9anime extractor timeout')), 22000)
+                    setTimeout(() => rej(new Error('9anime extractor timeout')), 35000)
                 )
             ]).catch(() => ({ success: false as const, streams: [] as { url: string; quality: string; type: string }[] }));
 
@@ -145,7 +145,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             const resultKaido = await Promise.race([
                 streamExtractor.extractFromKaido(animeSlug, epNum),
                 new Promise<{ success: false; streams: never[] }>((_, rej) =>
-                    setTimeout(() => rej(new Error('kaido extractor timeout')), 22000)
+                    setTimeout(() => rej(new Error('kaido extractor timeout')), 35000)
                 )
             ]).catch(() => ({ success: false as const, streams: [] as { url: string; quality: string; type: string }[] }));
 
@@ -473,7 +473,7 @@ export class NineAnimeSource extends BaseAnimeSource {
         try {
             const response = await this.client.get(`${this.baseUrl}/home`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: options?.timeout || 25000
             });
             this.isAvailable = response.status === 200;
             return this.isAvailable;
@@ -492,7 +492,7 @@ export class NineAnimeSource extends BaseAnimeSource {
                 params: { keyword: query, page },
                 headers: { 'Accept': 'text/html' },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: options?.timeout || 25000
             });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
@@ -533,7 +533,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             const response = await this.client.get(`${this.baseUrl}/watch/${animeSlug}`, {
                 headers: { 'Accept': 'text/html' },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: options?.timeout || 25000
             });
 
             const $ = cheerio.load(response.data);
@@ -595,7 +595,7 @@ export class NineAnimeSource extends BaseAnimeSource {
                     'Referer': `${this.baseUrl}/watch/${animeSlug}`
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: options?.timeout || 25000
             });
 
             if (!response.data?.html) {
@@ -646,7 +646,7 @@ export class NineAnimeSource extends BaseAnimeSource {
                     'Referer': this.baseUrl
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 5000
+                timeout: 25000
             });
 
             if (!response.data?.html) {
@@ -705,7 +705,7 @@ export class NineAnimeSource extends BaseAnimeSource {
         }
 
         const [animeSlug, epPart] = episodeId.split('?');
-        const epNum = epPart?.replace('ep=', '')?.trim() || '';
+        const epNum = options?.episodeNum ? String(options.episodeNum) : (epPart?.replace('ep=', '')?.trim() || '');
         if (!animeSlug || !epNum) return { sources: [], subtitles: [] };
 
         // For dub category, try to find actual dub content
@@ -727,7 +727,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             const result9 = await Promise.race([
                 streamExtractor.extractFrom9Anime(animeSlug, epNum),
                 new Promise<{ success: false; streams: never[] }>((_, rej) =>
-                    setTimeout(() => rej(new Error('9anime extractor timeout')), 22000)
+                    setTimeout(() => rej(new Error('9anime extractor timeout')), 35000)
                 )
             ]).catch(() => ({ success: false as const, streams: [] as { url: string; quality: string; type: string }[] }));
 
@@ -744,7 +744,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             const resultKaido = await Promise.race([
                 streamExtractor.extractFromKaido(animeSlug, epNum),
                 new Promise<{ success: false; streams: never[] }>((_, rej) =>
-                    setTimeout(() => rej(new Error('kaido extractor timeout')), 22000)
+                    setTimeout(() => rej(new Error('kaido extractor timeout')), 35000)
                 )
             ]).catch(() => ({ success: false as const, streams: [] as { url: string; quality: string; type: string }[] }));
 
@@ -791,7 +791,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             const response = await this.client.get(`${this.baseUrl}/home`, {
                 headers: { 'Accept': 'text/html' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
 
             const $ = cheerio.load(response.data);
@@ -834,7 +834,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             const response = await this.client.get(`${this.baseUrl}/recently-updated?page=${page}`, {
                 headers: { 'Accept': 'text/html' },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
@@ -863,7 +863,7 @@ export class NineAnimeSource extends BaseAnimeSource {
             const response = await this.client.get(`${this.baseUrl}/most-popular?page=${page}`, {
                 headers: { 'Accept': 'text/html' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             const results: TopAnime[] = [];

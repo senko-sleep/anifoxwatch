@@ -7,7 +7,7 @@ import { logger } from '../utils/logger.js';
 
 export class GogoanimeSource extends BaseAnimeSource {
     name = 'Gogoanime';
-    baseUrl = 'https://anitaku.to';
+    baseUrl = 'https://anitaku.pe';
     private readonly fallbackDomains = ['https://gogoanimehd.to', 'https://gogoanimes.fi'];
 
     constructor() {
@@ -33,7 +33,7 @@ export class GogoanimeSource extends BaseAnimeSource {
         try {
             const resp = await axios.get(m3u8Url, {
                 signal: options?.signal,
-                timeout: 5000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Referer': this.baseUrl,
@@ -87,7 +87,7 @@ export class GogoanimeSource extends BaseAnimeSource {
          try {
              const response = await axios.get(`${this.baseUrl}/search.html?keyword=test`, {
                  signal: options?.signal,
-                 timeout: options?.timeout || 15000, // Increased from 5000 to 15000
+                 timeout: 25000, // Increased from 5000 to 15000
                  headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
              });
              return response.status === 200 && (response.data as string).includes('last_episodes');
@@ -179,7 +179,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             try {
                 const animeIdForDub = id.replace('gogoanime-', '');
                  const dubTestResp = await axios.get(`${this.baseUrl}/${animeIdForDub}-dub-episode-1`, {
-                     timeout: 15000, // Increased from 5000 to 15000
+                     timeout: 25000, // Increased from 5000 to 15000
                      headers: { 'User-Agent': 'Mozilla/5.0' },
                      validateStatus: s => s < 500,
                  });
@@ -266,7 +266,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             let hasDubAvailable = false;
             try {
                 const dubTestResp = await axios.get(`${this.baseUrl}/${id}-dub-episode-1`, {
-                    timeout: 5000,
+                    timeout: 25000,
                     headers: { 'User-Agent': 'Mozilla/5.0' },
                     validateStatus: s => s < 500,
                 });
@@ -294,7 +294,7 @@ export class GogoanimeSource extends BaseAnimeSource {
                 // Fallback: try fetching ep 1 to verify the show exists, assume a single episode
                 try {
                     const testR = await axios.get(`${this.baseUrl}/${id}-episode-1`, {
-                        timeout: 15000,
+                        timeout: 25000,
                         headers: { 'User-Agent': 'Mozilla/5.0' },
                         validateStatus: s => s < 500,
                     });
@@ -325,7 +325,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             // Get sub episode servers
             const response = await axios.get(`${this.baseUrl}/${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 validateStatus: s => s < 500
             });
@@ -352,7 +352,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             try {
                 const dubResponse = await axios.get(`${this.baseUrl}/${dubEpisodeId}`, {
                     signal: options?.signal,
-                    timeout: options?.timeout || 8000,
+                    timeout: 25000,
                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                     validateStatus: s => s < 500
                 });
@@ -422,8 +422,8 @@ export class GogoanimeSource extends BaseAnimeSource {
                     .replace(/\?ep=.+$/, '')           // strip ?ep=TOKEN
                     .replace(/-[a-z0-9]*[0-9][a-z0-9]*$/, ''); // strip HiAnime hash suffix (e.g. -8lj0, ensures at least one digit)
                 // Extract episode number from the original ID
-                let crossEpNum = '1';
-                const epMatch = episodeId.match(/\$ep=(\d+)/) || episodeId.match(/[?&]ep=(\d+)/) || episodeId.match(/-episode-(\d+)/);
+                let crossEpNum = String(options?.episodeNum || '1');
+                const epMatch = !options?.episodeNum ? (episodeId.match(/\$ep=(\d+)/) || episodeId.match(/[?&]ep=(\d+)/) || episodeId.match(/-episode-(\d+)/)) : null;
                 if (epMatch) crossEpNum = epMatch[1];
 
                 // Try multiple slug patterns for dub
@@ -477,7 +477,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             // No dub available — return empty so the caller knows dub genuinely failed
             // and can fall back to sub rather than serving sub content labeled as dub.
             logger.info(`Gogoanime: No dub sources found for ${epId}, returning empty`, undefined, this.name);
-            return { sources: [], subtitles: [], source: this.name, category: 'sub' } as any;
+            return { sources: [], subtitles: [], source: this.name, category: isDubRequest ? 'dub' : 'sub' } as any;
         }
 
         // ── SUB: Normal sub extraction ─────────────────────────────────────
@@ -491,8 +491,8 @@ export class GogoanimeSource extends BaseAnimeSource {
                     .replace(/\$ep=\d+$/, '')
                     .replace(/-[a-z0-9]*[0-9][a-z0-9]*$/, '');
                     
-                let crossEpNum = '1';
-                const epMatch = episodeId.match(/\$ep=(\d+)/) || episodeId.match(/[?&]ep=(\d+)/);
+                let crossEpNum = String(options?.episodeNum || '1');
+                const epMatch = !options?.episodeNum ? (episodeId.match(/\$ep=(\d+)/) || episodeId.match(/[?&]ep=(\d+)/)) : null;
                 if (epMatch) crossEpNum = epMatch[1];
                 
                 subEpId = `${crossSlug}-episode-${crossEpNum}`;
@@ -501,7 +501,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             console.log(`   🔍 Gogoanime: Trying SUB URL: ${subEpId}`);
             let response = await axios.get(`${this.baseUrl}/${subEpId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 15000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -514,7 +514,7 @@ export class GogoanimeSource extends BaseAnimeSource {
                 // fallback to bare epId if the reconstructed one fails
                 response = await axios.get(`${this.baseUrl}/${epId}`, {
                     signal: options?.signal,
-                    timeout: options?.timeout || 15000,
+                    timeout: 25000,
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -580,7 +580,7 @@ export class GogoanimeSource extends BaseAnimeSource {
                 try {
                     const embedResp = await axios.get(embed.url, {
                         signal: options?.signal,
-                        timeout: 8000,
+                        timeout: 25000,
                         headers: {
                             'Referer': this.baseUrl,
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -640,7 +640,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/popular.html`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
@@ -686,7 +686,7 @@ export class GogoanimeSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/${dubEpId}`, {
                 signal: options?.signal,
-                timeout: 10000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Referer': this.baseUrl
@@ -718,7 +718,7 @@ export class GogoanimeSource extends BaseAnimeSource {
                 const searchResponse = await axios.get(`${this.baseUrl}/search.html`, {
                     params: { keyword: query },
                     signal: options?.signal,
-                    timeout: 8000
+                    timeout: 25000
                 });
                 
                 const $ = cheerio.load(searchResponse.data);
@@ -797,7 +797,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             try {
                 const embedResp = await axios.get(embed.url, {
                     signal: options?.signal,
-                    timeout: 8000,
+                    timeout: 25000,
                     headers: {
                         'Referer': this.baseUrl,
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -857,7 +857,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             
             const response = await axios.get(`${this.baseUrl}/${epId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 15000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -921,7 +921,7 @@ export class GogoanimeSource extends BaseAnimeSource {
                 try {
                     const embedResp = await axios.get(embed.url, {
                         signal: options?.signal,
-                        timeout: 8000,
+                        timeout: 25000,
                         headers: {
                             'Referer': this.baseUrl,
                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -981,7 +981,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             // Fetch the m3u8 playlist
             const response = await axios.get(m3u8Url, {
                 signal: options?.signal,
-                timeout: 5000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Referer': this.baseUrl
@@ -1032,7 +1032,7 @@ export class GogoanimeSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/home.html`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];

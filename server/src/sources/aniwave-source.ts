@@ -40,7 +40,7 @@ export class AniwaveSource extends BaseAnimeSource {
         this.baseUrl = `${apiUrl}/anime/animepahe`;
         this.client = axios.create({
             baseURL: this.baseUrl,
-            timeout: 12000,
+            timeout: 25000,
             headers: {
                 'Accept': 'application/json',
                 'User-Agent': 'AniStreamHub/1.0 (Premium)',
@@ -176,7 +176,7 @@ export class AniwaveSource extends BaseAnimeSource {
             const response = await this.throttledRequest((signal) =>
                 this.client.get('/recent-episodes', {
                     params: { page: 1 },
-                    timeout: options?.timeout || 5000,
+                    timeout: 25000,
                     signal
                 }),
                 options?.signal
@@ -198,7 +198,7 @@ export class AniwaveSource extends BaseAnimeSource {
                 this.client.get(`/${encodeURIComponent(query)}`, {
                     params: { page },
                     signal,
-                    timeout: options?.timeout || 10000
+                    timeout: 25000
                 }),
                 options?.signal
             );
@@ -229,7 +229,7 @@ export class AniwaveSource extends BaseAnimeSource {
             const response = await this.throttledRequest((signal) =>
                 this.client.get(`/info/${animeId}`, {
                     signal,
-                    timeout: options?.timeout || 10000
+                    timeout: 25000
                 }),
                 options?.signal
             );
@@ -252,7 +252,7 @@ export class AniwaveSource extends BaseAnimeSource {
             const response = await this.throttledRequest((signal) =>
                 this.client.get(`/info/${id}`, {
                     signal,
-                    timeout: options?.timeout || 10000
+                    timeout: 25000
                 }),
                 options?.signal
             );
@@ -287,7 +287,7 @@ export class AniwaveSource extends BaseAnimeSource {
             const response = await this.throttledRequest((signal) =>
                 this.client.get(`/servers/${episodeId}`, {
                     signal,
-                    timeout: options?.timeout || 5000
+                    timeout: 25000
                 }),
                 options?.signal
             );
@@ -322,7 +322,7 @@ export class AniwaveSource extends BaseAnimeSource {
             const response = await this.throttledRequest((signal) =>
                 this.client.get(`/watch/${episodeId}`, {
                     params: { server, category },
-                    timeout: options?.timeout || 8000,
+                    timeout: 25000,
                     signal
                 }),
                 options?.signal
@@ -386,7 +386,7 @@ export class AniwaveSource extends BaseAnimeSource {
                 this.client.get('/airing', {
                     params: { page },
                     signal,
-                    timeout: options?.timeout || 10000
+                    timeout: 25000
                 }),
                 options?.signal
             );
@@ -409,7 +409,7 @@ export class AniwaveSource extends BaseAnimeSource {
                 this.client.get('/recent-episodes', {
                     params: { page },
                     signal,
-                    timeout: options?.timeout || 10000
+                    timeout: 25000
                 }),
                 options?.signal
             );
@@ -432,7 +432,7 @@ export class AniwaveSource extends BaseAnimeSource {
                 this.client.get('/airing', {
                     params: { page },
                     signal,
-                    timeout: options?.timeout || 15000
+                    timeout: 25000
                 }),
                 options?.signal
             );

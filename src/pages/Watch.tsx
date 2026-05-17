@@ -364,6 +364,12 @@ const Watch = () => {
     setServerRetryCount(0);
   }, [selectedEpisode, audioType]);
 
+  // Reset server selection when audioType changes to allow auto-selecting the best server for the new audio type
+  useEffect(() => {
+    setSelectedServer('');
+    setUserPickedServer(false);
+  }, [audioType]);
+
   // Reset source retries when stream changes
   useEffect(() => {
     setSourceRetryIndex(0);

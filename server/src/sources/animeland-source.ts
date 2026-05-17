@@ -10,7 +10,7 @@ export class AnimeLandSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const response = await axios.get(this.baseUrl, { signal: options?.signal, timeout: options?.timeout || 5000, headers: this.getHeaders() });
+            const response = await axios.get(this.baseUrl, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             return response.status === 200;
         } catch { return false; }
     }
@@ -25,7 +25,7 @@ export class AnimeLandSource extends BaseAnimeSource {
 
     async search(query: string, page: number = 1, _filters?: Record<string, unknown>, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         try {
-            const response = await axios.get(`${this.baseUrl}`, { params: { s: query }, signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}`, { params: { s: query }, signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
             $('.post, .item').each((i, el) => {
@@ -44,7 +44,7 @@ export class AnimeLandSource extends BaseAnimeSource {
     async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
         try {
             const animeId = id.replace('animeland-', '');
-            const response = await axios.get(`${this.baseUrl}/${animeId}`, { signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/${animeId}`, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const title = $('h1, .entry-title').first().text().trim();
             const image = $('.entry-content img, .post-thumb img').first().attr('src') || '';
@@ -56,7 +56,7 @@ export class AnimeLandSource extends BaseAnimeSource {
     async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         try {
             const id = animeId.replace('animeland-', '');
-            const response = await axios.get(`${this.baseUrl}/${id}`, { signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/${id}`, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const episodes: Episode[] = [];
             $('select option, .video-info a').each((i, el) => {
@@ -77,7 +77,7 @@ export class AnimeLandSource extends BaseAnimeSource {
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         try {
-            const response = await axios.get(`${this.baseUrl}/${episodeId}`, { signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/${episodeId}`, { signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const sources: VideoSource[] = [];
             const iframeSrc = $('iframe').attr('src');
@@ -98,7 +98,7 @@ export class AnimeLandSource extends BaseAnimeSource {
 
     async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         try {
-            const response = await axios.get(this.baseUrl, { params: { page }, signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(this.baseUrl, { params: { page }, signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
             $('.post, .item').each((i, el) => {

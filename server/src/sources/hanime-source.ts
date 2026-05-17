@@ -69,7 +69,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
             const response = await axios.get(this.baseUrl, {
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 signal: options?.signal,
                 headers: { 
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -125,7 +125,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                         'Content-Type': 'application/json',
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     },
-                    timeout: options?.timeout || 15000,
+                    timeout: 25000,
                     signal: options?.signal
                 }
             );
@@ -188,7 +188,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                         'Content-Type': 'application/json',
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     },
-                    timeout: options?.timeout || 15000,
+                    timeout: 25000,
                     signal: options?.signal
                 }
             );
@@ -234,7 +234,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                         'Content-Type': 'application/json',
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     },
-                    timeout: options?.timeout || 15000,
+                    timeout: 25000,
                     signal: options?.signal
                 }
             );
@@ -280,7 +280,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                         'Content-Type': 'application/json',
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     },
-                    timeout: options?.timeout || 15000,
+                    timeout: 25000,
                     signal: options?.signal
                 }
             );
@@ -420,7 +420,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                         'Content-Type': 'application/json',
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     },
-                    timeout: options?.timeout || 15000,
+                    timeout: 25000,
                     signal: options?.signal
                 }
             );
@@ -482,7 +482,7 @@ export class HanimeSource extends BaseAnimeSource implements GenreAwareSource {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept': 'text/html,application/xhtml+xml'
                 },
-                timeout: options?.timeout || 15000,
+                timeout: 25000,
                 signal: options?.signal
             });
 

@@ -5,9 +5,10 @@
  * Keep in sync with `registerSource(new …Source())` calls in `services/source-manager.ts`.
  */
 export const REGISTERED_SOURCE_NAMES: readonly string[] = [
-    'Gogoanime',
     'Aniwaves',
-    'AnimeKai',
+    'GogoOrAt',
+    'Wcofun',
+    'Gogoanime',
     'AllAnime',
     'AnimeHeaven',
     '9Anime',

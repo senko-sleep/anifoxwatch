@@ -83,7 +83,7 @@ export class ConsumetSource extends BaseAnimeSource {
         this.provider = provider;
         this.client = axios.create({
             baseURL: `${apiUrl}/anime/${provider}`,
-            timeout: 10000,
+            timeout: 25000,
             headers: {
                 'Accept': 'application/json',
                 'User-Agent': 'AniStreamHub/1.0'
@@ -109,7 +109,7 @@ export class ConsumetSource extends BaseAnimeSource {
             const response = await this.client.get('/recent-episodes', {
                 params: { page: 1 },
                 signal: options?.signal,
-                timeout: options?.timeout || 5000
+                timeout: 25000
             });
             this.isAvailable = response.status === 200;
             return this.isAvailable;
@@ -168,7 +168,7 @@ export class ConsumetSource extends BaseAnimeSource {
             const response = await this.client.get(`/${encodeURIComponent(query)}`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
 
             const result: AnimeSearchResult = {
@@ -196,7 +196,7 @@ export class ConsumetSource extends BaseAnimeSource {
             const animeId = id.replace(`consumet-${this.provider}-`, '');
             const response = await this.client.get(`/info/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const anime = this.mapAnime(response.data as ConsumetAnimeResponse);
             this.setCache(cacheKey, anime, 10 * 60 * 1000); // 10 min cache
@@ -216,7 +216,7 @@ export class ConsumetSource extends BaseAnimeSource {
             const id = animeId.replace(`consumet-${this.provider}-`, '');
             const response = await this.client.get(`/info/${id}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
 
             const episodes: Episode[] = (response.data.episodes || []).map((ep: ConsumetEpisodeResponse) => ({
@@ -270,7 +270,7 @@ export class ConsumetSource extends BaseAnimeSource {
             const enc = encodeURIComponent(raw);
             const response = await axios.get(`${this.consumetWatchBase(prv)}/servers/${enc}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.client.defaults.headers as any,
             });
             const servers: EpisodeServer[] = (response.data || []).map((s: { name: string; url: string; type?: string }) => ({
@@ -306,7 +306,7 @@ export class ConsumetSource extends BaseAnimeSource {
             const response = await axios.get(`${this.consumetWatchBase(prv)}/watch/${enc}`, {
                 params,
                 signal: options?.signal,
-                timeout: options?.timeout || 15000,
+                timeout: 25000,
                 headers: this.client.defaults.headers as any,
             });
 
@@ -345,7 +345,7 @@ export class ConsumetSource extends BaseAnimeSource {
             const response = await this.client.get('/top-airing', {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const results = (response.data.results || []).map((a: ConsumetAnimeResponse) => this.mapAnime(a));
             this.setCache(cacheKey, results);
@@ -365,7 +365,7 @@ export class ConsumetSource extends BaseAnimeSource {
             const response = await this.client.get('/recent-episodes', {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const results = (response.data.results || []).map((a: ConsumetAnimeResponse) => this.mapAnime(a));
             this.setCache(cacheKey, results);
@@ -385,7 +385,7 @@ export class ConsumetSource extends BaseAnimeSource {
             const response = await this.client.get('/top-airing', {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const results = (response.data.results || [])
                 .slice(0, limit)

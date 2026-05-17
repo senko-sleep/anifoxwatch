@@ -231,7 +231,7 @@ export class RealDubSource extends BaseAnimeSource {
             // Try to get dub stream from Gogoanime
             const response = await axios.get(`http://localhost:3001/api/stream/watch/gogoanime-${animeTitle.toLowerCase().replace(/\s+/g, '-')}-episode-${episodeNum}?category=dub`, {
                 signal: options?.signal,
-                timeout: 10000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }

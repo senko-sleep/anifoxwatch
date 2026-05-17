@@ -1,0 +1,62 @@
+{
+  "scraped": [
+    {
+      "id": "naruto-9r5k",
+      "title": "Naruto",
+      "hasSub": true,
+      "hasDub": true,
+      "source": "AnimeKai",
+      "scraped": true,
+      "episodes": 220,
+      "extractedStreams": {
+        "sub": 1,
+        "dub": 1
+      },
+      "extractedServers": [
+        "Megaup"
+      ]
+    },
+    {
+      "id": "aniwaves-naruto-76396",
+      "title": "Naruto",
+      "hasSub": true,
+      "hasDub": false,
+      "source": "Aniwaves",
+      "scraped": true,
+      "episodes": 0,
+      "extractedStreams": {
+        "sub": 0
+      }
+    }
+  ],
+  "unscraped": [],
+  "status": {
+    "AnimeKai": {
+      "searched": true,
+      "results": 29,
+      "scraped": 1,
+      "errors": []
+    },
+    "Gogoanime": {
+      "searched": true,
+      "results": 0,
+      "scraped": 0,
+      "errors": []
+    },
+    "Aniwaves": {
+      "searched": true,
+      "results": 5,
+      "scraped": 1,
+      "errors": []
+    },
+    "AllAnime": {
+      "searched": false,
+      "results": 0,
+      "scraped": 0,
+      "errors": [
+        "search: Search timeout"
+      ]
+    }
+  },
+  "totalTime": 48046
+}

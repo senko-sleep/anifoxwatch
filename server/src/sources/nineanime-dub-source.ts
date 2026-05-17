@@ -12,7 +12,7 @@ export class NineAnimeDubSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -35,7 +35,7 @@ export class NineAnimeDubSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/search`, {
                 params: { keyword: query },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -88,7 +88,7 @@ export class NineAnimeDubSource extends BaseAnimeSource {
             const cleanId = id.replace('nineanime-dub-', '');
             const response = await axios.get(`${this.baseUrl}/${cleanId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -129,7 +129,7 @@ export class NineAnimeDubSource extends BaseAnimeSource {
             const cleanId = id.replace('nineanime-dub-', '');
             const response = await axios.get(`${this.baseUrl}/${cleanId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -180,7 +180,7 @@ export class NineAnimeDubSource extends BaseAnimeSource {
             const cleanId = episodeId.replace('nineanime-dub-', '');
             const response = await axios.get(`${this.baseUrl}/${cleanId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             
@@ -282,7 +282,7 @@ export class NineAnimeDubSource extends BaseAnimeSource {
             // Try Gogoanime as fallback
             const gogoanimeResponse = await axios.get(`http://localhost:3001/api/stream/watch/gogoanime-${episodeId}?category=dub`, {
                 signal: options?.signal,
-                timeout: 10000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
@@ -307,7 +307,7 @@ export class NineAnimeDubSource extends BaseAnimeSource {
         try {
             const response = await axios.get(m3u8Url, {
                 signal: options?.signal,
-                timeout: 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -333,7 +333,7 @@ export class NineAnimeDubSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

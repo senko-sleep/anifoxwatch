@@ -13,7 +13,7 @@ export class AnimePaheSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -37,7 +37,7 @@ export class AnimePaheSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}`, {
                 params: { m: 'search', q: query },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -80,7 +80,7 @@ export class AnimePaheSource extends BaseAnimeSource {
             const session = id.replace('animepahe-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${session}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -134,7 +134,7 @@ export class AnimePaheSource extends BaseAnimeSource {
                 const response = await axios.get(`${this.apiUrl}`, {
                     params: { m: 'release', id: session, sort: 'episode_asc', page },
                     signal: options?.signal,
-                    timeout: options?.timeout || 10000,
+                    timeout: 25000,
                     headers: this.getHeaders()
                 });
 
@@ -178,7 +178,7 @@ export class AnimePaheSource extends BaseAnimeSource {
             const [session, epSession] = episodeId.split('/');
             const response = await axios.get(`${this.baseUrl}/play/${session}/${epSession}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -217,7 +217,7 @@ export class AnimePaheSource extends BaseAnimeSource {
             const response = await axios.get(`${this.apiUrl}`, {
                 params: { m: 'airing', page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 

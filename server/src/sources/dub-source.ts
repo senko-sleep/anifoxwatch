@@ -20,7 +20,7 @@ export class DubSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             });
             return response.status === 200;
@@ -37,7 +37,7 @@ export class DubSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/search`, {
                 params: { keyword: dubQuery, page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             
             // Parse search results (basic implementation)

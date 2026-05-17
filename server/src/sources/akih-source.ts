@@ -39,7 +39,7 @@ export class AkiHSource extends BaseAnimeSource implements GenreAwareSource {
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
             const response = await axios.get(this.baseUrl, {
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 signal: options?.signal,
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
             });
@@ -121,7 +121,7 @@ export class AkiHSource extends BaseAnimeSource implements GenreAwareSource {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     signal: options?.signal,
-                    timeout: options?.timeout || 15000
+                    timeout: 25000
                 }
             );
             const $ = cheerio.load(response.data);
@@ -154,7 +154,7 @@ export class AkiHSource extends BaseAnimeSource implements GenreAwareSource {
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
 
@@ -205,7 +205,7 @@ export class AkiHSource extends BaseAnimeSource implements GenreAwareSource {
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
 
@@ -301,7 +301,7 @@ export class AkiHSource extends BaseAnimeSource implements GenreAwareSource {
             logger.info(`[AkiH] Fetching video page with axios: ${url}`);
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 signal: options?.signal
             });
             const $ = cheerio.load(response.data);
@@ -391,8 +391,8 @@ export class AkiHSource extends BaseAnimeSource implements GenreAwareSource {
                 }
             });
 
-            await page.goto(url, { waitUntil: 'networkidle2', timeout: 15000 });
-            await page.waitForSelector('#player_container, video, iframe', { timeout: 5000 }).catch(() => {});
+            await page.goto(url, { waitUntil: 'networkidle2', timeout: 25000 });
+            await page.waitForSelector('#player_container, video, iframe', { timeout: 25000 }).catch(() => {});
             await new Promise(resolve => setTimeout(resolve, 2000));
 
             const pageSources: VideoSource[] = await page.evaluate(() => {
@@ -459,7 +459,7 @@ export class AkiHSource extends BaseAnimeSource implements GenreAwareSource {
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             
@@ -526,7 +526,7 @@ export class AkiHSource extends BaseAnimeSource implements GenreAwareSource {
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             const results = this.parseAnimeItems($);

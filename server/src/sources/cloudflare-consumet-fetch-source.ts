@@ -92,7 +92,7 @@ export class CloudflareConsumetFetchSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            await this.fetchJson<{ results?: unknown[] }>('gogoanime', '/recent-episodes', { page: '1' }, { ...options, timeout: 5000 });
+            await this.fetchJson<{ results?: unknown[] }>('gogoanime', '/recent-episodes', { page: '1' }, { ...options, timeout: 25000 });
             this.isAvailable = true;
             return true;
         } catch {

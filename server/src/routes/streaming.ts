@@ -16,13 +16,13 @@ const router = Router();
 
 const DEFAULT_REMOTE_STREAM_PROXY =
     process.env.DEFAULT_REMOTE_STREAM_PROXY ||
-    'https://anifoxwatch.vercel.app/api/stream/proxy';
+    'https://anistream-proxy.vercel.app/api/stream/proxy';
 
 /** How long to wait for a dub result before accepting a sub fallback (ms). */
-const DUB_PATIENCE_MS = 5_000; // Reduced from 18s to 5s for faster fallback
+const DUB_PATIENCE_MS = 25_000; // Increased to 25s to allow for deep fallbacks
 
 /** Global per-request timeout safety net (ms). */
-const GLOBAL_TIMEOUT_MS = 25_000;
+const GLOBAL_TIMEOUT_MS = 60_000; // Increased to 60s to match SourceManager's time budget
 
 // ---------------------------------------------------------------------------
 // Helpers — episode ID normalisation
@@ -104,9 +104,11 @@ const DEAD_DOMAINS = new Set([
     'hub26link.site',
     'hub27link.site',
     'shop21pro.site',
-    'burntburst45.site',
     'xm8.site',
     'rrr.site',
+    'rrr.store',
+    'rrr.live',
+    'rrr.to',
 ]);
 
 /**
@@ -158,6 +160,7 @@ const ISP_BLOCKED_DOMAINS = new Set([
     'megaup.nl',
     'megaup.live',
     'megaup.to',
+    'burntburst',
 ]);
 
 function isDeadDomain(url: string): boolean {
@@ -185,7 +188,8 @@ const CDN_CONFIGS: Array<{ pattern: RegExp; configs: CdnCombo[] }> = [
     { pattern: /gogocdn/i, configs: [{ referer: 'https://gogoanime.run/', origin: 'https://gogoanime.run' }, { referer: 'https://gogoanime.ai/', origin: 'https://gogoanime.ai' }] },
     { pattern: /aniwatchtv|megacloud|rapid-cloud/i, configs: [{ referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
     { pattern: /watchhentai/i, configs: [{ referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' }, { referer: 'https://hentai19.net/', origin: 'https://hentai19.net' }] },
-    { pattern: /megaup|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|burntburst45|rrr\.|xm8\./i, configs: [{ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' }, { referer: 'https://animekai.to/', origin: 'https://animekai.to' }, { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
+    { pattern: /burntburst45/i, configs: [{ referer: 'https://aniwaves.ru/', origin: 'https://aniwaves.ru' }] },
+    { pattern: /megaup|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|rrr\.|xm8\./i, configs: [{ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' }, { referer: 'https://animekai.to/', origin: 'https://animekai.to' }, { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
 ];
 
 function getCdnConfigs(hostname: string): CdnCombo[] {
@@ -306,7 +310,7 @@ function streamCacheGet(key: string): any | null {
     return entry.data;
 }
 
-function streamCacheSet(key: string, data: any): void {
+function streamCacheSet(key: string, data: any, ttlOverride?: number): void {
     if (!data?.sources?.length) return; // Don't cache failures
     if (streamCache.size >= STREAM_CACHE_MAX) {
         // Evict all expired entries first; if still full, evict oldest
@@ -318,7 +322,8 @@ function streamCacheSet(key: string, data: any): void {
             if (oldest) streamCache.delete(oldest);
         }
     }
-    streamCache.set(key, { data, expiresAt: Date.now() + STREAM_CACHE_TTL });
+    const ttl = ttlOverride != null ? ttlOverride : STREAM_CACHE_TTL;
+    streamCache.set(key, { data, expiresAt: Date.now() + ttl });
 }
 
 // ---------------------------------------------------------------------------
@@ -514,12 +519,7 @@ function reconstructEpisodeId(episodeId: string, query: Record<string, any>): st
     // Do not corrupt fully-formed AnimeKai IDs with a stray ?ep=
     if (episodeId.includes('$ep=') && episodeId.includes('$token=')) return episodeId;
     
-    const epParam = String(query.ep);
-    if (!/^\d+$/.test(epParam) && !episodeId.startsWith('animekai-')) {
-        const epNum = query.ep_num ? String(query.ep_num) : '1';
-        return `animekai-${episodeId}$ep=${epNum}$token=${epParam}`;
-    }
-    return `${episodeId}?ep=${epParam}`;
+    return `${episodeId}?ep=${String(query.ep)}`;
 }
 
 /**
@@ -598,9 +598,17 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         episodeId = `animekai-${episodeId}`;
     }
 
-    const { category, proxy: useProxy = 'true' } = req.query;
+    const { category, proxy: useProxy = 'true', ep: epToken, ep_num: epNumRaw } = req.query;
     const explicitServer = normalizeStreamServerQuery(req.query.server);
-    const episodeNum = (req.query.ep_num || req.query.ep) ? parseInt(String(req.query.ep_num || req.query.ep), 10) || undefined : undefined;
+    
+    // Parse episode number - prioritize ep_num, fallback to ep if it's numeric
+    let episodeNum: number | undefined;
+    if (epNumRaw) {
+        episodeNum = parseInt(String(epNumRaw), 10);
+    } else if (epToken && /^\d+$/.test(String(epToken))) {
+        episodeNum = parseInt(String(epToken), 10);
+    }
+    if (episodeNum != null && isNaN(episodeNum)) episodeNum = undefined;
     const anilistId = req.query.anilist_id ? parseInt(String(req.query.anilist_id), 10) || undefined : undefined;
     const requestId = (req as any).id;
     const shouldProxy = useProxy !== 'false';
@@ -627,215 +635,35 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     const episodeIdForRest = episodeId.replace(/^animekai-/i, '');
     const preferredSource = explicitServer || (req.query.preferred_source as string) || undefined;
 
-    const buildAttempts = (targetCategory: 'sub' | 'dub'): Promise<any>[] => {
-        const attempts: Promise<any>[] = [];
-
-        if (isHianimeStyleEpisodeId(episodeIdForRest)) {
-            attempts.push(
-                tryFetchHianimeRestStreamingData({
-                    episodeId: episodeIdForRest,
-                    category: targetCategory,
-                    explicitServer: preferredSource,
-                    perAttemptTimeoutMs: 15_000,
-                    catalogEpisodeFallback: catalogEpisodeFallbackForRest(episodeId, episodeNum),
-                }).then(r => r?.sources?.length ? { ...r, _category: targetCategory } : null).catch(() => null),
-            );
-        }
-
-        attempts.push(
-            sourceManager.getStreamingLinks(episodeId, preferredSource, targetCategory, episodeNum, anilistId)
-                .then(r => r?.sources?.length ? { ...r, _category: targetCategory } : null)
-                .catch(() => null),
-        );
-
-        if (episodeNum != null && episodeNum >= 1) {
-            attempts.push(
-                sourceManager.tryAllAnimeFallback(episodeIdForRest, targetCategory, episodeNum, anilistId)
-                    .then(r => r?.sources?.length ? { ...r, _category: targetCategory } : null)
-                    .catch(() => null),
-            );
-            attempts.push(
-                sourceManager.crossSourceStreamingFallback(episodeId, preferredSource, targetCategory, episodeNum, anilistId)
-                    .then(r => r?.sources?.length ? { ...r, _category: targetCategory } : null)
-                    .catch(() => null),
-            );
-            
-            // For dub requests, also try cross-source fallback to sub in parallel
-            if (targetCategory === 'dub') {
-                attempts.push(
-                    sourceManager.crossSourceStreamingFallback(episodeId, preferredSource, 'sub', episodeNum, anilistId)
-                        .then(r => r?.sources?.length ? { ...r, _category: 'sub', isDubFallback: true } : null)
-                        .catch(() => null),
-                );
-            }
-        }
-        return attempts;
-    };
-
-    const dubAttempts = buildAttempts(cat);
-    const subAttempts = isDubRequested ? buildAttempts('sub') : [];
-
-    // ---------------------------------------------------------------------------
-    // Race all attempts. Prefer dub; fall back to sub only when sub was requested
-    // implicitly (not by explicit user click).
-    // FIX: The original patienceExpired check used `!dubPatienceTimer` which was
-    // unreliable — the timer variable was captured by closure and could be null
-    // both before it fired AND after. We now use a dedicated boolean flag instead.
-    // ---------------------------------------------------------------------------
     let streamData: any = { sources: [], subtitles: [] };
     let lastError: string | null = null;
 
-    streamData = await new Promise<any>((resolve) => {
-        let remainingDub = dubAttempts.length;
-        let remainingSub = subAttempts.length;
-        let resolved = false;
-        const dubResults: any[] = [];
-        const subResults: any[] = [];
-        let dubPatienceExpired = false;
-        let timerHandle: ReturnType<typeof setTimeout> | null = null;
-
-        const tryResolve = () => {
-            if (resolved) return;
-
-            // Score streams — prefer sources that DON'T use megaup CDN (which is
-            // frequently dead/403). Higher score = better.
-            const scoreCdnReliability = (result: any): number => {
-                const urls: string[] = (result?.sources || []).map((s: any) => s.url || '');
-                const firstUrl = urls[0] || '';
-                const isDub = result?._category === 'dub' || result?.category === 'dub' || firstUrl.toLowerCase().includes('dub');
-                
-                // megaup CDN (rjp.megaup.cc, rrr.megaup.cc, etc.) is unreliable but often our only source for DUB
-                if (/megaup\.(cc|nl|live|to)/.test(firstUrl) || /web24code\.site|cdn31link\.site/.test(firstUrl)) {
-                    return isDub ? 8 : 0; // Give DUB a chance to resolve quickly
-                }
-                
-                // Non-megaup CDNs (burntburst, echovideo, gogoanime etc) are reliable
-                return 10;
-            };
-
-            // Sort candidates by CDN reliability
-            const sortedDub = [...dubResults].sort((a, b) => scoreCdnReliability(b) - scoreCdnReliability(a));
-
-            if (sortedDub.length > 0) {
-                const best = sortedDub[0];
-                const bestScore = scoreCdnReliability(best);
-
-                // If the best result uses a reliable CDN, resolve immediately
-                if (bestScore > 0) {
-                    resolved = true;
-                    if (timerHandle) clearTimeout(timerHandle);
-                    logger.info(`[STREAM] Preferred source found for ${episodeId}: ${best.source ?? 'unknown'} (score=${bestScore})`, { requestId });
-                    resolve(best);
-                    return;
-                }
-
-                // If all we have is megaup CDN and nothing better has arrived yet,
-                // wait a bit for non-megaup sources — but only if there are still
-                // pending attempts that might return a better source.
-                if (remainingDub > 0) {
-                    // Don't resolve yet — let other attempts finish
-                    return;
-                }
-
-                // All dub attempts done and only megaup. Use it as last resort.
-                resolved = true;
-                if (timerHandle) clearTimeout(timerHandle);
-                logger.warn(`[STREAM] Only megaup CDN available for ${episodeId}. Using as fallback.`, { requestId });
-                resolve(best);
-                return;
-            }
-
-            const dubDone = remainingDub === 0;
-
-            // Sub fallback - allow for both auto-mode and explicit dub requests (from parallel cross-source fallback)
-            if ((dubDone || dubPatienceExpired) && subResults.length > 0) {
-                resolved = true;
-                if (timerHandle) clearTimeout(timerHandle);
-                const fallbackResult = subResults[0];
-                if (isDubRequested) {
-                    logger.info(`[STREAM] Parallel sub fallback used for dub request ${episodeId}`, { requestId });
-                } else {
-                    logger.info(`[STREAM] Sub fallback used for ${episodeId}`, { requestId });
-                }
-                resolve({ ...fallbackResult, category: 'sub', dubFallback: true });
-                return;
-            }
-
-            // Explicit dub request with no dub found and no sub fallback — return empty so UI can show "no dub"
-            if ((dubDone || dubPatienceExpired) && isDubRequested && subResults.length === 0) {
-                resolved = true;
-                if (timerHandle) clearTimeout(timerHandle);
-                logger.info(`[STREAM] No dub sources found for ${episodeId}`, { requestId });
-                resolve({ sources: [], subtitles: [], category: 'dub', dubUnavailable: true });
-                return;
-            }
-
-            // All attempts exhausted
-            if (dubDone && remainingSub === 0) {
-                resolved = true;
-                if (timerHandle) clearTimeout(timerHandle);
-                resolve({ sources: [], subtitles: [] });
-            }
-        };
-
-        for (const p of dubAttempts) {
-            p.then((result: any) => {
-                remainingDub--;
-                if (result?.sources?.length > 0) {
-                    // Handle cross-source dub fallback results (marked as sub)
-                    if (result.isDubFallback) {
-                        subResults.push(result);
-                    } else if (isDubRequested) {
-                        if (validateDubStream(result)) {
-                            dubResults.push(result);
-                        } else {
-                            logger.info(`[STREAM] Filtered non-dub result from ${result.source ?? 'unknown'}`, { requestId });
-                        }
-                    } else {
-                        dubResults.push(result);
-                    }
-                }
-                tryResolve();
-            }).catch(() => { remainingDub--; tryResolve(); });
+    if (isHianimeStyleEpisodeId(episodeIdForRest)) {
+        try {
+            streamData = await tryFetchHianimeRestStreamingData({
+                episodeId: episodeIdForRest,
+                category: cat,
+                explicitServer: preferredSource,
+                perAttemptTimeoutMs: 15_000,
+                catalogEpisodeFallback: catalogEpisodeFallbackForRest(episodeId, episodeNum),
+            });
+        } catch (e: unknown) {
+            lastError = e instanceof Error ? e.message : String(e);
         }
-
-        if (isDubRequested) {
-            for (const p of subAttempts) {
-                p.then((result: any) => {
-                    remainingSub--;
-                    if (result?.sources?.length > 0) subResults.push(result);
-                    tryResolve();
-                }).catch(() => { remainingSub--; tryResolve(); });
-            }
-
-            timerHandle = setTimeout(() => {
-                logger.info(`[STREAM] Dub patience (${DUB_PATIENCE_MS}ms) expired for ${episodeId}`, { requestId });
-                dubPatienceExpired = true;
-                timerHandle = null;
-                tryResolve();
-            }, DUB_PATIENCE_MS);
-        }
-
-        // Global safety net
-        setTimeout(() => {
-            if (!resolved) {
-                resolved = true;
-                if (timerHandle) clearTimeout(timerHandle);
-                if (dubResults.length > 0) resolve(dubResults[0]);
-                else if (subResults.length > 0) resolve({ ...subResults[0], category: 'sub', dubFallback: true });
-                else resolve({ sources: [], subtitles: [] });
-            }
-        }, 25_000);
-    });
-
-    if (streamData?.sources?.length) {
-        logger.info(`[STREAM] Source resolved (${streamData.source ?? 'unknown'}, cat=${streamData.category ?? cat}) for ${episodeId}`, { requestId });
     }
 
-    // Legacy sequential sub fallback — rarely needed now but kept for safety
-    if (!streamData.sources?.length && isDubRequested) {
+    if (!streamData?.sources?.length) {
         try {
-            logger.info(`[STREAM] Final sequential sub fallback for ${episodeId}`, { requestId });
+            streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId);
+        } catch (e: unknown) {
+            lastError = e instanceof Error ? e.message : String(e);
+        }
+    }
+
+    // If no dub sources found, fall back to sub sequentially
+    if (!streamData?.sources?.length && isDubRequested) {
+        try {
+            logger.info(`[STREAM] Sequential sub fallback for dub request ${episodeId}`, { requestId });
             const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId);
             if (subFallback?.sources?.length) {
                 streamData = { ...subFallback, category: 'sub', dubFallback: true };
@@ -844,6 +672,10 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         } catch (e: unknown) {
             lastError = e instanceof Error ? e.message : String(e);
         }
+    }
+
+    if (streamData?.sources?.length) {
+        logger.info(`[STREAM] Source resolved (${streamData.source ?? 'unknown'}, cat=${streamData.category ?? cat}) for ${episodeId}`, { requestId });
     }
 
     const winningSource = typeof streamData?.source === 'string' ? streamData.source : undefined;
@@ -870,10 +702,16 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     });
 
     // Clone before mutating — the object may come from a shared cache reference
-    const response: StreamingData & { server?: string; triedServers?: string[]; audioLanguage?: string } = {
+    const response: StreamingData & { server?: string; triedServers?: string[]; audioLanguage?: string; dubFallback?: boolean; category?: string } = {
         ...streamData,
         audioLanguage: isDubRequested ? 'en' : 'ja',
     };
+
+    // Hardening: If DUB was requested but the resolved stream is SUB category, force dubFallback to true
+    if (isDubRequested && (streamData.category === 'sub' || streamData.dubFallback === true)) {
+        response.dubFallback = true;
+        response.category = 'sub';
+    }
 
     if (shouldProxy) {
         // Determine best referer: source-provided > domain-guessed > default
@@ -927,7 +765,8 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     response.server = successServer;
     response.triedServers = explicitServer ? [explicitServer] : ['auto'];
 
-    streamCacheSet(cacheKey, response);
+    const isFallback = response.dubFallback === true;
+    streamCacheSet(cacheKey, response, isFallback ? 10000 : undefined);
     res.set('Cache-Control', 'private, max-age=300');
     res.set('X-Stream-Cache', 'MISS');
     res.json(response);
@@ -973,7 +812,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Pattern: sub.domain.tld where domain matches known dead patterns (e.g., code29wave.site)
     // Example: p36.code29wave.site/path -> p36.megaup.cc/path
     try {
-        const deadCdnMatch = domain.match(/^([a-z0-9]+)\.(code|lab|web|net|pro|tech|hub|shop|burnt|xm8|rrr)[\w-]*\.(site|click|buzz|online|top|xyz|store)$/i);
+        const deadCdnMatch = domain.match(/^([a-z0-9-]+)\.(code|lab|web|net|pro|tech|hub|shop|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|data|link|media|host|cdn|file|store|link)\d*\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/i);
         if (deadCdnMatch) {
             url = `https://${deadCdnMatch[1]}.megaup.cc${urlObj.pathname}${urlObj.search}`;
             urlObj = new URL(url); // Update urlObj after rewrite
@@ -988,7 +827,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
     const isM3u8 = url.includes('.m3u8');
     // Megaup CDN uses obfuscated extensions (.gif, .jpg, .png) for real video segments
-    const isMegaupDomain = /megaup\.(cc|nl|live|to)/i.test(domain);
+    const isMegaupDomain = /megaup\.(cc|nl|live|to)|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|burntburst45|rrr\.|xm8\./i.test(domain);
     const hasObfuscatedExt = /\.(gif|jpg|jpeg|png|webp)$/i.test(urlObj.pathname);
     const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt);
     const isVideo = url.endsWith('.mp4');
@@ -1318,7 +1157,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 logger.warn(`[PROXY] Network timeout for ${domain}. Skipping remaining combos.`, { requestId });
                 break;
             }
-            logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed (${combo.referer}): ${errMsg}${status ? ` (Status: ${status})` : ''}`, { requestId });
+            logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed (${combo.referer}): ${errMsg}${status ? ` (Status: ${status})` : ''} (Code: ${errCode})`, { requestId });
             if (attempt < refererCombos.length - 1) await new Promise(r => setTimeout(r, 300));
         }
     }
@@ -1342,6 +1181,20 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             const err = lastProxyError;
             const errMsg = err instanceof Error ? err.message : String(err);
             const errCode = (err as NodeJS.ErrnoException | undefined)?.code;
+
+            logger.error(`
+🚨 [PROXY FAILURE] 502 Bad Gateway
+=========================================
+• Domain:       ${domain}
+• Target URL:   ${url}
+• Original URL: ${originalUrlBeforeRewrite}
+• Referer Parameter: ${refererParam || 'none'}
+• Error Code:   ${errCode || 'N/A'}
+• Error Message: ${errMsg}
+• Status:       Local attempts and remote fallbacks all failed to reach the upstream CDN.
+=========================================
+`, err instanceof Error ? err : undefined, { requestId });
+
             res.status(502).json({
                 error: 'Failed to proxy stream',
                 reason: errCode === 'EPROTO' ? 'tls_error' : errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' ? 'timeout' : 'connection_error',
@@ -1372,6 +1225,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
             // Reject manifests whose segments resolve to known ad CDNs
             if (isAdPoisonedManifest(content, url)) {
+                logger.warn(`⚠️ [MANIFEST AD-POISONED] Manifest from ${domain} contains ad CDN segments instead of real video data. Rejecting stream.`, { url: url.substring(0, 200), requestId });
                 res.status(502).json({
                     error: 'Ad-poisoned manifest',
                     reason: 'ad_cdn_segments',

@@ -462,10 +462,11 @@ export const VideoPlayer = ({
     } else if (isM3U8 && video.canPlayType('application/vnd.apple.mpegurl')) {
       playerLog('info', 'Using native HLS support');
 
-      const attachNativeHls = (videoSrc: string) => {
-        video.src = videoSrc;
+      let onLoadedMetadataNative: (() => void) | null = null;
+      let onErrorNative: (() => void) | null = null;
 
-        video.addEventListener('loadedmetadata', () => {
+      const attachNativeHls = (videoSrc: string) => {
+        onLoadedMetadataNative = () => {
           playerLog('info', 'Video metadata loaded (native)');
           setIsLoading(false);
 
@@ -478,9 +479,9 @@ export const VideoPlayer = ({
           }
 
           video.play().catch(() => { });
-        });
+        };
 
-        video.addEventListener('error', () => {
+        onErrorNative = () => {
           const now = Date.now();
           if (errorFiredRef.current && (now - lastErrorTimeRef.current) < 1000) {
             return;
@@ -496,7 +497,21 @@ export const VideoPlayer = ({
           });
           setError('Failed to load video. Try a different server.');
           onError?.('native_error');
-        });
+        };
+
+        // Cleanup
+        (video as any)._cleanupNative = () => {
+          video.removeEventListener('loadedmetadata', onLoadedMetadataNative!);
+          video.removeEventListener('error', onErrorNative!);
+        };
+
+        video.addEventListener('loadedmetadata', onLoadedMetadataNative);
+        video.addEventListener('error', onErrorNative);
+        video.src = videoSrc;
+
+        if (video.readyState >= 1) {
+          onLoadedMetadataNative();
+        }
       };
 
       if (isM3U8) {
@@ -551,8 +566,7 @@ export const VideoPlayer = ({
       }
     } else {
       playerLog('info', 'Using direct video source');
-      video.src = resolvedSrc;
-      video.addEventListener('loadedmetadata', () => {
+      const onLoadedMetadataDirect = () => {
         setIsLoading(false);
 
         const savedPos = loadSavedPosition();
@@ -564,8 +578,9 @@ export const VideoPlayer = ({
         }
 
         video.play().catch(() => { });
-      });
-      video.addEventListener('error', () => {
+      };
+      
+      const onErrorDirect = () => {
         const now = Date.now();
         if (errorFiredRef.current && (now - lastErrorTimeRef.current) < 1000) return;
         errorFiredRef.current = true;
@@ -574,12 +589,34 @@ export const VideoPlayer = ({
         playerLog('error', 'Direct video error', { code: err?.code, message: err?.message });
         setError('Failed to load video. Try a different server.');
         onError?.('native_error');
-      });
+      };
+
+      // In JavaScript, you can attach arbitrary properties to the video element to clean them up later
+      (video as any)._cleanupDirect = () => {
+        video.removeEventListener('loadedmetadata', onLoadedMetadataDirect);
+        video.removeEventListener('error', onErrorDirect);
+      };
+
+      video.addEventListener('loadedmetadata', onLoadedMetadataDirect);
+      video.addEventListener('error', onErrorDirect);
+      video.src = resolvedSrc;
+
+      if (video.readyState >= 1) {
+        onLoadedMetadataDirect();
+      }
     }
 
     return () => {
       // Pause video to prevent audio playing after navigation
       if (video) {
+        if ((video as any)._cleanupDirect) {
+          (video as any)._cleanupDirect();
+          delete (video as any)._cleanupDirect;
+        }
+        if ((video as any)._cleanupNative) {
+          (video as any)._cleanupNative();
+          delete (video as any)._cleanupNative;
+        }
         video.pause();
         video.src = '';
         video.load();
@@ -664,6 +701,10 @@ export const VideoPlayer = ({
 
         vid.addEventListener('loadeddata', onReady);
         vid.src = blobUrl;
+        
+        if (vid.readyState >= 2) {
+          onReady();
+        }
       } catch (e: any) {
         if (e.name !== 'AbortError') {
           playerLog('warn', 'Background MP4 cache failed, continuing with stream', e.message);

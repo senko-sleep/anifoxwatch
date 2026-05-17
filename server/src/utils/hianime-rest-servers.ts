@@ -29,6 +29,7 @@ export function normalizeAnimeEpisodeIdForHianimeRest(raw: string): string {
 
 /** True if this id can be resolved via HiAnime REST (`aniwatch-api`) after normalization. */
 export function isHianimeStyleEpisodeId(episodeId: string): boolean {
+    if (episodeId.toLowerCase().startsWith('anilist-')) return false;
     const n = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
     return /^[^/?#]+\?ep=[^&?#]+$/i.test(n);
 }

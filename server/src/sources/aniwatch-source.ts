@@ -56,7 +56,7 @@ export class AniwatchSource extends BaseAnimeSource {
         this.baseUrl = apiUrl;
         this.client = axios.create({
             baseURL: apiUrl,
-            timeout: 8000, // Fast timeout for responsiveness
+            timeout: 25000, // Fast timeout for responsiveness
             headers: {
                 'Accept': 'application/json',
                 'Accept-Encoding': 'gzip, deflate',
@@ -159,7 +159,7 @@ export class AniwatchSource extends BaseAnimeSource {
             const response = await this.client.get(`/${encodeURIComponent(query)}`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
 
             const result: AnimeSearchResult = {
@@ -188,7 +188,7 @@ export class AniwatchSource extends BaseAnimeSource {
             const response = await this.client.get(`/info`, {
                 params: { id: animeId },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const anime = this.mapAnime(response.data);
             this.setCache(cacheKey, anime, 15 * 60 * 1000);
@@ -209,7 +209,7 @@ export class AniwatchSource extends BaseAnimeSource {
             const response = await this.client.get(`/info`, {
                 params: { id },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
 
             const episodes: Episode[] = (response.data.episodes || []).map((ep: unknown) => {
@@ -245,7 +245,7 @@ export class AniwatchSource extends BaseAnimeSource {
         try {
             const response = await this.client.get(`/servers/${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000
+                timeout: 25000
             });
             const servers: EpisodeServer[] = (response.data || []).map((s: unknown) => {
                 const srv = s as Record<string, unknown>;
@@ -275,7 +275,7 @@ export class AniwatchSource extends BaseAnimeSource {
             const response = await this.client.get(`/watch/${episodeId}`, {
                 params: { server, category },
                 signal: options?.signal,
-                timeout: options?.timeout || 8000
+                timeout: 25000
             });
 
             const streamData: StreamingData = {
@@ -331,7 +331,7 @@ export class AniwatchSource extends BaseAnimeSource {
             const response = await this.client.get('/top-airing', {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const results = (response.data.results || []).map((a: unknown) => this.mapAnime(a));
             this.setCache(cacheKey, results, 10 * 60 * 1000);
@@ -351,7 +351,7 @@ export class AniwatchSource extends BaseAnimeSource {
             const response = await this.client.get('/recent-episodes', {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const results = (response.data.results || []).map((a: unknown) => this.mapAnime(a));
             this.setCache(cacheKey, results, 3 * 60 * 1000); // Short cache for latest
@@ -371,7 +371,7 @@ export class AniwatchSource extends BaseAnimeSource {
             const response = await this.client.get('/top-airing', {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: 25000
             });
             const results = (response.data.results || [])
                 .slice(0, limit)

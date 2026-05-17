@@ -12,7 +12,7 @@ export class ZoroSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -35,7 +35,7 @@ export class ZoroSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/search`, {
                 params: { keyword: query, page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -93,7 +93,7 @@ export class ZoroSource extends BaseAnimeSource {
             const animeId = id.replace('zoro-', '');
             const response = await axios.get(`${this.baseUrl}/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -142,7 +142,7 @@ export class ZoroSource extends BaseAnimeSource {
             const dataId = id.split('-').pop();
             const response = await axios.get(`${this.baseUrl}/ajax/v2/episode/list/${dataId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
             });
 
@@ -178,7 +178,7 @@ export class ZoroSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/ajax/v2/episode/servers?episodeId=${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
             });
 
@@ -209,7 +209,7 @@ export class ZoroSource extends BaseAnimeSource {
             const serverId = server || episodeId;
             const response = await axios.get(`${this.baseUrl}/ajax/v2/episode/sources?id=${serverId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
             });
 
@@ -224,7 +224,7 @@ export class ZoroSource extends BaseAnimeSource {
             // Parse embed URL for streams
             const embedResponse = await axios.get(embedUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -269,7 +269,7 @@ export class ZoroSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/most-popular`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -316,7 +316,7 @@ export class ZoroSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/recently-updated`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

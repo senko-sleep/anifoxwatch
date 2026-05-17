@@ -14,7 +14,7 @@ export class KaidoSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -40,7 +40,7 @@ export class KaidoSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/search`, {
                 params: { keyword: query, page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -97,7 +97,7 @@ export class KaidoSource extends BaseAnimeSource {
             const animeId = this.stripProviderPrefix(id);
             const response = await axios.get(`${this.baseUrl}/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -144,7 +144,7 @@ export class KaidoSource extends BaseAnimeSource {
             const dataId = id.split('-').pop();
             const response = await axios.get(`${this.baseUrl}/ajax/episode/list/${dataId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
             });
 
@@ -185,7 +185,7 @@ export class KaidoSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/ajax/episode/servers?episodeId=${encodeURIComponent(episodeId)}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { ...this.getHeaders(), 'X-Requested-With': 'XMLHttpRequest' }
             });
 
@@ -217,7 +217,7 @@ export class KaidoSource extends BaseAnimeSource {
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
         const cleanId = this.stripProviderPrefix(episodeId);
         const [animeSlug, epPart] = cleanId.split('?');
-        const epNum = epPart?.replace('ep=', '')?.trim() || '';
+        const epNum = options?.episodeNum ? String(options.episodeNum) : (epPart?.replace('ep=', '')?.trim() || '');
 
         if (!animeSlug || !epNum) {
             logger.warn(`Kaido: invalid episode ID "${episodeId}"`, undefined, this.name);
@@ -286,7 +286,7 @@ export class KaidoSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/most-popular`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -333,7 +333,7 @@ export class KaidoSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/recently-updated`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

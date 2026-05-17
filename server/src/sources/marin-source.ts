@@ -12,7 +12,7 @@ export class MarinSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -34,7 +34,7 @@ export class MarinSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/anime`, {
                 params: { search: query, page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -89,7 +89,7 @@ export class MarinSource extends BaseAnimeSource {
             const animeId = id.replace('marin-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -132,7 +132,7 @@ export class MarinSource extends BaseAnimeSource {
             const id = animeId.replace('marin-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${id}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -169,7 +169,7 @@ export class MarinSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/watch/${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -208,7 +208,7 @@ export class MarinSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/anime`, {
                 params: { sort: 'popular', page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -255,7 +255,7 @@ export class MarinSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/anime`, {
                 params: { sort: 'latest', page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

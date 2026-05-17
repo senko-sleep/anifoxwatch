@@ -231,7 +231,7 @@ export class WorkingDubExtractor extends BaseAnimeSource {
             // First, try to get the anime ID from Gogoanime
             const searchResponse = await axios.get(`http://localhost:3001/api/anime/search?q=${encodeURIComponent(animeTitle)}&source=Gogoanime`, {
                 signal: options?.signal,
-                timeout: 10000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
@@ -244,7 +244,7 @@ export class WorkingDubExtractor extends BaseAnimeSource {
                 // Get episodes
                 const epResponse = await axios.get(`http://localhost:3001/api/anime/episodes?id=${anime.id}&source=Gogoanime`, {
                     signal: options?.signal,
-                    timeout: 10000,
+                    timeout: 25000,
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     }
@@ -258,7 +258,7 @@ export class WorkingDubExtractor extends BaseAnimeSource {
                         // Get dub stream
                         const streamResponse = await axios.get(`http://localhost:3001/api/stream/watch/${targetEpisode.id}?category=dub&source=Gogoanime`, {
                             signal: options?.signal,
-                            timeout: 10000,
+                            timeout: 25000,
                             headers: {
                                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                             }
@@ -295,7 +295,7 @@ export class WorkingDubExtractor extends BaseAnimeSource {
         try {
             const searchResponse = await axios.get(`http://localhost:3001/api/anime/search?q=${encodeURIComponent(animeTitle)}&source=AllAnime`, {
                 signal: options?.signal,
-                timeout: 10000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
@@ -307,7 +307,7 @@ export class WorkingDubExtractor extends BaseAnimeSource {
                 // Get episodes
                 const epResponse = await axios.get(`http://localhost:3001/api/anime/episodes?id=${anime.id}&source=AllAnime`, {
                     signal: options?.signal,
-                    timeout: 10000,
+                    timeout: 25000,
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     }
@@ -321,7 +321,7 @@ export class WorkingDubExtractor extends BaseAnimeSource {
                         // Get dub stream
                         const streamResponse = await axios.get(`http://localhost:3001/api/stream/watch/${targetEpisode.id}?category=dub&source=AllAnime`, {
                             signal: options?.signal,
-                            timeout: 10000,
+                            timeout: 25000,
                             headers: {
                                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                             }
@@ -357,7 +357,7 @@ export class WorkingDubExtractor extends BaseAnimeSource {
         try {
             const searchResponse = await axios.get(`http://localhost:3001/api/anime/search?q=${encodeURIComponent(animeTitle)}&source=AnimeKai`, {
                 signal: options?.signal,
-                timeout: 10000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
@@ -369,7 +369,7 @@ export class WorkingDubExtractor extends BaseAnimeSource {
                 // Get episodes
                 const epResponse = await axios.get(`http://localhost:3001/api/anime/episodes?id=${anime.id}&source=AnimeKai`, {
                     signal: options?.signal,
-                    timeout: 10000,
+                    timeout: 25000,
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     }
@@ -383,7 +383,7 @@ export class WorkingDubExtractor extends BaseAnimeSource {
                         // Get dub stream
                         const streamResponse = await axios.get(`http://localhost:3001/api/stream/watch/${targetEpisode.id}?category=dub&source=AnimeKai`, {
                             signal: options?.signal,
-                            timeout: 10000,
+                            timeout: 25000,
                             headers: {
                                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                             }

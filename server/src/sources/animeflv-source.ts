@@ -18,7 +18,7 @@ async function extractStreamtapeUrl(embedUrl: string): Promise<string | null> {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
             },
-            timeout: 10000,
+            timeout: 25000,
         });
         const html: string = resp.data;
 
@@ -75,7 +75,7 @@ async function extractStreamwishUrl(embedUrl: string): Promise<string | null> {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
                 'Referer': 'https://www3.animeflv.net',
             },
-            timeout: 10000,
+            timeout: 25000,
         });
         const html: string = resp.data;
 
@@ -106,7 +106,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -129,7 +129,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/browse`, {
                 params: { q: query, page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -190,7 +190,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
             const animeId = id.replace('animeflv-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -236,7 +236,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
             const id = animeId.replace('animeflv-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${id}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -295,7 +295,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
             const epId = episodeId.replace('animeflv-', '');
             const response = await axios.get(`${this.baseUrl}/ver/${epId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -379,7 +379,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
             const res = await axios.post<{ data: { Media: { title: { romaji: string; english: string | null } } } }>(
                 'https://graphql.anilist.co',
                 { query, variables: { id: anilistId } },
-                { timeout: 5000, headers: { 'Content-Type': 'application/json' } }
+                { timeout: 25000, headers: { 'Content-Type': 'application/json' } }
             );
             const t = res.data?.data?.Media?.title;
             if (!t) return [];
@@ -413,7 +413,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
                 try {
                     const r = await axios.get<string>(`${this.baseUrl}/ver/${slug}`, {
                         signal: options?.signal,
-                        timeout: options?.timeout || 10000,
+                        timeout: 25000,
                         headers: this.getHeaders(),
                         validateStatus: (s) => s < 500,
                     });
@@ -565,7 +565,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -611,7 +611,7 @@ export class AnimeFLVSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

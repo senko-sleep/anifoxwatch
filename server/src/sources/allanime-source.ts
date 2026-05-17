@@ -102,7 +102,7 @@ export class AllAnimeSource extends BaseAnimeSource {
         let response = await axios.post(API_URL, { query }, {
             headers,
             signal: options?.signal,
-            timeout: options?.timeout || 10000
+            timeout: options?.timeout || 8000
         }).catch(() => null);
 
         // Fallback to alternate endpoint if primary fails or returns CAPTCHA
@@ -110,7 +110,7 @@ export class AllAnimeSource extends BaseAnimeSource {
             response = await axios.post(API_URL_ALT, { query }, {
                 headers,
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: options?.timeout || 8000
             });
         }
         if (response?.data?.errors?.length) {
@@ -298,7 +298,7 @@ export class AllAnimeSource extends BaseAnimeSource {
                         const clockUrl = `https://allanime.day${raw.replace('clock', 'clock.json')}`;
                         const clockResp = await axios.get(clockUrl, {
                             headers: { 'Referer': 'https://allmanga.to/' },
-                            timeout: 15000,
+                            timeout: 25000,
                             signal: options?.signal,
                         });
                         const links: any[] = clockResp.data?.links || [];

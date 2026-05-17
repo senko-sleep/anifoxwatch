@@ -12,7 +12,7 @@ export class AniMixPlaySource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -35,7 +35,7 @@ export class AniMixPlaySource extends BaseAnimeSource {
                 { q: query },
                 {
                     signal: options?.signal,
-                    timeout: options?.timeout || 10000,
+                    timeout: 25000,
                     headers: { ...this.getHeaders(), 'Content-Type': 'application/json' }
                 }
             );
@@ -78,7 +78,7 @@ export class AniMixPlaySource extends BaseAnimeSource {
             const animeId = id.replace('animixplay-', '');
             const response = await axios.get(`${this.baseUrl}/v1/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -121,7 +121,7 @@ export class AniMixPlaySource extends BaseAnimeSource {
             const id = animeId.replace('animixplay-', '');
             const response = await axios.get(`${this.baseUrl}/v1/${id}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -183,7 +183,7 @@ export class AniMixPlaySource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/api/live${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
 
@@ -218,7 +218,7 @@ export class AniMixPlaySource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/api/popular`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const data = response.data?.result || [];
@@ -252,7 +252,7 @@ export class AniMixPlaySource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/api/recent`, {
                 params: { page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const data = response.data?.result || [];

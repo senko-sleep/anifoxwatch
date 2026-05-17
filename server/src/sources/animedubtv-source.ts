@@ -12,7 +12,7 @@ export class AnimeDubTVSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -35,7 +35,7 @@ export class AnimeDubTVSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/search`, {
                 params: { keyword: query },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -87,7 +87,7 @@ export class AnimeDubTVSource extends BaseAnimeSource {
             const cleanId = id.replace('animedubtv-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${cleanId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -128,7 +128,7 @@ export class AnimeDubTVSource extends BaseAnimeSource {
             const cleanId = id.replace('animedubtv-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${cleanId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -179,7 +179,7 @@ export class AnimeDubTVSource extends BaseAnimeSource {
             const cleanId = episodeId.replace('animedubtv-', '');
             const response = await axios.get(`${this.baseUrl}/${cleanId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             
@@ -254,7 +254,7 @@ export class AnimeDubTVSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);

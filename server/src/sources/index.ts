@@ -4,6 +4,7 @@ export { BaseAnimeSource, type AnimeSource } from './base-source.js';
 export { AnimePaheDirectSource } from './animepahe-direct-source.js';
 export { AnimeKaiSource } from './animekai-source.js';
 export { AnimeKaiFetchSource } from './animekai-fetch-source.js';
+export { GogoOrAtSource } from './gogo-or-at-source.js';
 
 // Alternative streaming sources
 export { GogoanimeBySource } from './gogoanime-by-source.js';
@@ -65,3 +66,6 @@ export { AllAnimeSource } from './allanime-source.js';
 
 // Aniwaves: aniwaves.ru scraper
 export { AniwavesSource } from './aniwaves-source.js';
+
+// Wcofun: English Dub specialist
+export { WcofunSource } from './wcofun-source.js';

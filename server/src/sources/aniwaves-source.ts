@@ -32,7 +32,7 @@ export class AniwavesSource extends BaseAnimeSource {
         super();
         this.client = axios.create({
             baseURL: this.baseUrl,
-            timeout: 15000,
+            timeout: 25000,
             headers: {
                 'Accept': 'application/json, text/html',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -101,7 +101,7 @@ export class AniwavesSource extends BaseAnimeSource {
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
             const response = await this.client.get('/', {
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 signal: options?.signal
             });
             this.isAvailable = response.status === 200;
@@ -290,18 +290,28 @@ export class AniwavesSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            let targetServerId = serverId;
-
-            // If no serverId provided, pick the first one from the list
-            if (!targetServerId) {
-                const servers = await this.getEpisodeServers(episodeId, options);
-                const filtered = servers.filter(s => s.type === category);
-                const best = filtered.length > 0 ? filtered[0] : (servers.length > 0 ? servers[0] : null);
-                
-                if (!best) {
-                    return { sources: [], subtitles: [] };
+            const servers = await this.getEpisodeServers(episodeId, options);
+            const filtered = servers.filter(s => s.type === category);
+            
+            let targetServerId = '';
+            let resolvedCategory: 'sub' | 'dub' = category;
+            
+            if (serverId) {
+                const match = filtered.find(s => 
+                    s.name.toLowerCase() === serverId.toLowerCase() || 
+                    s.url === serverId
+                );
+                if (match) {
+                    targetServerId = match.url;
+                    resolvedCategory = match.type === 'dub' ? 'dub' : 'sub';
                 }
+            }
+            
+            if (!targetServerId) {
+                const best = filtered.length > 0 ? filtered[0] : (servers.length > 0 ? servers[0] : null);
+                if (!best) return { sources: [], subtitles: [] };
                 targetServerId = best.url;
+                resolvedCategory = best.type === 'dub' ? 'dub' : 'sub';
             }
 
             // Step 1: Get the embed URL
@@ -325,7 +335,7 @@ export class AniwavesSource extends BaseAnimeSource {
                 return { sources: [], subtitles: [] };
             }
 
-            const streamData: StreamingData = {
+             const streamData: StreamingData = {
                 sources: extraction.streams
                     .filter(s => /\.(m3u8|mp4|mkv|ts)(\?|$)/i.test(s.url) || s.url.includes('/hls/'))
                     .map(s => ({
@@ -342,7 +352,9 @@ export class AniwavesSource extends BaseAnimeSource {
                     'Referer': this.baseUrl,
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
                 },
-                source: this.name
+                source: this.name,
+                category: resolvedCategory,
+                dubFallback: category === 'dub' && resolvedCategory === 'sub'
             };
 
             this.setCache(cacheKey, streamData, this.cacheTTL.stream);

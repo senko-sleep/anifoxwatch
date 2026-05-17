@@ -16,7 +16,7 @@ export class CrazyAnimeTVSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             });
             return response.status === 200;
@@ -30,7 +30,7 @@ export class CrazyAnimeTVSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/search`, {
                 params: { q: query, page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
@@ -84,7 +84,7 @@ export class CrazyAnimeTVSource extends BaseAnimeSource {
             const animeId = id.replace('crazyanimetv-', '');
             const response = await axios.get(`${this.baseUrl}/series/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
 
@@ -131,7 +131,7 @@ export class CrazyAnimeTVSource extends BaseAnimeSource {
             const id = animeId.replace('crazyanimetv-', '');
             const response = await axios.get(`${this.baseUrl}/series/${id}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
             });
             const $ = cheerio.load(response.data);
@@ -168,7 +168,7 @@ export class CrazyAnimeTVSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/${episodeId.replace('crazyanimetv-', '')}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 15000,
+                timeout: 25000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -185,7 +185,7 @@ export class CrazyAnimeTVSource extends BaseAnimeSource {
                 try {
                     const embedResp = await axios.get(iframeSrc.startsWith('http') ? iframeSrc : `${this.baseUrl}${iframeSrc}`, {
                         signal: options?.signal,
-                        timeout: 8000,
+                        timeout: 25000,
                         headers: { 'Referer': this.baseUrl }
                     });
                     const html = embedResp.data;
@@ -231,7 +231,7 @@ export class CrazyAnimeTVSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000
+                timeout: 25000
             });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];

@@ -12,7 +12,7 @@ export class AnimeOwlSource extends BaseAnimeSource {
         try {
             const response = await axios.get(this.baseUrl, {
                 signal: options?.signal,
-                timeout: options?.timeout || 5000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             return response.status === 200;
@@ -34,7 +34,7 @@ export class AnimeOwlSource extends BaseAnimeSource {
             const response = await axios.get(`${this.baseUrl}/search`, {
                 params: { q: query, page },
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -89,7 +89,7 @@ export class AnimeOwlSource extends BaseAnimeSource {
             const animeId = id.replace('animeowl-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${animeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -132,7 +132,7 @@ export class AnimeOwlSource extends BaseAnimeSource {
             const id = animeId.replace('animeowl-', '');
             const response = await axios.get(`${this.baseUrl}/anime/${id}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -168,7 +168,7 @@ export class AnimeOwlSource extends BaseAnimeSource {
         try {
             const response = await axios.get(`${this.baseUrl}/watch/${episodeId}`, {
                 signal: options?.signal,
-                timeout: options?.timeout || 10000,
+                timeout: 25000,
                 headers: this.getHeaders()
             });
             const $ = cheerio.load(response.data);
@@ -179,7 +179,7 @@ export class AnimeOwlSource extends BaseAnimeSource {
                 const embedUrl = iframeSrc.startsWith('http') ? iframeSrc : `https:${iframeSrc}`;
                 const embedResponse = await axios.get(embedUrl, {
                     signal: options?.signal,
-                    timeout: options?.timeout || 10000,
+                    timeout: 25000,
                     headers: this.getHeaders()
                 });
 
@@ -198,7 +198,7 @@ export class AnimeOwlSource extends BaseAnimeSource {
 
     async getTrending(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         try {
-            const response = await axios.get(`${this.baseUrl}/popular`, { params: { page }, signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/popular`, { params: { page }, signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
             $('.anime-card').each((i, el) => {
@@ -216,7 +216,7 @@ export class AnimeOwlSource extends BaseAnimeSource {
 
     async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
         try {
-            const response = await axios.get(`${this.baseUrl}/recent`, { params: { page }, signal: options?.signal, timeout: options?.timeout || 10000, headers: this.getHeaders() });
+            const response = await axios.get(`${this.baseUrl}/recent`, { params: { page }, signal: options?.signal, timeout: 25000, headers: this.getHeaders() });
             const $ = cheerio.load(response.data);
             const results: AnimeBase[] = [];
             $('.anime-card').each((i, el) => {
