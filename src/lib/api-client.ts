@@ -816,8 +816,11 @@ const primaryBase = this.apiBase();
                     console.warn(`[API] HiAnime REST proxy returned no sources (upstream services may be unavailable)`);
                 }
 
-            console.error(`[API] ❌ Stream fetch failed:`, primaryErr);
-                throw primaryErr;
+            const isAbort = primaryErr instanceof Error && (primaryErr.name === 'AbortError' || primaryErr.message.toLowerCase().includes('aborted'));
+            if (!isAbort) {
+                console.error(`[API] ❌ Stream fetch failed:`, primaryErr);
+            }
+            throw primaryErr;
         }
     }
 

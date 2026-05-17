@@ -936,7 +936,8 @@ export class SourceManager {
         'animekai-', 'animepahe-',
         '9anime-', 'gogoanime-', 'consumet-',
         'animeflv-', 'anilist-', 'watchhentai-', 'hanime-', 'akih-',
-            'aniwave-', 'aniwaves-', 'aniwatch-', 'allanime-', 'miruro-'
+        'aniwave-', 'aniwaves-', 'aniwatch-', 'allanime-', 'miruro-',
+        'gogoorat-', 'wcofun-', 'animeheaven-', 'kaido-'
     ];
 
     /**
@@ -969,7 +970,7 @@ export class SourceManager {
             }
         }
         // Also strip common provider prefixes that might not be in knownPrefixes
-        return id.replace(/^(gogoanime|animekai|9anime|aniwave|aniwaves|aniwatch|miruro|allanime)-/i, '');
+        return id.replace(/^(gogoanime|animekai|9anime|aniwave|aniwaves|aniwatch|miruro|allanime|gogoorat|wcofun|animeheaven|kaido)-/i, '');
     }
 
     /**
@@ -1106,6 +1107,9 @@ export class SourceManager {
             { prefix: 'watchhentai-series/', source: 'WatchHentai' },
             { prefix: 'watchhentai-videos/', source: 'WatchHentai' },
             { prefix: 'animeflv-', source: 'AnimeFLV' },
+            { prefix: 'gogoorat-', source: 'GogoOrAt' },
+            { prefix: 'wcofun-', source: 'Wcofun' },
+            { prefix: 'animeheaven-', source: 'AnimeHeaven' },
         ];
 
         for (const { prefix, source } of prefixes) {
@@ -4274,7 +4278,7 @@ export class SourceManager {
             try {
                 all = await Promise.race([
                     this.search(t, 1),
-                    new Promise<AnimeSearchResult>((_, reject) => setTimeout(() => reject(new Error('Search timeout')), 10000))
+                    new Promise<AnimeSearchResult>((_, reject) => setTimeout(() => reject(new Error('Search timeout')), 6000))
                 ]);
             } catch (err) {
                 console.log(`[SourceManager] resolveAniListToStreamingId search timeout for title: "${t}"`);
@@ -4513,7 +4517,7 @@ export class SourceManager {
                 try {
                     const searchResult = await this.executeReliably(source.name, 'search', 
                         (signal) => source.search(title, 1, {}, { signal }), 
-                        { timeout: 12000 }
+                        { timeout: 6000 }
                     );
                     const results = searchResult.results || [];
                     

@@ -272,6 +272,10 @@ const Watch = () => {
   // Auto-failover on stream error
   useEffect(() => {
     if (!streamError || !servers?.length) return;
+    if (streamError.name === 'AbortError' || streamError.message?.toLowerCase().includes('abort')) {
+      console.log('[Watch] ⏭️ Skipping failover because stream fetch was aborted (likely due to server change)');
+      return;
+    }
     const realServers = servers;
     if (realServers.length === 0 || serverRetryCount >= realServers.length) return;
     const currentIndex = realServers.findIndex(s => s.name === selectedServer);
@@ -307,6 +311,7 @@ const Watch = () => {
   // Log errors
   useEffect(() => {
     if (streamError) {
+      if (streamError.name === 'AbortError' || streamError.message?.toLowerCase().includes('abort')) return;
       console.error('[Watch] ❌ Stream error:', streamError);
     }
   }, [streamError]);
