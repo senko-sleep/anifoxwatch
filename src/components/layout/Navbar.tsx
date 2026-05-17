@@ -229,7 +229,7 @@ export const Navbar = () => {
             {/* Desktop Search */}
             <div className={cn(
               'hidden md:flex items-center flex-shrink-0 transition-all duration-300',
-              isSearchOpen ? 'w-72 min-w-[18rem]' : 'w-auto'
+              isSearchOpen ? 'w-[28rem] min-w-[24rem]' : 'w-auto'
             )}>
               {isSearchOpen ? (
                 <SearchAutocomplete
@@ -240,7 +240,7 @@ export const Navbar = () => {
               ) : (
                 <button
                   onClick={() => setIsSearchOpen(true)}
-                  className="group flex items-center gap-2.5 h-9 px-3 rounded-lg bg-white/[0.04] border border-fox-orange/25 hover:bg-white/[0.06] hover:border-fox-orange/60 transition-all duration-200 shadow-[0_0_8px_rgba(255,102,0,0.08)]"
+                  className="group flex items-center gap-2.5 h-9 px-3 rounded-lg bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.06] hover:border-fox-orange/45 transition-all duration-200"
                   title="Search (press / or Ctrl+K)"
                 >
                   <Search className="w-4 h-4 text-zinc-400 group-hover:text-fox-orange transition-colors" />

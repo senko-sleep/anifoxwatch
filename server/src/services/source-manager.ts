@@ -4493,7 +4493,7 @@ export class SourceManager {
         // If only one result and it's a close match, use it
         if (results.length === 1) {
             const similarity = this.calculateSimilarity(title, results[0].title);
-            if (similarity > 0.5) {
+            if (similarity > 0.7) {
                 return results[0];
             }
             return null;
@@ -4568,7 +4568,7 @@ export class SourceManager {
 
             const sourceNamesToTry = animeType === 'Movie'
                 ? ['Aniwaves', 'GogoOrAt', 'Kaido', '9Anime', 'Gogoanime']
-                : ['GogoOrAt', 'Kaido', '9Anime', 'Gogoanime', 'Aniwaves'];
+                : ['Aniwaves', 'GogoOrAt', 'Kaido', '9Anime', 'Gogoanime'];
             const sourcesToTry = sourceNamesToTry
                 .map((name) => this.sources.get(name))
                 .filter(s => s && s.isAvailable) as StreamingSource[];
@@ -4627,10 +4627,10 @@ export class SourceManager {
                 }
                 
                 // If we found a decent match and we've tried at least 2 sources, stop
-                if (bestMatchOverall && bestScoreOverall > 0.6 && i >= 1) break;
+                if (bestMatchOverall && bestScoreOverall > 0.8 && i >= 1) break;
             }
 
-            if (bestMatchOverall && bestScoreOverall > 0.4) {
+            if (bestMatchOverall && bestScoreOverall > 0.7) {
                 console.log(`   ✅ Using best found match: ${bestMatchOverall.title} (${bestMatchOverall.id}) with score ${bestScoreOverall.toFixed(2)}`);
                 return bestMatchOverall;
             }

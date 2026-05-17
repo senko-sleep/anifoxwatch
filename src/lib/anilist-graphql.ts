@@ -74,3 +74,15 @@ export function fetchAniListGraphQL(body: Record<string, unknown>): Promise<Resp
   queue = run.finally(() => delay(MIN_SPACING_MS));
   return run;
 }
+
+/**
+ * Low-latency path for user-typed autocomplete. It still retries transient
+ * failures/429s, but it does not wait behind slower browse/home AniList calls.
+ */
+export function fetchAniListGraphQLFast(body: Record<string, unknown>): Promise<Response> {
+  return fetchAniListOnceWithTransientRetry({
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+}

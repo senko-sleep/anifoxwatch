@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Search, X, Play, Star, Clock, TrendingUp, Loader2, Mic, Film, Eye } from 'lucide-react';
+import { Search, X, Play, Star, TrendingUp, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { apiClient } from '@/lib/api-client';
-import { cn, normalizeRating, stripSourcePrefix, truncateAtWordBoundary } from '@/lib/utils';
+import { fetchAniListGraphQLFast } from '@/lib/anilist-graphql';
+import { mapAniListMediaToAnime, type AniListHomeMedia } from '@/lib/anilist-home-queries';
+import { cn, normalizeRating } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface SearchResult {
@@ -39,6 +40,52 @@ const POPULAR_SEARCHES = [
   'Jujutsu Kaisen', 'My Hero Academia', 'Dragon Ball', 'Bleach'
 ];
 
+const suggestionCache = new Map<string, SearchResult[]>();
+
+async function fetchSuggestions(q: string): Promise<SearchResult[]> {
+  const key = q.trim().toLowerCase();
+  const cached = suggestionCache.get(key);
+  if (cached) return cached;
+
+  const gql = `{
+    Page(page:1,perPage:6) {
+      media(search:${JSON.stringify(q)},type:ANIME,isAdult:false,sort:SEARCH_MATCH) {
+        id
+        title { romaji english }
+        coverImage { extraLarge large }
+        bannerImage
+        description
+        genres
+        episodes
+        duration
+        format
+        status
+        averageScore
+        popularity
+        seasonYear
+        season
+        studios(isMain:true) { nodes { name } }
+      }
+    }
+  }`;
+
+  const response = await fetchAniListGraphQLFast({ query: gql });
+  if (!response.ok) throw new Error(`AniList ${response.status}`);
+  const body = await response.json() as {
+    errors?: { message?: string }[];
+    data?: { Page?: { media?: AniListHomeMedia[] } };
+  };
+  if (body.errors?.length) throw new Error(body.errors[0]?.message || 'AniList search failed');
+
+  const results = (body.data?.Page?.media || []).map((media) => mapAniListMediaToAnime(media));
+  suggestionCache.set(key, results);
+  if (suggestionCache.size > 40) {
+    const oldest = suggestionCache.keys().next().value;
+    if (oldest) suggestionCache.delete(oldest);
+  }
+  return results;
+}
+
 export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: SearchAutocompleteProps) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -47,9 +94,9 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
   const [isLoading, setIsLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [isInitialLoad, setIsInitialLoad] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const requestSeqRef = useRef(0);
   const localInputRef = useRef<HTMLInputElement>(null);
   const effectiveInputRef = inputRef || localInputRef;
 
@@ -58,21 +105,22 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
     if (q.length < 2) {
       setResults([]);
       setShowDropdown(q.length > 0);
-      setIsInitialLoad(false);
       return;
     }
 
+    const requestSeq = ++requestSeqRef.current;
     setIsLoading(true);
-    setIsInitialLoad(true);
     try {
-      const data = await apiClient.search(q, 1);
-      setResults((data.results || []).slice(0, 8));
+      const data = await fetchSuggestions(q);
+      if (requestSeq !== requestSeqRef.current) return;
+      setResults(data);
       setShowDropdown(true);
     } catch {
+      if (requestSeq !== requestSeqRef.current) return;
       setResults([]);
     } finally {
+      if (requestSeq !== requestSeqRef.current) return;
       setIsLoading(false);
-      setTimeout(() => setIsInitialLoad(false), 300);
     }
   }, []);
 
@@ -83,7 +131,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
       setShowDropdown(false);
       return;
     }
-    debounceRef.current = setTimeout(() => performSearch(query), 300);
+    debounceRef.current = setTimeout(() => performSearch(query.trim()), 120);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [query, performSearch]);
 
@@ -153,14 +201,14 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
           }}
           onFocus={() => query.length > 0 && setShowDropdown(true)}
           onKeyDown={handleKeyDown}
-          className="w-full min-w-0 pl-10 pr-10 bg-fox-surface border-border focus:border-fox-orange focus:ring-fox-orange/20"
+          className="h-11 w-full min-w-0 rounded-xl border-white/10 bg-[#0c1018] pl-10 pr-16 text-[15px] shadow-none focus-visible:border-fox-orange/50 focus-visible:ring-2 focus-visible:ring-fox-orange/15"
           autoFocus
         />
         {query && (
           <button
             type="button"
             onClick={() => { setQuery(''); setResults([]); setShowDropdown(false); }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-white/5 hover:text-foreground"
           >
             <X className="w-4 h-4" />
           </button>
@@ -173,15 +221,16 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
       {/* Dropdown */}
       {showDropdown && (
         <div className={cn(
-          "absolute top-full left-0 right-0 mt-2 bg-zinc-950 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-[100]",
-          isMobile ? "max-h-[60vh]" : "max-h-[450px]"
+          "absolute top-full z-[100] mt-3 overflow-hidden rounded-xl border border-white/10 bg-[#090c12]/98 shadow-2xl shadow-black/40 backdrop-blur-xl",
+          isMobile ? "left-0 right-0 max-h-[70vh]" : "right-0 w-[min(34rem,calc(100vw-2rem))] max-h-[520px]"
         )}>
           {/* Results */}
           {results.length > 0 ? (
-            <div className="overflow-y-auto max-h-[390px]">
+            <div className="overflow-y-auto max-h-[460px]">
               {/* Results count */}
-              <div className="px-4 py-2 text-xs text-zinc-500 border-b border-white/5">
-                {results.length} results
+              <div className="flex items-center justify-between border-b border-white/5 px-4 py-2.5 text-xs text-zinc-500">
+                <span>{results.length} result{results.length === 1 ? '' : 's'}</span>
+                <span className="hidden sm:inline text-zinc-600">AniList instant search</span>
               </div>
 
               {results.map((result, i) => {
@@ -195,17 +244,14 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
                     onClick={() => handleSelect(result)}
                     onMouseEnter={() => setSelectedIndex(i)}
                     className={cn(
-                      "w-full flex gap-3 px-4 py-3 text-left transition-all duration-200 border-b border-white/5 last:border-b-0",
+                      "w-full flex gap-3 px-4 py-3 text-left transition-colors border-b border-white/5 last:border-b-0",
                       selectedIndex === i 
-                        ? "bg-gradient-to-r from-fox-orange/20 to-fox-orange/5" 
-                        : "hover:bg-white/[0.03] hover:backdrop-blur-sm",
-                      "animate-in fade-in slide-in-from-top-2",
-                      isInitialLoad && "opacity-0"
+                        ? "bg-fox-orange/10" 
+                        : "hover:bg-white/[0.04]"
                     )}
-                    style={{ animationDelay: `${i * 50}ms`, opacity: isInitialLoad ? 0 : 1 }}
                   >
                     {/* Thumbnail */}
-                    <div className="w-14 h-20 rounded-lg overflow-hidden bg-zinc-900 flex-shrink-0 ring-1 ring-white/10 shadow-lg">
+                    <div className="w-14 h-20 rounded-md overflow-hidden bg-zinc-900 flex-shrink-0 ring-1 ring-white/10 shadow-lg">
                       <img
                         src={result.image}
                         alt={displayTitle}
@@ -241,7 +287,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
                           {result.genres.slice(0, 4).map((genre, idx) => (
                             <span
                               key={`${genre}-${idx}`}
-                              className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-white/10"
+                              className="text-[10px] px-2 py-0.5 rounded-md bg-white/[0.06] text-zinc-300 border border-white/10"
                             >
                               {genre}
                             </span>
@@ -274,7 +320,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
                     </div>
 
                     {/* Play icon */}
-                    <div className="shrink-0 w-8 h-8 rounded-full bg-white/5 hover:bg-fox-orange/20 flex items-center justify-center transition-colors">
+                    <div className="shrink-0 w-8 h-8 rounded-lg bg-white/5 hover:bg-fox-orange/20 flex items-center justify-center transition-colors">
                       <Play className="w-3.5 h-3.5 text-zinc-400 fill-zinc-400" />
                     </div>
                   </button>
@@ -284,15 +330,15 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
               {/* View all results link */}
               <button
                 onClick={(e) => handleSubmit(e as unknown as React.FormEvent)}
-                className="w-full px-4 py-3 text-center text-xs font-medium text-fox-orange hover:bg-fox-orange/10 transition-colors border-t border-white/10"
+                className="w-full px-4 py-3 text-center text-sm font-semibold text-fox-orange hover:bg-fox-orange/10 transition-colors border-t border-white/10"
               >
                 View all results for "{query}"
               </button>
             </div>
           ) : isLoading && results.length === 0 ? (
-            <div className="p-4 space-y-3">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-4 px-4 py-3">
+            <div className="p-3 space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 px-2 py-2">
                   <Skeleton className="w-12 h-16 rounded-lg" />
                   <div className="flex-1 space-y-2">
                     <Skeleton className="h-4 w-3/4" />
@@ -319,7 +365,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
                   <button
                     key={term}
                     onClick={() => handlePopularClick(term)}
-                    className="px-3 py-2 text-xs font-medium text-zinc-300 bg-zinc-800/80 hover:bg-fox-orange/20 hover:text-fox-orange hover:border-fox-orange/30 rounded-lg transition-all border border-white/10"
+                    className="px-3 py-2 text-xs font-medium text-zinc-300 bg-white/[0.05] hover:bg-fox-orange/15 hover:text-fox-orange hover:border-fox-orange/30 rounded-md transition-colors border border-white/10"
                   >
                     {term}
                   </button>

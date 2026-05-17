@@ -107,6 +107,7 @@ const Watch = () => {
   }, [location.state, searchParams]);
 
   // State
+  const [selectedAnimeId, setSelectedAnimeId] = useState<string>(cleanAnimeId);
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(1);
   const [audioType, setAudioType] = useState<AudioType>(() => {
@@ -171,7 +172,8 @@ const Watch = () => {
   // Data fetching
   const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
   const { data: episodes, isLoading: episodesLoading, isFetching: episodesFetching, error: episodesError, refetch: refetchEpisodes } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
-  const { data: servers, isLoading: serversLoading } = useEpisodeServers(selectedEpisode || '', !!selectedEpisode);
+  const selectedEpisodeForCurrentAnime = selectedAnimeId === cleanAnimeId ? selectedEpisode : null;
+  const { data: servers, isLoading: serversLoading } = useEpisodeServers(selectedEpisodeForCurrentAnime || '', !!selectedEpisodeForCurrentAnime);
   const serversHaveDub = useMemo(
     () => servers?.some((s) => s.type === 'dub') ?? false,
     [servers]
@@ -189,7 +191,7 @@ const Watch = () => {
     isLoading: streamLoading,
     error: streamError,
     refetch: refetchStream
-  } = useStreamingLinks(selectedEpisode || '', streamServer, audioType, !!selectedEpisode, selectedEpisodeNum,
+  } = useStreamingLinks(selectedEpisodeForCurrentAnime || '', streamServer, audioType, !!selectedEpisodeForCurrentAnime, selectedEpisodeNum,
     cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined);
 
   /** Dub is available if: server list has dub, metadata says dub, active dub playback returned sources, or dub probe (while on SUB) succeeded. */
@@ -208,7 +210,7 @@ const Watch = () => {
   const skipDubProbe = true;
 
   const { data: dubProbeData } = useDubStreamProbe(
-    selectedEpisode || '',
+    selectedEpisodeForCurrentAnime || '',
     servers,
     skipDubProbe
   );
@@ -224,6 +226,18 @@ const Watch = () => {
   // Dynamic page title
   useDocumentTitle(anime?.title ?? 'Watch', Boolean(anime?.title) ? false : true);
 
+  useEffect(() => {
+    setSelectedAnimeId('');
+    setSelectedEpisode(null);
+    setSelectedEpisodeNum(1);
+    setSelectedServer('');
+    setUserPickedServer(false);
+    setServerRetryCount(0);
+    setSourceRetryIndex(0);
+    setAudioManuallySet(false);
+    setStreamSlowWarning(false);
+  }, [cleanAnimeId]);
+
   // Initialize episode from URL or first episode (runs once on mount)
   useEffect(() => {
     if (!episodes?.length || selectedEpisode) return;
@@ -233,16 +247,18 @@ const Watch = () => {
       const epNum = parseInt(epParam, 10);
       const ep = episodes.find(e => e.number === epNum);
       if (ep) {
+        setSelectedAnimeId(cleanAnimeId);
         setSelectedEpisode(ep.id);
         setSelectedEpisodeNum(ep.number);
         return;
       }
     }
     // Default to first episode if no URL param
+    setSelectedAnimeId(cleanAnimeId);
     setSelectedEpisode(episodes[0].id);
     setSelectedEpisodeNum(episodes[0].number);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [episodes]);
+  }, [episodes, cleanAnimeId]);
 
   // Auto-select default server (neko_senko preferred) when servers are loaded
   useEffect(() => {
@@ -452,6 +468,7 @@ const Watch = () => {
       }, { replace: true, state: location.state });
     }
 
+    setSelectedAnimeId(cleanAnimeId);
     setSelectedEpisode(episodeId);
     setSelectedEpisodeNum(episodeNum);
     setSelectedServer(''); // Reset server for new episode
@@ -846,6 +863,7 @@ const Watch = () => {
               />
             ) : videoSource ? (
               <VideoPlayer
+                key={`${cleanAnimeId}:${selectedEpisodeForCurrentAnime || 'none'}:${audioType}`}
                 src={videoSource?.url || ''}
                 isM3U8={videoSource?.isM3U8}
                 subtitles={streamData?.subtitles}
@@ -1123,6 +1141,7 @@ const Watch = () => {
                     />
                   ) : videoSource ? (
                     <VideoPlayer
+                      key={`${cleanAnimeId}:${selectedEpisodeForCurrentAnime || 'none'}:${audioType}`}
                       src={videoSource?.url || ''}
                       isM3U8={videoSource?.isM3U8}
                       subtitles={streamData?.subtitles}

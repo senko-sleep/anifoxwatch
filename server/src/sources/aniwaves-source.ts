@@ -332,7 +332,24 @@ export class AniwavesSource extends BaseAnimeSource {
             
             if (!extraction.success || extraction.streams.length === 0) {
                 logger.warn(`[Aniwaves] Failed to extract streams from embed: ${embedUrl}`, undefined, this.name);
-                return { sources: [], subtitles: [] };
+                return {
+                    sources: [{
+                        url: embedUrl,
+                        quality: 'auto',
+                        isM3U8: false,
+                        isEmbed: true,
+                        isDirect: true,
+                        server: 'Aniwaves Embed',
+                    }],
+                    subtitles: [],
+                    headers: {
+                        'Referer': this.baseUrl,
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+                    },
+                    source: this.name,
+                    category: resolvedCategory,
+                    dubFallback: category === 'dub' && resolvedCategory === 'sub'
+                };
             }
 
              const streamData: StreamingData = {

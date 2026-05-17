@@ -515,6 +515,9 @@ async function forwardToRemoteProxy(
  * Reconstruct a full episode ID from a split path + query (Render/nginx decode).
  */
 function reconstructEpisodeId(episodeId: string, query: Record<string, any>): string {
+    if (query.eps && episodeId.toLowerCase().startsWith('aniwaves-') && !episodeId.includes('&eps=')) {
+        return `${episodeId}&eps=${String(query.eps)}`;
+    }
     if (!query.ep || episodeId.includes('?ep=')) return episodeId;
     // Do not corrupt fully-formed AnimeKai IDs with a stray ?ep=
     if (episodeId.includes('$ep=') && episodeId.includes('$token=')) return episodeId;
