@@ -3681,7 +3681,7 @@ export class SourceManager {
                         const cleanTitle = title.replace(/\s+\d+(st|nd|rd|th)\s+season/i, '').replace(/\s+season\s+\d+/i, '').trim();
                         const searchTitles = category === 'dub'
                             ? [title, `${title} dub`, `${title} (Dub)`, `${cleanTitle} dub`]
-                            : [title];
+                            : [title, cleanTitle];
 
                         let searchResult: AnimeSearchResult | null = null;
                         let bestMatch: AnimeBase | null = null;
@@ -3692,7 +3692,7 @@ export class SourceManager {
                             try {
                                 const res = await Promise.race([
                                     src.search(searchTitle, 1),
-                                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 20000))
+                                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 6000))
                                 ]);
                                 if (res.results?.length) {
                                     searchResult = res;
@@ -3720,8 +3720,8 @@ export class SourceManager {
                         if (!bestMatch || !searchResult || resolved) throw new Error('no results');
 
                         const episodes = await Promise.race([
-                            src.getEpisodes!(bestMatch.id, { timeout: 15000 }),
-                            new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
+                            src.getEpisodes!(bestMatch.id, { timeout: 6000 }),
+                            new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 6000))
                         ]);
                         if (!episodes?.length || resolved) throw new Error('no episodes');
 
@@ -3730,8 +3730,8 @@ export class SourceManager {
 
                         console.log(`   ⏳ ${srcName}: streaming ep ${targetEpNum} (ID: ${targetEp.id}, hasDub=${targetEp.hasDub})`);
                         const streamData = await Promise.race([
-                            src.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 20000 }),
-                            new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 20000))
+                            src.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 8000 }),
+                            new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
                         ]);
 
                         if (streamData?.sources?.length > 0 && !resolved) {
