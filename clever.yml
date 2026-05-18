@@ -1,0 +1,27 @@
+# clever.yml — Clever Cloud deployment manifest
+# Active production host : https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io
+# Clever CLI deploy command : clever deploy --app anifoxwatch-api
+#
+# Clever Cloud injects these env vars automatically:
+#   CLEVER_NAME      → app identifier slug
+#   CLEVER_HOST      → Domain e.g. cleverapps.io
+#   PORT             → port Clever Cloud expects the process to listen on (set in Dockerfile ENV PORT=8080)
+#
+# Env vars set in the Clever Cloud dashboard (or via `clever env set`):
+#   NODE_ENV          → production
+#   BASE_URL          → https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io
+#   CLEVER_APP_URL    → https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io
+#   CORS_ORIGIN       → *
+#   DEFAULT_REMOTE_STREAM_PROXY → https://anifoxwatch-api.anya-bot.workers.dev/api/stream/proxy
+
+applications:
+  - name: anifoxwatch-api
+    docker:
+      context: .
+    # Dockerfile lives at repo root (chromium + puppeteer build context)
+    dockerfilePath: ./Dockerfile
+    # Clever Cloud sends requests on PORT; Dockerfile already EXPOSE 8080 and ENV PORT=8080
+    scale:
+      count: 1
+      cpu: 512
+      memory: 1024
