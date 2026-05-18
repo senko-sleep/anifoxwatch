@@ -610,7 +610,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         episodeId = `animekai-${episodeId}`;
     }
 
-    const { category, proxy: useProxy = 'true', ep: epToken, ep_num: epNumRaw } = req.query;
+    const { category, proxy: useProxy = 'true', ep: epToken, ep_num: epNumRaw, title: queryTitle } = req.query;
     const explicitServer = normalizeStreamServerQuery(req.query.server);
     
     // Parse episode number - prioritize ep_num, fallback to ep if it's numeric
@@ -666,7 +666,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 
     if (!streamData?.sources?.length) {
         try {
-            streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId);
+            streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string);
         } catch (e: unknown) {
             lastError = e instanceof Error ? e.message : String(e);
         }
@@ -676,7 +676,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     if (!streamData?.sources?.length && isDubRequested) {
         try {
             logger.info(`[STREAM] Sequential sub fallback for dub request ${episodeId}`, { requestId });
-            const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId);
+            const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string);
             if (subFallback?.sources?.length) {
                 streamData = { ...subFallback, category: 'sub', dubFallback: true };
                 logger.info(`[STREAM] Sequential sub fallback succeeded for ${episodeId}`, { requestId });

@@ -3115,7 +3115,7 @@ export class SourceManager {
      * Uses PARALLEL multi-source querying for maximum reliability
      * Queries multiple sources simultaneously and returns the first successful result
      */
-    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', episodeNum?: number, anilistId?: number): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', episodeNum?: number, anilistId?: number, forcedTitle?: string): Promise<StreamingData> {
         const timer = new PerformanceTimer(`Get streaming links: ${episodeId}`, { episodeId, server, category });
         const startTime = Date.now();
         
@@ -3480,7 +3480,7 @@ export class SourceManager {
 
             // Cross-source title-based fallback
             Promise.race([
-                this.crossSourceStreamingFallback(episodeId, server, category, episodeNum, anilistId),
+                this.crossSourceStreamingFallback(episodeId, server, category, episodeNum, anilistId, forcedTitle),
                 new Promise<StreamingData | null>((resolve) =>
                     setTimeout(() => resolve(null), CROSS_SOURCE_FALLBACK_MAX_MS),
                 ),
@@ -3552,9 +3552,10 @@ export class SourceManager {
         server?: string,
         category: 'sub' | 'dub' = 'sub',
         hintEpisodeNum?: number,
-        anilistId?: number
+        anilistId?: number,
+        forcedTitle?: string
     ): Promise<StreamingData | null> {
-        let title = this.episodeIdToFallbackSearchTitle(episodeId);
+        let title = forcedTitle || this.episodeIdToFallbackSearchTitle(episodeId);
         
         // Try DB lookup if the title is still a numeric/proprietary ID format
         if (/^\d+(\&|$)/.test(title.replace(/\s+/g, ''))) {

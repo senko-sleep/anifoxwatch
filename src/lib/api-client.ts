@@ -678,7 +678,7 @@ class AnimeApiClient {
         return response.servers || [];
     }
 
-    async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number, animeTitle?: string): Promise<StreamingData> {
         // Split hianime-style "slug?ep=12345" — put `ep` as a real query param so
         // the path never contains %3F (Vercel returns 404 for encoded ? in paths).
         const normalized = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
@@ -698,6 +698,7 @@ class AnimeApiClient {
             params.append('ep_num', String(episodeNum));
         }
         if (anilistId != null) params.append('anilist_id', String(anilistId));
+        if (animeTitle) params.append('title', animeTitle);
 
         const queryString = params.toString() ? `?${params.toString()}` : '';
         const streamPath = `/api/stream/watch/${encodeURIComponent(slugPart)}${queryString}`;

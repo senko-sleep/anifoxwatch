@@ -192,7 +192,7 @@ const Watch = () => {
     error: streamError,
     refetch: refetchStream
   } = useStreamingLinks(selectedEpisodeForCurrentAnime || '', streamServer, audioType, !!selectedEpisodeForCurrentAnime, selectedEpisodeNum,
-    cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined);
+    cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined, anime?.title);
 
   /** Dub is available if: server list has dub, metadata says dub, active dub playback returned sources, or dub probe (while on SUB) succeeded. */
   const metadataIndicatesDub = useMemo(
