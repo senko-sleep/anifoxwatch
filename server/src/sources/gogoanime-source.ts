@@ -7,8 +7,8 @@ import { logger } from '../utils/logger.js';
 
 export class GogoanimeSource extends BaseAnimeSource {
     name = 'Gogoanime';
-    baseUrl = 'https://anitaku.pe';
-    private readonly fallbackDomains = ['https://gogoanimehd.to', 'https://gogoanimes.fi'];
+    baseUrl = 'https://gogoanimes.fi';
+    private readonly fallbackDomains = ['https://gogoanimehd.to', 'https://anitaku.to'];
 
     constructor() {
         super();
@@ -617,6 +617,17 @@ export class GogoanimeSource extends BaseAnimeSource {
                 } catch {
                     // Try next embed
                 }
+            }
+
+            if (sources.length === 0 && embedUrls.length > 0) {
+                logger.info(`Gogoanime: No direct stream extracted, falling back to iframe embed: ${embedUrls[0].url}`, undefined, this.name);
+                sources.push({
+                    url: embedUrls[0].url,
+                    quality: 'auto',
+                    isM3U8: false,
+                    isEmbed: true,
+                    originalUrl: embedUrls[0].url
+                });
             }
 
             return {

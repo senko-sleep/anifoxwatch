@@ -201,6 +201,7 @@ export class SourceManager {
         // Anikai: Same as AnimeKai (duplicate)
 
         // Adult sources
+        this.registerSource(new AnimeKaiSource());
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
         this.registerSource(new AkiHSource()); // Re-enabled - hentai only
