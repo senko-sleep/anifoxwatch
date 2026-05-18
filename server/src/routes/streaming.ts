@@ -1430,7 +1430,7 @@ router.get('/debug/test-sources', async (req: Request, res: Response): Promise<v
         }
         try {
             console.log(`[DEBUG] Testing source ${name}`);
-            const searchRes = await src.search('Re:Zero', 1);
+            const searchRes = await src.search('Re Zero', 1);
             results[name] = {
                 ok: true,
                 count: searchRes.results?.length ?? 0,
