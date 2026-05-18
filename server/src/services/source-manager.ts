@@ -72,6 +72,7 @@ export class SourceManager {
     private primarySource: string = 'Gogoanime';
     private healthStatus: Map<string, SourceHealth> = new Map();
     private sourceMetadata: Map<string, SourceMetadata> = new Map();
+    private episodeIdToParentAnimeId: Map<string, string> = new Map();
     
     private sourceOrder: string[] = [...REGISTERED_SOURCE_NAMES];
 
@@ -977,7 +978,8 @@ export class SourceManager {
      * Human-ish title for cross-source stream fallback (strips watch params, AnimeKai $ep$token tails, hash suffix).
      */
     private episodeIdToFallbackSearchTitle(episodeId: string): string {
-        let slug = episodeId.split('?')[0];
+        const parentId = this.episodeIdToParentAnimeId.get(episodeId);
+        let slug = (parentId || episodeId).split('?')[0];
         const dollar = slug.indexOf('$');
         if (dollar !== -1) slug = slug.slice(0, dollar);
         slug = this.extractRawId(slug);
@@ -988,6 +990,18 @@ export class SourceManager {
                   .replace(/-\d+$/i, '');
         
         return slug.replace(/[-_]/g, ' ').trim();
+    }
+
+    private mapEpisodeParentIds(animeId: string, episodes: Episode[]): Episode[] {
+        if (episodes && episodes.length > 0) {
+            for (const ep of episodes) {
+                this.episodeIdToParentAnimeId.set(ep.id, animeId);
+                if (process.env.POSTGRES_URL) {
+                    AnimeCache.setSourcePreference(`ep-parent:${ep.id}`, animeId).catch(() => {});
+                }
+            }
+        }
+        return episodes;
     }
 
     /**
@@ -1832,7 +1846,7 @@ export class SourceManager {
         if (memCached && memCached.length > 0) {
             console.log(`[SourceManager] Memory cache hit for episodes: ${animeId}`);
             timer.end();
-            return memCached;
+            return this.mapEpisodeParentIds(animeId, memCached);
         }
 
         // Check database cache
@@ -1843,7 +1857,7 @@ export class SourceManager {
                     console.log(`[SourceManager] Database cache hit for episodes: ${animeId}`);
                     episodesCache.set(animeId, cachedEpisodes); // Cache in memory for instant next access
                     timer.end();
-                    return cachedEpisodes;
+                    return this.mapEpisodeParentIds(animeId, cachedEpisodes);
                 }
             } catch (error) {
                 logger.warn(`[SourceManager] Database episode cache check failed:`, { error: String(error) });
@@ -1952,7 +1966,7 @@ export class SourceManager {
                         }
                         
                         timer.end();
-                        return episodes;
+                        return this.mapEpisodeParentIds(animeId, episodes);
                     }
                 } catch (err) {
                     console.log(`   ❌ Primary source failed: ${(err as Error).message}`);
@@ -1972,7 +1986,7 @@ export class SourceManager {
                             const episodes = await this.getEpisodes(best.id);
                             if (episodes && episodes.length > 0) {
                                 timer.end();
-                                return episodes;
+                                return this.mapEpisodeParentIds(best.id, episodes);
                             }
                         }
                     }
@@ -1995,7 +2009,7 @@ export class SourceManager {
                         console.log(`   ✅ Got ${episodes.length} episodes from Kaido in ${duration}ms`);
                         logger.episodeFetch(animeId, episodes.length, 'Kaido', duration);
                         timer.end();
-                        return episodes;
+                        return this.mapEpisodeParentIds(animeId, episodes);
                     }
                 } catch (err) {
                     console.log(`   ❌ Kaido failed: ${(err as Error).message}`);
@@ -2146,7 +2160,7 @@ export class SourceManager {
             console.log(`   ✅ Got ${episodes.length} episodes from ${primarySource.name} in ${duration}ms`);
             logger.episodeFetch(animeId, episodes.length, primarySource.name, duration);
             timer.end();
-            return episodes;
+            return this.mapEpisodeParentIds(animeId, episodes);
         }
 
         // Primary source returned no episodes — try backup sources with converted IDs
@@ -2187,7 +2201,7 @@ export class SourceManager {
                         console.log(`   ✅ Got ${backupEpisodes.length} episodes from backup ${name} in ${duration}ms`);
                         logger.episodeFetch(bestMatchId, backupEpisodes.length, name, duration);
                         timer.end();
-                        return backupEpisodes;
+                        return this.mapEpisodeParentIds(bestMatchId, backupEpisodes);
                     }
                 }
             } catch (err) {
@@ -3540,6 +3554,20 @@ export class SourceManager {
         anilistId?: number
     ): Promise<StreamingData | null> {
         let title = this.episodeIdToFallbackSearchTitle(episodeId);
+        
+        // Try DB lookup if the title is still a numeric/proprietary ID format
+        if (/^\d+(\&|$)/.test(title.replace(/\s+/g, ''))) {
+            try {
+                if (process.env.POSTGRES_URL) {
+                    const dbParentId = await AnimeCache.getSourcePreference(`ep-parent:${episodeId}`);
+                    if (dbParentId) {
+                        const rawParentId = this.extractRawId(dbParentId);
+                        title = rawParentId.replace(/-\d+$/, '').replace(/[-_]/g, ' ').trim();
+                        console.log(`   💾 Resolved parent ID from DB: ${episodeId} → ${dbParentId} (title: "${title}")`);
+                    }
+                }
+            } catch { /* ignore */ }
+        }
         
         // Extract anilistId from episode ID if not provided
         if (!anilistId && episodeId.toLowerCase().startsWith('anilist-')) {
