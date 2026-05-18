@@ -3692,7 +3692,7 @@ export class SourceManager {
                             try {
                                 const res = await Promise.race([
                                     src.search(searchTitle, 1),
-                                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 6000))
+                                    new Promise<AnimeSearchResult>((_, r) => setTimeout(() => r(new Error('timeout')), 12000))
                                 ]);
                                 if (res.results?.length) {
                                     searchResult = res;
@@ -3720,8 +3720,8 @@ export class SourceManager {
                         if (!bestMatch || !searchResult || resolved) throw new Error('no results');
 
                         const episodes = await Promise.race([
-                            src.getEpisodes!(bestMatch.id, { timeout: 6000 }),
-                            new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 6000))
+                            src.getEpisodes!(bestMatch.id, { timeout: 10000 }),
+                            new Promise<Episode[]>((_, r) => setTimeout(() => r(new Error('timeout')), 10000))
                         ]);
                         if (!episodes?.length || resolved) throw new Error('no episodes');
 
@@ -3730,8 +3730,8 @@ export class SourceManager {
 
                         console.log(`   ⏳ ${srcName}: streaming ep ${targetEpNum} (ID: ${targetEp.id}, hasDub=${targetEp.hasDub})`);
                         const streamData = await Promise.race([
-                            src.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 8000 }),
-                            new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 8000))
+                            src.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 15000 }),
+                            new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
                         ]);
 
                         if (streamData?.sources?.length > 0 && !resolved) {

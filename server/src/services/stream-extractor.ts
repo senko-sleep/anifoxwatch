@@ -37,27 +37,38 @@ class StreamExtractor {
             return this.browserLaunchPromise;
         }
 
-        this.browserLaunchPromise = puppeteer.launch({
-            headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--disable-gpu',
-                '--window-size=1920,1080',
-                '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process',
-                '--js-flags="--max-old-space-size=256"'
-            ]
-        });
+        try {
+            const launchPromise = puppeteer.launch({
+                headless: true,
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-accelerated-2d-canvas',
+                    '--disable-gpu',
+                    '--window-size=1920,1080',
+                    '--disable-web-security',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--js-flags="--max-old-space-size=256"'
+                ]
+            });
 
-        this.browser = await this.browserLaunchPromise;
-        this.browserLaunchPromise = null;
+            this.browserLaunchPromise = Promise.race([
+                launchPromise,
+                new Promise<Browser>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 4000))
+            ]);
 
-        logger.info('[StreamExtractor] Browser launched');
-        return this.browser;
+            this.browser = await this.browserLaunchPromise;
+            this.browserLaunchPromise = null;
+
+            logger.info('[StreamExtractor] Browser launched');
+            return this.browser;
+        } catch (error) {
+            this.browserLaunchPromise = null;
+            logger.error(`[StreamExtractor] Failed to launch browser: ${error}`);
+            throw error;
+        }
     }
 
     private activePages = 0;
