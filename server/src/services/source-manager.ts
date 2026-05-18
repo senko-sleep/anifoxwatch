@@ -4567,8 +4567,8 @@ export class SourceManager {
             }
 
             const sourceNamesToTry = animeType === 'Movie'
-                ? ['Aniwaves', 'GogoOrAt', 'Kaido', '9Anime', 'Gogoanime']
-                : ['Aniwaves', 'GogoOrAt', 'Kaido', '9Anime', 'Gogoanime'];
+                ? ['Gogoanime', 'AllAnime', '9Anime', 'Aniwaves', 'GogoOrAt']
+                : ['Gogoanime', 'AllAnime', '9Anime', 'Aniwaves', 'GogoOrAt'];
             const sourcesToTry = sourceNamesToTry
                 .map((name) => this.sources.get(name))
                 .filter(s => s && s.isAvailable) as StreamingSource[];
@@ -4578,7 +4578,7 @@ export class SourceManager {
 
             // Try sources until we find a good match with enough episode coverage
             // or we've tried the top sources for this media type.
-            for (let i = 0; i < Math.min(sourcesToTry.length, animeType === 'Movie' ? 5 : 3); i++) {
+            for (let i = 0; i < Math.min(sourcesToTry.length, animeType === 'Movie' ? 5 : 4); i++) {
                 const source = sourcesToTry[i];
                 console.log(`   📡 Trying ${source.name} to search for "${title}"`);
 

@@ -345,10 +345,14 @@ const startServer = async (port: number) => {
         }
     });
 
-    // Self-ping keep-alive to prevent idle shutdown on Render/Koyeb free tier
+    // Self-ping keep-alive to prevent idle shutdown on Render/Koyeb/Clever Cloud free tiers
     if (process.env.NODE_ENV === 'production') {
-        const BASE_URL = process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || `http://localhost:${port}`;
-        const KEEP_ALIVE_INTERVAL = 3 * 60 * 1000; // 3 minutes — keeps Render warm (idles after ~15 min)
+        const BASE_URL =
+            process.env.RENDER_EXTERNAL_URL ||
+            process.env.CLEVER_APP_URL ||
+            process.env.BASE_URL ||
+            `http://localhost:${port}`;
+        const KEEP_ALIVE_INTERVAL = 3 * 60 * 1000; // 3 minutes — keeps origin warm
         setInterval(async () => {
             try {
                 const res = await fetch(`${BASE_URL}/health`);
