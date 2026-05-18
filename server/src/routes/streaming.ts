@@ -1417,4 +1417,35 @@ router.post('/proxy', (req, res, next) => {
     res.status(404).end();
 });
 
+router.get('/debug/test-sources', async (req: Request, res: Response): Promise<void> => {
+    const results: any = {};
+    const sm = sourceManager;
+    const sourcesToTest = ['Gogoanime', 'AllAnime', '9Anime', 'Aniwaves'];
+    
+    for (const name of sourcesToTest) {
+        const src = sm['sources'].get(name);
+        if (!src) {
+            results[name] = 'Not registered';
+            continue;
+        }
+        try {
+            console.log(`[DEBUG] Testing source ${name}`);
+            const searchRes = await src.search('Re:Zero', 1);
+            results[name] = {
+                ok: true,
+                count: searchRes.results?.length ?? 0,
+                results: searchRes.results?.map((r: any) => ({ id: r.id, title: r.title })) ?? []
+            };
+        } catch (err: any) {
+            results[name] = {
+                ok: false,
+                error: err.message,
+                stack: err.stack,
+                code: err.code
+            };
+        }
+    }
+    res.json(results);
+});
+
 export default router;
