@@ -365,6 +365,7 @@ export const VideoPlayer = ({
       let fragLoadErrorCount = 0;
       let fragParseErrorCount = 0;
       const FRAG_LOAD_ERROR_THRESHOLD = 4; // After 4 consecutive frag load failures, switch source
+      const FRAG_PARSE_ERROR_THRESHOLD = 4; // After 4 consecutive frag parse errors, stream is corrupted
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         playerLog('error', 'HLS error', {

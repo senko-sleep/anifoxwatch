@@ -257,15 +257,18 @@ export function EpisodeList({
                        // Prefer serversHaveDub (from server list) over unreliable per-ep hasDub
                        // serversHaveDub indicates the source actually has dub servers available
                        const epHasDub = episode.hasDub || serversHaveDub || (effectiveDubCount > 0 && episode.number <= effectiveDubCount);
-                       const epHasSub = episode.hasSub !== false; // hasSub is typically always true if source supports it
+                       // Show SUB if explicitly true, or fall back to it only when no DUB is available
+                       // (some sources like animekai-source don't set hasSub per-episode; others like dub-only
+                       // sources correctly set hasSub=false to suppress the SUB badge)
+                       const epHasSub = episode.hasSub !== false ? true : !serversHaveDub;
                        return (
-                        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                          {epHasSub && (
-                            <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
-                              <Subtitles className="w-2 h-2 flex-shrink-0" />
-                              SUB
-                            </span>
-                          )}
+                         <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                           {epHasSub && (
+                             <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
+                               <Subtitles className="w-2 h-2 flex-shrink-0" />
+                               SUB
+                             </span>
+                           )}
                           {epHasDub && (
                             <span className="flex items-center gap-0.5 text-[10px] text-green-500 whitespace-nowrap">
                               <Mic className="w-2 h-2 flex-shrink-0" />
@@ -293,13 +296,17 @@ export function EpisodeList({
         <div className="flex items-center justify-between text-[10px]">
           <div className="flex items-center gap-1 text-muted-foreground">
             <Subtitles className="w-3 h-3" />
-            <span>{episodes.filter(e => e.hasSub).length || anime?.subCount || episodes.length} Sub</span>
+            <span>{episodes.filter(e => e.hasSub !== false).length} Sub</span>
           </div>
           <span className="text-muted-foreground/40">•</span>
           {(() => {
-            const dubEpCount = episodes.filter(e => e.hasDub).length;
-            const metaDub = dubEpCount || (anime?.dubCount ?? 0);
-            const hasDub = metaDub > 0 || serversHaveDub;
+            // When servers indicate dub availability, all episodes are considered dubbed
+            // to match the per-episode DUB badge logic
+            const effectiveDubCount = dubCount ?? anime?.dubCount ?? 0;
+            const dubEpCount = serversHaveDub
+              ? episodes.length
+              : episodes.filter(e => e.hasDub || (effectiveDubCount > 0 && e.number <= effectiveDubCount)).length;
+            const hasDub = dubEpCount > 0;
             return (
               <div className={cn(
                 "flex items-center gap-1",
@@ -307,11 +314,7 @@ export function EpisodeList({
               )}>
                 <Mic className="w-3 h-3" />
                 {hasDub ? (
-                  metaDub > 0 ? (
-                    <span>{metaDub} Dub</span>
-                  ) : (
-                    <span>Dub</span>
-                  )
+                  <span>{dubEpCount} Dub</span>
                 ) : (
                   <span>No Dub</span>
                 )}

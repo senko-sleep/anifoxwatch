@@ -126,7 +126,8 @@ export function getApiConfig(): ApiConfig {
     // This fixes deployments on arbitrary Vercel domains (preview URLs, forks, custom domains).
     const sameOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
-    if (isFirebaseHosting) {
+    // Only use Firebase-specific configuration if VITE_API_URL is not explicitly set
+    if (isFirebaseHosting && !envApiUrl) {
         return {
             deployment: 'firebase',
             baseUrl: API_DEPLOYMENTS.firebase,

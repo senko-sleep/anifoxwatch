@@ -1,11 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
+
+// Extend Express Request type to include custom property for normalized content type
+declare module 'express' {
+    interface Request {
+        _normalizedCt?: string;
+    }
+}
+
 import { tryFetchHianimeRestStreamingData } from '../services/hianime-rest-fallback.js';
 import { isHianimeStyleEpisodeId } from '../utils/hianime-rest-servers.js';
 import { logger } from '../utils/logger.js';
 import axios, { type AxiosResponse } from 'axios';
 import https from 'node:https';
 import { lookup } from 'dns/promises';
+import { Readable } from 'node:stream';
 import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streaming.js';
 
 const router = Router();
@@ -452,7 +461,7 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
     return false;
 }
 
-async function streamToString(stream: any, maxSize = 5 * 1024 * 1024): Promise<string> {
+async function streamToString(stream: Readable, maxSize = 5 * 1024 * 1024): Promise<string> {
     const chunks: Buffer[] = [];
     let size = 0;
     for await (const chunk of stream) {
@@ -789,20 +798,20 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     if (url) logger.info(`[PROXY] Request: ${url.substring(0, 100)}${url.length > 100 ? '...' : ''} (Referer: ${refererParam})`, { requestId });
 
     if (!url || typeof url !== 'string') {
-        res.status(400).json({ error: 'URL parameter is required' });
+        res.set('Access-Control-Allow-Origin', '*').status(400).json({ error: 'URL parameter is required' });
         return;
     }
 
     url = unwrapProxyTarget(url);
 
     if (!/^https?:\/\//i.test(url)) {
-        res.status(400).json({ error: 'Invalid streaming URL' });
+        res.set('Access-Control-Allow-Origin', '*').status(400).json({ error: 'Invalid streaming URL' });
         return;
     }
 
     let urlObj: URL;
     try { urlObj = new URL(url); } catch {
-        res.status(400).json({ error: 'Malformed URL' });
+        res.set('Access-Control-Allow-Origin', '*').status(400).json({ error: 'Malformed URL' });
         return;
     }
     const domain = urlObj.hostname;
@@ -825,7 +834,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     // Check for dead domains AFTER rewrite to catch any that couldn't be fixed
     if (isDeadDomain(url)) {
-        res.status(502).json({ error: 'Dead domain', reason: 'dead_domain', domain });
+        res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Dead domain', reason: 'dead_domain', domain });
         return;
     }
     const isM3u8 = url.includes('.m3u8');
@@ -855,7 +864,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     });
 
     if (isDeadDomain(url)) {
-        res.status(502).json({ error: 'Dead domain', reason: 'dead_domain', domain });
+        res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Dead domain', reason: 'dead_domain', domain });
         return;
     }
 
@@ -869,7 +878,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     const isResolvable = await isDomainResolvable(domain);
     if (!isResolvable) {
-        res.status(502).json({ error: 'Domain not resolvable', reason: 'dns_error', domain });
+        res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Domain not resolvable', reason: 'dns_error', domain });
         return;
     }
 
@@ -1198,19 +1207,19 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 =========================================
 `, err instanceof Error ? err : undefined, { requestId });
 
-            res.status(502).json({
-                error: 'Failed to proxy stream',
-                reason: errCode === 'EPROTO' ? 'tls_error' : errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' ? 'timeout' : 'connection_error',
-                domain,
-                message: process.env.NODE_ENV === 'development' ? errMsg : undefined,
-            });
+                res.set('Access-Control-Allow-Origin', '*').status(502).json({
+                    error: 'Failed to proxy stream',
+                    reason: errCode === 'EPROTO' ? 'tls_error' : errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' ? 'timeout' : 'connection_error',
+                    domain,
+                    message: process.env.NODE_ENV === 'development' ? errMsg : undefined,
+                });
         }
         return;
     }
 
     if (proxyResponse.status >= 400) {
         proxyResponse.data?.resume?.();
-        res.status(proxyResponse.status).json({ error: 'Upstream error', status: proxyResponse.status, domain });
+        res.set('Access-Control-Allow-Origin', '*').status(proxyResponse.status).json({ error: 'Upstream error', status: proxyResponse.status, domain });
         return;
     }
 
@@ -1229,7 +1238,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             // Reject manifests whose segments resolve to known ad CDNs
             if (isAdPoisonedManifest(content, url)) {
                 logger.warn(`⚠️ [MANIFEST AD-POISONED] Manifest from ${domain} contains ad CDN segments instead of real video data. Rejecting stream.`, { url: url.substring(0, 200), requestId });
-                res.status(502).json({
+                res.set('Access-Control-Allow-Origin', '*').status(502).json({
                     error: 'Ad-poisoned manifest',
                     reason: 'ad_cdn_segments',
                     domain,
@@ -1251,11 +1260,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             res.set('Pragma', 'no-cache');
             res.set('Expires', '0');
             res.set('Access-Control-Allow-Origin', '*');
+            res.set('Vary', 'Origin');
             res.send(rewritten);
             logger.info(`[PROXY] Rewrote m3u8 from ${domain}`, { domain, originalSize: content.length, requestId });
         } catch (err) {
             logger.error(`[PROXY] Failed to process m3u8 from ${domain}`, err as Error);
-            res.status(502).json({ error: 'Failed to process manifest' });
+            res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Failed to process manifest' });
         }
         return;
     }
@@ -1266,7 +1276,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     if (isAdCdnUrl(url)) {
         proxyResponse.data?.resume?.();
         logger.warn(`[PROXY] Blocked ad CDN segment: ${domain}`, { url: url.substring(0, 200), requestId });
-        res.status(502).json({ error: 'Ad CDN content blocked', reason: 'ad_cdn', domain });
+        res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Ad CDN content blocked', reason: 'ad_cdn', domain });
         return;
     }
 
@@ -1279,7 +1289,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         if (NON_VIDEO_CONTENT_TYPES.some(bad => ctLower.includes(bad))) {
             proxyResponse.data?.resume?.();
             logger.warn(`[PROXY] Blocked strict non-video content type: ${upstreamCt}`, { domain, requestId });
-            res.status(502).json({ error: 'Non-video content type blocked', contentType: upstreamCt, domain });
+            res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Non-video content type blocked', contentType: upstreamCt, domain });
             return;
         }
 
@@ -1291,7 +1301,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             if (isAdDomain) {
                 proxyResponse.data?.resume?.();
                 logger.warn(`[PROXY] Blocked ad image segment: ${domain}`, { url: url.substring(0, 100), requestId });
-                res.status(502).json({ error: 'Ad image segment blocked', domain });
+                res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Ad image segment blocked', domain });
                 return;
             }
 
@@ -1301,7 +1311,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 if (size > 0 && size < 100 * 1024) { // < 100KB on unknown domain
                     proxyResponse.data?.resume?.();
                     logger.warn(`[PROXY] Blocked small unknown image segment (${size} bytes): ${domain}`, { requestId });
-                    res.status(502).json({ error: 'Small unknown image segment blocked', domain });
+                    res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Small unknown image segment blocked', domain });
                     return;
                 }
             }
@@ -1309,11 +1319,11 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             // It's likely an obfuscated video segment - allow it
             logger.info(`[PROXY] Allowing obfuscated image segment (${upstreamCt}) from ${domain}`, { requestId });
             // Set normalized video content type for the Accept-Ranges check below
-            (req as any)._normalizedCt = 'video/MP2T';
+            req._normalizedCt = 'video/MP2T';
         }
     }
 
-    const effectiveCt = (req as any)._normalizedCt || upstreamCt.toLowerCase();
+    const effectiveCt = req._normalizedCt || upstreamCt.toLowerCase();
 
     if (proxyResponse.headers['content-length'] && !proxyResponse.headers['content-encoding']) {
         res.set('Content-Length', proxyResponse.headers['content-length']);
@@ -1379,7 +1389,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     proxyResponse.data.on('error', (err: Error) => {
         logger.error(`[PROXY] Stream error from ${domain}`, err);
-        if (!res.headersSent) res.status(502).json({ error: 'Stream error' });
+        if (!res.headersSent) res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Stream error' });
         else res.end();
     });
 });
