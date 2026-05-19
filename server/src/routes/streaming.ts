@@ -104,20 +104,6 @@ const DEAD_DOMAINS = new Set([
     'anitaku.so',
     'anix.to',
     'animesuge.to',
-    'code29wave.site',
-    'lab27core.site',
-    'net22lab.site',
-    'pro25zone.site',
-    'tech20hub.site',
-    'web24code.site',
-    'hub26link.site',
-    'hub27link.site',
-    'shop21pro.site',
-    'xm8.site',
-    'rrr.site',
-    'rrr.store',
-    'rrr.live',
-    'rrr.to',
 ]);
 
 /**
