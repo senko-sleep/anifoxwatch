@@ -109,6 +109,7 @@ export const HeroSection = ({ featuredAnime }: HeroSectionProps) => {
               style={{ transform: `scale(${scale})` }}
               onLoad={() => setImageLoaded(true)}
               loading={idx === currentIndex ? "eager" : "lazy"}
+              referrerPolicy="no-referrer"
             />
             {/* Advanced Gradient Overlays for Cinematic Feel */}
             <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/60 to-transparent" />

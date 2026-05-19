@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { Play, Star, Clock, Film, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn, formatRating, ensureHttps } from '@/lib/utils';
+import { apiUrl } from '@/lib/api-config';
 
 interface SpotlightAnime {
   id: string;
@@ -24,6 +25,7 @@ interface FeaturedSpotlightProps {
 export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [imgUseProxy, setImgUseProxy] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -168,10 +170,17 @@ export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
                 )}
               >
                 <div className="w-72 aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl ring-4 ring-white/10 hover:ring-fox-orange transition-all hover:scale-105">
-                  <img 
-                    src={ensureHttps(current.image)} 
+                  <img
+                    src={imgUseProxy ? `${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(ensureHttps(current.image))}` : ensureHttps(current.image)}
                     alt={current.title}
                     className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      if (!imgUseProxy && target.naturalWidth === 0) {
+                        setImgUseProxy(true);
+                      }
+                    }}
                   />
                 </div>
                 {/* Glow Effect */}

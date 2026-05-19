@@ -257,6 +257,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
                         alt={displayTitle}
                         className="w-full h-full object-cover"
                         loading="lazy"
+                        referrerPolicy="no-referrer"
                       />
                     </div>
 
@@ -304,12 +305,13 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
                               className="w-6 h-6 rounded-full overflow-hidden ring-1 ring-white/20"
                               title={va.name}
                             >
-                              <img
+                            <img
                                 src={va.image}
                                 alt={va.name}
                                 className="w-full h-full object-cover"
                                 loading="lazy"
-                              />
+                                referrerPolicy="no-referrer"
+                            />
                             </div>
                           ))}
                           {result.voiceActors.length > 3 && (

@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Play, Star, Info } from 'lucide-react';
 import { cn, formatRating, ensureHttps } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { apiUrl } from '@/lib/api-config';
 
 interface CarouselAnime {
   id: string;
@@ -41,21 +42,25 @@ export const AnimeCarousel = ({ anime, title, autoPlay = false, showDetails = tr
     return () => clearInterval(interval);
   }, [autoPlay, isHovered, anime.length]);
 
+  // Background image failover state per slide
+  const [bgSrcIdx, setBgSrcIdx] = useState(0);
+
   const goToSlide = (index: number) => {
     setCurrentIndex(index);
   };
 
-  const goToPrev = () => {
-    setCurrentIndex((prev) => (prev - 1 + anime.length) % anime.length);
-  };
+  // Build proxied background candidates (direct + proxy fallback)
+  const bgCandidates = useMemo(() => {
+    const src = ensureHttps(currentAnime.cover || currentAnime.image);
+    if (!src) return [];
+    const proxied = `${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(src)}`;
+    return [src, proxied]; // try direct first, fall back to proxy on error
+  }, [currentAnime.cover, currentAnime.image]);
 
-  const goToNext = () => {
-    setCurrentIndex((prev) => (prev + 1) % anime.length);
-  };
+  const bgSrc = bgCandidates[bgSrcIdx] || '';
 
-  if (!anime || anime.length === 0) return null;
-
-  const currentAnime = anime[currentIndex];
+  // Reset bg index when slide changes
+  useEffect(() => { setBgSrcIdx(0); }, [currentAnime.id]);
 
   return (
     <div 
@@ -67,15 +72,21 @@ export const AnimeCarousel = ({ anime, title, autoPlay = false, showDetails = tr
       {/* Main Display */}
       <div className="relative aspect-[21/9] rounded-2xl overflow-hidden bg-fox-dark">
         {/* Background Image with Parallax Effect */}
-        <div 
-          className="absolute inset-0 transition-transform duration-700 ease-out"
-          style={{
-            backgroundImage: `url(${ensureHttps(currentAnime.cover || currentAnime.image)})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            transform: isHovered ? 'scale(1.05)' : 'scale(1)',
-          }}
-        />
+        {bgSrc ? (
+          <img
+            src={bgSrc}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 ease-out pointer-events-none"
+            style={{ transform: isHovered ? 'scale(1.05)' : 'scale(1)' }}
+            referrerPolicy="no-referrer"
+            onError={() => {
+              // Cycle: direct → proxy → stay on proxy (no infinite fail)
+              if (bgSrcIdx < bgCandidates.length - 1) setBgSrcIdx(bgSrcIdx + 1);
+            }}
+          />
+        ) : (
+          <div className="absolute inset-0 bg-fox-dark" />
+        )}
         
         {/* Gradient Overlays */}
         <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/50 to-transparent" />
@@ -186,6 +197,7 @@ export const AnimeCarousel = ({ anime, title, autoPlay = false, showDetails = tr
               src={item.image} 
               alt=""
               className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
             />
           </button>
         ))}

@@ -694,7 +694,7 @@ const Watch = () => {
         <div className="min-h-screen bg-zinc-950 flex flex-col">
           <div className="w-full bg-zinc-900 aspect-[16/9] relative overflow-hidden">
             {anime?.image && (
-              <img src={anime.image} alt="" className="w-full h-full object-cover blur-lg opacity-30 scale-110" />
+              <img src={anime.image} alt="" className="w-full h-full object-cover blur-lg opacity-30 scale-110" referrerPolicy="no-referrer" />
             )}
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="flex flex-col items-center gap-2">
@@ -840,7 +840,7 @@ const Watch = () => {
           {streamLoading ? (
               <div className="absolute inset-0 flex items-center justify-center bg-zinc-950 overflow-hidden">
                 {anime?.image && (
-                  <img src={anime.image} alt="" className="absolute inset-0 w-full h-full object-cover scale-110 blur-xl opacity-25 pointer-events-none" />
+                  <img src={anime.image} alt="" className="absolute inset-0 w-full h-full object-cover scale-110 blur-xl opacity-25 pointer-events-none" referrerPolicy="no-referrer" />
                 )}
                 <div className="relative flex flex-col items-center gap-3">
                   <div className="relative w-12 h-12">
@@ -1042,7 +1042,7 @@ const Watch = () => {
           {/* About — compact, at the bottom */}
           <div className="px-3 pt-2 pb-6">
             <div className="flex gap-3 p-3 rounded-xl bg-white/[0.03]">
-              <img src={anime?.image} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover" />
+              <img src={anime?.image} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover" referrerPolicy="no-referrer" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-white leading-tight truncate">{anime?.title}</p>
                 {anime?.titleJapanese && <p className="text-[10px] italic text-zinc-500 truncate mt-0.5">{anime.titleJapanese}</p>}
@@ -1077,6 +1077,7 @@ const Watch = () => {
             src={anime.cover}
             alt="Backdrop"
             className="w-full h-full object-cover blur-3xl scale-110"
+            referrerPolicy="no-referrer"
           />
         </div>
       )}
@@ -1351,6 +1352,7 @@ const Watch = () => {
                     src={anime.image}
                     alt=""
                     className="mx-auto h-40 w-28 shrink-0 rounded-lg object-cover ring-1 ring-white/10 sm:mx-0 sm:h-44 sm:w-32"
+                    referrerPolicy="no-referrer"
                   />
                   <div className="min-w-0 flex-1 text-center sm:text-left">
                     <h3 className="font-display text-lg font-bold text-white sm:text-xl md:text-2xl">{anime.title}</h3>

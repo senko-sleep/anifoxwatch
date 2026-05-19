@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Hls from 'hls.js';
 import { PostProxyLoader } from '@/lib/hls-post-loader';
+import { apiUrl } from '@/lib/api-config';
 
 export interface VideoPreviewProps {
   src: string;
@@ -250,11 +251,12 @@ function PreviewCanvas({
     };
   }, [isHovering, videoRef, width, height, canvasFailed, hasFrame]);
 
-  // If canvas capture fails (CORS), show poster as fallback
+  // If canvas capture fails (CORS), show proxied poster as fallback
   if (canvasFailed) {
+    const proxiedPoster = poster ? `${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(poster)}` : poster;
     return (
       <img
-        src={poster}
+        src={proxiedPoster}
         className="absolute inset-0 w-full h-full object-cover"
         alt=""
       />
@@ -273,7 +275,7 @@ function PreviewCanvas({
       {/* Poster fallback while waiting for first frame */}
       {!hasFrame && (
         <img
-          src={poster}
+          src={poster ? `${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(poster)}` : poster}
           className="absolute inset-0 w-full h-full object-cover opacity-60"
           alt=""
         />

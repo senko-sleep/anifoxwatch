@@ -1,8 +1,11 @@
-# Clever Cloud (active production):
-#   https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io
-# Deploy with: clever deploy --app anifoxwatch-api
+# Deployment configuration for AniStream Hub
 # 
-# Legacy Render.com env vars (kept as reference):
-#   BASE_URL                   = https://anifoxwatch-ci33.onrender.com  → CLEVER_APP_URL
-#   VITE_API_URL               = https://anifoxwatch-0go1.onrender.com   → CLEVER_APP_URL
-#   VITE_ANIWATCH_API_URL      = https://anifoxwatch-0go1.onrender.com   → CLEVER_APP_URL
+# Active production — Clever Cloud:
+#   URL  : https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io
+#   CLI  : clever deploy --app anifoxwatch-api
+#   Env  : CLEVER_APP_URL, CLEVER_APP_NAME, etc. (managed by clever.toml)
+#
+# Legacy / reference — Render.com (no longer active):
+#   BASE_URL              = https://anifoxwatch-ci33.onrender.com  → CLEVER_APP_URL
+#   VITE_API_URL          = https://anifoxwatch-0go1.onrender.com   → CLEVER_APP_URL
+#   VITE_ANIWATCH_API_URL = https://anifoxwatch-0go1.onrender.com   → CLEVER_APP_URL

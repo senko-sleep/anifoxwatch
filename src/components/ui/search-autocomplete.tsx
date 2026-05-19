@@ -260,6 +260,7 @@ export const SearchAutocomplete = ({
                                                     src={suggestion.image} 
                                                     alt=""
                                                     className="w-10 h-14 object-cover rounded flex-shrink-0"
+                                                    referrerPolicy="no-referrer"
                                                 />
                                             )}
                                             <div className="flex-1 min-w-0">

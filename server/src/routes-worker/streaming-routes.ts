@@ -574,22 +574,78 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
 
             const rangeHeader = c.req.header('range');
 
-            // Try each referer combo until one succeeds
+            // CDN subdomain rotation helper for megaup domains
+            const ROTATION_SUBS = ['rrr', 'xm8', 'cdn', 'stream', 'media', 'file', 'videos', 'play', 'watch'];
+            const ROTATION_BASES = ['megaup.cc', 'megaup.nl', 'megaup.to', 'megaup.live', 'megaup.net', 'megaup.org'];
+            const ROTATION_MAX = 8;
+
             let response: Response | null = null;
-            for (const combo of refererCombos) {
-                const headers: Record<string, string> = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                    'Accept': '*/*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Referer': combo.referer,
-                    'Origin': combo.origin,
-                    'Connection': 'keep-alive',
-                };
-                if (rangeHeader) headers['Range'] = rangeHeader;
+
+            function buildRotationUrls(targetUrl: string): string[] {
+                if (!domain.match(/megaup\.(cc|nl|live|to)|rrr\.|xm8\.|pro25zone|lab27core|code29wave|net22lab|tech20hub|hub26link|hub27link|shop21pro|burntburst45/i)) return [];
                 try {
-                    const res = await fetch(url, { headers, redirect: 'follow' });
-                    if (res.ok) { response = res; break; }
-                } catch { /* try next combo */ }
+                    const u = new URL(targetUrl);
+                    const results: string[] = [];
+                    outer: for (const base of ROTATION_BASES) {
+                        for (const sub of ROTATION_SUBS) {
+                            if (results.length >= ROTATION_MAX) break outer;
+                            const candidate = `${sub}.${base}`;
+                            if (candidate === u.hostname) continue;
+                            const nu = new URL(targetUrl);
+                            nu.hostname = candidate;
+                            results.push(nu.toString());
+                        }
+                    }
+                    return results.sort(() => Math.random() - 0.5);
+                } catch { return []; }
+            }
+
+            /**
+             * Try fetching `fetchUrl` with every combo in combos list.
+             * Returns the first successful Response, or null.
+             */
+            async function tryWithCombos(fetchUrl: string, combos: RefererCombo[]): Promise<Response | null> {
+                for (const combo of combos) {
+                    const h: Record<string, string> = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                        'Accept': '*/*',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Referer': combo.referer,
+                        'Origin': combo.origin,
+                        'Connection': 'keep-alive',
+                    };
+                    if (rangeHeader) h['Range'] = rangeHeader;
+                    try {
+                        const res = await fetch(fetchUrl, { headers: h, redirect: 'follow' });
+                        if (res.ok) return res;
+                    } catch { /* try next combo */ }
+                }
+                return null;
+            }
+
+            // 1st pass — original URL with all referer combos
+            response = await tryWithCombos(url, refererCombos);
+
+            // 2nd pass — CDN rotation: try rotated subdomains through ALL referer combos
+            if (!response) {
+                const rotated = buildRotationUrls(url);
+                if (rotated.length > 0) {
+                    for (const rotUrl of rotated) {
+                        response = await tryWithCombos(rotUrl, refererCombos);
+                        if (response) break;
+                    }
+                }
+            }
+
+            // 3rd pass — extra megaup referers as last resort
+            if (!response && domain.match(/megaup\.(cc|nl|live|to)|rrr\.|xm8\./i)) {
+                const extraCombos: RefererCombo[] = [
+                    { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
+                    { referer: 'https://megaup.cc/', origin: 'https://megaup.cc' },
+                    { referer: 'https://megaup.to/', origin: 'https://megaup.to' },
+                    { referer: 'https://megaup.live/', origin: 'https://megaup.live' },
+                ];
+                response = await tryWithCombos(url, extraCombos);
             }
 
             const activeReferer = refererCombos[0]?.referer || 'https://megacloud.blog/';
@@ -644,7 +700,11 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
 
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : 'Unknown error';
-            return c.json({ error: 'Failed to proxy stream', domain, message: msg }, 502);
+            const isMega = domain.match(/megaup\.(cc|nl|live|to)|rrr\.|xm8\.|pro25zone|lab27core|code29wave|net22lab|tech20hub/i);
+            const extra: Record<string, string> = isMega
+                ? { hint: 'All referer combos + CDN rotation failed. The Cloudflare Worker IP may be geo-blocked or rate-limited by the megaup CDN. Try a different playback server.' }
+                : {};
+            return c.json({ error: 'Failed to proxy stream', domain, message: msg, ...extra }, 502);
         }
     }
 

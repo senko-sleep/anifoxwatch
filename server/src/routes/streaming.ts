@@ -904,6 +904,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         addCombo('https://megaup.live/', 'https://megaup.live');
         addCombo('https://megaup.cc/', 'https://megaup.cc');
         addCombo('https://megaup.to/', 'https://megaup.to');
+        addCombo('https://megaup.nl/', 'https://megaup.nl');
+        addCombo('https://megaup.net/', 'https://megaup.net');
     }
 
     // Proxy CDN config lookup for per-domain referers in the proxy route
@@ -975,7 +977,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             : undefined;
 
         // Use shorter timeout for segments (they should be fast) vs manifests
-        const timeoutMs = (isSegment && !isM3u8) ? 15_000 : 30_000;
+        const timeoutMs = (isSegment && !isM3u8) ? 15_000 : 60_000;
 
         return axios({
             method: 'get',
@@ -990,15 +992,17 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     };
 
     /**
-     * CDN subdomain rotation: when a megaup CDN segment fails (e.g. rjp.megaup.cc 502),
+     * CDN subdomain rotation: when a megaup CDN URL fails (e.g. rrr.megaup.cc 502),
      * try alternative subdomains and base domains that are known to serve the same content.
+     * Covers both segments AND manifests.
      */
-    const MEGAUP_SUBDOMAIN_ALTERNATIVES = ['rrr', 'xm8', 'cdn', 'stream'];
+    const MEGAUP_SUBDOMAIN_ALTERNATIVES = ['rrr', 'xm8', 'cdn', 'stream', 'media', 'file', 'videos', 'play', 'watch'];
     const MEGAUP_BASE_ALTERNATIVES = ['megaup.cc', 'megaup.nl', 'megaup.to', 'megaup.live', 'megaup.net', 'megaup.org'];
-    
+
     // In-memory blacklist for failing mirrors (lasts 60s)
     const mirrorBlacklist = new Map<string, number>();
     const MIRROR_BLACKLIST_TTL = 60 * 1000;
+    const MIRROR_TRY_MAX = 8; // Max rotation candidates to try per URL
 
     const buildCdnRotationUrls = (failedUrl: string): string[] => {
         if (!isMegaupDomain) return [];
@@ -1011,9 +1015,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             const alternatives: string[] = [];
             for (const base of MEGAUP_BASE_ALTERNATIVES) {
                 for (const sub of MEGAUP_SUBDOMAIN_ALTERNATIVES) {
+                    if (alternatives.length >= MIRROR_TRY_MAX) break;
                     const altHostname = `${sub}.${base}`;
                     if (altHostname === u.hostname) continue;
-                    
+
                     // Skip blacklisted mirrors
                     if ((mirrorBlacklist.get(altHostname) || 0) > Date.now()) continue;
 
@@ -1021,8 +1026,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                     newUrl.hostname = altHostname;
                     alternatives.push(newUrl.toString());
                 }
+                if (alternatives.length >= MIRROR_TRY_MAX) break;
             }
-            return alternatives.sort(() => Math.random() - 0.5).slice(0, 5);
+            // Shuffle to distribute attempt load across mirrors
+            return alternatives.sort(() => Math.random() - 0.5);
         } catch { return []; }
     };
 
@@ -1068,47 +1075,45 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 errMsg.includes('socket hang up') || errMsg.includes('alert protocol version') ||
                 errMsg.includes('revoked');
 
-            // CDN subdomain rotation for 403/502/503 or connection errors on megaup segment requests
-            // 403 = CDN access denied (common when segment tokens expire or CDN blocks region)
-            if (isMegaupDomain && isSegment && !isM3u8 && (
+            let rotationTried = false;
+
+            // CDN subdomain rotation for 403/502/503 or connection errors on megaup
+            // Works for BOTH segments and manifests — tries each rotation candidate
+            // through the FULL referer combo cycle, then falls back to the original URL.
+            if (isMegaupDomain && !rotationTried && (
+                (isSegment && !isM3u8) || isM3u8
+            ) && (
                 status === 403 || status === 502 || status === 503 || status === 504 ||
-                errCode === 'ECONNREFUSED' || errCode === 'ECONNRESET' || 
+                errCode === 'ECONNREFUSED' || errCode === 'ECONNRESET' ||
                 errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' ||
                 errCode === 'ENOTFOUND' || errMsg.includes('timeout') || errMsg.includes('502')
             )) {
+                rotationTried = true;
                 const altUrls = buildCdnRotationUrls(url);
-                logger.warn(`[PROXY] Megaup error ${status || errCode || 'timeout'} on ${domain} — attempting rotation through ${altUrls.length} mirrors`, { requestId, isM3u8 });
-                let rotationSuccess = false;
-                for (const altUrl of altUrls) {
-                    try {
-                        const altDomain = new URL(altUrl).hostname;
-                        logger.info(`[PROXY] Trying rotation mirror: ${altDomain}`, { requestId });
-                        proxyResponse = await makeProxyRequest(altUrl, combo, false);
-                        logger.info(`[PROXY] CDN rotation success: ${domain} → ${altDomain}`, { requestId });
-                        rotationSuccess = true;
-                        break;
-                    } catch (altErr: any) {
-                        const altDomain = new URL(altUrl).hostname;
-                        const altStatus = altErr.response?.status;
-                        mirrorBlacklist.set(altDomain, Date.now() + MIRROR_BLACKLIST_TTL);
-                        logger.warn(`[PROXY] Rotation mirror ${altDomain} failed (${altStatus || altErr.code}) — blacklisting`, { requestId });
-                    }
-                }
-                if (rotationSuccess) break;
-            }
+                logger.warn(`[PROXY] Megaup error ${status || errCode || 'timeout'} on ${domain} (${isM3u8 ? 'manifest' : 'segment'}) — trying ${altUrls.length} rotated URLs x ${refererCombos.length} referer combos`, { requestId });
 
-            // Also try rotation for MANIFESTS on megaup if they fail with 502/504
-            if (isMegaupDomain && isM3u8 && (status === 502 || status === 504 || status === 503)) {
-                const altUrls = buildCdnRotationUrls(url);
-                logger.warn(`[PROXY] Megaup manifest error ${status} on ${domain} — attempting rotation`, { requestId });
+                // Try EACH rotation candidate through the FULL referer combo list
                 for (const altUrl of altUrls) {
-                    try {
-                        proxyResponse = await makeProxyRequest(altUrl, combo, false);
-                        logger.info(`[PROXY] Megaup manifest rotation success: ${domain} → ${new URL(altUrl).hostname}`, { requestId });
-                        break;
-                    } catch { /* try next */ }
+                    const altDomain = new URL(altUrl).hostname;
+                    for (const rotateCombo of refererCombos) {
+                        try {
+                            proxyResponse = await makeProxyRequest(altUrl, rotateCombo, false);
+                            logger.info(`[PROXY] Rotation success: ${domain} → ${altDomain} (referer: ${rotateCombo.referer})`, { requestId });
+                            mirrorBlacklist.delete(altDomain); // Clear any prior blacklist entry on success
+                            break; // Break inner referer loop
+                        } catch (altErr: any) {
+                            const altStatus = altErr.response?.status;
+                            mirrorBlacklist.set(altDomain, Date.now() + MIRROR_BLACKLIST_TTL);
+                            logger.warn(`[PROXY] Rotation fail: ${altDomain} with ${rotateCombo.referer} (${altStatus || altErr.code})`, { requestId });
+                        }
+                    }
+                    if (proxyResponse) break; // Break outer altUrl loop on success
                 }
-                if (proxyResponse) break;
+
+                // If all rotation candidates failed, still try the ORIGINAL URL with remaining combos
+                if (!proxyResponse) {
+                    logger.warn(`[PROXY] All ${altUrls.length} rotated URLs failed for ${domain}. Retrying original URL through remaining combos.`, { requestId });
+                }
             }
 
             if (isTlsError && cachedProtocol !== 'http') {
@@ -1146,17 +1151,20 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                         break; // Not HTTPS, so no HTTP fallback to try. Hard block.
                     }
                 }
-            } else if (status === 403 && isMegaupDomain) {
+            } else if (!rotationTried && status === 403 && isMegaupDomain) {
                 // CDN access denied — no referer will fix this. Break immediately.
+                // (Skip when rotation was already tried — rotation is our best shot.)
                 logger.warn(`[PROXY] CDN 403 for ${domain}. Skipping remaining referer combos.`, { requestId });
                 break;
-            } else if (errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' || errMsg.includes('timeout')) {
+            } else if (!rotationTried && (errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' || errMsg.includes('timeout'))) {
                 // Timeouts are network-level. Changing referer won't fix it.
+                // (Skip when rotation was already tried.)
                 logger.warn(`[PROXY] Network timeout for ${domain}. Skipping remaining combos.`, { requestId });
                 break;
             }
             logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed (${combo.referer}): ${errMsg}${status ? ` (Status: ${status})` : ''} (Code: ${errCode})`, { requestId });
-            if (attempt < refererCombos.length - 1) await new Promise(r => setTimeout(r, 300));
+            // Longer delay for manifest requests — CDN rotation + referer combos take time
+            if (attempt < refererCombos.length - 1) await new Promise(r => setTimeout(r, isM3u8 ? 800 : 300));
         }
     }
 

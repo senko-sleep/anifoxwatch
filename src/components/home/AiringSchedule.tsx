@@ -88,6 +88,7 @@ export const AiringSchedule = ({ schedule, isLoading }: AiringScheduleProps) => 
                                 alt={item.title}
                                 className="w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110"
                                 loading="lazy"
+                                referrerPolicy="no-referrer"
                             />
 
                             {/* Gradient overlay */}
