@@ -45,6 +45,11 @@ async function fetchAniListOnceWithTransientRetry(init: RequestInit): Promise<Re
   for (let attempt = 0; attempt < MAX_TRANSIENT_RETRIES; attempt++) {
     try {
       const res = await fetchWith429Retry(init);
+      // 403/Forbidden: AniList API blocked/disabled - serve stale from cache or return error
+      if (res.status === 403) {
+        console.warn('[AniList] API returned 403 Forbidden - API may be temporarily disabled');
+        return res;
+      }
       if (res.ok) return res;
       if (res.status === 429) return res;
       if (res.status >= 500 && res.status < 600 && attempt < MAX_TRANSIENT_RETRIES - 1) {

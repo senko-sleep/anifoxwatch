@@ -1,5 +1,6 @@
 /**
- * Home page anime rows — sourced only from AniList GraphQL (public API).
+ * Home page anime rows — Multi-source fallback including AniList, Jikan, Kitsu.
+ * Works even when AniList is down.
  */
 
 import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
@@ -85,12 +86,19 @@ async function fetchMediaPage(query: string): Promise<{
   pageInfo: { hasNextPage: boolean; currentPage: number; total: number };
 }> {
   const res = await fetchAniListGraphQL({ query });
+  // Handle HTTP errors (403, etc.) - return empty to allow fallback
+  if (!res.ok) {
+    console.warn(`[AniList] HTTP ${res.status} - API may be temporarily unavailable`);
+    return { media: [], pageInfo: { hasNextPage: false, currentPage: 1, total: 0 } };
+  }
   const json = (await res.json()) as {
     errors?: { message: string }[];
     data?: { Page?: { media?: AniListHomeMedia[]; pageInfo?: { hasNextPage: boolean; currentPage: number; total: number } } };
   };
   if (json.errors?.length) {
-    throw new Error(json.errors[0]?.message || 'AniList query failed');
+    // Log error but return empty instead of throwing to allow fallback
+    console.warn('[AniList] Query error:', json.errors[0]?.message);
+    return { media: [], pageInfo: { hasNextPage: false, currentPage: 1, total: 0 } };
   }
   const page = json.data?.Page;
   return {
@@ -198,4 +206,105 @@ export async function fetchActionTrendingFromAniList(perPage: number = 20): Prom
     hasNextPage: pageInfo.hasNextPage,
     totalResults: pageInfo.total ?? results.length,
   };
+}
+
+// ─── Jikan (MyAnimeList API) Fallbacks ─────────────────────────────────────────
+
+async function fetchFromJikanTop(page: number, perPage: number, filter: string = 'airing'): Promise<Anime[]> {
+  try {
+    const response = await fetch(`https://api.jikan.moe/v4/top/anime?page=${page}&limit=${perPage}&filter=${filter}`);
+    if (!response.ok) return [];
+    const json = (await response.json()) as { data?: Array<{
+      mal_id: number;
+      title: string;
+      title_english?: string;
+      images?: { jpg?: { image_url?: string; large_image?: string } };
+      synopsis?: string;
+      genres?: Array<{ name: string }>;
+      score?: number;
+      episodes?: number;
+      status?: string;
+    }> };
+    return (json.data || []).map((item) => ({
+      id: `mal-${item.mal_id}`,
+      title: item.title_english || item.title,
+      titleJapanese: item.title,
+      image: item.images?.jpg?.large_image || item.images?.jpg?.image_url || '',
+      cover: item.images?.jpg?.image_url || '',
+      banner: undefined,
+      description: (item.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+      type: 'TV' as const,
+      status: item.status === 'Airing' ? 'Ongoing' : item.status === 'Complete' ? 'Completed' : 'Unknown',
+      rating: item.score,
+      episodes: item.episodes || 0,
+      genres: item.genres?.map((g) => g.name) || [],
+      studios: [],
+      year: undefined,
+      season: undefined,
+      isMature: false,
+      source: 'jikan',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ─── Kitsu API Fallbacks ───────────────────────────────────────────────────────
+
+async function fetchFromKitsuPopular(page: number, perPage: number): Promise<Anime[]> {
+  try {
+    const offset = (page - 1) * perPage;
+    const response = await fetch(`https://kitsu.io/api/edge/anime?page[limit]=${perPage}&page[offset]=${offset}&sort=-popularityRank&filter[status]=current`, {
+      headers: { Accept: 'application/vnd.api+json' },
+    });
+    if (!response.ok) return [];
+    const json = (await response.json()) as {
+      data?: Array<{
+        id: string;
+        attributes?: {
+          titles?: { en?: string; en_jp?: string };
+          coverImage?: { large?: string };
+          synopsis?: string;
+          averageRating?: string;
+          episodeCount?: number;
+          status?: string;
+        };
+      }>;
+    };
+    return (json.data || []).map((item) => ({
+      id: `kitsu-${item.id}`,
+      title: item.attributes?.titles?.en || item.attributes?.titles?.en_jp || '',
+      titleJapanese: item.attributes?.titles?.en_jp,
+      image: item.attributes?.coverImage?.large || '',
+      cover: item.attributes?.coverImage?.large || '',
+      banner: undefined,
+      description: (item.attributes?.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+      type: 'TV' as const,
+      status: item.attributes?.status === 'current' ? 'Ongoing' : 'Unknown',
+      rating: item.attributes?.averageRating ? parseFloat(item.attributes.averageRating) : undefined,
+      episodes: item.attributes?.episodeCount || 0,
+      genres: [],
+      studios: [],
+      year: undefined,
+      season: undefined,
+      isMature: false,
+      source: 'kitsu',
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ─── Public fallback functions (used by hooks) ─────────────────────────────────
+
+export async function fetchTrendingFromJikan(perPage: number = 24): Promise<Anime[]> {
+  return fetchFromJikanTop(1, perPage, 'airing');
+}
+
+export async function fetchTrendingFromKitsu(perPage: number = 24): Promise<Anime[]> {
+  return fetchFromKitsuPopular(1, perPage);
+}
+
+export async function fetchLatestFromJikan(perPage: number = 24): Promise<Anime[]> {
+  return fetchFromJikanTop(1, perPage, 'airing');
 }

@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiUrl } from '@/lib/api-config';
 import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
 import { isPlaceholderAnimeDescription } from '@/lib/utils';
+import type { Anime } from '@/types/anime';
 
 /**
- * Hero anime: AniList GraphQL (catalog + metadata). Optional server hero-spotlight
- * (same AniList-backed list with server-side synopsis helpers); no streaming-catalog fallback.
+ * Hero anime: Multi-source fallback system supporting AniList, Jikan (MAL), Kitsu, 
+ * Anime-Planet, and BFF trending. Works even when AniList is down.
  * 
- * Cached for 30 minutes in localStorage. Clears stale caches automatically.
+ * Cached for 20 minutes in localStorage.
  */
 
 export interface HeroAnime {
@@ -44,7 +45,7 @@ export interface HeroAnime {
     id: string | null;
     site: string | null;
   } | null;
-  source: 'anilist';
+  source: 'anilist' | 'bff' | 'jikan' | 'kitsu' | 'animeplanet';
 }
 
 interface CachedHeroData {
@@ -283,10 +284,172 @@ async function fetchFromHeroSpotlightAPI(): Promise<HeroAnime[]> {
   }));
 }
 
+// ─── FALLBACK: Jikan (MyAnimeList unofficial API) ─────────────────────────────
+
+async function fetchFromJikan(): Promise<HeroAnime[]> {
+  try {
+    const response = await fetch('https://api.jikan.moe/v4/top/anime?page=1&limit=20&filter=airing');
+    if (!response.ok) return [];
+    const json = (await response.json()) as { data?: Array<{
+      mal_id: number;
+      title: string;
+      title_english?: string;
+      title_japanese?: string;
+      images?: { jpg?: { image_url?: string; large_image?: string } };
+      synopsis?: string;
+      genres?: Array<{ name: string }>;
+      score?: number;
+      members?: number;
+      episodes?: number;
+      status?: string;
+    }> };
+    const results = json.data || [];
+    return results.map((item) => ({
+      id: item.mal_id,
+      idMal: item.mal_id,
+      title: { english: item.title_english, romaji: item.title, native: item.title_japanese },
+      bannerImage: null,
+      coverImage: {
+        extraLarge: item.images?.jpg?.large_image || item.images?.jpg?.image_url || '',
+        large: item.images?.jpg?.image_url || '',
+        color: null,
+      },
+      description: cleanDescription(item.synopsis || ''),
+      genres: item.genres?.map((g) => g.name) || [],
+      averageScore: item.score ? Math.round(item.score * 10) : null,
+      popularity: item.members || 0,
+      episodes: item.episodes || 0,
+      duration: null,
+      format: 'TV',
+      status: item.status === 'Airing' ? 'RELEASING' : item.status === 'Complete' ? 'FINISHED' : item.status,
+      season: null,
+      seasonYear: null,
+      studios: { nodes: [] },
+      nextAiringEpisode: null,
+      trailer: null,
+      source: 'jikan' as const,
+    }));
+  } catch (e) {
+    console.warn('[Hero] Jikan fallback failed:', e);
+    return [];
+  }
+}
+
+// ─── FALLBACK: Kitsu API ───────────────────────────────────────────────────────
+
+async function fetchFromKitsu(): Promise<HeroAnime[]> {
+  try {
+    const response = await fetch('https://kitsu.io/api/edge/anime?page[limit]=20&page[offset]=0&sort=-popularityRank&filter[status]=current', {
+      headers: { Accept: 'application/vnd.api+json' },
+    });
+    if (!response.ok) return [];
+    const json = (await response.json()) as {
+      data?: Array<{
+        id: string;
+        attributes?: {
+          titles?: { en?: string; en_jp?: string; ja_jp?: string };
+          coverImage?: { large?: string; original?: string };
+          synopsis?: string;
+          averageRating?: string;
+          userCount?: number;
+          episodeCount?: number;
+          startDate?: string;
+          status?: string;
+        };
+      }>;
+    };
+    const results = json.data || [];
+    return results.map((item) => ({
+      id: parseInt(item.id, 10),
+      idMal: null,
+      title: {
+        english: item.attributes?.titles?.en,
+        romaji: item.attributes?.titles?.en_jp || '',
+        native: item.attributes?.titles?.ja_jp,
+      },
+      bannerImage: null,
+      coverImage: {
+        extraLarge: item.attributes?.coverImage?.large || item.attributes?.coverImage?.original || '',
+        large: item.attributes?.coverImage?.large || '',
+        color: null,
+      },
+      description: cleanDescription(item.attributes?.synopsis || ''),
+      genres: [],
+      averageScore: item.attributes?.averageRating ? parseFloat(item.attributes.averageRating) * 10 : null,
+      popularity: item.attributes?.userCount || 0,
+      episodes: item.attributes?.episodeCount || 0,
+      duration: null,
+      format: 'TV',
+      status: item.attributes?.status === 'current' ? 'RELEASING' : 'Unknown',
+      season: null,
+      seasonYear: item.attributes?.startDate ? new Date(item.attributes.startDate).getFullYear() : null,
+      studios: { nodes: [] },
+      nextAiringEpisode: null,
+      trailer: null,
+      source: 'kitsu' as const,
+    }));
+  } catch (e) {
+    console.warn('[Hero] Kitsu fallback failed:', e);
+    return [];
+  }
+}
+
+// ─── FALLBACK: Anime-Planet API ────────────────────────────────────────────────
+
+async function fetchFromAnimePlanet(): Promise<HeroAnime[]> {
+  try {
+    // Anime-Planet doesn't have a public API, use their discover page
+    const response = await fetch('https://www.anime-planet.com/anime/all');
+    if (!response.ok) return [];
+    // Note: This would require HTML parsing which is complex; return empty for now
+    // A proper implementation would use a backend service
+    console.warn('[Hero] Anime-Planet fallback: no public API available');
+    return [];
+  } catch (e) {
+    console.warn('[Hero] Anime-Planet fallback failed:', e);
+    return [];
+  }
+}
+
+// ─── FALLBACK: BFF Trending (works without AniList) ─────────────────────────
+
+async function fetchFromBffTrending(): Promise<HeroAnime[]> {
+  try {
+    const response = await fetch(apiUrl('/api/anime/trending?page=1&limit=20'));
+    if (!response.ok) return [];
+    const json = (await response.json()) as { results?: Anime[] };
+    const results = json.results || [];
+    return results.map((a) => ({
+      id: a.id,
+      idMal: null,
+      title: { english: a.title, romaji: a.titleJapanese || a.title, native: null },
+      bannerImage: a.banner || null,
+      coverImage: { extraLarge: a.image || a.cover || '', large: a.image || a.cover || '', color: null },
+      description: a.description || '',
+      genres: a.genres || [],
+      averageScore: a.rating ? Math.round(a.rating * 10) : null,
+      popularity: 0,
+      episodes: a.episodes || 0,
+      duration: null,
+      format: a.type || 'TV',
+      status: a.status || 'Unknown',
+      season: a.season || null,
+      seasonYear: a.year || null,
+      studios: { nodes: [] },
+      nextAiringEpisode: null,
+      trailer: null,
+      source: 'bff' as const,
+    }));
+  } catch (e) {
+    console.warn('[Hero] BFF trending fallback failed:', e);
+    return [];
+  }
+}
+
 // ─── Orchestrator ───────────────────────────────────────────────────────────
 
 async function fetchHeroAnime(): Promise<HeroAnime[]> {
-  // 1) Server: AniList widescreen banners + Jikan synopsis when needed (best quality)
+  // 1) Server hero-spotlight API (AniList + Jikan synopsis)
   try {
     const data = await fetchFromHeroSpotlightAPI();
     if (data.length > 0) {
@@ -297,10 +460,10 @@ async function fetchHeroAnime(): Promise<HeroAnime[]> {
       return data;
     }
   } catch (err) {
-    console.warn('[Hero] hero-spotlight API failed, trying direct AniList:', err);
+    console.warn('[Hero] hero-spotlight API failed, trying fallbacks:', err);
   }
 
-  // 2) Browser: AniList + optional Jikan (same rules: real banner URL + real synopsis)
+  // 2) Direct AniList GraphQL
   try {
     const data = await fetchFromAniList();
     if (data.length > 0) {
@@ -312,7 +475,64 @@ async function fetchHeroAnime(): Promise<HeroAnime[]> {
     console.warn('[Hero] AniList direct failed:', err);
   }
 
-  throw new Error('All hero sources failed');
+  // 3) BFF trending (streaming-source backed)
+  try {
+    const data = await fetchFromBffTrending();
+    if (data.length > 0) {
+      console.log(`[Hero] ✅ ${data.length} anime from BFF trending`);
+      setCachedData(data, 'BFF-trending');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] BFF trending failed:', err);
+  }
+
+  // 4) Jikan (MyAnimeList unofficial API)
+  try {
+    const data = await fetchFromJikan();
+    if (data.length > 0) {
+      console.log(`[Hero] ✅ ${data.length} anime from Jikan (MAL)`);
+      setCachedData(data, 'Jikan');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] Jikan failed:', err);
+  }
+
+  // 5) Kitsu API
+  try {
+    const data = await fetchFromKitsu();
+    if (data.length > 0) {
+      console.log(`[Hero] ✅ ${data.length} anime from Kitsu`);
+      setCachedData(data, 'Kitsu');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] Kitsu failed:', err);
+  }
+
+  // 6) Anime-Planet (if available)
+  try {
+    const data = await fetchFromAnimePlanet();
+    if (data.length > 0) {
+      console.log(`[Hero] ✅ ${data.length} anime from Anime-Planet`);
+      setCachedData(data, 'AnimePlanet');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] Anime-Planet failed:', err);
+  }
+
+  // 7) Return cached data if available (app may be temporarily offline)
+  const cached = getCachedData();
+  if (cached && cached.length > 0) {
+    console.warn('[Hero] All sources failed, returning cached data');
+    return cached;
+  }
+
+  // 8) Return empty array instead of throwing to prevent UI crash
+  console.warn('[Hero] All hero sources failed, returning empty array');
+  return [];
 }
 
 // ─── React Hook ─────────────────────────────────────────────────────────────

@@ -432,11 +432,11 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
     if (segmentUrls.length === 0) return false;
     
     // Exception: Megaup use .jpg/.png/.gif for real video segments to bypass blocks
-    const isMegaupPattern = /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\.(site|store|click|buzz|online|top|xyz|shop|live|cc|nl)/i.test(originalUrl);
+    const isMegaupPattern = /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+|dev\d*app)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link|site)\.(site|store|click|buzz|online|top|xyz|shop|live|cc|nl)/i.test(originalUrl);
     if (isMegaupPattern) return false;
     
     // Also check if segments themselves are from megaup CDN
-    const hasMegaupSegments = segmentUrls.some(u => /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst|xm8|rrr\.|rrr\d+/i.test(u));
+    const hasMegaupSegments = segmentUrls.some(u => /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst|xm8|rrr\.|rrr\d+|dev\d*app/i.test(u));
     if (hasMegaupSegments) return false;
 
     // Use common ad extensions for segment-level detection
@@ -628,10 +628,11 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     const categoryStr = String(category || 'sub');
     const isDubRequested = categoryStr === 'dub';
     const cat = isDubRequested ? 'dub' : 'sub';
+    const noCache = req.query.nocache === 'true';
 
     const cacheKey = streamCacheKey(episodeId, explicitServer, categoryStr);
     const cached = streamCacheGet(cacheKey);
-    if (cached) {
+    if (cached && !noCache) {
         logger.info(`[STREAM] Cache hit for ${episodeId}`, { requestId });
         res.set('Cache-Control', 'private, max-age=300');
         res.set('X-Stream-Cache', 'HIT');
@@ -820,17 +821,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // might have better connectivity to the original CDN domain.
     const originalUrlBeforeRewrite = url;
 
-    // Fix dead Megaup CDN domains by rewriting them to megaup.cc
-    // Pattern: sub.domain.tld where domain matches known dead patterns (e.g., code29wave.site)
-    // Example: p36.code29wave.site/path -> p36.megaup.cc/path
-    try {
-        const deadCdnMatch = domain.match(/^([a-z0-9-]+)\.(code|lab|web|net|pro|tech|hub|shop|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|data|link|media|host|cdn|file|store|link)\d*\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/i);
-        if (deadCdnMatch) {
-            url = `https://${deadCdnMatch[1]}.megaup.cc${urlObj.pathname}${urlObj.search}`;
-            urlObj = new URL(url); // Update urlObj after rewrite
-            logger.info(`[PROXY] Rewrote dead CDN domain: ${domain} -> ${urlObj.hostname}`, { requestId });
-        }
-    } catch { /* not a valid URL yet, will fail validation later */ }
+    // Removing dead CDN domain rewrites since megaup.cc subdomains are globally dead.
 
     // Check for dead domains AFTER rewrite to catch any that couldn't be fixed
     if (isDeadDomain(url)) {
@@ -839,7 +830,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
     const isM3u8 = url.includes('.m3u8');
     // Megaup CDN uses obfuscated extensions (.gif, .jpg, .png) for real video segments
-    const isMegaupDomain = /megaup\.(cc|nl|live|to)|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|burntburst45|rrr\.|xm8\./i.test(domain);
+    const isMegaupDomain = /megaup\.(cc|nl|live|to)|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|burntburst45|rrr\.|xm8\.|dev\d*app/i.test(domain);
     const hasObfuscatedExt = /\.(gif|jpg|jpeg|png|webp)$/i.test(urlObj.pathname);
     const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt);
     const isVideo = url.endsWith('.mp4');
@@ -878,8 +869,17 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     const isResolvable = await isDomainResolvable(domain);
     if (!isResolvable) {
-        res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Domain not resolvable', reason: 'dns_error', domain });
-        return;
+        if (process.env.IS_REMOTE_PROXY !== 'true' && !isIspBlockedDomain(domain)) {
+            logger.info(`[PROXY] Unresolvable ${domain} — routing to remote proxy`, { domain, requestId });
+            const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'Unresolvable fast-path');
+            if (ok) return;
+        }
+
+        if (!isMegaupDomain) {
+            res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Domain not resolvable', reason: 'dns_error', domain });
+            return;
+        }
+        // Let megaup domains fall through so the catch block can handle rotation
     }
 
     // Build referer combos to try in order
@@ -1247,14 +1247,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
-            // Normalize dead CDN domain aliases inside the manifest content itself.
-            // e.g. rjp.web24code.site/path → rjp.megaup.cc/path so the proxy rotation logic can handle failures.
-            const normalizedContent = content.replace(
-                /https?:\/\/([a-z0-9-]+)\.(web\d*code|lab\d*core|code\d*wave|net\d*lab|pro\d*zone|tech\d*hub|hub\d*link|shop\d*pro|burnt\d*burst|xm8\d*|rrr\d*|rrr|xm8|web\d*|lab\d*|code\d*|net\d*|pro\d*|tech\d*|hub\d*|shop\d*|burnt\d*)\.(site|store|click|buzz|online|top|xyz|shop)\//gi,
-                'https://$1.megaup.cc/'
-            );
-
-            const rewritten = rewriteM3u8Content(normalizedContent, url, proxyBase, refererParam || refererCombos[0]?.referer);
+            const rewritten = rewriteM3u8Content(content, url, proxyBase, refererParam || refererCombos[0]?.referer);
             res.set('Content-Type', 'application/vnd.apple.mpegurl');
             res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
             res.set('Pragma', 'no-cache');

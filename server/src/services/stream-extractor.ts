@@ -56,7 +56,7 @@ class StreamExtractor {
 
             this.browserLaunchPromise = Promise.race([
                 launchPromise,
-                new Promise<Browser>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 4000))
+                new Promise<Browser>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 15000))
             ]);
 
             this.browser = await this.browserLaunchPromise;
@@ -248,15 +248,9 @@ class StreamExtractor {
 
             // Convert captured URLs to streams
             for (const m3u8Url of capturedM3u8s) {
-                // Normalize Megaup mirror domains to megaup.cc for better proxy stability
-                const normalizedUrl = m3u8Url.replace(
-                    /([a-z0-9-]+)\.(code|lab|web|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link)\d*\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi,
-                    '$1.megaup.cc'
-                );
-
                 streams.push({
-                    url: normalizedUrl,
-                    quality: this.detectQuality(normalizedUrl),
+                    url: m3u8Url,
+                    quality: this.detectQuality(m3u8Url),
                     type: 'hls'
                 });
             }

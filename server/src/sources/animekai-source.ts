@@ -385,7 +385,6 @@ export class AnimeKaiSource extends BaseAnimeSource {
 
         const sources = (decrypted.sources as Array<{ file?: string; type?: string }>).map((s): VideoSource => {
             let url = s.file ?? '';
-            url = url.replace(/(code|lab|web|net|pro|tech|hub|shop|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+)\d*(code|core|wave|lab|zone|hub|link|pro|data|link|media|host|cdn|file|store|link)\d*\.(site|store|click|buzz|online|top|xyz|shop|cc|nl|live)/gi, 'megaup.cc');
             return {
                 url,
                 quality: 'auto',
