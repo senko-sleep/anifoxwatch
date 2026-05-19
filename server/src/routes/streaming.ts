@@ -780,7 +780,13 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     let url = (req.query.url || req.body.url) as string | undefined;
     const requestId = (req as any).id;
     const proxyBase = getProxyBaseUrl(req);
-    const refererParam = (req.query.referer || req.body.referer) as string | undefined;
+    let refererParam = (req.query.referer || req.body.referer) as string | undefined;
+    if (refererParam !== undefined) {
+        refererParam = refererParam.trim();
+        if (refererParam === '') {
+            refererParam = undefined;
+        }
+    }
 
     if (url) logger.info(`[PROXY] Request: ${url.substring(0, 100)}${url.length > 100 ? '...' : ''} (Referer: ${refererParam})`, { requestId });
 
@@ -901,11 +907,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     addCombo('https://aniwatchtv.to/', 'https://aniwatchtv.to');
     addCombo('https://animekai.to/', 'https://animekai.to');
     if (domain.includes('megaup') || domain.includes('rrr.')) {
-        addCombo('https://megaup.live/', 'https://megaup.live');
-        addCombo('https://megaup.cc/', 'https://megaup.cc');
-        addCombo('https://megaup.to/', 'https://megaup.to');
         addCombo('https://megaup.nl/', 'https://megaup.nl');
-        addCombo('https://megaup.net/', 'https://megaup.net');
+        addCombo('https://megaup.cc/', 'https://megaup.cc');
     }
 
     // Proxy CDN config lookup for per-domain referers in the proxy route
