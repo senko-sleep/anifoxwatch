@@ -5,14 +5,10 @@
  * Keep in sync with `registerSource(new …Source())` calls in `services/source-manager.ts`.
  */
 export const REGISTERED_SOURCE_NAMES: readonly string[] = [
-    'Aniwaves',
-    'GogoOrAt',
-    'Wcofun',
-    'Gogoanime',
-    'AllAnime',
-    'AnimeHeaven',
-    '9Anime',
-    // 'AnimePahe',       // DISABLED: Dead (0 search results)
+    // ── VERIFIED WORKING ──────────────────────────────────────
+    'Aniwaves',           // ✅ Primary: EchoVideo → burntburst45.store HLS
+
+    // ── ADULT SOURCES (separate scraper paths) ──────────────────
     'WatchHentai',
     'Hanime',
     'AkiH',

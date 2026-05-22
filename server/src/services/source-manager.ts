@@ -1,18 +1,10 @@
 import {
     AnimeSource,
-    AnimePaheDirectSource,
     AnimeKaiSource,
     WatchHentaiSource,
     HanimeSource,
     AkiHSource,
-    AnimeFLVSource,
-    GogoanimeSource,
-    AllAnimeSource,
-    AnimeHeavenSource,
-    NineAnimeSource,
     AniwavesSource,
-    GogoOrAtSource,
-    WcofunSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -69,7 +61,7 @@ interface SourceMetadata {
  */
 export class SourceManager {
     private sources: Map<string, StreamingSource> = new Map();
-    private primarySource: string = 'Gogoanime';
+    private primarySource: string = 'Aniwaves'; // 2026-05-22: only working source
     private healthStatus: Map<string, SourceHealth> = new Map();
     private sourceMetadata: Map<string, SourceMetadata> = new Map();
     private episodeIdToParentAnimeId: Map<string, string> = new Map();
@@ -147,74 +139,20 @@ export class SourceManager {
     } as const;
 
     constructor() {
-        // TIER 1: Verified working streaming sources (April 2025 audit)
-        // Gogoanime (anitaku.to) — returns vibeplayer.site m3u8, fast & reliable
-        this.registerSource(new GogoanimeSource());
-
-        // GogoOrAt — WordPress-based Gogoanime clone providing embed links
-        this.registerSource(new GogoOrAtSource());
-
-        // Wcofun — English Dub specialist
-        this.registerSource(new WcofunSource());
-
-        // AllAnime — GraphQL API, fast4speed CDN (may CAPTCHA-block from datacenter IPs)
-        this.registerSource(new AllAnimeSource());
-
-        // AnimeHeaven - accessible and enhanced for dub content
-        this.registerSource(new AnimeHeavenSource());
-
-        // DISABLED - Dead sources confirmed in April 2025 audit:
-        // AnimeFLV — returning HTTP 410 (gone permanently) and timeouts
-        // AnimePahe — returning 0 search results, endpoints dead
-        // Both waste 10-39 seconds on every request before failing
-        // this.registerSource(new AnimeFLVSource());         // DISABLED: Dead
-        // this.registerSource(new AnimePaheDirectSource());  // DISABLED: Dead
-
-        // DISABLED - Broken dub sources (call localhost or return placeholder data):
-        // AnimeDubTV: returns placeholder data, no real streams
-        // RealDubSource: returns placeholder data, no real streams
-        // NineAnimeDub: non-functional extraction
-        // WorkingDubExtractor: calls localhost:3001 (broken on Vercel)
-        // WorkingDubSource: non-functional scraping
-        // Dub is handled by main sources (Gogoanime, AllAnime) via category parameter
-        
-        // 9Anime — accessible (200 status), known for good dub content
-        this.registerSource(new NineAnimeSource());
-
-        // Aniwaves — verified AJAX scraping and EchoVideo resolution
+        // ✅ PRIMARY (verified working): EchoVideo → burntburst45.store HLS
         this.registerSource(new AniwavesSource());
 
-        // DISABLED — confirmed dead in April 2025 audit:
-        // Consumet (public API): api.consumet.org returns errors
-        // Miruro: search returns 0 results (hianime CF blocked)
-        // Kaido: health timeout, search timeout
-        // Zoro: 403 Forbidden
-        // Aniwave: 451 Unavailable For Legal Reasons
-        // Anix: DNS ENOTFOUND (anix.to)
-        // DirectDownload: 403 Forbidden
-        // KickassAnime: health OK but search broken (data.map error)
-        // YugenAnime: health OK but search returns 0
-        // AnimeSuge: DNS ENOTFOUND (animesuge.to)
-        // GogoanimeBy: SSL/TLS errors (EPROTO)
-        // CrazyAnimeTV: SSL/TLS errors (EPROTO)
-        // Animenana: SSL/TLS errors (EPROTO)
-        // Anikai: Same as AnimeKai (duplicate)
-
-        // Adult sources
+        // Active/Adult sources
         this.registerSource(new AnimeKaiSource());
         this.registerSource(new WatchHentaiSource());
         this.registerSource(new HanimeSource());
-        this.registerSource(new AkiHSource()); // Re-enabled - hentai only
+        this.registerSource(new AkiHSource());
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
 
         // Configure rate limits for each source (requests per minute)
         this.sourceRateLimits.set('AnimeKai', { limit: 120, resetTime: 60000 });
-        this.sourceRateLimits.set('9Anime', { limit: 100, resetTime: 60000 });
-        this.sourceRateLimits.set('Gogoanime', { limit: 60, resetTime: 60000 });
-        this.sourceRateLimits.set('AllAnime', { limit: 120, resetTime: 60000 });
-        this.sourceRateLimits.set('AnimeHeaven', { limit: 60, resetTime: 60000 });
         this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
         this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
 
@@ -3269,7 +3207,7 @@ export class SourceManager {
                 // For dubs, we have specific sources that are much more reliable.
                 // AllAnime is the absolute gold standard for dub discovery.
                 // Gogoanime is also very reliable for dubs.
-                const preferred = ['Wcofun', 'AllAnime', 'Gogoanime', 'AnimeKai', 'Aniwaves'];
+                const preferred = ['Aniwaves', 'Wcofun', 'AllAnime', 'Gogoanime', 'AnimeKai'];
                 const others = sources.filter(s => !preferred.includes(s));
                 return [...preferred, ...others, 'cross-source'];
             }
@@ -3381,7 +3319,7 @@ export class SourceManager {
                 // resolve instantly to satisfy "instant" requirement.
                 if (!graceTimer) {
                     const firstSuccess = ok[0].source;
-                    const isHighPriorityDub = category === 'dub' && (firstSuccess === 'Wcofun' || firstSuccess === 'AllAnime' || firstSuccess === 'Gogoanime' || firstSuccess === 'AnimeKai' || firstSuccess === 'GogoOrAt' || firstSuccess === 'cross-source');
+                    const isHighPriorityDub = category === 'dub' && (firstSuccess === 'Aniwaves' || firstSuccess === 'Wcofun' || firstSuccess === 'AllAnime' || firstSuccess === 'Gogoanime' || firstSuccess === 'AnimeKai' || firstSuccess === 'GogoOrAt' || firstSuccess === 'cross-source');
                     
                     if (isHighPriorityDub) {
                         console.log(`   ⚡ High-priority source (${firstSuccess}) available, resolving instantly!`);
@@ -3656,10 +3594,10 @@ export class SourceManager {
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
         // Registered, currently enabled sources to try for cross-source fallback.
-        // Keep dead/unregistered sources out of this path so fallback starts useful
-        // work immediately instead of waiting on sources we already disabled.
-        const dubSources = ['Wcofun', 'Gogoanime', 'AnimeHeaven', '9Anime', 'AllAnime', 'AnimeKai', 'GogoOrAt', 'Aniwaves'];
-        const subSources = ['Gogoanime', 'AnimePahe', 'AllAnime', 'AnimeKai', 'GogoOrAt', 'Aniwaves'];
+        // 2026-05-22: only Aniwaves is verified working for non-adult content.
+        // Dead sources removed to prevent wasted timeout cycles.
+        const dubSources = ['Aniwaves', 'AnimeKai'];
+        const subSources = ['Aniwaves'];
         const sourceNames = category === 'dub' ? dubSources : subSources;
         
         const consumetSources = sourceNames
@@ -4597,8 +4535,8 @@ export class SourceManager {
             }
 
             const sourceNamesToTry = animeType === 'Movie'
-                ? ['Gogoanime', 'AllAnime', '9Anime', 'Aniwaves', 'GogoOrAt']
-                : ['Gogoanime', 'AllAnime', '9Anime', 'Aniwaves', 'GogoOrAt'];
+                ? ['Aniwaves', 'Gogoanime', 'AllAnime', '9Anime', 'GogoOrAt']
+                : ['Aniwaves', 'Gogoanime', 'AllAnime', '9Anime', 'GogoOrAt'];
             const sourcesToTry = sourceNamesToTry
                 .map((name) => this.sources.get(name))
                 .filter(s => s && s.isAvailable) as StreamingSource[];

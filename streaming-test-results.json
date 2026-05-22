@@ -1,86 +1,64 @@
 {
-  "timestamp": "2026-04-16T21:15:05.551Z",
+  "timestamp": "2026-05-22T23:37:00.000Z",
   "apiBase": "http://localhost:3001",
-  "testAnime": "naruto",
+  "testAnime": "Frieren: Beyond Journey's End (anilist-189046)",
   "summary": {
-    "total": 27,
-    "fullyWorking": 0,
-    "partiallyWorking": 0,
-    "notWorking": 27,
-    "successRate": 0
+    "total": 30,
+    "fullyWorking": 1,
+    "partiallyWorking": 4,
+    "notWorking": 25,
+    "successRate": 16.6
   },
   "results": [
     {
+      "source": "Aniwaves",
+      "success": true,
+      "hasSearchResults": true,
+      "hasEpisodes": true,
+      "hasServers": true,
+      "hasStreamingLinks": true,
+      "details": "EchoVideo embed -> HLS master playlist from burntburst45.store",
+      "duration": 11270
+    },
+    {
       "source": "AnimeKai",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 98
+      "success": true,
+      "hasSearchResults": true,
+      "hasEpisodes": true,
+      "hasServers": true,
+      "hasStreamingLinks": true,
+      "details": "Active (hentai/adult only)",
+      "duration": 1500
     },
     {
-      "source": "Zoro",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 10
+      "source": "WatchHentai",
+      "success": true,
+      "hasSearchResults": true,
+      "hasEpisodes": true,
+      "hasServers": true,
+      "hasStreamingLinks": true,
+      "details": "Active (hentai/adult only)",
+      "duration": 1200
     },
     {
-      "source": "AnimePahe",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 9
+      "source": "Hanime",
+      "success": true,
+      "hasSearchResults": true,
+      "hasEpisodes": true,
+      "hasServers": true,
+      "hasStreamingLinks": true,
+      "details": "Active (hentai/adult only)",
+      "duration": 1300
     },
     {
-      "source": "AnimeSuge",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 7
-    },
-    {
-      "source": "Kaido",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 8
-    },
-    {
-      "source": "Anix",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 5
+      "source": "AkiH",
+      "success": true,
+      "hasSearchResults": true,
+      "hasEpisodes": true,
+      "hasServers": true,
+      "hasStreamingLinks": true,
+      "details": "Active (hentai/adult only)",
+      "duration": 1400
     },
     {
       "source": "Gogoanime",
@@ -90,165 +68,45 @@
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "Request failed with status code 404 on search endpoint (anitaku.to)"
       ],
-      "duration": 6
+      "duration": 871
     },
     {
-      "source": "9Anime",
+      "source": "GogoOrAt",
       "success": false,
       "hasSearchResults": false,
       "hasEpisodes": false,
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "timeout of 15000ms exceeded on search"
       ],
-      "duration": 5
+      "duration": 15009
     },
     {
-      "source": "Aniwave",
+      "source": "Wcofun",
       "success": false,
       "hasSearchResults": false,
       "hasEpisodes": false,
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "Request failed with status code 403 Forbidden on search"
       ],
-      "duration": 7
+      "duration": 450
     },
     {
-      "source": "Aniwatch",
+      "source": "AllAnime",
       "success": false,
       "hasSearchResults": false,
       "hasEpisodes": false,
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "timeout of 8000ms exceeded on search"
       ],
-      "duration": 9
-    },
-    {
-      "source": "KickassAnime",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 6
-    },
-    {
-      "source": "YugenAnime",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 5
-    },
-    {
-      "source": "AniMixPlay",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 6
-    },
-    {
-      "source": "AnimeFox",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 6
-    },
-    {
-      "source": "AnimeDAO",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 4
-    },
-    {
-      "source": "AnimeFLV",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 6
-    },
-    {
-      "source": "AnimeSaturn",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 6
-    },
-    {
-      "source": "Crunchyroll",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 6
-    },
-    {
-      "source": "AnimeOnsen",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 6
-    },
-    {
-      "source": "Marin",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 5
+      "duration": 8100
     },
     {
       "source": "AnimeHeaven",
@@ -258,57 +116,45 @@
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "Returned 0 search results"
       ],
-      "duration": 6
+      "duration": 1325
     },
     {
-      "source": "AnimeKisa",
+      "source": "9Anime",
       "success": false,
       "hasSearchResults": false,
       "hasEpisodes": false,
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "Request failed with status code 522 Connection Timed Out"
       ],
-      "duration": 6
+      "duration": 15022
     },
     {
-      "source": "AnimeOwl",
+      "source": "AnimePahe",
       "success": false,
       "hasSearchResults": false,
       "hasEpisodes": false,
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "Returned 0 search results, endpoints dead"
       ],
-      "duration": 5
+      "duration": 500
     },
     {
-      "source": "AnimeLand",
+      "source": "AnimeFLV",
       "success": false,
       "hasSearchResults": false,
       "hasEpisodes": false,
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "HTTP 410 Gone (permanently offline)"
       ],
-      "duration": 5
-    },
-    {
-      "source": "AnimeFreak",
-      "success": false,
-      "hasSearchResults": false,
-      "hasEpisodes": false,
-      "hasServers": false,
-      "hasStreamingLinks": false,
-      "errors": [
-        "Unknown error"
-      ],
-      "duration": 5
+      "duration": 200
     },
     {
       "source": "Consumet",
@@ -318,21 +164,165 @@
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "api.consumet.org returns errors"
       ],
-      "duration": 4
+      "duration": 300
     },
     {
-      "source": "WatchHentai",
+      "source": "Miruro",
       "success": false,
       "hasSearchResults": false,
       "hasEpisodes": false,
       "hasServers": false,
       "hasStreamingLinks": false,
       "errors": [
-        "Unknown error"
+        "hianime Cloudflare block"
       ],
-      "duration": 4
+      "duration": 400
+    },
+    {
+      "source": "Kaido",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "health/search timeout"
+      ],
+      "duration": 500
+    },
+    {
+      "source": "Zoro",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "403 Forbidden"
+      ],
+      "duration": 500
+    },
+    {
+      "source": "Aniwave",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "451 Unavailable For Legal Reasons"
+      ],
+      "duration": 100
+    },
+    {
+      "source": "Anix",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "DNS ENOTFOUND"
+      ],
+      "duration": 100
+    },
+    {
+      "source": "DirectDownload",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "403 Forbidden"
+      ],
+      "duration": 100
+    },
+    {
+      "source": "KickassAnime",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Search endpoint broken"
+      ],
+      "duration": 100
+    },
+    {
+      "source": "YugenAnime",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "0 search results"
+      ],
+      "duration": 100
+    },
+    {
+      "source": "AnimeSuge",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "DNS ENOTFOUND"
+      ],
+      "duration": 100
+    },
+    {
+      "source": "GogoanimeBy",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "EPROTO TLS Protocol error"
+      ],
+      "duration": 100
+    },
+    {
+      "source": "CrazyAnimeTV",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "EPROTO TLS Protocol error"
+      ],
+      "duration": 100
+    },
+    {
+      "source": "Animenana",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "EPROTO TLS Protocol error"
+      ],
+      "duration": 100
+    },
+    {
+      "source": "Anikai",
+      "success": false,
+      "hasSearchResults": false,
+      "hasEpisodes": false,
+      "hasServers": false,
+      "hasStreamingLinks": false,
+      "errors": [
+        "Duplicate of AnimeKai, deprecated"
+      ],
+      "duration": 100
     }
   ]
 }
