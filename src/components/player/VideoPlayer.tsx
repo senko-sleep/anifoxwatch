@@ -872,21 +872,25 @@ export const VideoPlayer = ({
       setIsLoading(false);
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        if (video.currentTime > 5) {
-          savePosition(video.currentTime);
-        }
-        // Pause HLS segment loading so backgrounded tabs don't accumulate
-        // ERR_NETWORK_IO_SUSPENDED errors that block the scheduler long enough
-        // to cancel active fetches (e.g. BYFMS failover).
-        if (hlsRef.current) hlsRef.current.pauseLoad();
-      } else {
-        // Resume segment loading immediately when the user returns to the tab
-        // so HLS can pick up where it left off without retrying from scratch.
-        if (hlsRef.current) hlsRef.current.startLoad();
-      }
-    };
+const handleVisibilityChange = () => {
+               if (document.visibilityState === 'hidden') {
+                 if (video.currentTime > 5) {
+                   savePosition(video.currentTime);
+                 }
+                 // Pause HLS segment loading so backgrounded tabs don't accumulate
+                 // ERR_NETWORK_IO_SUSPENDED errors that block the scheduler long enough
+                 // to cancel active fetches (e.g. BYFMS failover).
+                 if (hlsRef.current && typeof hlsRef.current.pauseLoad === 'function') {
+                   try { hlsRef.current.pauseLoad(); } catch { /* ignore */ }
+                 }
+               } else {
+                 // Resume segment loading immediately when the user returns to the tab
+                 // so HLS can pick up where it left off without retrying from scratch.
+                 if (hlsRef.current && typeof hlsRef.current.startLoad === 'function') {
+                   try { hlsRef.current.startLoad(); } catch { /* ignore */ }
+                 }
+               }
+             };
 
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);

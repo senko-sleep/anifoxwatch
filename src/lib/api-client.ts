@@ -816,10 +816,12 @@ const primaryBase = this.apiBase();
                 }
 
                 // HiAnime: primary may 404 while upstream aniwatch-api (HIANIME_REST_URL) still returns sources.
+                // Aniwaves IDs should NOT trigger HiAnime REST fallback - the server handles Aniwaves directly.
                 // AnimeKai compound IDs (slug$ep=N$token=...) normalize to slug?ep=TOKEN which
                 // matches the HiAnime style regex but are NOT HiAnime IDs — skip REST for them.
                 const isAnimeKaiCompound = episodeId.includes('$ep=') || episodeId.includes('$token=');
-                if (!isAnimeKaiCompound && isHianimeStyleEpisodeId(episodeId)) {
+                const isAniwavesId = /^(aniwaves|aniwave)-/i.test(episodeId);
+                if (!isAniwavesId && !isAnimeKaiCompound && isHianimeStyleEpisodeId(episodeId)) {
                     const proxyBase = primaryBase;
                     console.warn(`[API] Stream primary failed; trying HiAnime REST proxy (${proxyBase}/api/hianime-rest/...)`);
                     const fromRest = await fetchStreamingFromAniwatchRest({
