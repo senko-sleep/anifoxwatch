@@ -47,7 +47,7 @@ export class AniwavesSource extends BaseAnimeSource {
             return response;
         } catch (error: any) {
             if (axios.isCancel(error) || error.name === 'AbortError') throw error;
-            logger.warn(`[Aniwaves] Direct fetch failed for ${urlPath}, trying allorigins proxy...`, undefined, this.name);
+            logger.warn(`[Aniwaves] Direct fetch failed for ${urlPath}, trying proxies...`, undefined, this.name);
             
             let fullUrl = `${this.baseUrl}${urlPath}`;
             if (config.params) {
@@ -55,11 +55,26 @@ export class AniwavesSource extends BaseAnimeSource {
                 fullUrl += `?${searchParams.toString()}`;
             }
             
-            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(fullUrl)}`;
-            return await axios.get(proxyUrl, {
-                signal: config.signal,
-                timeout: 25000
-            });
+            const proxies = [
+                `https://api.allorigins.win/raw?url=${encodeURIComponent(fullUrl)}`,
+                `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(fullUrl)}`,
+                `https://corsproxy.io/?${encodeURIComponent(fullUrl)}`
+            ];
+
+            let lastError: any;
+            for (const proxyUrl of proxies) {
+                try {
+                    return await axios.get(proxyUrl, {
+                        signal: config.signal,
+                        timeout: 15000 // Shorter timeout to fail fast and try next
+                    });
+                } catch (proxyError: any) {
+                    lastError = proxyError;
+                    logger.warn(`[Aniwaves] Proxy ${proxyUrl.split('/')[2]} failed`, undefined, this.name);
+                }
+            }
+            
+            throw lastError;
         }
     }
 

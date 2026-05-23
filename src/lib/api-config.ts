@@ -29,7 +29,7 @@ export const API_DEPLOYMENTS = {
      * `window.location.origin` (your current deployment domain) instead of a hardcoded app.
      */
     vercel: '',
-    firebase: 'https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io',
+    firebase: 'https://anifoxwatch-ch82xw1vqff9.allenposton14.deno.net',
     custom: '',
     /** Optional HiAnime REST host for status checks (same shape as VITE_ANIWATCH_API_URL). */
     hianimeRest: (import.meta.env.VITE_ANIWATCH_API_URL as string | undefined)?.trim() || '',
@@ -42,7 +42,7 @@ function configFromUrl(envApiUrl: string): ApiConfig {
         deployment = 'local';
     } else if (envApiUrl.includes('vercel.app')) {
         deployment = 'vercel';
-    } else if (envApiUrl === 'https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io' || envApiUrl === '/api') {
+    } else if (envApiUrl === 'https://anifoxwatch-ch82xw1vqff9.allenposton14.deno.net' || envApiUrl === '/api') {
         deployment = 'firebase';
     }
 

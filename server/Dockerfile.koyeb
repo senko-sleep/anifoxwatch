@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1
+# Koyeb Dockerfile — build context is the server/ directory.
+# In Koyeb console:  Dockerfile = Dockerfile.koyeb  |  Build Context = server
+
+# ── Stage 1: Build ──────────────────────────────────────────────────────────
+FROM node:20-slim AS builder
+
+WORKDIR /app
+
+COPY package*.json tsconfig.json ./
+COPY patches ./patches
+
+RUN npm ci
+
+COPY src ./src
+RUN npx tsc --project tsconfig.json
+
+# ── Stage 2: Runtime ─────────────────────────────────────────────────────────
+FROM node:20-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Chromium + fonts for Puppeteer-based extractors
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update -qq \
+    && apt-get install -qq -y --no-install-recommends \
+        chromium \
+        fonts-ipafont-gothic \
+        fonts-wqy-zenhei \
+        fonts-freefont-ttf \
+        libxss1 \
+        dumb-init \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV NODE_ENV=production
+# Koyeb injects PORT automatically; default to 8000 to match free tier expectations
+ENV PORT=8000
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY patches ./patches
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/dist ./dist
+
+EXPOSE 8000
+
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "dist/index.js"]

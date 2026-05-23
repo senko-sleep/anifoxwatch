@@ -1,39 +1,59 @@
-const functions = require('firebase-functions');
-const admin = require('firebase-admin');
-const express = require('express');
-const cors = require('cors');
+// Firebase Cloud Function wrapping the aniwatch-api Hono app
+// This re-exports the Hono app as a Firebase HTTPS function.
+// The aniwatch-api is built separately in ./aniwatch-api/dist/
 
-// Initialize Firebase Admin
-admin.initializeApp();
+const { onRequest } = require('firebase-functions/v2/https');
+const { setGlobalOptions } = require('firebase-functions/v2');
 
-// Create Express app
-const app = express();
+// Set region (us-central1 is default, use us-east1 for lower latency)
+setGlobalOptions({ region: 'us-central1', maxInstances: 10 });
 
-// Enable CORS
-app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'https://anifoxwatch.web.app',
-    'https://anifoxwatch.firebaseapp.com'
-  ],
-  credentials: true
-}));
+// We dynamically import the ESM Hono app using an async wrapper
+exports.api = onRequest(async (req, res) => {
+  try {
+    // Dynamically import the built ESM aniwatch-api server
+    const { default: app } = await import('./aniwatch-api/dist/src/server.js');
 
-// Parse JSON bodies
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+    // Convert Firebase req/res to Fetch API Request
+    const url = `https://${req.hostname}${req.originalUrl || req.url}`;
+    const method = req.method;
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (value) {
+        if (Array.isArray(value)) {
+          value.forEach(v => headers.append(key, v));
+        } else {
+          headers.set(key, value);
+        }
+      }
+    }
 
-// Import server routes
-const serverApp = require('./src/index');
+    let body = undefined;
+    if (method !== 'GET' && method !== 'HEAD') {
+      // req.body is already parsed by Firebase, re-serialize it
+      if (req.body) {
+        body = JSON.stringify(req.body);
+        if (!headers.has('content-type')) {
+          headers.set('content-type', 'application/json');
+        }
+      }
+    }
 
-// Mount server routes under /api
-app.use('/api', serverApp);
+    const fetchRequest = new Request(url, { method, headers, body });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    // Call the Hono app's fetch handler
+    const honoResponse = await app.fetch(fetchRequest);
+
+    // Stream the Hono response back to Firebase res
+    res.status(honoResponse.status);
+    honoResponse.headers.forEach((value, key) => {
+      res.setHeader(key, value);
+    });
+
+    const responseText = await honoResponse.text();
+    res.send(responseText);
+  } catch (err) {
+    console.error('Firebase Function error:', err);
+    res.status(500).json({ error: 'Internal server error', message: err.message });
+  }
 });
-
-// Export Firebase Functions
-exports.api = functions.https.onRequest(app);
