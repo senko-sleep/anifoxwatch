@@ -386,8 +386,7 @@ export class SourceManager {
                 options
             ) as Promise<T>;
         } catch (error) {
-            // For non-streaming operations, only mark offline temporarily — do NOT permanently remove.
-            console.log(`[SourceManager] ❌ executeReliably failed for ${sourceName} (${operation}): ${(error as Error).message}`);
+            // Non-streaming failures: only mark offline temporarily
             this.markSourceOffline(sourceName, 'DEFAULT');
             throw error;
         }
@@ -395,8 +394,8 @@ export class SourceManager {
 
     /**
      * Streaming-specific variant of executeReliably.
-     * Permanently removes the source on failure, since a broken streaming source
-     * should not remain in the fallback list for the rest of the server session.
+     * Marks the source offline temporarily on failure instead of removing it permanently,
+     * to avoid breaking the entire API when a single stream fetch fails.
      */
     private async executeReliablyStream<T>(
         sourceName: string,
@@ -417,7 +416,7 @@ export class SourceManager {
             ) as Promise<T>;
         } catch (error) {
             console.log(`[SourceManager] ❌ Stream executeReliably failed for ${sourceName}: ${(error as Error).message}`);
-            this.removeSource(sourceName);
+            // We rely on the circuit breaker to handle transient failures instead of taking the whole source offline.
             throw error;
         }
     }
@@ -772,13 +771,9 @@ export class SourceManager {
     }
 
     recordFailure(sourceName: string, error?: Error, isStreamingFailure = false): void {
-        if (isStreamingFailure) {
-            // Streaming failures: completely remove the source so it cannot remain as a fallback
-            this.removeSource(sourceName);
-        } else {
-            // Non-streaming failures: only mark offline temporarily
-            this.markSourceOffline(sourceName, 'DEFAULT');
-        }
+        // We rely on the circuit breaker (handled in reliableRequest) to manage failures.
+        // Taking the source offline here would aggressively disable it globally.
+        console.log(`[SourceManager] ⚠️ recordFailure called for ${sourceName} - relying on circuit breaker.`);
     }
 
     /**
