@@ -384,7 +384,7 @@ export class AkiHSource extends BaseAnimeSource {
             // Combine all sources
             const allSources = [...pageSources, ...videoUrls.map(url => ({
                 url,
-                quality: 'auto',
+                quality: 'auto' as const,
                 isM3U8: url.includes('.m3u8'),
                 isDASH: url.includes('.mpd')
             }))];
