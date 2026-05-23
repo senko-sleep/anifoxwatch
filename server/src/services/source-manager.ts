@@ -1,14 +1,10 @@
 import {
     AnimeSource,
-    AnimeKaiSource,
-    WatchHentaiSource,
-    HanimeSource,
-    AkiHSource,
     AniwavesSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
-import { StreamingData, EpisodeServer } from '../types/streaming.js';
+import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js';
 import { logger, PerformanceTimer, createRequestContext } from '../utils/logger.js';
 import { AnimeCache } from '../lib/anime-cache.js';
 import { animeCache, episodesCache, searchCache, trendingCache } from '../lib/memory-cache.js';
@@ -142,19 +138,8 @@ export class SourceManager {
         // ✅ PRIMARY (verified working): EchoVideo → burntburst45.store HLS
         this.registerSource(new AniwavesSource());
 
-        // Active/Adult sources
-        this.registerSource(new AnimeKaiSource());
-        this.registerSource(new WatchHentaiSource());
-        this.registerSource(new HanimeSource());
-        this.registerSource(new AkiHSource());
-
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
-
-        // Configure rate limits for each source (requests per minute)
-        this.sourceRateLimits.set('AnimeKai', { limit: 120, resetTime: 60000 });
-        this.sourceRateLimits.set('WatchHentai', { limit: 30, resetTime: 60000 });
-        this.sourceRateLimits.set('Hanime', { limit: 40, resetTime: 60000 });
 
         // Start health monitoring and perform initial health check
         this.startHealthMonitor();
@@ -373,25 +358,68 @@ export class SourceManager {
         );
     }
 
-    /**
-     * Internal helper to execute a source method reliably with timeout, retries, and circuit breaker
-     */
+    public removeSource(sourceName: string): void {
+        if (!this.sources.has(sourceName)) return;
+        this.sources.delete(sourceName);
+        this.sourceOrder = this.sourceOrder.filter(name => name !== sourceName);
+        this.healthStatus.delete(sourceName);
+        this.sourceMetadata.delete(sourceName);
+        console.log(`[SourceManager] 🚨 COMPLETELY REMOVED source: ${sourceName}`);
+        logger.info(`Source ${sourceName} has been completely removed from active sources.`, undefined, 'SourceManager');
+    }
+
     private async executeReliably<T>(
         sourceName: string,
         operation: string,
         fn: (signal: AbortSignal) => Promise<T>,
         options: SourceRequestOptions = {}
     ): Promise<T> {
-        return this.enqueueRequest(
-            (signal) => reliableRequest(
-                sourceName,
+        try {
+            return await this.enqueueRequest(
+                (signal) => reliableRequest(
+                    sourceName,
+                    operation,
+                    (innerSignal) => fn(innerSignal),
+                    { ...options, signal }
+                ),
                 operation,
-                (innerSignal) => fn(innerSignal),
-                { ...options, signal }
-            ),
-            operation,
-            options
-        ) as Promise<T>;
+                options
+            ) as Promise<T>;
+        } catch (error) {
+            // For non-streaming operations, only mark offline temporarily — do NOT permanently remove.
+            console.log(`[SourceManager] ❌ executeReliably failed for ${sourceName} (${operation}): ${(error as Error).message}`);
+            this.markSourceOffline(sourceName, 'DEFAULT');
+            throw error;
+        }
+    }
+
+    /**
+     * Streaming-specific variant of executeReliably.
+     * Permanently removes the source on failure, since a broken streaming source
+     * should not remain in the fallback list for the rest of the server session.
+     */
+    private async executeReliablyStream<T>(
+        sourceName: string,
+        operation: string,
+        fn: (signal: AbortSignal) => Promise<T>,
+        options: SourceRequestOptions = {}
+    ): Promise<T> {
+        try {
+            return await this.enqueueRequest(
+                (signal) => reliableRequest(
+                    sourceName,
+                    operation,
+                    (innerSignal) => fn(innerSignal),
+                    { ...options, signal }
+                ),
+                operation,
+                options
+            ) as Promise<T>;
+        } catch (error) {
+            console.log(`[SourceManager] ❌ Stream executeReliably failed for ${sourceName}: ${(error as Error).message}`);
+            this.removeSource(sourceName);
+            throw error;
+        }
     }
 
     /**
@@ -743,67 +771,13 @@ export class SourceManager {
         console.log(`   ⚠️ ${sourceName} offline (${errorType})`);
     }
 
-    /**
-     * Record failed request for performance tracking
-     */
-    recordFailure(sourceName: string, error?: Error): void {
-        // Update success rate
-        const rate = this.sourceSuccessRates.get(sourceName) || { success: 0, total: 0 };
-        rate.total++;
-        if (rate.total > this.SUCCESS_RATE_WINDOW) {
-            rate.total = this.SUCCESS_RATE_WINDOW;
-        }
-        this.sourceSuccessRates.set(sourceName, rate);
-        
-        // Update metadata
-        const metadata = this.sourceMetadata.get(sourceName) || {
-            capabilities: this.sourceCapabilities.get(sourceName)!,
-            successRate: 0,
-            avgLatency: 0,
-            lastSuccessTime: 0,
-            consecutiveFailures: 0
-        };
-        metadata.consecutiveFailures++;
-        metadata.successRate = rate.success / Math.max(1, rate.total);
-        this.sourceMetadata.set(sourceName, metadata);
-        
-        // Determine error type and potentially mark offline
-        if (error) {
-            let errorType = 'DEFAULT';
-            const message = error.message.toLowerCase();
-            
-            if (message.includes('timeout') || message.includes('etimedout')) {
-                errorType = 'TIMEOUT';
-            } else if (message.includes('410') || message.includes('gone')) {
-                errorType = 'HTTP_410';
-            } else if (message.includes('403') || message.includes('forbidden')) {
-                errorType = 'HTTP_403';
-            } else if (message.includes('500') || message.includes('internal server error')) {
-                errorType = 'HTTP_500';
-            } else if (message.includes('enotfound') || message.includes('network') || message.includes('econnreset')) {
-                errorType = 'NETWORK_ERROR';
-            }
-            
-            // Mark offline after 3 consecutive failures of the same error type
-            if (metadata.consecutiveFailures >= 3) {
-                this.markSourceOffline(sourceName, errorType);
-            }
-        }
-        
-        // Mark source unavailable after too many consecutive failures
-        if (metadata.consecutiveFailures >= 5) {
-            const source = this.sources.get(sourceName);
-            if (source) {
-                source.isAvailable = false;
-                this.healthStatus.set(sourceName, {
-                    name: sourceName,
-                    status: 'offline',
-                    lastCheck: new Date()
-                });
-                logger.warn(`Source ${sourceName} marked offline after ${metadata.consecutiveFailures} consecutive failures`, undefined, 'SourceManager');
-                // Reset counter so recovery gets a fresh start
-                metadata.consecutiveFailures = 0;
-            }
+    recordFailure(sourceName: string, error?: Error, isStreamingFailure = false): void {
+        if (isStreamingFailure) {
+            // Streaming failures: completely remove the source so it cannot remain as a fallback
+            this.removeSource(sourceName);
+        } else {
+            // Non-streaming failures: only mark offline temporarily
+            this.markSourceOffline(sourceName, 'DEFAULT');
         }
     }
 
@@ -812,6 +786,94 @@ export class SourceManager {
      */
     getSourceCapabilities(sourceName: string): SourceCapabilities | undefined {
         return this.sourceCapabilities.get(sourceName);
+    }
+
+    /**
+     * Run a fast parallel speed test/health check on stream sources to filter out
+     * dead/broken links and prioritize the fastest working ones.
+     */
+    private async speedTestSources(
+        sources: VideoSource[],
+        headers?: Record<string, string>,
+        timeoutMs: number = 2500
+    ): Promise<VideoSource[]> {
+        if (!sources || sources.length === 0) return [];
+        
+        console.log(`⏱️ [SourceManager] Running speed test on ${sources.length} stream links...`);
+        
+        // Prepare headers: merge default user-agent with source referer/headers
+        const defaultUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+        const requestHeaders: Record<string, string> = {
+            'User-Agent': defaultUA,
+            'Range': 'bytes=0-1023', // Request first KB to avoid downloading whole file
+        };
+        
+        if (headers) {
+            for (const [k, v] of Object.entries(headers)) {
+                if (v) requestHeaders[k] = v;
+            }
+        }
+
+        const testPromises = sources.map(async (source) => {
+            const urlToTest = source.originalUrl || source.url;
+            
+            // Skip speed test for embeds (they are iframe pages, not direct video streams)
+            if (source.isEmbed || urlToTest.includes('iframe') || urlToTest.includes('/embed/')) {
+                return { source, success: true, latency: 9999 }; // Keep embed links but give them lowest priority
+            }
+            
+            const start = Date.now();
+            try {
+                // Ensure correct referer header based on URL if not already explicitly provided
+                const actualHeaders = { ...requestHeaders };
+                if (!actualHeaders['Referer'] && !actualHeaders['referer']) {
+                    try {
+                        const parsed = new URL(urlToTest);
+                        actualHeaders['Referer'] = `${parsed.protocol}//${parsed.hostname}/`;
+                    } catch {}
+                }
+                
+                // Use global fetch for standard, lightweight requests
+                const response = await fetch(urlToTest, {
+                    method: 'GET',
+                    headers: actualHeaders,
+                    signal: AbortSignal.timeout(timeoutMs)
+                });
+                
+                const latency = Date.now() - start;
+                
+                // HTTP 200 (OK) or 206 (Partial Content) indicates stream is working
+                if (response.status === 200 || response.status === 206) {
+                    console.log(`   🟢 Stream working: ${urlToTest.substring(0, 60)}... (${latency}ms, status: ${response.status})`);
+                    return { source, success: true, latency };
+                } else {
+                    console.log(`   🔴 Stream failed status ${response.status}: ${urlToTest.substring(0, 60)}...`);
+                    return { source, success: false, latency };
+                }
+            } catch (err: any) {
+                const latency = Date.now() - start;
+                console.log(`   🔴 Stream error/timeout (${latency}ms): ${urlToTest.substring(0, 60)}... - ${(err as Error).message}`);
+                return { source, success: false, latency };
+            }
+        });
+        
+        const results = await Promise.all(testPromises);
+        
+        // Filter working sources
+        const workingResults = results.filter(r => r.success);
+        
+        if (workingResults.length === 0) {
+            console.log(`⚠️ [SourceManager] All streams failed speed test. Falling back to returning original untested links.`);
+            return sources;
+        }
+        
+        // Sort working sources by latency (fastest first)
+        workingResults.sort((a, b) => a.latency - b.latency);
+        
+        console.log(`⏱️ [SourceManager] Speed test complete. ${workingResults.length}/${sources.length} links working.`);
+        
+        // Return sorted sources
+        return workingResults.map(r => r.source);
     }
 
     public getAvailableSource(preferred?: string): StreamingSource | null {
@@ -3100,26 +3162,34 @@ export class SourceManager {
                               episodeId.toLowerCase().startsWith('watchhentai-');
 
         const sourcesToTry: StreamingSource[] = [];
-        
-        // Add primary source first, but honor the offline hold-down window. Retrying
-        // known-bad sources inside the same stream request is what made recovery
-        // attempts burn the entire client timeout.
-        const primaryMatchesId = primarySource && hasSourcePrefix && primarySource.getStreamingLinks;
-        if (primaryMatchesId && primarySource!.isAvailable && !sourcesToTry.includes(primarySource!)) {
-            sourcesToTry.push(primarySource!);
-        }
-        if (primarySource?.isAvailable && primarySource.getStreamingLinks && !sourcesToTry.includes(primarySource)) {
-            sourcesToTry.push(primarySource);
-        }
 
-        // Backup sources: only names actually registered in the constructor (see REGISTERED_SOURCE_NAMES).
-        const backupNames = REGISTERED_SOURCE_NAMES.filter((n) => n !== primarySource?.name);
-        for (const name of backupNames) {
-            if (isAdultContent && name !== 'WatchHentai' && name !== 'Hanime') continue;
-            if (!isAdultContent && (name === 'WatchHentai' || name === 'Hanime')) continue;
-            const source = this.sources.get(name) as StreamingSource;
-            if (source?.isAvailable && source.getStreamingLinks && !sourcesToTry.includes(source)) {
-                sourcesToTry.push(source);
+        // AniList IDs (anilist-XXXXX) cannot be handled by any source directly.
+        // They require a title-based lookup via crossSourceStreamingFallback.
+        // Skip the direct source list entirely so we don't incorrectly remove sources
+        // that fail because of an incompatible ID format (not because they're broken).
+        const isAnilistId = episodeId.toLowerCase().startsWith('anilist-');
+        
+        if (!isAnilistId) {
+            // Add primary source first, but honor the offline hold-down window. Retrying
+            // known-bad sources inside the same stream request is what made recovery
+            // attempts burn the entire client timeout.
+            const primaryMatchesId = primarySource && hasSourcePrefix && primarySource.getStreamingLinks;
+            if (primaryMatchesId && primarySource!.isAvailable && !sourcesToTry.includes(primarySource!)) {
+                sourcesToTry.push(primarySource!);
+            }
+            if (primarySource?.isAvailable && primarySource.getStreamingLinks && !sourcesToTry.includes(primarySource)) {
+                sourcesToTry.push(primarySource);
+            }
+
+            // Backup sources: only names actually registered in the constructor (see REGISTERED_SOURCE_NAMES).
+            const backupNames = REGISTERED_SOURCE_NAMES.filter((n) => n !== primarySource?.name);
+            for (const name of backupNames) {
+                if (isAdultContent && name !== 'WatchHentai' && name !== 'Hanime') continue;
+                if (!isAdultContent && (name === 'WatchHentai' || name === 'Hanime')) continue;
+                const source = this.sources.get(name) as StreamingSource;
+                if (source?.isAvailable && source.getStreamingLinks && !sourcesToTry.includes(source)) {
+                    sourcesToTry.push(source);
+                }
             }
         }
 
@@ -3170,6 +3240,15 @@ export class SourceManager {
         const ordered = [...sourcesToTry].sort((a, b) => scoreSource(b.name) - scoreSource(a.name));
         let finalSources = ordered;
 
+        // Force Aniwaves to be first for all non-adult content no matter what
+        if (!isAdultContent) {
+            const aniwavesIdx = finalSources.findIndex(s => s.name === 'Aniwaves');
+            if (aniwavesIdx > -1) {
+                const [aniwaves] = finalSources.splice(aniwavesIdx, 1);
+                finalSources.unshift(aniwaves);
+            }
+        }
+
         if (isHianimeStyleEpisodeId(episodeId)) {
             const allow = new Set<string>([
                 'AnimeKai',
@@ -3215,11 +3294,14 @@ export class SourceManager {
             return [...sources, 'cross-source'];
         };
 
-        if (finalSources.length === 0) {
+        if (finalSources.length === 0 && !isAnilistId) {
             console.log(`   ❌ No available sources for streaming`);
             logger.warn(`No available sources for streaming: ${episodeId}`, { episodeId }, 'SourceManager');
             timer.end();
             return { sources: [], subtitles: [] };
+        }
+        if (isAnilistId) {
+            console.log(`   ℹ️ AniList ID detected — delegating entirely to cross-source fallback (title-based search)`);
         }
 
         // Fast-path: race all sources in parallel, return as soon as a high-priority
@@ -3394,7 +3476,7 @@ export class SourceManager {
                 const isPrimary = source === primarySource;
                 const streamReliabilityOpts = { timeout: isPrimary ? 25_000 : 8_000, maxAttempts: 1 };
                 const sourceStart = Date.now();
-                this.executeReliably(source.name, 'getStreamingLinks',
+                this.executeReliablyStream(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
                     streamReliabilityOpts
                 )
@@ -3405,13 +3487,13 @@ export class SourceManager {
                         this.recordSuccess(source.name, Date.now() - sourceStart);
                     } else {
                         allResults.push({ source: source.name, data, success: false });
-                        this.recordFailure(source.name);
+                        this.recordFailure(source.name, undefined, true);
                     }
                 })
                 .catch(err => {
                     console.log(`   ❌ ${source.name} failed: ${(err as Error).message?.substring(0, 80)}`);
                     allResults.push({ source: source.name, data: { sources: [], subtitles: [] } as StreamingData, success: false });
-                    this.recordFailure(source.name);
+                    this.recordFailure(source.name, undefined, true);
                 })
                 .finally(onDone);
             }
@@ -3443,6 +3525,20 @@ export class SourceManager {
 
         });
 
+        // Run speed test to verify stream links and filter/prioritize them before returning
+        if (result && result.sources && result.sources.length > 0) {
+            try {
+                const testedSources = await this.speedTestSources(result.sources, result.headers);
+                result.sources = testedSources;
+                
+                // Update cache with the speed-tested and sorted links
+                const cacheKey = `${episodeId}:${server || 'default'}:${category || 'sub'}:${anilistId || ''}`;
+                this.streamingLinksCache.set(cacheKey, { data: result, timestamp: Date.now() });
+            } catch (err) {
+                console.error(`❌ [SourceManager] Error running speed test:`, err);
+            }
+        }
+
         return result;
     }
 
@@ -3463,7 +3559,7 @@ export class SourceManager {
         if (!kai?.getStreamingLinks) return null;
         const id = `animekai-${compound}`;
         try {
-            const data = await this.executeReliably(
+            const data = await this.executeReliablyStream(
                 'AnimeKai',
                 'getStreamingLinks',
                 (signal) =>

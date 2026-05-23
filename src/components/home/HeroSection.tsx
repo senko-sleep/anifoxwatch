@@ -32,6 +32,13 @@ function heroSynopsis(anime: HeroAnime): string {
 
 export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const { isMobile, isLandscape } = useBreakpoint();
+
+  // Filter out anime without a banner so the hero never falls back to a portrait cover image
+  const slides = useMemo(
+    () => heroAnime.filter((a) => !!a.bannerImage),
+    [heroAnime]
+  );
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [prevIndex, setPrevIndex] = useState<number | null>(null);
   const [_progress, setProgress] = useState(0);
@@ -44,8 +51,8 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const animFrameRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
 
-  const anime = heroAnime[currentIndex];
-  const count = heroAnime.length;
+  const anime = slides[currentIndex];
+  const count = slides.length;
 
   const displayGenres = useMemo(
     () => anime ? normalizeAnimeGenresForDisplay(anime.genres) : [],
@@ -53,13 +60,13 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   );
 
   useEffect(() => {
-    heroAnime.slice(0, 5).forEach((a) => {
+    slides.slice(0, 5).forEach((a) => {
       if (a.bannerImage) {
         const img = new Image();
         img.src = a.bannerImage;
       }
     });
-  }, [heroAnime]);
+  }, [slides]);
 
   const goToSlide = useCallback((index: number) => {
     if (index === currentIndex) return;
@@ -132,7 +139,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
           className="relative w-full h-[160px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]"
         >
 
-          {heroAnime.map((a, idx) => {
+          {slides.map((a, idx) => {
             const isActive = idx === currentIndex;
             const isPrev = idx === prevIndex;
             const show = isActive || isPrev;
@@ -351,13 +358,13 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                     <TrendingUp className="w-3 h-3" />
                     Up Next
                   </p>
-                  {heroAnime
+                  {slides
                     .slice(currentIndex + 1, currentIndex + 3)
-                    .concat(currentIndex + 3 > heroAnime.length ? heroAnime.slice(0, Math.max(0, 2 - (heroAnime.length - currentIndex - 1))) : [])
+                    .concat(currentIndex + 3 > slides.length ? slides.slice(0, Math.max(0, 2 - (slides.length - currentIndex - 1))) : [])
                     .slice(0, 2)
                     .map((a, i) => {
                       const upNextTitle = getHeroTitle(a);
-                      const upNextIdx = (currentIndex + 1 + i) % heroAnime.length;
+                      const upNextIdx = (currentIndex + 1 + i) % slides.length;
                       return (
                         <button
                           key={a.id}
@@ -386,7 +393,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
           {/* Slide dots */}
           <div className="pointer-events-auto absolute bottom-0 inset-x-0 z-[6] flex items-center justify-center gap-0.5 pb-1 sm:pb-0">
-            {heroAnime.slice(0, 12).map((_, idx) => (
+            {slides.slice(0, 12).map((_, idx) => (
               <button
                 key={idx}
                 type="button"
@@ -424,14 +431,13 @@ function HeroSlideBg({
 }) {
   const candidates = useMemo(() => {
     const b = anime.bannerImage?.trim();
-    const c = anime.coverImage?.extraLarge || anime.coverImage?.large || '';
     const out: string[] = [];
-    if (b) out.push(b);
-    if (c && c !== b) out.push(c);
-    if (b) out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(b)}`);
-    if (c) out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(c)}`);
+    if (b) {
+      out.push(b);
+      out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(b)}`);
+    }
     return [...new Set(out.filter(Boolean))];
-  }, [anime.bannerImage, anime.coverImage?.extraLarge, anime.coverImage?.large]);
+  }, [anime.bannerImage]);
 
   const [srcIndex, setSrcIndex] = useState(0);
   useEffect(() => {

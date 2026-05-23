@@ -55,9 +55,9 @@ interface CachedHeroData {
   version: number;
 }
 
-const CACHE_KEY = 'anistream_hero_v9';
+const CACHE_KEY = 'anistream_hero_v10';
 const CACHE_TTL = 20 * 60 * 1000;
-const CACHE_VERSION = 9;
+const CACHE_VERSION = 10;
 
 // Clear legacy cache keys on load
 try {
@@ -66,6 +66,8 @@ try {
   localStorage.removeItem('anistream_hero_v3');
   localStorage.removeItem('anistream_hero_v6');
   localStorage.removeItem('anistream_hero_v7');
+  localStorage.removeItem('anistream_hero_v8');
+  localStorage.removeItem('anistream_hero_v9');
 } catch { /* ignore */ }
 
 function getCurrentSeason(): { season: string; year: number } {
@@ -204,12 +206,13 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
   const raw: Record<string, unknown>[] = [];
 
   const queries = [
-    // Current season first — most relevant for right now (e.g. Spring 2026)
+    // Current season — most relevant for right now (Spring/Summer 2026)
     buildAniListQuery('TRENDING_DESC', `,season:${season},seasonYear:${seasonYear},format_in:${formats}`),
-    buildAniListQuery('POPULARITY_DESC', `,season:${season},seasonYear:${seasonYear},format_in:${formats}`),
+    buildAniListQuery('SCORE_DESC', `,season:${season},seasonYear:${seasonYear},status:RELEASING,format_in:${formats}`),
+    // Recent airing — catch multi-cour shows that started last season
     buildAniListQuery('TRENDING_DESC', `,status:RELEASING,format_in:${formats}`),
-    buildAniListQuery('TRENDING_DESC', `,startDate_greater:${recentYear}0000,format_in:${formats}`),
-    buildAniListQuery('TRENDING_DESC', ``), // global fallback
+    // Recent years only — exclude legacy titles (pre-2024)
+    buildAniListQuery('TRENDING_DESC', `,startDate_greater:${currentYear - 1}0000,format_in:${formats}`),
   ];
 
   for (const q of queries) {
@@ -230,7 +233,16 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
     return true;
   });
 
-  const candidates = deduped.filter(hasHttpBanner);
+  // Filter: must have banner AND be from 2025 or newer (no legacy shows in spotlight)
+  const candidates = deduped.filter((m) => {
+    if (!hasHttpBanner(m)) return false;
+    const year = (m.seasonYear as number) || 0;
+    const status = (m.status as string) || '';
+    // Always include currently releasing, even if year is unknown
+    if (status === 'RELEASING') return true;
+    // For finished shows, only accept 2024+
+    return year >= currentYear - 1;
+  });
   candidates.sort((a, b) => clientRecencyScore(b) - clientRecencyScore(a));
 
   // Shuffle within tiers so repeat visitors see a fresh rotation
@@ -511,26 +523,14 @@ async function fetchHeroAnime(): Promise<HeroAnime[]> {
     console.warn('[Hero] Kitsu failed:', err);
   }
 
-  // 6) Anime-Planet (if available)
-  try {
-    const data = await fetchFromAnimePlanet();
-    if (data.length > 0) {
-      console.log(`[Hero] ✅ ${data.length} anime from Anime-Planet`);
-      setCachedData(data, 'AnimePlanet');
-      return data;
-    }
-  } catch (err) {
-    console.warn('[Hero] Anime-Planet failed:', err);
-  }
-
-  // 7) Return cached data if available (app may be temporarily offline)
+  // 6) Return cached data if available (app may be temporarily offline)
   const cached = getCachedData();
   if (cached && cached.length > 0) {
     console.warn('[Hero] All sources failed, returning cached data');
     return cached;
   }
 
-  // 8) Return empty array instead of throwing to prevent UI crash
+  // 7) Return empty array instead of throwing to prevent UI crash
   console.warn('[Hero] All hero sources failed, returning empty array');
   return [];
 }

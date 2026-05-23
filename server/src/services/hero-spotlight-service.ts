@@ -45,7 +45,7 @@ const MAX_HERO = 20;
 const MAX_JIKAN_CALLS = 18;
 const MAX_MAL_CALLS = 36;
 const MAX_HERO_SCAN = 100;
-const SERVER_CACHE_MS = 60 * 60 * 1000; // 1 hour — seasonal data changes slowly
+const SERVER_CACHE_MS = 30 * 60 * 1000; // 30 min — refresh spotlight every 30 min for fresh content
 const JIKAN_GAP_MS = 380;
 const MAL_GAP_MS = 340;
 
@@ -310,7 +310,16 @@ export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
   sorted.sort((a, b) => recencyScore(b) - recencyScore(a));
 
   const useMal = Boolean(malClientId());
-  const pool = useMal ? sorted : sorted.filter((m) => anilistBannerUrl(m));
+  // Only include anime from 2025+ OR currently releasing — no legacy shows in spotlight
+  const pool = sorted.filter((m) => {
+    if (!anilistBannerUrl(m)) return false;
+    const year = (m.seasonYear as number) || 0;
+    const status = (m.status as string) || '';
+    // Always spotlight currently airing regardless of year
+    if (status === 'RELEASING') return true;
+    // For finished shows, only 2025 or newer
+    return year >= currentYear - 1;
+  });
   const out: HeroSpotlightAnime[] = [];
   let jikanCalls = 0;
   let malCalls = 0;
@@ -331,7 +340,6 @@ export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
       malCalls += 1;
       await new Promise((r) => setTimeout(r, MAL_GAP_MS));
       const mal = await fetchMalAnimeDetails(idMal);
-      if (mal?.bannerImage) banner = mal.bannerImage;
       if (mal?.synopsis && (isWeakSynopsis(desc) || mal.synopsis.length > desc.length + 30)) {
         desc = mal.synopsis;
       }

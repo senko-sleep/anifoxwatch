@@ -1,5 +1,5 @@
-const STATIC_CACHE = 'anistream-static-v3';
-const DYNAMIC_CACHE = 'anistream-dynamic-v3';
+const STATIC_CACHE = 'anistream-static-v4';
+const DYNAMIC_CACHE = 'anistream-dynamic-v4';
 
 const STATIC_ASSETS = [
   '/',
