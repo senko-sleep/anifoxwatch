@@ -41,6 +41,28 @@ export class AniwavesSource extends BaseAnimeSource {
         });
     }
 
+    private async fetchWithProxyFallback(urlPath: string, config: any = {}): Promise<any> {
+        try {
+            const response = await this.client.get(urlPath, config);
+            return response;
+        } catch (error: any) {
+            if (axios.isCancel(error) || error.name === 'AbortError') throw error;
+            logger.warn(`[Aniwaves] Direct fetch failed for ${urlPath}, trying allorigins proxy...`, undefined, this.name);
+            
+            let fullUrl = `${this.baseUrl}${urlPath}`;
+            if (config.params) {
+                const searchParams = new URLSearchParams(config.params);
+                fullUrl += `?${searchParams.toString()}`;
+            }
+            
+            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(fullUrl)}`;
+            return await axios.get(proxyUrl, {
+                signal: config.signal,
+                timeout: 25000
+            });
+        }
+    }
+
     // ============ CACHING ============
 
     private getCached<T>(key: string): T | null {
@@ -100,7 +122,7 @@ export class AniwavesSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const response = await this.client.get('/', {
+            const response = await this.fetchWithProxyFallback('/', {
                 timeout: 25000,
                 signal: options?.signal
             });
@@ -117,7 +139,7 @@ export class AniwavesSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const response = await this.client.get('/ajax/anime/search', {
+            const response = await this.fetchWithProxyFallback('/ajax/anime/search', {
                 params: { keyword: query },
                 signal: options?.signal
             });
@@ -150,7 +172,7 @@ export class AniwavesSource extends BaseAnimeSource {
 
         const slug = id.replace('aniwaves-', '');
         try {
-            const response = await this.client.get(`/watch/${slug}`, {
+            const response = await this.fetchWithProxyFallback(`/watch/${slug}`, {
                 signal: options?.signal,
                 headers: { 'Accept': 'text/html', 'X-Requested-With': undefined }
             });
@@ -198,7 +220,7 @@ export class AniwavesSource extends BaseAnimeSource {
 
         const id = animeId.replace('aniwaves-', '').split('-').pop() || '';
         try {
-            const response = await this.client.get(`/ajax/episode/list/${id}`, {
+            const response = await this.fetchWithProxyFallback(`/ajax/episode/list/${id}`, {
                 signal: options?.signal
             });
 
@@ -245,7 +267,7 @@ export class AniwavesSource extends BaseAnimeSource {
         const eps = epsPart || '';
 
         try {
-            const response = await this.client.get('/ajax/server/list', {
+            const response = await this.fetchWithProxyFallback('/ajax/server/list', {
                 params: { servers: id, eps: eps },
                 signal: options?.signal
             });
@@ -315,7 +337,7 @@ export class AniwavesSource extends BaseAnimeSource {
             }
 
             // Step 1: Get the embed URL
-            const response = await this.client.get('/ajax/sources', {
+            const response = await this.fetchWithProxyFallback('/ajax/sources', {
                 params: { id: targetServerId },
                 signal: options?.signal
             });
