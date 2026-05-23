@@ -7,4 +7,8 @@
 export const REGISTERED_SOURCE_NAMES: readonly string[] = [
     // ── VERIFIED WORKING ──────────────────────────────────────
     'Aniwaves',           // ✅ Primary: EchoVideo → burntburst45.store HLS
+
+    // ── HENTAI SOURCES ─────────────────────────────────────────
+    'AkiH',               // ✅ aki-h.com - Hentai streaming
+    'WatchHentai',        // ✅ watchhentai.net - Hentai streaming
 ];
