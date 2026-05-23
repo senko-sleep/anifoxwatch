@@ -1,6 +1,8 @@
 import {
     AnimeSource,
     AniwavesSource,
+    AkiHSource,
+    WatchHentaiSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -138,8 +140,13 @@ export class SourceManager {
         // ✅ PRIMARY (verified working)
         this.registerSource(new AniwavesSource());
 
+        // ✅ HENTAI SOURCES (for adult anime)
+        this.registerSource(new AkiHSource());
+        this.registerSource(new WatchHentaiSource());
+
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
+        console.log(`   Available sources: ${Array.from(this.sources.keys()).join(', ')}`);
 
         // Start health monitoring and perform initial health check
         this.startHealthMonitor();

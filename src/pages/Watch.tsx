@@ -240,23 +240,26 @@ const Watch = () => {
 
   // Initialize episode from URL or first episode (runs once on mount)
   useEffect(() => {
-    if (!episodes?.length || selectedEpisode) return;
+    if (!episodes?.length) return;
 
     const epParam = searchParams.get('ep');
+    let targetEpisode = null;
+    
     if (epParam) {
       const epNum = parseInt(epParam, 10);
-      const ep = episodes.find(e => e.number === epNum);
-      if (ep) {
-        setSelectedAnimeId(cleanAnimeId);
-        setSelectedEpisode(ep.id);
-        setSelectedEpisodeNum(ep.number);
-        return;
-      }
+      targetEpisode = episodes.find(e => e.number === epNum);
     }
-    // Default to first episode if no URL param
+    
+    // If no URL param or episode not found, use first episode
+    if (!targetEpisode) {
+      targetEpisode = episodes[0];
+    }
+    
+    // Always update selectedAnimeId and selectedEpisode (even if they were already set)
+    // This ensures they're always in sync when episodes change
     setSelectedAnimeId(cleanAnimeId);
-    setSelectedEpisode(episodes[0].id);
-    setSelectedEpisodeNum(episodes[0].number);
+    setSelectedEpisode(targetEpisode.id);
+    setSelectedEpisodeNum(targetEpisode.number);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodes, cleanAnimeId]);
 
