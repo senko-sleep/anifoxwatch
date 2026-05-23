@@ -4322,7 +4322,10 @@ export class SourceManager {
         // 1. In-memory cache (warm instances)
         const cachedMapping = this.anilistStreamingIdCache.get(anilistNumericId);
         if (cachedMapping && cachedMapping.timestamp > Date.now() - this.ANILIST_STREAMING_ID_TTL) {
-            return cachedMapping.streamingId;
+            const sid = cachedMapping.streamingId;
+            if (sid.startsWith('aniwaves-') || sid.startsWith('aniwave-') || sid.startsWith('9anime-')) {
+                return sid;
+            }
         }
 
         // 2. DB cache — persists across cold Vercel starts and prevents duplicate AniList calls
@@ -4331,7 +4334,7 @@ export class SourceManager {
         if (process.env.POSTGRES_URL) {
             try {
                 const dbCached = await AnimeCache.getSourcePreference(`anilist-${anilistNumericId}`);
-                if (dbCached && dbCached.startsWith('animekai-')) {
+                if (dbCached && (dbCached.startsWith('aniwaves-') || dbCached.startsWith('aniwave-') || dbCached.startsWith('9anime-'))) {
                     this.anilistStreamingIdCache.set(anilistNumericId, { streamingId: dbCached, timestamp: Date.now() });
                     console.log(`   💾 DB cache hit: anilist-${anilistNumericId} → ${dbCached}`);
                     return dbCached;
