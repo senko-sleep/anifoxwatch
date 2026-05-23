@@ -115,7 +115,7 @@ router.get('/resolve', async (req: Request, res: Response): Promise<void> => {
 
         const streamingId = await Promise.race([
             sourceManager.resolveAniListToStreamingId(numericId),
-            new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Resolve timeout')), 20000))
+            new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Resolve timeout')), 60000))
         ]);
         if (!streamingId) {
             res.status(404).json({ error: 'No streaming match found', id });

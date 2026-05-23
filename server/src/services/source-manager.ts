@@ -135,7 +135,7 @@ export class SourceManager {
     } as const;
 
     constructor() {
-        // ✅ PRIMARY (verified working): EchoVideo → burntburst45.store HLS
+        // ✅ PRIMARY (verified working)
         this.registerSource(new AniwavesSource());
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
@@ -4414,7 +4414,7 @@ export class SourceManager {
             try {
                 all = await Promise.race([
                     this.search(t, 1),
-                    new Promise<AnimeSearchResult>((_, reject) => setTimeout(() => reject(new Error('Search timeout')), 6000))
+                    new Promise<AnimeSearchResult>((_, reject) => setTimeout(() => reject(new Error('Search timeout')), 15000))
                 ]);
             } catch (err) {
                 console.log(`[SourceManager] resolveAniListToStreamingId search timeout for title: "${t}"`);
@@ -4652,7 +4652,7 @@ export class SourceManager {
                 try {
                     const searchResult = await this.executeReliably(source.name, 'search', 
                         (signal) => source.search(title, 1, {}, { signal }), 
-                        { timeout: 6000 }
+                        { timeout: 20000 }
                     );
                     const results = searchResult.results || [];
                     
