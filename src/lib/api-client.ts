@@ -670,10 +670,19 @@ class AnimeApiClient {
 
     async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
         const normalized = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
-        const [slugPart, epPart] = normalized.split('?ep=');
-        const qs = epPart ? `?ep=${epPart}` : '';
+        let slugPart = normalized;
+        let query = '';
+        if (normalized.includes('?ep=')) {
+            const parts = normalized.split('?ep=');
+            slugPart = parts[0];
+            query = `?ep=${parts[1]}`;
+        } else if (normalized.includes('&eps=')) {
+            const parts = normalized.split('&eps=');
+            slugPart = parts[0];
+            query = `?eps=${parts[1]}`;
+        }
         const response = await this.fetch<{ servers: EpisodeServer[] }>(
-            `/api/stream/servers/${encodeURIComponent(slugPart)}${qs}`
+            `/api/stream/servers/${encodeURIComponent(slugPart)}${query}`
         );
         return response.servers || [];
     }
@@ -682,14 +691,28 @@ class AnimeApiClient {
         // Split hianime-style "slug?ep=12345" — put `ep` as a real query param so
         // the path never contains %3F (Vercel returns 404 for encoded ? in paths).
         const normalized = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
-        const [slugPart, epPart] = normalized.split('?ep=');
+        let slugPart = normalized;
+        let epPart = '';
+        let epsPart = '';
+        
+        if (normalized.includes('?ep=')) {
+            const parts = normalized.split('?ep=');
+            slugPart = parts[0];
+            epPart = parts[1];
+        } else if (normalized.includes('&eps=')) {
+            const parts = normalized.split('&eps=');
+            slugPart = parts[0];
+            epsPart = parts[1];
+        }
+
         const params = new URLSearchParams();
         if (epPart) params.append('ep', epPart);
+        if (epsPart) params.append('eps', epsPart);
         if (server) params.append('server', server);
         if (category) params.append('category', category);
         // `ep_num`: catalog episode for cross-source + server HiAnime REST fallback when `?ep=` is a
         // non-numeric embed token (from `slug$ep=N$token=...` we still know N).
-        const epKey = epPart || '';
+        const epKey = epPart || epsPart || '';
         const looksLikeNumericAniwatchEp = /^\d+$/.test(epKey);
         const compoundCatalog = getCatalogEpisodeFromTokenCompound(episodeId);
         if (compoundCatalog != null) {
