@@ -1,5 +1,5 @@
-import { AkiHSource } from '../sources/akih-source';
-import { WatchHentaiSource } from '../sources/watchhentai-source';
+import { AkiHSource } from '../sources/akih-source.js';
+import { WatchHentaiSource } from '../sources/watchhentai-source.js';
 
 async function testAkiH() {
     console.log('=== Testing Aki-H Source ===\n');

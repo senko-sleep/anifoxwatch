@@ -1,5 +1,5 @@
-import { AkiHSource } from '../sources/akih-source';
-import { WatchHentaiSource } from '../sources/watchhentai-source';
+import { AkiHSource } from '../sources/akih-source.js';
+import { WatchHentaiSource } from '../sources/watchhentai-source.js';
 
 async function testAkiHStreaming() {
     console.log('=== Testing AkiH Streaming ===\n');
@@ -18,7 +18,7 @@ async function testAkiHStreaming() {
         
         if (streamingData.sources.length > 0) {
             console.log('\n✅ SUCCESS - Streaming sources found:');
-            streamingData.sources.forEach((s, i) => {
+            streamingData.sources.forEach((s: any, i: number) => {
                 console.log(`  ${i + 1}. Quality: ${s.quality}`);
                 console.log(`     URL: ${s.url}`);
                 console.log(`     M3U8: ${s.isM3U8}, DASH: ${s.isDASH}`);
@@ -46,7 +46,7 @@ async function testWatchHentaiStreaming() {
         
         if (streamingData.sources.length > 0) {
             console.log('\n✅ SUCCESS - Streaming sources found:');
-            streamingData.sources.forEach((s, i) => {
+            streamingData.sources.forEach((s: any, i: number) => {
                 console.log(`  ${i + 1}. Quality: ${s.quality}`);
                 console.log(`     URL: ${s.url}`);
                 console.log(`     M3U8: ${s.isM3U8}, DASH: ${s.isDASH}`);

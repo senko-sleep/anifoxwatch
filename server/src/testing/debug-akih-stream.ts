@@ -56,13 +56,13 @@ async function debugAkiH() {
     const hstorageMatches = html.match(/https?:\/\/hstorage[^\s"'<>]+\.mp4/gi);
     console.log(`HStorage URLs: ${hstorageMatches?.length || 0}`);
     if (hstorageMatches) {
-        hstorageMatches.slice(0, 5).forEach(u => console.log(`  ${u}`));
+        hstorageMatches.slice(0, 5).forEach((u: string) => console.log(`  ${u}`));
     }
     
     const anyMp4Matches = html.match(/https?:\/\/[^\s"'<>]+\.mp4/gi);
     console.log(`\nAny MP4 URLs: ${anyMp4Matches?.length || 0}`);
     if (anyMp4Matches) {
-        anyMp4Matches.slice(0, 10).forEach(u => console.log(`  ${u}`));
+        anyMp4Matches.slice(0, 10).forEach((u: string) => console.log(`  ${u}`));
     }
 }
 

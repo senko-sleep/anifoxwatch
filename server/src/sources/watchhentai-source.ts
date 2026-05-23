@@ -10,7 +10,7 @@ import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
 
-export class WatchHentaiSource extends BaseAnimeSource implements GenreAwareSource {
+export class WatchHentaiSource extends BaseAnimeSource {
     name = 'WatchHentai';
     baseUrl = 'https://watchhentai.net';
 
