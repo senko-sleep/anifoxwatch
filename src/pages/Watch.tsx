@@ -281,7 +281,6 @@ const Watch = () => {
     if (defaultServer) {
       console.log('[Watch] Auto-selecting default server:', defaultServer.name);
       setSelectedServer(defaultServer.name);
-      setUserPickedServer(true);
     }
   }, [servers, serversLoading, userPickedServer, audioType]);
 
@@ -514,12 +513,16 @@ const Watch = () => {
     : undefined;
   useEffect(() => {
     if (!episodes?.length || !selectedEpisode || !cleanAnimeId) return;
+    if (streamLoading || !(streamData?.sources?.length)) return;
     const idx = episodes.findIndex(e => e.id === selectedEpisode);
     if (idx >= 0 && idx < episodes.length - 1) {
       const next = episodes[idx + 1];
-      prefetchNext(cleanAnimeId, next.id, audioType, next.number, anilistIdForPrefetch);
+      const timeoutId = window.setTimeout(() => {
+        prefetchNext(cleanAnimeId, next.id, audioType, next.number, anilistIdForPrefetch);
+      }, 1500);
+      return () => window.clearTimeout(timeoutId);
     }
-  }, [episodes, selectedEpisode, cleanAnimeId, audioType, prefetchNext, anilistIdForPrefetch]);
+  }, [episodes, selectedEpisode, cleanAnimeId, audioType, prefetchNext, anilistIdForPrefetch, streamLoading, streamData]);
 
   // Helper: get/set per-anime audio preference
   const getAnimeAudioPref = useCallback((animeId: string): AudioType | null => {

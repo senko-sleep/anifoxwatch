@@ -1,6 +1,6 @@
 /**
  * Keep-Alive Utility
- * Pings the configured API `/health` periodically (visibility-aware, with backoff on failures).
+ * Pings the configured API `/api/health` periodically (visibility-aware, with backoff on failures).
  */
 
 import { apiUrl } from '@/lib/api-config';
@@ -24,7 +24,7 @@ export async function ping() {
   }).catch(() => {});
 
   try {
-    await pingUrl(apiUrl('/health'));
+    await pingUrl(apiUrl('/api/health'));
     consecutiveFailures = 0;
   } catch {
     consecutiveFailures++;

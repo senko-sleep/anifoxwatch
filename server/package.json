@@ -23,6 +23,7 @@
         "test:stream": "node testing/test-100-sources.js",
         "test:stream:smoke": "tsx testing/smoke-streaming.ts",
         "test:stream:cross": "tsx src/testing/cross-stream-test.ts",
+        "test:adult:anilist": "tsx testing/test-adult-anilist-stream.ts",
         "postinstall": "patch-package"
     },
     "dependencies": {

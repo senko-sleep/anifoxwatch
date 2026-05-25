@@ -340,7 +340,9 @@ class AnimeApiClient {
         if (isGet) {
             this.inflight.set(endpoint, promise);
             promise.catch(() => {});
-            promise.finally(() => this.inflight.delete(endpoint));
+            promise
+                .finally(() => this.inflight.delete(endpoint))
+                .catch(() => {});
         }
 
         return promise;

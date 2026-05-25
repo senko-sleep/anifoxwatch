@@ -658,7 +658,7 @@ export class SourceManager {
         // Score available sources
         for (const name of this.sourceOrder) {
             // Skip adult sources if excluded
-            if (excludeAdult && name === 'WatchHentai') continue;
+            if (excludeAdult && this.adultSourceNames.has(name)) continue;
             
             const source = this.sources.get(name);
             if (!source?.isAvailable) continue;
@@ -889,7 +889,7 @@ export class SourceManager {
         // Try sources in priority order
         for (const name of this.sourceOrder) {
             // Skip adult sources in general availability unless specifically requested (which is handled above)
-            if (name === 'WatchHentai') continue;
+            if (this.adultSourceNames.has(name)) continue;
 
             if (this.sources.has(name)) {
                 const source = this.sources.get(name)!;
@@ -899,7 +899,7 @@ export class SourceManager {
 
         // Fallback to any available source (excluding Adult)
         for (const [name, source] of this.sources.entries()) {
-            if (name === 'WatchHentai') continue;
+            if (this.adultSourceNames.has(name)) continue;
             if (source.isAvailable) return source;
         }
 
@@ -943,6 +943,7 @@ export class SourceManager {
         'aniwave-', 'aniwaves-', 'aniwatch-', 'allanime-', 'miruro-',
         'gogoorat-', 'wcofun-', 'animeheaven-', 'kaido-'
     ];
+    private readonly adultSourceNames = new Set(['AkiH', 'WatchHentai', 'Hanime']);
 
     /**
      * Consumet AnimeKai episode IDs (fetchAnimeInfo): "show-slug-suffix$ep=N$token=..."
@@ -960,6 +961,20 @@ export class SourceManager {
         const lowerId = id.toLowerCase();
         if (this.knownPrefixes.some(prefix => lowerId.startsWith(prefix))) return true;
         return this.isAnimeKaiConsumetEpisodeId(id);
+    }
+
+    private isAdultAnime(anime?: Partial<AnimeBase> | null): boolean {
+        if (!anime) return false;
+        const title = `${anime.title || ''} ${anime.titleEnglish || ''} ${anime.titleRomaji || ''}`.toLowerCase();
+        const id = String(anime.id || '').toLowerCase();
+        const genres = (anime.genres || []).map((g) => String(g).toLowerCase());
+        return (
+            id.startsWith('watchhentai-') ||
+            id.startsWith('akih-') ||
+            id.startsWith('hanime-') ||
+            title.includes('hentai') ||
+            genres.some((g) => ['hentai', 'adult', 'ecchi'].includes(g))
+        );
     }
 
     /**
@@ -1042,6 +1057,7 @@ export class SourceManager {
             'AnimeOwl': 'animeowl-',
             'AnimeLand': 'animeland-',
             'AnimeFreak': 'animefreak-',
+            'AkiH': 'akih-',
             'WatchHentai': 'watchhentai-',
             'Hanime': 'hanime-',
             'Miruro': 'miruro-'
@@ -1230,12 +1246,12 @@ export class SourceManager {
         // Mixed Mode: Search both Preferred/Selected source AND Adult sources, then merge
         if (mode === 'mixed') {
             const standardSources = this.sourceOrder
-                .filter(name => name !== 'WatchHentai')
+                .filter(name => !this.adultSourceNames.has(name))
                 .map(name => this.sources.get(name))
                 .filter(source => source && source.isAvailable)
                 .slice(0, 2) as StreamingSource[];
 
-            const adultSources = ['WatchHentai', 'Hanime']
+            const adultSources = ['WatchHentai', 'Hanime', 'AkiH']
                 .map(name => this.getAvailableSource(name))
                 .filter(source => source && source.isAvailable) as StreamingSource[];
 
@@ -1314,7 +1330,7 @@ export class SourceManager {
         }
 
         const sourcesToTry = this.sourceOrder
-            .filter(name => name !== 'WatchHentai')
+            .filter(name => !this.adultSourceNames.has(name))
             .map(name => this.sources.get(name))
             .filter(source => source && source.isAvailable)
             .slice(0, 3) as StreamingSource[];
@@ -1940,7 +1956,8 @@ export class SourceManager {
         // Build list of sources to try
         const isAdultContent = animeId.toLowerCase().startsWith('hh-') || 
                               animeId.toLowerCase().startsWith('hanime-') ||
-                              animeId.toLowerCase().startsWith('watchhentai-');
+                              animeId.toLowerCase().startsWith('watchhentai-') ||
+                              animeId.toLowerCase().startsWith('akih-');
 
         // If no known prefix, resolve to an AnimeKai ID via title search first.
         // Kaido streaming is unreliable (404s) so we prefer AnimeKai episode IDs.
@@ -2169,7 +2186,7 @@ export class SourceManager {
         // Primary source returned no episodes — try backup sources with converted IDs
         const rawId = this.extractRawId(animeId);
         const backupSourceNames = REGISTERED_SOURCE_NAMES.filter(
-            (name) => name !== primarySource.name && name !== 'WatchHentai' && name !== 'Hanime'
+            (name) => name !== primarySource.name && !this.adultSourceNames.has(name)
         );
         
         const strippedTitle = rawId.replace(/-\d+$/, '').replace(/[-_]/g, ' ').trim();
@@ -2754,7 +2771,7 @@ export class SourceManager {
             const allAnime: AnimeBase[] = [];
             const sortType = filters.sort || 'popularity';
 
-            const isAdultSource = ['WatchHentai', 'Hanime'].includes(source.name);
+            const isAdultSource = this.adultSourceNames.has(source.name);
 
             // Special Case 1: Genre-only browsing with source support (including adult sources)
             if (filters.genres && filters.genres.length > 0 && typeof (source as any).getByGenre === 'function') {
@@ -2834,9 +2851,9 @@ export class SourceManager {
             if (!isPaginatedResult) {
                 // Get backup sources to aggregate from - prioritize reliable streaming sources
                 // Skip backup sources for adult sources since they don't have adult content
-                const isAdultSource = ['WatchHentai', 'Hanime'].includes(source.name);
+                const isAdultSource = this.adultSourceNames.has(source.name);
                 const backupSourceNames = isAdultSource ? [] : REGISTERED_SOURCE_NAMES.filter(
-                    (n) => n !== source.name && n !== 'WatchHentai' && n !== 'Hanime'
+                    (n) => n !== source.name && !this.adultSourceNames.has(n)
                 );
                 const backupSources = backupSourceNames
                     .map(n => this.sources.get(n))
@@ -3161,7 +3178,8 @@ export class SourceManager {
         // Build list of sources to try - primary first, then all available sources
         const isAdultContent = episodeId.toLowerCase().startsWith('hh-') || 
                               episodeId.toLowerCase().startsWith('hanime-') ||
-                              episodeId.toLowerCase().startsWith('watchhentai-');
+                              episodeId.toLowerCase().startsWith('watchhentai-') ||
+                              episodeId.toLowerCase().startsWith('akih-');
 
         const sourcesToTry: StreamingSource[] = [];
 
@@ -3186,8 +3204,8 @@ export class SourceManager {
             // Backup sources: only names actually registered in the constructor (see REGISTERED_SOURCE_NAMES).
             const backupNames = REGISTERED_SOURCE_NAMES.filter((n) => n !== primarySource?.name);
             for (const name of backupNames) {
-                if (isAdultContent && name !== 'WatchHentai' && name !== 'Hanime') continue;
-                if (!isAdultContent && (name === 'WatchHentai' || name === 'Hanime')) continue;
+                if (isAdultContent && !this.adultSourceNames.has(name)) continue;
+                if (!isAdultContent && this.adultSourceNames.has(name)) continue;
                 const source = this.sources.get(name) as StreamingSource;
                 if (source?.isAvailable && source.getStreamingLinks && !sourcesToTry.includes(source)) {
                     sourcesToTry.push(source);
@@ -3249,6 +3267,12 @@ export class SourceManager {
                 const [aniwaves] = finalSources.splice(aniwavesIdx, 1);
                 finalSources.unshift(aniwaves);
             }
+        } else if (primarySource) {
+            const primaryIdx = finalSources.findIndex(s => s.name === primarySource.name);
+            if (primaryIdx > -1) {
+                const [primary] = finalSources.splice(primaryIdx, 1);
+                finalSources.unshift(primary);
+            }
         }
 
         if (isHianimeStyleEpisodeId(episodeId)) {
@@ -3293,7 +3317,7 @@ export class SourceManager {
                 return [...preferred, ...others, 'cross-source'];
             }
             
-            return [...sources, 'cross-source'];
+            return isAdultContent ? sources : [...sources, 'cross-source'];
         };
 
         if (finalSources.length === 0 && !isAnilistId) {
@@ -3501,7 +3525,8 @@ export class SourceManager {
             }
 
             // Cross-source title-based fallback
-            Promise.race([
+            if (pickOrder.includes('cross-source')) {
+                Promise.race([
                 this.crossSourceStreamingFallback(episodeId, server, category, episodeNum, anilistId, forcedTitle),
                 new Promise<StreamingData | null>((resolve) =>
                     setTimeout(() => resolve(null), CROSS_SOURCE_FALLBACK_MAX_MS),
@@ -3523,7 +3548,8 @@ export class SourceManager {
                     console.log(`   ❌ Cross-source fallback failed: ${(err as Error).message?.substring(0, 80)}`);
                     allResults.push({ source: 'cross-source', data: { sources: [], subtitles: [] } as StreamingData, success: false });
                 })
-                .finally(onDone);
+                    .finally(onDone);
+            }
 
         });
 
@@ -4325,7 +4351,7 @@ export class SourceManager {
         const cachedMapping = this.anilistStreamingIdCache.get(anilistNumericId);
         if (cachedMapping && cachedMapping.timestamp > Date.now() - this.ANILIST_STREAMING_ID_TTL) {
             const sid = cachedMapping.streamingId;
-            if (sid.startsWith('aniwaves-') || sid.startsWith('aniwave-') || sid.startsWith('9anime-')) {
+            if (this.hasKnownSourcePrefix(sid) && !sid.startsWith('anilist-')) {
                 return sid;
             }
         }
@@ -4336,7 +4362,7 @@ export class SourceManager {
         if (process.env.POSTGRES_URL) {
             try {
                 const dbCached = await AnimeCache.getSourcePreference(`anilist-${anilistNumericId}`);
-                if (dbCached && (dbCached.startsWith('aniwaves-') || dbCached.startsWith('aniwave-') || dbCached.startsWith('9anime-'))) {
+                if (dbCached && this.hasKnownSourcePrefix(dbCached) && !dbCached.startsWith('anilist-')) {
                     this.anilistStreamingIdCache.set(anilistNumericId, { streamingId: dbCached, timestamp: Date.now() });
                     console.log(`   💾 DB cache hit: anilist-${anilistNumericId} → ${dbCached}`);
                     return dbCached;
@@ -4346,8 +4372,9 @@ export class SourceManager {
 
         const anilistData = await anilistService.getAnimeById(anilistNumericId);
         if (!anilistData?.title) return null;
+        const includeAdultSources = this.isAdultAnime(anilistData);
 
-        const titlesToTry = [
+        const baseTitles = [
             anilistData.titleEnglish,
             anilistData.titleRomaji,
             anilistData.titleJapanese,
@@ -4355,6 +4382,16 @@ export class SourceManager {
         ]
             .filter((t): t is string => typeof t === 'string' && t.trim().length >= 2)
             .map((t) => t.trim());
+        const adultSearchAliases = includeAdultSources
+            ? baseTitles.flatMap((title) => {
+                const aliases = title
+                    .split(/\s*[:\-–—]\s*/)
+                    .map((part) => part.trim())
+                    .filter((part) => part.length >= 6 && part.length < title.length);
+                return aliases;
+            })
+            : [];
+        const titlesToTry = [...baseTitles, ...adultSearchAliases];
 
         const seen = new Set<string>();
         const uniqueTitles = titlesToTry.filter((t) => {
@@ -4376,7 +4413,7 @@ export class SourceManager {
         console.log(`   🔍 resolveAniListToStreamingId: Trying fast-path matching for ${uniqueTitles.length} titles...`);
         for (const t of uniqueTitles) {
             console.log(`   📡 Fast-path check: "${t}"`);
-            const match = await this.findStreamingAnimeByTitle(t, anilistData.type);
+            const match = await this.findStreamingAnimeByTitle(t, anilistData.type, { includeAdultSources });
             if (match?.id && !match.id.startsWith('anilist-')) {
                 console.log(`   ✅ Fast-path matched: "${t}" → ${match.id}`);
                 saveMapping(match.id);
@@ -4415,14 +4452,18 @@ export class SourceManager {
             let all: AnimeSearchResult | undefined;
             try {
                 all = await Promise.race([
-                    this.search(t, 1),
+                    this.search(t, 1, undefined, { mode: includeAdultSources ? 'adult' : 'safe' }),
                     new Promise<AnimeSearchResult>((_, reject) => setTimeout(() => reject(new Error('Search timeout')), 15000))
                 ]);
             } catch (err) {
                 console.log(`[SourceManager] resolveAniListToStreamingId search timeout for title: "${t}"`);
                 continue;
             }
-            const candidates = (all?.results || []).filter((r) => r?.id && !String(r.id).startsWith('anilist-'));
+            const candidates = (all?.results || []).filter((r) => {
+                const id = String(r?.id || '').toLowerCase();
+                if (!id || id.startsWith('anilist-')) return false;
+                return !includeAdultSources || id.startsWith('watchhentai-') || id.startsWith('akih-') || id.startsWith('hanime-');
+            });
             if (!candidates.length) continue;
 
             const best = candidates
@@ -4556,8 +4597,17 @@ export class SourceManager {
     /**
      * Find the best matching anime from search results
      */
-    private findBestMatch(title: string, results: AnimeBase[], animeType?: string): AnimeBase | null {
+    private findBestMatch(
+        title: string,
+        results: AnimeBase[],
+        animeType?: string,
+        options?: { includeAdultSources?: boolean }
+    ): AnimeBase | null {
         if (!results || results.length === 0) return null;
+        const includeAdultSources = options?.includeAdultSources === true;
+        const meaningfulWords = (value: string) =>
+            value.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+        const queryHead = meaningfulWords(title).slice(0, 4);
 
         // If only one result and it's a close match, use it
         if (results.length === 1) {
@@ -4575,6 +4625,13 @@ export class SourceManager {
 
         for (const anime of results) {
             let score = this.calculateSimilarity(title, anime.title);
+            if (includeAdultSources && queryHead.length >= 3) {
+                const candidateWords = new Set(meaningfulWords(anime.title));
+                const headMatches = queryHead.filter(w => candidateWords.has(w)).length;
+                if (headMatches >= 3) {
+                    score = Math.max(score, 0.72);
+                }
+            }
             
             // Boost when the result's type matches what we're looking for
             if (animeType && anime.type && anime.type === animeType) {
@@ -4621,21 +4678,28 @@ export class SourceManager {
      * Batch search for multiple anime titles at once
      * More efficient than searching individually
      */
-    async findStreamingAnimeByTitle(title: string, animeType?: string): Promise<AnimeBase | null> {
+    async findStreamingAnimeByTitle(
+        title: string,
+        animeType?: string,
+        options?: { includeAdultSources?: boolean }
+    ): Promise<AnimeBase | null> {
         try {
             console.log(`🔎 [SourceManager] Finding streaming match for AniList title: "${title}" (type: ${animeType || 'unknown'})`);
 
             // Check cache first
             // Use full normalised title — truncating to 30 chars caused "Season 4" to share
             // a cache key with the base title, returning the wrong season's search results.
-            const cacheKey = title.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+            const includeAdultSources = options?.includeAdultSources === true;
+            const cacheKey = `${includeAdultSources ? 'adult' : 'safe'}:${title.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()}`;
             const cached = this.searchCache.get(cacheKey);
             if (cached && cached.timestamp > Date.now() - this.SEARCH_CACHE_TTL) {
                 console.log(`   ✅ Using cached results for "${title}"`);
-                return this.findBestMatch(title, cached.results, animeType);
+                return this.findBestMatch(title, cached.results, animeType, { includeAdultSources });
             }
 
-            const sourceNamesToTry = animeType === 'Movie'
+            const sourceNamesToTry = includeAdultSources
+                ? ['AkiH', 'WatchHentai', 'Hanime']
+                : animeType === 'Movie'
                 ? ['Aniwaves', 'Gogoanime', 'AllAnime', '9Anime', 'GogoOrAt']
                 : ['Aniwaves', 'Gogoanime', 'AllAnime', '9Anime', 'GogoOrAt'];
             const sourcesToTry = sourceNamesToTry
@@ -4665,7 +4729,7 @@ export class SourceManager {
                             timestamp: Date.now()
                         });
 
-                        const match = this.findBestMatch(title, results, animeType);
+                        const match = this.findBestMatch(title, results, animeType, { includeAdultSources });
                         if (match) {
                             // Add prefix
                             if (!this.hasKnownSourcePrefix(match.id)) {
@@ -4674,12 +4738,12 @@ export class SourceManager {
 
                             const similarity = this.calculateSimilarity(title, match.title);
                             
-                            const hasEnoughEpisodeCoverage = animeType === 'Movie'
+                            const hasEnoughEpisodeCoverage = animeType === 'Movie' || animeType === 'OVA' || animeType === 'ONA' || animeType === 'Special'
                                 ? (match.episodes || 0) <= 1
                                 : (match.episodes || 0) > 1;
 
                             // If it's a very good match and has plausible episode coverage, we're done.
-                            if (similarity > 0.8 && hasEnoughEpisodeCoverage) {
+                            if ((includeAdultSources || similarity > 0.8) && hasEnoughEpisodeCoverage) {
                                 console.log(`   ✅ Found high-quality match on ${source.name}: ${match.title} (${match.id})`);
                                 return match;
                             }
