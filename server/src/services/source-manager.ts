@@ -147,9 +147,12 @@ export class SourceManager {
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
         console.log(`   Available sources: ${Array.from(this.sources.keys()).join(', ')}`);
-
-        // Start health monitoring and perform initial health check
-        this.startHealthMonitor();
+        
+        // Start health monitoring and perform initial health check (non-worker environments only)
+        const isWorker = typeof globalThis.WebSocketPair !== 'undefined' || (typeof process !== 'undefined' && process.env && (process.env.CF_PAGES || process.env.CF_WORKER || process.env.MINIFLARE));
+        if (!isWorker) {
+            this.startHealthMonitor();
+        }
 
         logger.info(`Initialized with ${this.sources.size} sources`, undefined, 'SourceManager');
     }

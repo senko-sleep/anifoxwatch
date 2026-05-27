@@ -65,10 +65,13 @@ export const episodesCache = new MemoryCache<any>(10 * 60 * 1000); // 10 minutes
 export const searchCache = new MemoryCache<any>(5 * 60 * 1000); // 5 minutes
 export const trendingCache = new MemoryCache<any>(2 * 60 * 1000); // 2 minutes
 
-// Cleanup expired entries every 5 minutes
-setInterval(() => {
-  animeCache.cleanup();
-  episodesCache.cleanup();
-  searchCache.cleanup();
-  trendingCache.cleanup();
-}, 5 * 60 * 1000);
+// Cleanup expired entries every 5 minutes in non-worker environments
+const isWorker = typeof globalThis.WebSocketPair !== 'undefined' || (typeof process !== 'undefined' && process.env && (process.env.CF_PAGES || process.env.CF_WORKER || process.env.MINIFLARE));
+if (!isWorker) {
+  setInterval(() => {
+    animeCache.cleanup();
+    episodesCache.cleanup();
+    searchCache.cleanup();
+    trendingCache.cleanup();
+  }, 5 * 60 * 1000);
+}

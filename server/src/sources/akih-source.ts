@@ -5,11 +5,12 @@
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import puppeteer from 'puppeteer';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
+
+let puppeteer: any = null;
 
 export class AkiHSource extends BaseAnimeSource {
     name = 'AkiH';
@@ -301,6 +302,11 @@ export class AkiHSource extends BaseAnimeSource {
 
             logger.info(`[AkiH] Fetching video page with Puppeteer: ${url}`);
 
+            if (!puppeteer) {
+                const puppeteerModuleName = 'puppeteer';
+                puppeteer = (await import(puppeteerModuleName)).default;
+            }
+            
             // Launch Puppeteer - try with or without sandbox
             const launchOptions: any = {
                 headless: true,

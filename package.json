@@ -1,8 +1,8 @@
 {
   "name": "anifoxwatch",
   "private": true,
-  "version": "1.0.0",
   "type": "module",
+  "version": "1.0.0",
   "main": "server/dist/index.js",
   "scripts": {
     "postinstall": "cd server && npm install && npm run build",
@@ -107,7 +107,7 @@
     "eslint": "^9.32.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
-    "firebase-tools": "^15.15.0",
+    "firebase-tools": "^15.18.0",
     "globals": "^15.15.0",
     "happy-dom": "^20.9.0",
     "jsdom": "^27.0.1",

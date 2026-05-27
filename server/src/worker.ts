@@ -35,6 +35,16 @@ app.use('*', async (c, next) => {
 // Health Check
 app.get('/health', (c) => c.json({
     status: 'healthy',
+    version: '1.0.0-worker',
+    environment: 'cloudflare-workers',
+    cacheBackend: 'in-memory',
+    timestamp: new Date().toISOString()
+}));
+
+// API Health (alias)
+app.get('/api/health', (c) => c.json({
+    status: 'healthy',
+    version: '1.0.0-worker',
     environment: 'cloudflare-workers',
     timestamp: new Date().toISOString()
 }));
@@ -171,7 +181,19 @@ app.get('/api/anime/genre/:genre', async (c) => {
 app.get('/api/anime/random', async (c) => {
     const source = c.req.query('source');
     try {
-        const data = await sourceManager.getRandomAnime(source as string | undefined);
+        let data = await sourceManager.getRandomAnime(source as string | undefined);
+
+        // Fallback: pick a random entry from AniList trending when all sources return null
+        if (!data) {
+            try {
+                const trending = await anilistService.getTrendingThisWeek(1, 50);
+                const pool = trending?.results ?? [];
+                if (pool.length > 0) {
+                    data = pool[Math.floor(Math.random() * pool.length)] as any;
+                }
+            } catch (_) { /* ignore */ }
+        }
+
         if (!data) return c.json({ error: 'No random anime found' }, 404);
         return c.json(data);
     } catch (e: any) {
@@ -408,37 +430,23 @@ app.get('/api/anime/browse', async (c) => {
         // Clean undefined
         Object.keys(filters).forEach(key => filters[key as keyof typeof filters] === undefined && delete filters[key as keyof typeof filters]);
 
-        const result = await sourceManager.browseAnime(filters);
-        return c.json(result);
+        const raw = await sourceManager.browseAnime(filters);
+
+        // Normalize: browseAnime returns { anime, totalPages, hasNextPage, totalResults }
+        // Expose as { results, ... } for frontend compatibility
+        return c.json({
+            results: raw.anime ?? [],
+            totalPages: raw.totalPages ?? 1,
+            hasNextPage: raw.hasNextPage ?? false,
+            totalResults: raw.totalResults ?? 0,
+            currentPage: filters.page ?? 1,
+            source: filters.source || 'default',
+        });
     } catch (e: any) {
         return c.json({ error: e.message }, 500);
     }
 });
 
-
-app.get('/api/anime/:id', async (c) => {
-    const id = c.req.param('id');
-    try {
-        // Decode ID
-        const decodedId = decodeURIComponent(id);
-        const data = await sourceManager.getAnime(decodedId);
-        if (!data) return c.json({ error: 'Anime not found' }, 404);
-        return c.json(data);
-    } catch (e: any) {
-        return c.json({ error: e.message }, 500);
-    }
-});
-
-app.get('/api/anime/:id/episodes', async (c) => {
-    const id = c.req.param('id');
-    try {
-        const decodedId = decodeURIComponent(id);
-        const data = await sourceManager.getEpisodes(decodedId);
-        return c.json({ episodes: data });
-    } catch (e: any) {
-        return c.json({ error: e.message }, 500);
-    }
-});
 
 // Query-based routes (for IDs with / characters)
 app.get('/api/anime', async (c) => {
@@ -456,6 +464,33 @@ app.get('/api/anime', async (c) => {
         return c.json(result);
     } catch (e: any) {
         return c.json({ error: e.message }, 500);
+    }
+});
+
+app.get('/api/anime/resolve', async (c) => {
+    const id = String(c.req.query('id') || '').trim();
+    const m = /^anilist-(\d+)$/i.exec(id);
+    if (!m) {
+        return c.json({ error: 'Query parameter "id" must be an AniList id (anilist-12345)' }, 400);
+    }
+    const numericId = parseInt(m[1], 10);
+    if (!Number.isFinite(numericId)) {
+        return c.json({ error: 'Invalid AniList id' }, 400);
+    }
+
+    try {
+        const streamingId = await Promise.race([
+            sourceManager.resolveAniListToStreamingId(numericId),
+            new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Resolve timeout')), 60000))
+        ]);
+        if (!streamingId) {
+            return c.json({ error: 'No streaming match found', id }, 404);
+        }
+
+        return c.json({ id, streamingId });
+    } catch (e: any) {
+        logger.error('Resolve failed', e);
+        return c.json({ error: e.message || 'Resolve failed' }, 500);
     }
 });
 
@@ -540,6 +575,46 @@ app.get('/api/anime/years', (c) => {
     return c.json({ years });
 });
 
+// Hero Spotlight — MUST be before /api/anime/:id wildcard
+app.get('/api/anime/hero-spotlight', async (c) => {
+    try {
+        const raw = await sourceManager.getTrending(1);
+        const list = Array.isArray(raw) ? raw : ((raw as any)?.results ?? []);
+        const source = Array.isArray(raw) ? 'SourceManager' : ((raw as any)?.source ?? 'default');
+        return c.json({ results: list.slice(0, 10), source });
+    } catch (e: any) {
+        return c.json({ results: [], source: 'fallback' });
+    }
+});
+
+app.get('/api/anime/:id/episodes', async (c) => {
+    const id = c.req.param('id');
+    try {
+        const decodedId = decodeURIComponent(id);
+        const data = await sourceManager.getEpisodes(decodedId);
+        return c.json({ episodes: data });
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
+app.get('/api/anime/:id', async (c) => {
+    const id = c.req.param('id');
+    // Validate: must be numeric or anilist-<number>
+    const decodedId = decodeURIComponent(id);
+    const isValid = /^\d+$/.test(decodedId) || /^anilist-\d+$/i.test(decodedId);
+    if (!isValid) {
+        return c.json({ error: `Invalid anime ID "${decodedId}" — must be a numeric ID` }, 400);
+    }
+    try {
+        const data = await sourceManager.getAnime(decodedId);
+        if (!data) return c.json({ error: 'Anime not found' }, 404);
+        return c.json(data);
+    } catch (e: any) {
+        return c.json({ error: e.message }, 500);
+    }
+});
+
 // ==========================================
 // Streaming Routes
 // ==========================================
@@ -587,21 +662,17 @@ app.get('/api/stream/watch/:episodeId', async (c) => {
                 }
             }
 
-            // Try fallback
-            if (tryAll && !server) {
-                // Priority: hd-2, hd-1, hd-3
-                const servers = ['hd-2', 'hd-1', 'hd-3'];
-                for (const srv of servers) {
-                    try {
-                        const data = await sourceManager.getStreamingLinks(episodeId, srv, category);
-                        if (data.sources?.length) {
-                            if (useProxy) {
-                                data.sources = data.sources.map((s: any) => ({ ...s, url: proxyUrl(s.url, proxyBase) }));
-                            }
-                            return c.json({ ...data, server: srv });
-                        }
-                    } catch (e) { continue; }
+            // Try default server fallback
+            try {
+                const data = await sourceManager.getStreamingLinks(episodeId, undefined, category);
+                if (data.sources?.length) {
+                    if (useProxy) {
+                        data.sources = data.sources.map((s: any) => ({ ...s, url: proxyUrl(s.url, proxyBase) }));
+                    }
+                    return c.json(data);
                 }
+            } catch (e) {
+                // Ignore and fall through to empty
             }
 
             // If we're here, we failed or found nothing
@@ -672,6 +743,18 @@ app.options('/api/stream/proxy', (c) => {
 });
 
 // ==========================================
+// Admin / Cache Status
+// ==========================================
+
+app.get('/api/admin/cache/status', (c) => {
+    return c.json({
+        enabled: true,
+        backend: 'in-memory',
+        kvBinding: 'not-bound',
+    });
+});
+
+// ==========================================
 // Sources Routes
 // ==========================================
 
@@ -712,6 +795,30 @@ app.post('/api/sources/preferred', async (c) => {
     }
 });
 
+
+// AniList GraphQL Proxy
+app.post('/api/anilist/graphql', async (c) => {
+    try {
+        const body = await c.req.text();
+        const res = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body,
+        });
+        const data = await res.json();
+        return c.json(data, res.status as any);
+    } catch (e: any) {
+        return c.json({ error: e.message }, 502);
+    }
+});
+
+// 404 catch-all
+app.all('*', (c) => c.json({
+    error: 'Not found',
+    path: c.req.path,
+    method: c.req.method,
+    hint: 'Use GET /api for a full list of available endpoints.',
+}, 404));
 
 // Cloudflare Workers Entrypoint
 export default {

@@ -54,10 +54,9 @@ function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>[
   const location = useLocation();
   const { isLandscape } = useBreakpoint();
 
-  // ✦ FIX 1: Filter out anime without a banner so the hero never falls back to a
-  //   portrait cover image (which caused the "chibi sticker sheet" bug).
+  // ✦ FIX 1: Filter to include anime with banner OR cover image for display
   const slides = useMemo(
-    () => heroAnime.filter(a => !!a.bannerImage),
+    () => heroAnime.filter(a => !!(a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large)),
     [heroAnime]
   );
 
@@ -150,36 +149,35 @@ function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>[
       aria-roledescription="carousel"
       aria-label="Featured anime"
     >
-      {/* ── Background slides ─────────────────────────────────── */}
-      {slides.map((a, i) => {
-        const bg = ensureHttps(a.bannerImage || '');
-        const isActive = i === idx;
-        const isPrev   = i === prevIdx;
-        if (!isActive && !isPrev) return null;
-        return (
-          <div
-            key={a.id}
-            className={cn(
-              'absolute inset-0 transition-opacity duration-[600ms] will-change-[opacity]',
-              isActive ? 'opacity-100 z-[1]' : 'opacity-0 z-[0]'
-            )}
-            aria-hidden={!isActive}
-          >
-            <img
-              src={bg}
-              alt=""
-              className="w-full h-full object-cover"
-              // ✦ FIX 3: 'center 30%' keeps character faces in frame better than
-              //   'center top' which crops heads on tall banners.
-              style={{ objectPosition: 'center 30%' }}
-              loading={i === 0 ? 'eager' : 'lazy'}
-              decoding="async"
-              referrerPolicy="no-referrer"
-              draggable={false}
-            />
-          </div>
-        );
-      })}
+{/* ── Background slides ─────────────────────────────────── */}
+       {slides.map((a, i) => {
+         const bg = ensureHttps(a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large || '');
+         const hasBanner = !!a.bannerImage;
+         const isActive = i === idx;
+         const isPrev   = i === prevIdx;
+         if (!isActive && !isPrev) return null;
+         return (
+           <div
+             key={a.id}
+             className={cn(
+               'absolute inset-0 transition-opacity duration-[600ms] will-change-[opacity]',
+               isActive ? 'opacity-100 z-[1]' : 'opacity-0 z-[0]'
+             )}
+             aria-hidden={!isActive}
+           >
+             <img
+               src={bg}
+               alt=""
+               className="w-full h-full object-cover"
+               style={{ objectPosition: hasBanner ? 'center 30%' : 'center top' }}
+               loading={i === 0 ? 'eager' : 'lazy'}
+               decoding="async"
+               referrerPolicy="no-referrer"
+               draggable={false}
+             />
+           </div>
+         );
+       })}
 
       {/* ── Gradient layers ─── */}
       <div className="pointer-events-none absolute inset-0 z-[2]">

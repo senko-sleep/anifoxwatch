@@ -26,6 +26,7 @@ export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [imgUseProxy, setImgUseProxy] = useState(false);
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
@@ -94,7 +95,7 @@ export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
                     {formatRating(current.rating)}
                   </span>
                 )}
-                {current.type && (
+                {current.type && current.type.toLowerCase() !== 'dub' && (
                   <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 text-white/80 text-sm">
                     <Film className="w-4 h-4" />
                     {current.type}
@@ -121,12 +122,37 @@ export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
                 </div>
               )}
 
-              {/* Description */}
-              {current.description && (
-                <p className="text-white/70 text-base lg:text-lg line-clamp-3 max-w-xl">
-                  {current.description.replace(/<[^>]*>/g, '').slice(0, 250)}...
-                </p>
-              )}
+               {/* Description */}
+               {current.description && (
+                 <div className="max-w-xl">
+                   <p 
+                     className={cn(
+                       "text-white/70 text-base lg:text-lg line-clamp-3",
+                       !isDescriptionExpanded && "line-clamp-3"
+                     )}
+                   >
+                     {current.description.replace(/<[^>]*>/g, '')}
+                   </p>
+                   {!isDescriptionExpanded && (
+                     <button 
+                       onClick={() => setIsDescriptionExpanded(true)}
+                       className="mt-2 text-xs text-fox-orange hover:text-fox-orange/80 font-medium"
+                     >
+                       Show more
+                     </button>
+                   )}
+                   {isDescriptionExpanded && (
+                     <div className="mt-2 flex justify-end">
+                       <button 
+                         onClick={() => setIsDescriptionExpanded(false)}
+                         className="text-xs text-fox-orange hover:text-fox-orange/80 font-medium"
+                       >
+                         Show less
+                       </button>
+                     </div>
+                   )}
+                 </div>
+               )}
 
               {/* Meta */}
               <div className="flex items-center gap-6 text-white/60 text-sm">

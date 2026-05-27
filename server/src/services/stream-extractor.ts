@@ -1,11 +1,6 @@
-/**
- * Stream Extractor Service
- * Uses puppeteer to extract actual working stream URLs from anime sites
- * by capturing network requests with valid tokens
- */
-
-import puppeteer, { Browser, Page } from 'puppeteer';
 import { logger } from '../utils/logger.js';
+
+let puppeteer: any = null;
 
 interface ExtractedStream {
     url: string;
@@ -22,13 +17,13 @@ interface ExtractionResult {
 }
 
 class StreamExtractor {
-    private browser: Browser | null = null;
-    private browserLaunchPromise: Promise<Browser> | null = null;
+    private browser: any = null;
+    private browserLaunchPromise: Promise<any> | null = null;
 
     /**
      * Get or create browser instance (singleton)
      */
-    private async getBrowser(): Promise<Browser> {
+    private async getBrowser(): Promise<any> {
         if (this.browser && this.browser.connected) {
             return this.browser;
         }
@@ -38,6 +33,10 @@ class StreamExtractor {
         }
 
         try {
+            if (!puppeteer) {
+                const puppeteerModuleName = 'puppeteer';
+                puppeteer = (await import(puppeteerModuleName)).default;
+            }
             const launchPromise = puppeteer.launch({
                 headless: true,
                 executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
@@ -56,7 +55,7 @@ class StreamExtractor {
 
             this.browserLaunchPromise = Promise.race([
                 launchPromise,
-                new Promise<Browser>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 15000))
+                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 15000))
             ]);
 
             this.browser = await this.browserLaunchPromise;
@@ -77,7 +76,7 @@ class StreamExtractor {
     /**
      * Create a new page with proper settings
      */
-    private async createPage(): Promise<Page> {
+    private async createPage(): Promise<any> {
         // Simple concurrency limit
         while (this.activePages >= this.MAX_CONCURRENT_PAGES) {
             await this.delay(500);
@@ -113,11 +112,12 @@ class StreamExtractor {
         const url = `${watchBaseUrl.replace(/\/$/, '')}/watch/${animeSlug}?ep=${episodeId}`;
         logger.info(`[StreamExtractor] Extracting from watch site (${watchBaseUrl}): ${url}`);
 
-        const page = await this.createPage();
+        let page: any = null;
         const streams: ExtractedStream[] = [];
         const subtitles: { url: string; lang: string }[] = [];
 
         try {
+            page = await this.createPage();
             // Enable request interception to capture m3u8 URLs
             await page.setRequestInterception(true);
 
@@ -280,8 +280,10 @@ class StreamExtractor {
                 error: error.message
             };
         } finally {
-            this.activePages--;
-            await page.close();
+            if (page) {
+                this.activePages--;
+                await page.close();
+            }
         }
     }
 
@@ -296,11 +298,12 @@ class StreamExtractor {
     async extractFromEmbed(embedUrl: string): Promise<ExtractionResult> {
         logger.info(`[StreamExtractor] Extracting from embed: ${embedUrl.substring(0, 80)}...`);
 
-        const page = await this.createPage();
+        let page: any = null;
         const streams: ExtractedStream[] = [];
         const subtitles: { url: string; lang: string }[] = [];
 
         try {
+            page = await this.createPage();
             await page.setRequestInterception(true);
 
             const capturedM3u8s = new Set<string>();
@@ -394,8 +397,10 @@ class StreamExtractor {
                 error: error.message
             };
         } finally {
-            this.activePages--;
-            await page.close();
+            if (page) {
+                this.activePages--;
+                await page.close();
+            }
         }
     }
 

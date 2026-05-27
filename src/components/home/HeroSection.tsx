@@ -33,11 +33,17 @@ function heroSynopsis(anime: HeroAnime): string {
 export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const { isMobile, isLandscape } = useBreakpoint();
 
-  // Filter out anime without a banner so the hero never falls back to a portrait cover image
-  const slides = useMemo(
-    () => heroAnime.filter((a) => !!a.bannerImage),
-    [heroAnime]
-  );
+/**
+ * Hero anime: Multi-source fallback system supporting AniList, Jikan (MAL), Kitsu, 
+ * Anime-Planet, and BFF trending. Works even when AniList is down.
+ * Must have either bannerImage or coverImage for display.
+ */
+
+// Filter: must have banner OR cover for hero display
+const slides = useMemo(
+  () => heroAnime.filter((a) => !!(a.bannerImage || a.coverImage?.extraLarge)),
+  [heroAnime]
+);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [prevIndex, setPrevIndex] = useState<number | null>(null);
@@ -234,10 +240,6 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                       {runtimeLabel}
                     </span>
                   )}
-                  <span className="hidden sm:inline-flex items-center gap-0.5 rounded-full border border-sky-500/25 bg-sky-950/30 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-300 sm:text-[11px]">
-                    <Captions className="h-2.5 w-2.5" />
-                    Sub
-                  </span>
                   {epCountLabel && (
                     <span className="hidden sm:inline-block rounded-full border border-white/[0.07] bg-white/[0.05] px-2 py-0.5 text-[10px] text-zinc-400 sm:text-[11px]">
                       {epCountLabel}
@@ -267,19 +269,9 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                   </div>
                 )}
 
-                {/* Synopsis — desktop only, scrollable */}
+                {/* Synopsis — desktop only, expandable */}
                 <div className="hidden sm:block relative max-w-[44ch] mt-0.5">
-                  <div
-                    className="overflow-y-auto pr-2 text-[12px] leading-relaxed text-zinc-400/90 sm:text-sm"
-                    style={{
-                      maxHeight: '4.5em',
-                      scrollbarWidth: 'thin',
-                      scrollbarColor: 'rgba(255,255,255,0.12) transparent',
-                    }}
-                  >
-                    <p>{synopsis}</p>
-                  </div>
-                  <div className="pointer-events-none absolute bottom-0 left-0 right-2 h-4 bg-gradient-to-t from-[#0c0e14]/80 to-transparent" />
+                  <SynopsisText synopsis={synopsis} />
                 </div>
 
                 {/* CTA buttons */}
@@ -431,13 +423,19 @@ function HeroSlideBg({
 }) {
   const candidates = useMemo(() => {
     const b = anime.bannerImage?.trim();
+    const c = anime.coverImage?.extraLarge?.trim() || anime.coverImage?.large?.trim();
     const out: string[] = [];
     if (b) {
       out.push(b);
       out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(b)}`);
     }
+    // Use cover image as fallback when no banner
+    if (c && !b) {
+      out.push(c);
+      out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(c)}`);
+    }
     return [...new Set(out.filter(Boolean))];
-  }, [anime.bannerImage]);
+  }, [anime.bannerImage, anime.coverImage]);
 
   const [srcIndex, setSrcIndex] = useState(0);
   useEffect(() => {
@@ -446,6 +444,7 @@ function HeroSlideBg({
 
   const src = candidates[srcIndex] || '';
   const hasBanner = Boolean(anime.bannerImage?.trim());
+  const hasCover = Boolean(anime.coverImage?.extraLarge || anime.coverImage?.large);
 
   return (
     <div
@@ -467,7 +466,7 @@ function HeroSlideBg({
           )}
           sizes="100vw"
           referrerPolicy="no-referrer"
-          style={{ objectPosition: hasBanner ? 'center 30%' : 'center 15%' }}
+          style={{ objectPosition: hasBanner ? 'center 30%' : hasCover ? 'center top' : 'center 15%' }}
           loading={idx < 3 ? 'eager' : 'lazy'}
           decoding="async"
           onError={() =>
@@ -476,6 +475,48 @@ function HeroSlideBg({
         />
       ) : (
         <div className="h-full w-full bg-zinc-950" />
+      )}
+    </div>
+  );
+}
+
+function SynopsisText({ synopsis }: { synopsis: string }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const checkOverflow = () => {
+      if (textRef.current) {
+        // Check if scrollHeight is greater than clientHeight (text is clamped)
+        setIsOverflowing(textRef.current.scrollHeight > textRef.current.clientHeight);
+      }
+    };
+
+    checkOverflow();
+    // Re-check on window resize
+    window.addEventListener('resize', checkOverflow);
+    return () => window.removeEventListener('resize', checkOverflow);
+  }, [synopsis]);
+
+  return (
+    <div className="relative">
+      <p
+        ref={textRef}
+        className={cn(
+          'text-[12px] leading-relaxed text-zinc-400/90 sm:text-sm transition-all duration-300',
+          !isExpanded && 'line-clamp-6'
+        )}
+      >
+        {synopsis}
+      </p>
+      {isOverflowing && (
+        <button
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="mt-1 text-[11px] font-medium text-fox-orange hover:text-fox-orange/80 transition-colors"
+        >
+          {isExpanded ? 'Show less' : 'Read more'}
+        </button>
       )}
     </div>
   );

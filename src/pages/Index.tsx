@@ -133,10 +133,10 @@ const Index = () => {
     <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-background to-background text-foreground font-sans">
       <Navbar />
 
-      {/* ── Hero ─────────────────────────────────────────────────────── */}
+{/* ── Hero ─────────────────────────────────────────────────────── */}
       {heroAnime.length > 0 ? (
         <HeroSection heroAnime={heroAnime} />
-      ) : isLoading ? (
+      ) : heroLoading ? (
         <section className="relative w-full sm:px-6 lg:px-8">
           <div className="mx-auto h-[340px] sm:h-[500px] w-full max-w-7xl animate-pulse sm:rounded-2xl bg-zinc-900/80" />
           <div className="mt-3 flex justify-center gap-2">
@@ -144,7 +144,15 @@ const Index = () => {
             <span className="text-[11px] text-muted-foreground">Loading spotlight…</span>
           </div>
         </section>
-      ) : null}
+      ) : (
+        <section className="relative w-full sm:px-6 lg:px-8">
+          <div className="mx-auto h-[200px] sm:h-[300px] w-full max-w-7xl shimmer sm:rounded-2xl" />
+          <div className="mt-3 flex justify-center gap-2">
+            <AlertCircle className="h-4 w-4 text-zinc-600" />
+            <span className="text-[11px] text-zinc-600">Spotlight unavailable</span>
+          </div>
+        </section>
+      )}
 
       {/* ── Error banner ──────────────────────────────────────────────── */}
       {trendingError && (

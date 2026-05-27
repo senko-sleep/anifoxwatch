@@ -1,16 +1,30 @@
-import pg from 'pg';
-const { Pool } = pg;
+let PoolClass: any = null;
 
-let pool: pg.Pool | null = null;
+// Edge-safe dynamic loading of pg module
+if (typeof process !== 'undefined' && process.env && process.env.POSTGRES_URL) {
+  try {
+    const pgModuleName = 'pg';
+    const pgModule = await import(pgModuleName);
+    PoolClass = pgModule.default?.Pool || pgModule.Pool;
+  } catch (e) {
+    console.error('[DB] Failed to load pg dynamically:', e);
+  }
+}
 
-export function getPool(): pg.Pool {
+let pool: any = null;
+
+export function getPool(): any {
   if (!pool) {
     const connectionString = process.env.POSTGRES_URL;
     if (!connectionString) {
       throw new Error('POSTGRES_URL environment variable is not set');
     }
     
-    pool = new Pool({
+    if (!PoolClass) {
+      throw new Error('Database pool could not be initialized: pg module is not available');
+    }
+    
+    pool = new PoolClass({
       connectionString,
       max: 5, // Reduced from 10 to prevent flooding
       idleTimeoutMillis: 10000, // Reduced from 30000 to release idle connections faster

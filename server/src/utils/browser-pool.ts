@@ -1,15 +1,18 @@
-
-import { Cluster } from 'puppeteer-cluster';
-import puppeteer from 'puppeteer';
+let Cluster: any = null;
 
 class BrowserPool {
-    private cluster: Cluster | null = null;
+    private cluster: any = null;
     private initialized = false;
 
     async init() {
         if (this.initialized) return;
         
         console.log('🚀 Initializing Puppeteer Cluster...');
+        if (!Cluster) {
+            const clusterModuleName = 'puppeteer-cluster';
+            const clusterModule = await import(clusterModuleName);
+            Cluster = clusterModule.Cluster;
+        }
         this.cluster = await Cluster.launch({
             concurrency: Cluster.CONCURRENCY_CONTEXT,
             maxConcurrency: 5,

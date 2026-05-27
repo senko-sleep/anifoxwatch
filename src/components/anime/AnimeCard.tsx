@@ -186,7 +186,7 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
           </>
         )}
 
-        {/* Top-left: type badge */}
+        {/* Top-left: type badge - always visible */}
         <div className="absolute top-1.5 left-1.5 z-10">
           <span className={cn(
             'text-[10px] font-semibold px-1.5 py-[3px] rounded-md text-white backdrop-blur-sm',
@@ -196,9 +196,9 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
           </span>
         </div>
 
-        {/* Top-right: rating */}
+        {/* Top-right: rating - only on hover */}
         {rating !== null && (
-          <div className="absolute top-1.5 right-1.5 z-10">
+          <div className="absolute top-1.5 right-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
             <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-white bg-black/60 backdrop-blur-sm px-1.5 py-[3px] rounded-md">
               <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
               {rating.toFixed(1)}
@@ -206,26 +206,9 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
           </div>
         )}
 
-        {/* Bottom-left: SUB / DUB badges */}
-        {(hasSub || hasDub) && (
-          <div className="absolute bottom-1.5 left-1.5 z-10 flex gap-1">
-            {hasSub && (
-              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-sky-300 bg-sky-950/80 backdrop-blur-sm px-1.5 py-[2px] rounded">
-                <Subtitles className="w-2.5 h-2.5" />
-                {anime.subCount}
-              </span>
-            )}
-            {hasDub && (
-              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-green-300 bg-green-950/80 backdrop-blur-sm px-1.5 py-[2px] rounded">
-                <Mic className="w-2.5 h-2.5" />
-                {anime.dubCount}
-              </span>
-            )}
-          </div>
-        )}
 
-        {/* Bottom-right: duration & airing indicator */}
-        <div className="absolute bottom-1.5 right-1.5 z-10 flex flex-col items-end gap-1">
+        {/* Bottom-right: duration & airing indicator - only on hover */}
+        <div className="absolute bottom-1.5 right-1.5 z-10 flex flex-col items-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
           {anime.duration && (
             <span className="px-1.5 py-[2px] rounded bg-black/70 backdrop-blur-md text-[9px] font-bold text-zinc-200 shadow-sm border border-white/5">
               {anime.duration}

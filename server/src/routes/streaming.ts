@@ -246,7 +246,9 @@ function setProtocolCache(domain: string, protocol: 'http' | 'https'): void {
 // Segment cache (in-memory LRU)
 // ---------------------------------------------------------------------------
 
-const SEGMENT_CACHE_MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+// MEMORY OPTIMIZATION: On Render/low-memory (512MB), use minimal cache; on high-memory, use more
+const IS_LOW_MEMORY = process.env.NODE_ENV === 'production' && !process.env.POSTGRES_URL;
+const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 2 * 1024 * 1024 : 50 * 1024 * 1024; // 2MB on Render, 50MB otherwise
 const SEGMENT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 interface SegmentCacheEntry { data: Buffer; contentType: string; fetchedAt: number; size: number; lastUsed: number }
@@ -289,7 +291,8 @@ function segmentCacheSet(url: string, data: Buffer, contentType: string): void {
 // ---------------------------------------------------------------------------
 
 const STREAM_CACHE_TTL = 8 * 60 * 1000; // 8 minutes
-const STREAM_CACHE_MAX = 200;
+// MEMORY OPTIMIZATION: Reduce cache on low-memory systems (Render free tier)
+const STREAM_CACHE_MAX = IS_LOW_MEMORY ? 20 : 200; // 20 entries on Render, 200 elsewhere
 
 interface StreamCacheEntry { data: any; expiresAt: number }
 const streamCache = new Map<string, StreamCacheEntry>();

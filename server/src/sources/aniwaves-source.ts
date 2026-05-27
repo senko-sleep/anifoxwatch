@@ -61,20 +61,23 @@ export class AniwavesSource extends BaseAnimeSource {
                 `https://corsproxy.io/?${encodeURIComponent(fullUrl)}`
             ];
 
-            let lastError: any;
-            for (const proxyUrl of proxies) {
+            const proxyPromises = proxies.map(async (proxyUrl) => {
                 try {
                     return await axios.get(proxyUrl, {
                         signal: config.signal,
-                        timeout: 15000 // Shorter timeout to fail fast and try next
+                        timeout: 5000 // Fast parallel timeout
                     });
-                } catch (proxyError: any) {
-                    lastError = proxyError;
+                } catch (error: any) {
                     logger.warn(`[Aniwaves] Proxy ${proxyUrl.split('/')[2]} failed`, undefined, this.name);
+                    throw error;
                 }
+            });
+
+            try {
+                return await Promise.any(proxyPromises);
+            } catch (aggregateError) {
+                throw new Error('All proxies failed for Aniwaves');
             }
-            
-            throw lastError;
         }
     }
 
