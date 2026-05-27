@@ -1054,7 +1054,7 @@ app.get('/api/anime/filter', (c) => {
   return app.fetch(
     new Request(c.req.url.replace('/api/anime/filter', '/api/anime/browse'), c.req.raw),
     c.env,
-    {} as ExecutionContext
+    {} as any
   );
 });
 
@@ -1403,7 +1403,7 @@ app.all('*', (c) =>
 // ---------------------------------------------------------------------------
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: any): Promise<Response> {
     return app.fetch(request, env, ctx);
   },
 };

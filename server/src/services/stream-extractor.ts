@@ -135,7 +135,7 @@ class StreamExtractor {
                 );
             };
 
-            page.on('request', (request) => {
+            page.on('request', (request: any) => {
                 const reqUrl = request.url();
 
                 if (looksLikeHls(reqUrl)) {
@@ -151,7 +151,7 @@ class StreamExtractor {
                 request.continue();
             });
 
-            page.on('response', async (response) => {
+            page.on('response', async (response: any) => {
                 const respUrl = response.url();
 
                 // Capture sources from API responses
@@ -161,7 +161,7 @@ class StreamExtractor {
                         // Try to extract m3u8 URLs from JSON response
                         const m3u8Matches = text.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g);
                         if (m3u8Matches) {
-                            m3u8Matches.forEach(url => capturedM3u8s.add(url));
+                            m3u8Matches.forEach((url: string) => capturedM3u8s.add(url));
                         }
                     } catch { }
                 }
@@ -196,7 +196,7 @@ class StreamExtractor {
             } catch { }
 
             // Try to get the iframe src and navigate to it directly
-            const iframeSrc = await page.$eval('iframe', (el) => el.src).catch(() => null);
+            const iframeSrc = await page.$eval('iframe', (el: any) => el.src).catch(() => null);
 
             if (iframeSrc && iframeSrc.includes('embed')) {
                 logger.info(`[StreamExtractor] Found embed iframe: ${iframeSrc.substring(0, 80)}...`);
@@ -206,7 +206,7 @@ class StreamExtractor {
 
                 await embedPage.setRequestInterception(true);
 
-                embedPage.on('request', (request) => {
+                embedPage.on('request', (request: any) => {
                     const reqUrl = request.url();
                     if (looksLikeHls(reqUrl)) {
                         capturedM3u8s.add(reqUrl);
@@ -308,7 +308,7 @@ class StreamExtractor {
 
             const capturedM3u8s = new Set<string>();
 
-            page.on('request', (request) => {
+            page.on('request', (request: any) => {
                 const reqUrl = request.url();
                 if (reqUrl.includes('.m3u8') && !reqUrl.includes('subtitles')) {
                     capturedM3u8s.add(reqUrl);
@@ -366,7 +366,7 @@ class StreamExtractor {
             const pageContent = await page.content();
             const m3u8Matches = pageContent.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/g);
             if (m3u8Matches) {
-                m3u8Matches.forEach(url => {
+                m3u8Matches.forEach((url: string) => {
                     if (!url.includes('subtitles')) {
                         capturedM3u8s.add(url);
                     }

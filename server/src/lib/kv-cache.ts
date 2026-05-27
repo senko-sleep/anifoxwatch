@@ -76,14 +76,14 @@ const memoryFallback = new InMemoryStore();
 // ---------------------------------------------------------------------------
 
 export class KVCache {
-  private kv: KVNamespace | undefined;
+  private kv: any | undefined;
   private enabled: boolean;
 
   /**
    * @param kv        Cloudflare KVNamespace binding (may be undefined locally)
    * @param enabled   Set to false to bypass all caching (useful for debug)
    */
-  constructor(kv: KVNamespace | undefined, enabled: boolean) {
+  constructor(kv: any | undefined, enabled: boolean) {
     this.kv = kv;
     this.enabled = enabled;
   }

@@ -326,7 +326,7 @@ export class AkiHSource extends BaseAnimeSource {
 
             // Intercept network requests to find video URLs
             const videoUrls: string[] = [];
-            page.on('response', async (response) => {
+            page.on('response', async (response: any) => {
                 const respUrl = response.url();
                 if (respUrl.includes('.mp4') || respUrl.includes('.m3u8') || respUrl.includes('hstorage')) {
                     logger.info(`[AkiH] Found video URL in network: ${respUrl.substring(0, 80)}...`);

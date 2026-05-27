@@ -66,7 +66,7 @@ export const searchCache = new MemoryCache<any>(5 * 60 * 1000); // 5 minutes
 export const trendingCache = new MemoryCache<any>(2 * 60 * 1000); // 2 minutes
 
 // Cleanup expired entries every 5 minutes in non-worker environments
-const isWorker = typeof globalThis.WebSocketPair !== 'undefined' || (typeof process !== 'undefined' && process.env && (process.env.CF_PAGES || process.env.CF_WORKER || process.env.MINIFLARE));
+const isWorker = typeof (globalThis as any).WebSocketPair !== 'undefined' || (typeof process !== 'undefined' && process.env && (process.env.CF_PAGES || process.env.CF_WORKER || process.env.MINIFLARE));
 if (!isWorker) {
   setInterval(() => {
     animeCache.cleanup();

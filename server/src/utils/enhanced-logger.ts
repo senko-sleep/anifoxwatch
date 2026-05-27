@@ -69,7 +69,7 @@ class EnhancedLogger {
         }
 
         // Log metrics every 5 minutes in production (non-worker environments only)
-        const isWorker = typeof globalThis.WebSocketPair !== 'undefined' || (typeof process !== 'undefined' && process.env && (process.env.CF_PAGES || process.env.CF_WORKER || process.env.MINIFLARE));
+        const isWorker = typeof (globalThis as any).WebSocketPair !== 'undefined' || (typeof process !== 'undefined' && process.env && (process.env.CF_PAGES || process.env.CF_WORKER || process.env.MINIFLARE));
         if (process.env.NODE_ENV === 'production' && !isWorker) {
             setInterval(() => this.logMetricsSummary(), 5 * 60 * 1000);
         }
