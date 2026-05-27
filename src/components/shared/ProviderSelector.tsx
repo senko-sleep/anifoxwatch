@@ -77,6 +77,7 @@ export const ALL_PROVIDERS_FLAT = [
   ...ALL_PROVIDERS.regional,
   ...ALL_PROVIDERS.backup,
   ...ALL_PROVIDERS.aggregator,
+  ...ALL_PROVIDERS.adult,
 ];
 
 interface ProviderHealth {

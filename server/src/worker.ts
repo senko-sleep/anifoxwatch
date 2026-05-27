@@ -21,16 +21,22 @@ const proxyUrl = (url: string, proxyBase: string): string => {
     return `${proxyBase}?url=${encodeURIComponent(url)}`;
 };
 
-// CORS
+// CORS — must use c.newResponse() so Hono serialises the context headers into
+// the returned Response. Using `new Response()` directly bypasses context headers
+// and causes preflight (OPTIONS) to arrive with no Access-Control-Allow-Origin.
 app.use('*', async (c, next) => {
     c.header('Access-Control-Allow-Origin', '*');
     c.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Range, X-Requested-With');
+    c.header('Access-Control-Max-Age', '86400');
     if (c.req.method === 'OPTIONS') {
-        return new Response(null, { status: 204 });
+        return c.newResponse(null, 204);
     }
     await next();
 });
+
+// Explicit OPTIONS pre-flight for the AniList GraphQL proxy
+app.options('/api/anilist/graphql', (c) => c.newResponse(null, 204));
 
 // Health Check
 app.get('/health', (c) => c.json({

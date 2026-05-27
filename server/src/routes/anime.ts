@@ -30,7 +30,12 @@ router.get('/search', async (req: Request, res: Response): Promise<void> => {
 
         const pageNum = parseInt(page as string, 10) || 1;
         const query = q.trim();
-        const searchMode = (mode as 'safe' | 'mixed' | 'adult');
+        let searchMode = (mode as 'safe' | 'mixed' | 'adult');
+
+        const adultSources = ['watchhentai', 'hanime', 'akih'];
+        if (source && adultSources.includes((source as string).toLowerCase())) {
+            searchMode = 'adult';
+        }
 
         logger.info(`🔍 Search: "${query}" page ${pageNum} source: ${source || 'auto'} mode: ${searchMode}`,
             { query, page: pageNum, source: source as string | undefined, mode: searchMode }, 'AnimeRoutes');
@@ -584,7 +589,15 @@ router.get('/browse', async (req: Request, res: Response): Promise<void> => {
 
         const genreParam = (genres as string) || (genre as string);
         const parsedGenres = genreParam ? genreParam.split(',').map(g => g.trim()) : [];
-        const browseMode = (mode as 'safe' | 'mixed' | 'adult');
+        let browseMode = (mode as 'safe' | 'mixed' | 'adult');
+
+        const adultSources = ['watchhentai', 'hanime', 'akih'];
+        const adultGenresSet = new Set(['hentai', 'ecchi', 'yaoi', 'yuri']);
+        if (source && adultSources.includes((source as string).toLowerCase())) {
+            browseMode = 'adult';
+        } else if (parsedGenres.some(g => adultGenresSet.has(g.toLowerCase()))) {
+            browseMode = 'adult';
+        }
 
         console.log(`[AnimeRoutes] 📋 Browse: type=${type || 'all'} genres=${parsedGenres.join(',') || 'none'} sort=${sort} mode=${browseMode}`);
 
