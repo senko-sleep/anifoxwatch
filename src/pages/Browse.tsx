@@ -313,8 +313,8 @@ const Browse = () => {
   const [shuffleBypass, setShuffleBypass] = useState(0);
   const hasSearchQuery = debouncedQuery.length >= 2;
 
-  // Load 150 items per page in infinite scroll with quick buffer for buttery smooth experience
-  const resultsPerPage = scrollMode === 'infinite' ? 150 : 25;
+  // Load fewer items per page but fetch earlier for truly instant endless feel without buffering
+  const resultsPerPage = scrollMode === 'infinite' ? 60 : 25;
 
   // In infinite mode, use infinitePage for API calls; in paginated mode, use page
   const apiPage = scrollMode === 'infinite' ? infinitePage : page;
@@ -456,7 +456,7 @@ const Browse = () => {
     if (scrollMode !== 'infinite' || !node) return;
 
     // Create new observer for buttery smooth infinite scroll with quick buffer
-    // threshold: 0.1 triggers earlier, 800px rootMargin preloads content well before scroll reaches bottom
+    // threshold: 0 triggers immediately, 2500px rootMargin preloads content WAY before scroll reaches bottom
     observerRef.current = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
@@ -468,7 +468,7 @@ const Browse = () => {
           });
         }
       },
-      { rootMargin: '800px', threshold: 0.1 }
+      { rootMargin: '2500px', threshold: 0 }
     );
 
     observerRef.current.observe(node);

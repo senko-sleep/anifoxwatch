@@ -149,7 +149,7 @@ export class AkiHSource extends BaseAnimeSource {
 
         try {
             const cleanId = id.replace(/^akih-/, '');
-            const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}`;
+            const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}/`;
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
@@ -200,7 +200,7 @@ export class AkiHSource extends BaseAnimeSource {
         
         try {
             // First try to fetch the episode page which contains video links
-            const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}`;
+            const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}/`;
             const response = await axios.get(url, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
                 signal: options?.signal,
@@ -211,14 +211,14 @@ export class AkiHSource extends BaseAnimeSource {
             const episodes: Episode[] = [];
             let episodeNum = 1;
 
-            // Extract video links from the episode page (links to /videos/)
+            // Extract video links from the episode page (links to /watch/)
             $('.live-thumbnail').each((_, el) => {
                 const $el = $(el);
                 const href = $el.attr('href') || '';
                 const title = $el.attr('title') || $el.find('.live-name a').text().trim();
                 
-                if (href.includes('/videos/')) {
-                    const videoId = href.replace(this.baseUrl, '').replace(/^\/videos\/|\/$/g, '');
+                if (href.includes('/watch/')) {
+                    const videoId = href.replace(this.baseUrl, '').replace(/^\/watch\/|\/$/g, '');
                     const epMatch = title.match(/Vol\s*(\d+)/i) || title.match(/Episode\s*(\d+)/i);
                     const num = epMatch ? parseInt(epMatch[1]) : episodeNum++;
                     
@@ -241,8 +241,8 @@ export class AkiHSource extends BaseAnimeSource {
                 const href = $el.attr('href') || '';
                 const text = $el.text().trim();
                 
-                if (href.includes('/videos/')) {
-                    const videoId = href.replace(this.baseUrl, '').replace(/^\/videos\/|\/$/g, '');
+                if (href.includes('/watch/')) {
+                    const videoId = href.replace(this.baseUrl, '').replace(/^\/watch\/|\/$/g, '');
                     const epMatch = text.match(/episode\s*(\d+)/i);
                     const num = epMatch ? parseInt(epMatch[1]) : episodeNum++;
                     
@@ -292,94 +292,600 @@ export class AkiHSource extends BaseAnimeSource {
         try {
             const cleanId = episodeId.replace(/^akih-(episode|video)\//, '');
             
-            // Build the video page URL
-            let url: string;
+            // Build the watch page URL
+            let watchUrl: string;
             if (cleanId.startsWith('http')) {
-                url = cleanId;
+                watchUrl = cleanId;
             } else {
-                url = `${this.baseUrl}/videos/${cleanId}/`;
+                watchUrl = `${this.baseUrl}/watch/${cleanId}/`;
             }
 
-            logger.info(`[AkiH] Fetching video page with Puppeteer: ${url}`);
+            logger.info(`[AkiH] Fetching watch page to extract video ID: ${watchUrl}`);
 
-            if (!puppeteer) {
-                const puppeteerModuleName = 'puppeteer';
-                puppeteer = (await import(puppeteerModuleName)).default;
+            // Step 1: Fetch the watch page HTML to find displayvideo(type, videoId) call
+            let embedUrl: string | null = null;
+            try {
+             const htmlRes = await axios.get(watchUrl, {
+                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                     timeout: 15000
+                 });
+                 // Try to find displayvideo with two numbers, capture the second one (video ID)
+                 let videoIdMatch = htmlRes.data.match(/displayvideo\s*\(\s*\d+\s*,\s*(\d+)\s*\)/);
+                 if (!videoIdMatch) {
+                     // Try to find displayvideo with at least one number (capture first number)
+                     videoIdMatch = htmlRes.data.match(/displayvideo\s*\(\s*(\d+)/);
+                 }
+                 if (videoIdMatch) {
+                     embedUrl = `${this.baseUrl}/video/${videoIdMatch[1]}/`;
+                     logger.info(`[AkiH] Found embed video URL: ${embedUrl}`);
+                 }
+            } catch (e: any) {
+                logger.warn(`[AkiH] Could not fetch watch page HTML: ${e.message}`);
+            }
+
+            // Step 2: NEW METHOD - Fetch the /e/ page which contains the streaming.aki.today iframe
+            logger.info(`[AkiH] Using new extraction method: fetch /e/ page for streaming.aki.today iframe`);
+            
+            // Extract the video ID from the episode ID
+            // Formats: akih-video/gVeegWqZIw, https://aki-h.com/videos/gVeegWqZIw/, or just gVeegWqZIw
+            let videoId = episodeId;
+            if (videoId.startsWith('akih-video/')) {
+                videoId = videoId.split('/')[1];
+            } else if (videoId.includes('aki-h.com/videos/')) {
+                const match = videoId.match(/videos\/([^\/]+)/);
+                if (match) videoId = match[1];
+            } else if (videoId.includes('aki-h.com/watch/')) {
+                const match = videoId.match(/watch\/([^\/]+)/);
+                if (match) videoId = match[1];
             }
             
-            // Launch Puppeteer - try with or without sandbox
-            const launchOptions: any = {
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
-                timeout: 30000
-            };
+            const ePageUrl = `https://v.aki-h.com/e/${videoId}`;
+            logger.info(`[AkiH] Fetching /e/ page: ${ePageUrl}`);
+            
+            // The /e/ page needs to be accessed with Referer from v.aki-h.com/v2/{embedVideoId}
+            // First, we need to get the embedVideoId from the watch page
+            let embedVideoId = '';
+            if (embedUrl) {
+                const embedIdMatch = embedUrl.match(/video\/(\d+)/);
+                if (embedIdMatch) {
+                    embedVideoId = embedIdMatch[1];
+                }
+            }
+            
+            const iframeReferer = embedVideoId ? `https://v.aki-h.com/v2/${embedVideoId}` : watchUrl;
+            logger.info(`[AkiH] Using iframe Referer: ${iframeReferer}`);
+            
+            try {
+                const ePageResponse = await axios.get(ePageUrl, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                        'Referer': iframeReferer,
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    },
+                    timeout: 15000
+                });
+                
+                logger.info(`[AkiH] /e/ page status: ${ePageResponse.status}, content length: ${ePageResponse.data.length}`);
+                
+                // Extract the streaming.aki.today iframe src
+                const iframeMatch = ePageResponse.data.match(/<iframe[^>]+src="(https:\/\/streaming\.aki\.today\/[^"]+)"/);
+                if (iframeMatch) {
+                    const streamingUrl = iframeMatch[1];
+                    logger.info(`[AkiH] ✅ Found streaming.aki.today iframe: ${streamingUrl}`);
+                    
+                    // Use Puppeteer to navigate to streaming.aki.today and extract direct stream URLs
+                    logger.info(`[AkiH] Using Puppeteer to extract direct stream URLs from streaming.aki.today`);
+                    
+                    if (!puppeteer) {
+                        const puppeteerModuleName = 'puppeteer-extra';
+                        puppeteer = (await import(puppeteerModuleName)).default;
+                        
+                        // Add stealth plugin
+                        const stealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+                        puppeteer.use(stealthPlugin());
+                    }
+                    
+                    const launchOptions: any = {
+                        headless: true,
+                        args: [
+                            '--no-sandbox',
+                            '--disable-setuid-sandbox',
+                            '--disable-dev-shm-usage',
+                            '--disable-gpu',
+                            '--disable-web-security',
+                            '--disable-features=IsolateOrigins,site-per-process',
+                            '--ignore-certificate-errors',
+                            '--ignore-ssl-errors',
+                            '--ignore-certificate-errors-spki-list'
+                        ],
+                        timeout: 30000
+                    };
+
+                    let streamBrowser = null;
+                    try {
+                        streamBrowser = await puppeteer.launch(launchOptions);
+                        const streamPage = await streamBrowser.newPage();
+                        await streamPage.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
+                        
+                        // Set extra HTTP headers
+                        await streamPage.setExtraHTTPHeaders({
+                            'Referer': watchUrl,
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        });
+                        
+                        // Intercept network requests to capture stream URLs
+                        const capturedStreamUrls: string[] = [];
+                        const blockedDomains = ['dtscout.com', 'histats.com', 'google-analytics.com', 'doubleclick.net', 'googlesyndication.com'];
+                        
+                        streamPage.on('request', (request: any) => {
+                            const url = request.url();
+                            // Block tracking domains
+                            if (blockedDomains.some(domain => url.includes(domain))) {
+                                request.abort();
+                            } else {
+                                request.continue();
+                            }
+                        });
+                        
+                        streamPage.on('response', async (response: any) => {
+                            const respUrl = response.url();
+                            
+                            // Capture actual video stream URLs
+                            if (
+                                (respUrl.includes('.m3u8') || respUrl.includes('.mp4') || respUrl.includes('stream') || respUrl.includes('hstorage')) &&
+                                !respUrl.includes('thumbnail') &&
+                                !respUrl.includes('googleapis') &&
+                                !respUrl.includes('.js') &&
+                                !respUrl.includes('.php') &&
+                                !blockedDomains.some(domain => respUrl.includes(domain))
+                            ) {
+                                logger.info(`[AkiH] Captured stream URL: ${respUrl.substring(0, 120)}`);
+                                capturedStreamUrls.push(respUrl);
+                            }
+                        });
+                        
+                        // Navigate to streaming.aki.today
+                        logger.info(`[AkiH] Navigating to streaming.aki.today: ${streamingUrl}`);
+                        await streamPage.goto(streamingUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+                        
+                        // Wait for video to load
+                        await new Promise(resolve => setTimeout(resolve, 8000));
+                        
+                        // Try to click play button to trigger stream loading
+                        try {
+                            await streamPage.evaluate(() => {
+                                const playButton = document.querySelector('button[aria-label*="play"], .play-btn, #play, [class*="play"]') as HTMLButtonElement;
+                                if (playButton) playButton.click();
+                                
+                                const video = document.querySelector('video') as HTMLVideoElement;
+                                if (video) video.play();
+                            });
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+                        } catch (e) {
+                            // Play attempt might fail, continue
+                        }
+                        
+                        // Extract stream URLs from page content
+                        const pageStreamSources = await streamPage.evaluate(() => {
+                            const sources: { url: string; quality: string; isM3U8: boolean; isDASH: boolean }[] = [];
+                            
+                            // Direct video elements
+                            document.querySelectorAll('video, video source').forEach((el: any) => {
+                                const src = el.src || el.currentSrc;
+                                if (src && src.startsWith('http') && !src.includes('javascript')) {
+                                    sources.push({ url: src, quality: 'auto', isM3U8: src.includes('.m3u8'), isDASH: src.includes('.mpd') });
+                                }
+                            });
+                            
+                            // Scan inline scripts for stream URLs
+                            document.querySelectorAll('script:not([src])').forEach(s => {
+                                const text = s.textContent || '';
+                                const urlPatterns = [
+                                    /["'](https?:\/\/[^"']+\.(m3u8|mp4))["']/g,
+                                    /["'](https?:\/\/[^"']+hstorage[^"']*)["']/g,
+                                    /["'](https?:\/\/[^"']+stream[^"']*)["']/g,
+                                    /url:\s*["'](https?:\/\/[^"']+)["']/g,
+                                    /file:\s*["'](https?:\/\/[^"']+)["']/g,
+                                    /src:\s*["'](https?:\/\/[^"']+)["']/g,
+                                    /"url":\s*"(https?:\/\/[^"]+)"/g,
+                                    /"file":\s*"(https?:\/\/[^"]+)"/g,
+                                ];
+                                
+                                for (const pattern of urlPatterns) {
+                                    const matches = text.match(pattern);
+                                    if (matches) {
+                                        matches.forEach(m => {
+                                            let url = m.replace(/^["']|["']$/g, '').replace(/^(url|file|src):\s*["']?|["']?$/g, '').replace(/^"url":\s*"|"$/g, '').replace(/^"file":\s*"|"$/g, '');
+                                            if (url.startsWith('http') && (url.includes('.m3u8') || url.includes('.mp4') || url.includes('hstorage') || url.includes('stream'))) {
+                                                sources.push({ url, quality: 'auto', isM3U8: url.includes('.m3u8'), isDASH: url.includes('.mpd') });
+                                            }
+                                        });
+                                    }
+                                }
+                            });
+                            
+                            // Try to extract from window/player objects
+                            try {
+                                const win = window as any;
+                                if (win.player && win.player.config && win.player.config.sources) {
+                                    win.player.config.sources.forEach((src: any) => {
+                                        if (src.file && src.file.startsWith('http')) {
+                                            sources.push({ url: src.file, quality: src.label || 'auto', isM3U8: src.file.includes('.m3u8'), isDASH: src.file.includes('.mpd') });
+                                        }
+                                    });
+                                }
+                                if (win.jwplayer && win.jwplayer().getConfig()) {
+                                    const config = win.jwplayer().getConfig();
+                                    if (config.sources) {
+                                        config.sources.forEach((src: any) => {
+                                            if (src.file && src.file.startsWith('http')) {
+                                                sources.push({ url: src.file, quality: src.label || 'auto', isM3U8: src.file.includes('.m3u8'), isDASH: src.file.includes('.mpd') });
+                                            }
+                                        });
+                                    }
+                                }
+                            } catch (e) {
+                                // Player extraction might fail
+                            }
+                            
+                            return sources;
+                        });
+                        
+                        // Combine network-captured URLs with page-extracted URLs
+                        const networkSources = capturedStreamUrls.map(u => ({
+                            url: u,
+                            quality: 'auto' as const,
+                            isM3U8: u.includes('.m3u8'),
+                            isDASH: u.includes('.mpd')
+                        }));
+                        
+                        const allSources = [...networkSources, ...pageStreamSources];
+                        
+                        // Filter out non-video files and aki-h.stream (returns webp segments, not playable)
+                        const videoSources = allSources.filter(s => 
+                            !s.url.includes('.css') && 
+                            !s.url.includes('.js') && 
+                            !s.url.includes('.png') && 
+                            !s.url.includes('.jpg') &&
+                            !s.url.includes('aki-h.stream') && // aki-h.stream returns webp segments, not video
+                            (s.url.includes('.m3u8') || s.url.includes('.mp4') || s.url.includes('hstorage'))
+                        );
+                        
+                        // Deduplicate
+                        const uniqueSources = videoSources.filter((s, i, self) => i === self.findIndex(x => x.url === s.url));
+                        
+                        if (streamBrowser) await streamBrowser.close();
+                        
+                        if (uniqueSources.length > 0) {
+                            logger.info(`[AkiH] ✅ Successfully extracted ${uniqueSources.length} direct stream URL(s) from streaming.aki.today`);
+                            const result: StreamingData = { 
+                                sources: uniqueSources, 
+                                subtitles: [], 
+                                source: this.name 
+                            };
+                            this.setCache(cacheKey, result, this.cacheTTL.stream);
+                            return result;
+                        } else {
+                            logger.warn(`[AkiH] Could not extract valid video stream URLs from streaming.aki.today (aki-h.stream returns webp segments), falling back to iframe`);
+                            
+                            // Fallback to iframe approach since direct extraction didn't work
+                            const iframeMatch = ePageResponse.data.match(/<iframe[^>]+src="(https:\/\/streaming\.aki\.today\/[^"]+)"/);
+                            if (iframeMatch) {
+                                const streamingUrl = iframeMatch[1];
+                                logger.info(`[AkiH] Returning streaming.aki.today iframe URL as fallback`);
+                                const result: StreamingData = { 
+                                    sources: [{ 
+                                        url: streamingUrl, 
+                                        quality: 'auto', 
+                                        isM3U8: false, 
+                                        isDASH: false,
+                                        isEmbed: true
+                                    }], 
+                                    subtitles: [], 
+                                    source: this.name 
+                                };
+                                this.setCache(cacheKey, result, this.cacheTTL.stream);
+                                return result;
+                            }
+                        }
+                    } catch (puppeteerError: any) {
+                        logger.warn(`[AkiH] Puppeteer extraction from streaming.aki.today failed: ${puppeteerError.message}`);
+                        if (streamBrowser) await streamBrowser.close();
+                    }
+                } else {
+                    logger.warn(`[AkiH] Could not find streaming.aki.today iframe in /e/ page`);
+                }
+            } catch (eError: any) {
+                logger.warn(`[AkiH] /e/ page extraction failed: ${eError.message}`);
+            }
+            
+            // Skip streaming.aki.today entirely due to connection/TLS issues
+            // Go directly to Puppeteer method to extract from Aki-H embed page
+            logger.info(`[AkiH] Skipping streaming.aki.today (connection/TLS issues), using Puppeteer to extract from Aki-H embed page`);
+            
+            // Step 3: Use Puppeteer with stealth mode on the embed /video/ URL for stream extraction
+            const targetUrl = embedUrl || watchUrl;
+            logger.info(`[AkiH] Launching Puppeteer with stealth mode to intercept stream from: ${targetUrl}`);
+
+             if (!puppeteer) {
+                 const puppeteerModuleName = 'puppeteer-extra';
+                 puppeteer = (await import(puppeteerModuleName)).default;
+                 
+                 // Add stealth plugin
+                 const stealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
+                 puppeteer.use(stealthPlugin());
+             }
+             
+             const launchOptions: any = {
+                 headless: true,
+                 args: [
+                     '--no-sandbox',
+                     '--disable-setuid-sandbox',
+                     '--disable-dev-shm-usage',
+                     '--disable-gpu',
+                     '--disable-web-security',
+                     '--disable-features=IsolateOrigins,site-per-process'
+                 ],
+                 timeout: 15000
+             };
 
             try {
                 browser = await puppeteer.launch(launchOptions);
             } catch (launchError: any) {
-                logger.warn(`[AkiH] Puppeteer launch with sandbox failed, trying simpler options: ${launchError.message}`);
+                logger.warn(`[AkiH] Puppeteer launch failed, retrying: ${launchError.message}`);
                 browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
             }
 
             const page = await browser.newPage();
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-            // Intercept network requests to find video URLs
+            // Step 4: Intercept ALL network requests for video URLs and API calls
             const videoUrls: string[] = [];
+            const apiResponses: string[] = [];
+            
             page.on('response', async (response: any) => {
                 const respUrl = response.url();
-                if (respUrl.includes('.mp4') || respUrl.includes('.m3u8') || respUrl.includes('hstorage')) {
-                    logger.info(`[AkiH] Found video URL in network: ${respUrl.substring(0, 80)}...`);
+                
+                // Intercept stream URLs
+                if (
+                    (respUrl.includes('.m3u8') || respUrl.includes('.mp4') || respUrl.includes('hstorage') || respUrl.includes('stream')) &&
+                    !respUrl.includes('thumbnail') &&
+                    !respUrl.includes('googleapis')
+                ) {
+                    logger.info(`[AkiH] Intercepted stream URL: ${respUrl.substring(0, 120)}`);
                     videoUrls.push(respUrl);
+                }
+                
+                // Intercept API responses that might contain stream data
+                if (respUrl.includes('api') || respUrl.includes('player') || respUrl.includes('video')) {
+                    try {
+                        const contentType = response.headers()['content-type'] || '';
+                        if (contentType.includes('application/json') || contentType.includes('text')) {
+                            const body = await response.text();
+                            if (body && body.length < 50000) { // Don't log huge responses
+                                apiResponses.push(body);
+                                logger.info(`[AkiH] Intercepted API response: ${respUrl.substring(0, 80)} (${body.length} chars)`);
+                            }
+                        }
+                    } catch (e) {
+                        // Ignore response read errors
+                    }
                 }
             });
 
-            // Navigate to the page
-            await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-            
-            // Wait for player container
-            await page.waitForSelector('#player_container', { timeout: 10000 }).catch(() => {});
-            
-            // Wait additional time for video to load
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            // Navigate to embed URL and wait longer for JavaScript to execute
+             await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 20000 });
+             await new Promise(resolve => setTimeout(resolve, 5000));
 
-            // Extract video sources from the page
-            const pageSources = await page.evaluate(() => {
+            // Try to click/play the video to trigger stream loading
+            try {
+                await page.evaluate(() => {
+                    // Try to find and click play button
+                    const playButton = document.querySelector('button[aria-label*="play"], .play-btn, #play, [class*="play"]');
+                    if (playButton) (playButton as any).click();
+                    
+                    // Try to find video element and trigger play
+                    const video = document.querySelector('video');
+                    if (video) (video as any).play();
+                });
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            } catch (e) {
+                // Play attempt might fail, continue
+            }
+
+            // Step 3.5: Try to extract stream URL from initial page WITHOUT navigating to iframe (iframe is 403 blocked)
+            const pageSources: VideoSource[] = await page.evaluate(() => {
                 const foundSources: { url: string; quality: string; isM3U8: boolean; isDASH: boolean }[] = [];
                 
-                // Try to find video elements
-                const videos = document.querySelectorAll('video');
-                videos.forEach(video => {
-                    const src = video.src || video.currentSrc;
-                    if (src && src !== 'javascript:false') {
-                        foundSources.push({
-                            url: src,
-                            quality: 'auto',
-                            isM3U8: src.includes('.m3u8'),
-                            isDASH: src.includes('.mpd')
-                        });
+                // Direct video elements
+                document.querySelectorAll('video, video source').forEach((el: any) => {
+                    const src = el.src || el.currentSrc;
+                    if (src && src.startsWith('http') && !src.includes('javascript')) {
+                        foundSources.push({ url: src, quality: 'auto', isM3U8: src.includes('.m3u8'), isDASH: src.includes('.mpd') });
                     }
                 });
 
-                // Try to find in player-wrapper data attributes
-                const playerWrapper = document.querySelector('#player-wrapper');
-                if (playerWrapper) {
-                    const dv = (playerWrapper as any).dataset.video;
-                    const dp = (playerWrapper as any).dataset.player;
-                    if (dv) foundSources.push({ url: dv, quality: 'auto', isM3U8: dv.includes('.m3u8'), isDASH: dv.includes('.mpd') });
-                    if (dp) foundSources.push({ url: dp, quality: 'auto', isM3U8: dp.includes('.m3u8'), isDASH: dp.includes('.mpd') });
+                // Try to execute displayvideo function if it exists
+                if ((window as any).displayvideo) {
+                    try {
+                        // Call displayvideo with common parameters to see if it returns a URL
+                        const result = (window as any).displayvideo(1, 1);
+                        if (result && typeof result === 'string' && result.startsWith('http')) {
+                            foundSources.push({ url: result, quality: 'auto', isM3U8: result.includes('.m3u8'), isDASH: result.includes('.mpd') });
+                        }
+                    } catch (e) {
+                        // Function might not be callable this way
+                    }
                 }
 
-                // Look for iframe sources
-                const iframes = document.querySelectorAll('iframe');
-                iframes.forEach(iframe => {
-                    const src = (iframe as HTMLIFrameElement).src;
-                    if (src && src !== 'javascript:false') {
-                        foundSources.push({
-                            url: src,
-                            quality: 'auto',
-                            isM3U8: src.includes('.m3u8'),
-                            isDASH: src.includes('.mpd')
+                // Scan inline scripts for m3u8/mp4 URLs - look for any URL patterns
+                document.querySelectorAll('script:not([src])').forEach(s => {
+                    const text = s.textContent || '';
+                    // Try multiple patterns for URLs
+                    const urlPatterns = [
+                        /["'](https?:\/\/[^"']+\.(m3u8|mp4))["']/g,
+                        /["'](https?:\/\/[^"']+hstorage[^"']*)["']/g,
+                        /["'](https?:\/\/[^"']+stream[^"']*)["']/g,
+                        /url:\s*["'](https?:\/\/[^"']+)["']/g,
+                        /file:\s*["'](https?:\/\/[^"']+)["']/g,
+                        /src:\s*["'](https?:\/\/[^"']+)["']/g,
+                    ];
+                    
+                    for (const pattern of urlPatterns) {
+                        const matches = text.match(pattern);
+                        if (matches) {
+                            matches.forEach(m => {
+                                const url = m.replace(/^["']|["']$/g, '').replace(/^(url|file|src):\s*["']?|["']?$/g, '');
+                                if (url.startsWith('http') && (url.includes('.m3u8') || url.includes('.mp4') || url.includes('hstorage') || url.includes('stream'))) {
+                                    foundSources.push({ url, quality: 'auto', isM3U8: url.includes('.m3u8'), isDASH: url.includes('.mpd') });
+                                }
+                            });
+                        }
+                    }
+                });
+
+                return foundSources;
+            });
+
+            // Also parse API responses for stream URLs
+            for (const apiBody of apiResponses) {
+                try {
+                    const urlPatterns = [
+                        /https?:\/\/[^\s"']+\.(m3u8|mp4)/g,
+                        /https?:\/\/[^\s"']+hstorage[^\s"']*/g,
+                        /https?:\/\/[^\s"']+stream[^\s"']*/g,
+                    ];
+                    
+                    for (const pattern of urlPatterns) {
+                        const matches = apiBody.match(pattern);
+                        if (matches) {
+                            matches.forEach(url => {
+                                if (url.startsWith('http') && (url.includes('.m3u8') || url.includes('.mp4') || url.includes('hstorage') || url.includes('stream'))) {
+                                    pageSources.push({
+                                        url: url,
+                                        quality: 'auto',
+                                        isM3U8: url.includes('.m3u8'),
+                                        isDASH: url.includes('.mpd')
+                                    });
+                                    logger.info(`[AkiH] Found stream URL in API response: ${url.substring(0, 80)}`);
+                                }
+                            });
+                        }
+                    }
+                } catch (e) {
+                    // JSON parse errors are okay
+                }
+            }
+
+            // If we found sources on the initial page, return them
+            if (pageSources.length > 0) {
+                logger.info(`[AkiH] Found ${pageSources.length} stream source(s) from initial page/API (no iframe navigation)`);
+                const result: StreamingData = { sources: pageSources, subtitles: [], source: this.name };
+                this.setCache(cacheKey, result, this.cacheTTL.stream);
+                if (browser) await browser.close();
+                return result;
+            }
+
+            // Step 3.6: If no sources found, try fetching iframe directly with axios (bypass Puppeteer detection)
+            const iframeSrc = await page.evaluate(() => {
+                const iframe = document.querySelector('iframe[src*="v.aki-h.com"]');
+                return iframe ? (iframe as any).src : null;
+            });
+
+            if (iframeSrc) {
+                logger.info(`[AkiH] No sources on initial page, attempting iframe fetch with axios (debug showed this returns 200): ${iframeSrc}`);
+                try {
+                    const iframeResponse = await axios.get(iframeSrc, {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                            'Referer': watchUrl,
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                        },
+                        timeout: 15000
+                    });
+                    
+                    logger.info(`[AkiH] Iframe fetch status: ${iframeResponse.status}, content length: ${iframeResponse.data.length}`);
+                    
+                    // Parse iframe HTML for stream URLs
+                    const $iframe = cheerio.load(iframeResponse.data);
+                    const iframeSources: VideoSource[] = [];
+                    
+                    // Check for video elements
+                    $iframe('video, video source').each((_, el) => {
+                        const src = $iframe(el).attr('src') || $iframe(el).attr('data-src');
+                        if (src && src.startsWith('http')) {
+                            iframeSources.push({
+                                url: src,
+                                quality: 'auto',
+                                isM3U8: src.includes('.m3u8'),
+                                isDASH: src.includes('.mpd')
+                            });
+                            logger.info(`[AkiH] Found video element: ${src.substring(0, 80)}`);
+                        }
+                    });
+                    
+                    // Scan scripts for URLs
+                    $iframe('script').each((_, el) => {
+                        const text = $iframe(el).html() || '';
+                        const urlPatterns = [
+                            /["'](https?:\/\/[^"']+\.(m3u8|mp4))["']/g,
+                            /["'](https?:\/\/[^"']+hstorage[^"']*)["']/g,
+                            /["'](https?:\/\/[^"']+stream[^"']*)["']/g,
+                        ];
+                        
+                        for (const pattern of urlPatterns) {
+                            const matches = text.match(pattern);
+                            if (matches) {
+                                matches.forEach(m => {
+                                    const url = m.replace(/^["']|["']$/g, '');
+                                    if (url.startsWith('http') && (url.includes('.m3u8') || url.includes('.mp4') || url.includes('hstorage') || url.includes('stream'))) {
+                                        iframeSources.push({
+                                            url,
+                                            quality: 'auto',
+                                            isM3U8: url.includes('.m3u8'),
+                                            isDASH: url.includes('.mpd')
+                                        });
+                                        logger.info(`[AkiH] Found stream URL in script: ${url.substring(0, 80)}`);
+                                    }
+                                });
+                            }
+                        }
+                    });
+                    
+                    if (iframeSources.length > 0) {
+                        logger.info(`[AkiH] Found ${iframeSources.length} stream source(s) from iframe axios fetch`);
+                        const result: StreamingData = { sources: iframeSources, subtitles: [], source: this.name };
+                        this.setCache(cacheKey, result, this.cacheTTL.stream);
+                        if (browser) await browser.close();
+                        return result;
+                    } else {
+                        logger.info(`[AkiH] No stream URLs found in iframe HTML (length: ${iframeResponse.data.length})`);
+                    }
+                } catch (e: any) {
+                    logger.warn(`[AkiH] Iframe axios fetch failed: ${e.message}`);
+                }
+            }
+
+            // Step 4: Extract video src from the page directly
+            const iframePageSources: VideoSource[] = await page.evaluate(() => {
+                const foundSources: { url: string; quality: string; isM3U8: boolean; isDASH: boolean }[] = [];
+                
+                // Direct video elements
+                document.querySelectorAll('video, video source').forEach((el: any) => {
+                    const src = el.src || el.currentSrc;
+                    if (src && src.startsWith('http') && !src.includes('javascript')) {
+                        foundSources.push({ url: src, quality: 'auto', isM3U8: src.includes('.m3u8'), isDASH: src.includes('.mpd') });
+                    }
+                });
+
+                // Scan inline scripts for m3u8/mp4 URLs
+                document.querySelectorAll('script:not([src])').forEach(s => {
+                    const text = s.textContent || '';
+                    const matches = text.match(/["'](https?:\/\/[^"']+\.(m3u8|mp4)[^"']*)["']/g);
+                    if (matches) {
+                        matches.forEach(m => {
+                            const url = m.replace(/^["']|["']$/g, '');
+                            foundSources.push({ url, quality: 'auto', isM3U8: url.includes('.m3u8'), isDASH: false });
                         });
                     }
                 });
@@ -387,26 +893,29 @@ export class AkiHSource extends BaseAnimeSource {
                 return foundSources;
             });
 
-            // Combine all sources
-            const allSources = [...(pageSources as VideoSource[]), ...videoUrls.map(url => ({
-                url,
+            // Combine: network-intercepted URLs take priority
+            const networkSources = videoUrls.map(u => ({
+                url: u,
                 quality: 'auto' as const,
-                isM3U8: url.includes('.m3u8'),
-                isDASH: url.includes('.mpd')
-            }))];
+                isM3U8: u.includes('.m3u8'),
+                isDASH: u.includes('.mpd')
+            }));
 
-            // Deduplicate
-            const uniqueSources = allSources.filter((s, i, self) => 
-                i === self.findIndex(x => x.url === s.url)
-            );
+            const allSources = [...networkSources, ...iframePageSources];
+
+            // Deduplicate and strip non-playable iframe wrapper URLs
+            const uniqueSources = allSources
+                .filter(s => !s.url.match(/\/video\/\d+\/?$/) || s.isM3U8 || s.url.includes('.mp4'))
+                .filter((s, i, self) => i === self.findIndex(x => x.url === s.url));
 
             if (uniqueSources.length > 0) {
+                logger.info(`[AkiH] Found ${uniqueSources.length} stream source(s)`);
                 const result: StreamingData = { sources: uniqueSources, subtitles: [], source: this.name };
                 this.setCache(cacheKey, result, this.cacheTTL.stream);
                 return result;
             }
 
-            logger.warn(`[AkiH] No stream URL found for ${url}`);
+            logger.warn(`[AkiH] No stream URL found for ${watchUrl}`);
             return { sources: [], subtitles: [], source: this.name };
 
         } catch (error) {

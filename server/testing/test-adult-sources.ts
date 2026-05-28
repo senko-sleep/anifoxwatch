@@ -7,7 +7,7 @@
  * - Streaming links
  */
 import { WatchHentaiSource } from '../src/sources/watchhentai-source.js';
-import { HanimeSource } from '../src/sources/hanime-source.js';
+import { AkiHSource } from '../src/sources/akih-source.js';
 
 interface TestResult {
     source: string;
@@ -156,7 +156,7 @@ async function runAllTests() {
     console.log(`Started: ${new Date().toISOString()}`);
 
     const watchHentai = new WatchHentaiSource();
-    const hanime = new HanimeSource();
+    const akih = new AkiHSource();
 
     await testSource(watchHentai);
     await testSource(hanime);
@@ -167,16 +167,16 @@ async function runAllTests() {
     console.log('═'.repeat(60));
 
     const watchHentaiResults = results.filter(r => r.source === 'WatchHentai');
-    const hanimeResults = results.filter(r => r.source === 'Hanime');
+    const akihResults = results.filter(r => r.source === 'AkiH');
 
     const whPassed = watchHentaiResults.filter(r => r.passed).length;
     const whTotal = watchHentaiResults.length;
-    const hPassed = hanimeResults.filter(r => r.passed).length;
-    const hTotal = hanimeResults.length;
+    const aPassed = akihResults.filter(r => r.passed).length;
+    const aTotal = akihResults.length;
 
     console.log(`\nWatchHentai: ${whPassed}/${whTotal} tests passed (${Math.round(whPassed/whTotal*100)}%)`);
-    console.log(`Hanime:      ${hPassed}/${hTotal} tests passed (${Math.round(hPassed/hTotal*100)}%)`);
-    console.log(`\nTotal:       ${whPassed + hPassed}/${whTotal + hTotal} tests passed`);
+    console.log(`AkiH:        ${aPassed}/${aTotal} tests passed (${Math.round(aPassed/aTotal*100)}%)`);
+    console.log(`\nTotal:       ${whPassed + aPassed}/${whTotal + aTotal} tests passed`);
 
     // Failed tests
     const failed = results.filter(r => !r.passed);

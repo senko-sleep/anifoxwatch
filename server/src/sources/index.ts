@@ -6,3 +6,4 @@ export { AniwavesSource } from './aniwaves-source.js';
 // Hentai sources - adult anime content
 export { AkiHSource } from './akih-source.js';
 export { WatchHentaiSource } from './watchhentai-source.js';
+export { HanimeSource } from './hanime-source.js';

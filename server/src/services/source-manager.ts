@@ -3,6 +3,7 @@ import {
     AniwavesSource,
     AkiHSource,
     WatchHentaiSource,
+    HanimeSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -141,7 +142,9 @@ export class SourceManager {
         this.registerSource(new AniwavesSource());
 
         // ✅ HENTAI SOURCES (for adult anime)
+        // AkiH fixed - now uses /e/ page extraction method
         this.registerSource(new AkiHSource());
+        this.registerSource(new HanimeSource()); // Second fallback - optimized for speed
         this.registerSource(new WatchHentaiSource());
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
@@ -3169,20 +3172,66 @@ export class SourceManager {
             episodeNum = m ? parseInt(m[1], 10) : 1;
         }
 
+        // If explicit server is requested with an Anilist ID, we need to search for the anime first
+        // to get the proper episode ID for that source
+        let resolvedEpisodeId = episodeId;
+        let isAnilistId = episodeId.toLowerCase().startsWith('anilist-');
+        const hasExplicitServer = !!server;
+        
+        console.log(`   🔍 DEBUG: episodeId=${episodeId}, isAnilistId=${isAnilistId}, hasExplicitServer=${hasExplicitServer}`);
+        
+        if (hasExplicitServer && isAnilistId) {
+            const explicitSource = this.sources.get(server) as StreamingSource;
+            if (explicitSource?.isAvailable && explicitSource.search) {
+                try {
+                    // Extract numeric Anilist ID from the string
+                    const numericAnilistId = parseInt(episodeId.replace('anilist-', ''), 10);
+                    console.log(`   🔍 Searching for anime on ${server} using Anilist ID: ${numericAnilistId}`);
+                    const animeInfo = await anilistService.getAnimeById(numericAnilistId);
+                    if (animeInfo?.title) {
+                        console.log(`   📝 Found anime title: ${animeInfo.title}`);
+                        const searchResults = await explicitSource.search(animeInfo.title);
+                        if (searchResults?.results?.length > 0) {
+                            const targetAnime = searchResults.results[0];
+                            console.log(`   ✅ Found anime on ${server}: ${targetAnime.title} (ID: ${targetAnime.id})`);
+                            
+                            // Get episodes for this anime
+                            if (explicitSource.getEpisodes) {
+                                const episodes = await explicitSource.getEpisodes(targetAnime.id);
+                                if (episodes?.length > 0) {
+                                    const targetEpisode = episodes[episodeNum ? Math.min(episodeNum, episodes.length) - 1 : 0];
+                                    console.log(`   🎬 Using episode: ${targetEpisode.title} (ID: ${targetEpisode.id})`);
+                                    
+                                    // Override the episode ID with the source-specific ID
+                                    resolvedEpisodeId = targetEpisode.id;
+                                    console.log(`   🔄 Overriding episode ID to: ${resolvedEpisodeId}`);
+                                    
+                                    // Update isAnilistId to false since we now have a source-specific ID
+                                    isAnilistId = false;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.log(`   ⚠️ Search on ${server} failed: ${(e as Error).message}`);
+                }
+            }
+        }
+
         // Determine primary source from episode ID
-        const primarySource = this.getStreamingSource(episodeId);
+        const primarySource = this.getStreamingSource(resolvedEpisodeId);
         console.log(`   📡 Primary source: ${primarySource?.name || 'none'}`);
         
         // Check if the ID has a known source prefix - if not, only use primary source
-        const hasSourcePrefix = this.hasKnownSourcePrefix(episodeId);
-        const rawId = this.extractRawId(episodeId);
+        const hasSourcePrefix = this.hasKnownSourcePrefix(resolvedEpisodeId);
+        const rawId = this.extractRawId(resolvedEpisodeId);
         console.log(`   🔑 Has source prefix: ${hasSourcePrefix}, Raw ID: ${rawId}`);
         
         // Build list of sources to try - primary first, then all available sources
-        const isAdultContent = episodeId.toLowerCase().startsWith('hh-') || 
-                              episodeId.toLowerCase().startsWith('hanime-') ||
-                              episodeId.toLowerCase().startsWith('watchhentai-') ||
-                              episodeId.toLowerCase().startsWith('akih-');
+        const isAdultContent = resolvedEpisodeId.toLowerCase().startsWith('hh-') || 
+                              resolvedEpisodeId.toLowerCase().startsWith('hanime-') ||
+                              resolvedEpisodeId.toLowerCase().startsWith('watchhentai-') ||
+                              resolvedEpisodeId.toLowerCase().startsWith('akih-');
 
         const sourcesToTry: StreamingSource[] = [];
 
@@ -3190,22 +3239,31 @@ export class SourceManager {
         // They require a title-based lookup via crossSourceStreamingFallback.
         // Skip the direct source list entirely so we don't incorrectly remove sources
         // that fail because of an incompatible ID format (not because they're broken).
-        const isAnilistId = episodeId.toLowerCase().startsWith('anilist-');
-        
-        if (!isAnilistId) {
-            // Add primary source first, but honor the offline hold-down window. Retrying
-            // known-bad sources inside the same stream request is what made recovery
-            // attempts burn the entire client timeout.
-            const primaryMatchesId = primarySource && hasSourcePrefix && primarySource.getStreamingLinks;
-            if (primaryMatchesId && primarySource!.isAvailable && !sourcesToTry.includes(primarySource!)) {
-                sourcesToTry.push(primarySource!);
+        // UNLESS an explicit server parameter is provided - in that case, honor it.
+
+        if (!isAnilistId || hasExplicitServer) {
+            // If explicit server is provided, prioritize it
+            if (hasExplicitServer) {
+                const explicitSource = this.sources.get(server) as StreamingSource;
+                if (explicitSource?.isAvailable && explicitSource.getStreamingLinks && !sourcesToTry.includes(explicitSource)) {
+                    sourcesToTry.push(explicitSource);
+                    console.log(`   🎯 Explicit server requested: ${server}`);
+                }
             }
-            if (primarySource?.isAvailable && primarySource.getStreamingLinks && !sourcesToTry.includes(primarySource)) {
-                sourcesToTry.push(primarySource);
+            
+            // Add primary source if not already added
+            if (!hasExplicitServer) {
+                const primaryMatchesId = primarySource && hasSourcePrefix && primarySource.getStreamingLinks;
+                if (primaryMatchesId && primarySource!.isAvailable && !sourcesToTry.includes(primarySource!)) {
+                    sourcesToTry.push(primarySource!);
+                }
+                if (primarySource?.isAvailable && primarySource.getStreamingLinks && !sourcesToTry.includes(primarySource)) {
+                    sourcesToTry.push(primarySource);
+                }
             }
 
             // Backup sources: only names actually registered in the constructor (see REGISTERED_SOURCE_NAMES).
-            const backupNames = REGISTERED_SOURCE_NAMES.filter((n) => n !== primarySource?.name);
+            const backupNames = REGISTERED_SOURCE_NAMES.filter((n) => n !== primarySource?.name && n !== server);
             for (const name of backupNames) {
                 if (isAdultContent && !this.adultSourceNames.has(name)) continue;
                 if (!isAdultContent && this.adultSourceNames.has(name)) continue;
@@ -3323,6 +3381,12 @@ export class SourceManager {
             return isAdultContent ? sources : [...sources, 'cross-source'];
         };
 
+        // If we successfully resolved the episode ID via search, don't treat it as Anilist ID
+        const wasResolved = resolvedEpisodeId !== episodeId;
+        if (wasResolved) {
+            isAnilistId = false;
+        }
+
         if (finalSources.length === 0 && !isAnilistId) {
             console.log(`   ❌ No available sources for streaming`);
             logger.warn(`No available sources for streaming: ${episodeId}`, { episodeId }, 'SourceManager');
@@ -3337,7 +3401,7 @@ export class SourceManager {
         // source succeeds instead of waiting for every source to finish/timeout.
         type RaceResult = { source: string; data: StreamingData; success: boolean };
 
-        const pickOrder = buildStreamingPickOrder(episodeId);
+        const pickOrder = buildStreamingPickOrder(resolvedEpisodeId);
         const allResults: RaceResult[] = [];
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3493,7 +3557,7 @@ export class SourceManager {
             for (const source of finalSources) {
                 // If the source is already resolved via another parallel branch, skip
                 if (resolved) break;
-                const idToUse = this.resolveStreamingEpisodeId(episodeId, source, primarySource, hasSourcePrefix, rawId);
+                const idToUse = this.resolveStreamingEpisodeId(resolvedEpisodeId, source, primarySource, hasSourcePrefix, rawId);
                 if (!idToUse) {
                     console.log(`   ⏭️ Skipping ${source.name} (ID format incompatible)`);
                     allResults.push({ source: source.name, data: { sources: [], subtitles: [] } as StreamingData, success: false });
@@ -3503,7 +3567,7 @@ export class SourceManager {
 
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
                 const isPrimary = source === primarySource;
-                const streamReliabilityOpts = { timeout: isPrimary ? 25_000 : 8_000, maxAttempts: 1 };
+                 const streamReliabilityOpts = { timeout: isPrimary ? 45_000 : 8_000, maxAttempts: 1 };
                 const sourceStart = Date.now();
                 this.executeReliablyStream(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
@@ -4349,6 +4413,22 @@ export class SourceManager {
      */
     async resolveAniListToStreamingId(anilistNumericId: number): Promise<string | null> {
         if (!Number.isFinite(anilistNumericId) || anilistNumericId <= 0) return null;
+
+        // Special case: Crayon Shin-chan (AniList ID 966) - known title mismatch
+        if (anilistNumericId === 966) {
+            const cachedMapping = this.anilistStreamingIdCache.get(966);
+            if (cachedMapping && cachedMapping.timestamp > Date.now() - this.ANILIST_STREAMING_ID_TTL) {
+                return cachedMapping.streamingId;
+            }
+            // Direct mapping to aniwaves ID
+            const streamingId = 'aniwaves-crayon-shin-chan-80147';
+            this.anilistStreamingIdCache.set(966, { streamingId, timestamp: Date.now() });
+            if (process.env.POSTGRES_URL) {
+                AnimeCache.setSourcePreference('anilist-966', streamingId).catch(() => {});
+            }
+            console.log(`   ✅ Special case mapping: anilist-966 → ${streamingId}`);
+            return streamingId;
+        }
 
         // 1. In-memory cache (warm instances)
         const cachedMapping = this.anilistStreamingIdCache.get(anilistNumericId);
