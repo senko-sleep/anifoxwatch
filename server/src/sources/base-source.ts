@@ -16,6 +16,15 @@ export interface SourceRequestOptions {
     episodeNum?: number;
     /** AniList ID of the anime; used for romaji title lookup when slug matching fails. */
     anilistId?: number;
+    /** Proxy configuration for making requests through a specific IP/country */
+    proxy?: {
+        host: string;
+        port: number;
+        auth?: {
+            username: string;
+            password: string;
+        };
+    };
 }
 
 /**

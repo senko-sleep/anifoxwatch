@@ -142,9 +142,7 @@ export class SourceManager {
         this.registerSource(new AniwavesSource());
 
         // ✅ HENTAI SOURCES (for adult anime)
-        // AkiH fixed - now uses /e/ page extraction method
-        this.registerSource(new AkiHSource());
-        this.registerSource(new HanimeSource()); // Second fallback - optimized for speed
+        this.registerSource(new HanimeSource()); // First fallback - optimized for speed
         this.registerSource(new WatchHentaiSource());
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
@@ -4413,22 +4411,6 @@ export class SourceManager {
      */
     async resolveAniListToStreamingId(anilistNumericId: number): Promise<string | null> {
         if (!Number.isFinite(anilistNumericId) || anilistNumericId <= 0) return null;
-
-        // Special case: Crayon Shin-chan (AniList ID 966) - known title mismatch
-        if (anilistNumericId === 966) {
-            const cachedMapping = this.anilistStreamingIdCache.get(966);
-            if (cachedMapping && cachedMapping.timestamp > Date.now() - this.ANILIST_STREAMING_ID_TTL) {
-                return cachedMapping.streamingId;
-            }
-            // Direct mapping to aniwaves ID
-            const streamingId = 'aniwaves-crayon-shin-chan-80147';
-            this.anilistStreamingIdCache.set(966, { streamingId, timestamp: Date.now() });
-            if (process.env.POSTGRES_URL) {
-                AnimeCache.setSourcePreference('anilist-966', streamingId).catch(() => {});
-            }
-            console.log(`   ✅ Special case mapping: anilist-966 → ${streamingId}`);
-            return streamingId;
-        }
 
         // 1. In-memory cache (warm instances)
         const cachedMapping = this.anilistStreamingIdCache.get(anilistNumericId);

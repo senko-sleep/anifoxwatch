@@ -36,19 +36,20 @@ export class AkiHSource extends BaseAnimeSource {
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
-    async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
-        try {
-            const response = await axios.get(this.baseUrl, {
-                timeout: options?.timeout || 10000,
-                signal: options?.signal,
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-            });
-            this.isAvailable = response.status === 200;
-            return this.isAvailable;
-        } catch {
-            return false;
-        }
-    }
+     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
+         try {
+             const response = await axios.get(this.baseUrl, {
+                 timeout: options?.timeout || 10000,
+                 signal: options?.signal,
+                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                 proxy: options?.proxy
+             });
+             this.isAvailable = response.status === 200;
+             return this.isAvailable;
+         } catch {
+             return false;
+         }
+     }
 
     private parseAnimeItems($: cheerio.CheerioAPI): AnimeBase[] {
         const items: AnimeBase[] = [];
@@ -107,175 +108,178 @@ export class AkiHSource extends BaseAnimeSource {
         return items;
     }
 
-    async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
-        const cacheKey = `search:${query}:${page}`;
-        const cached = this.getCached<AnimeSearchResult>(cacheKey);
-        if (cached) return cached;
+     async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
+         const cacheKey = `search:${query}:${page}`;
+         const cached = this.getCached<AnimeSearchResult>(cacheKey);
+         if (cached) return cached;
 
-        try {
-            // Aki-H uses POST for search
-            const url = `${this.baseUrl}/search/`;
-            const response = await axios.post(url, new URLSearchParams({ q: query, page: page.toString() }), {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                },
-                signal: options?.signal,
-                timeout: options?.timeout || 15000
-            });
-            const $ = cheerio.load(response.data);
-            const results = this.parseAnimeItems($);
-            
-            const result: AnimeSearchResult = {
-                results,
-                totalPages: 1,
-                currentPage: page,
-                hasNextPage: false,
-                source: this.name
-            };
+         try {
+             // Aki-H uses POST for search
+             const url = `${this.baseUrl}/search/`;
+             const response = await axios.post(url, new URLSearchParams({ q: query, page: page.toString() }), {
+                 headers: {
+                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                     'Content-Type': 'application/x-www-form-urlencoded'
+                 },
+                 signal: options?.signal,
+                 timeout: options?.timeout || 15000,
+                 proxy: options?.proxy
+             });
+             const $ = cheerio.load(response.data);
+             const results = this.parseAnimeItems($);
+             
+             const result: AnimeSearchResult = {
+                 results,
+                 totalPages: 1,
+                 currentPage: page,
+                 hasNextPage: false,
+                 source: this.name
+             };
 
-            this.setCache(cacheKey, result, this.cacheTTL.search);
-            return result;
-        } catch (error) {
-            this.handleError(error, 'search');
-            return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
-        }
-    }
+             this.setCache(cacheKey, result, this.cacheTTL.search);
+             return result;
+         } catch (error) {
+             this.handleError(error, 'search');
+             return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: this.name };
+         }
+     }
 
-    async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
-        const cacheKey = `anime:${id}`;
-        const cached = this.getCached<AnimeBase>(cacheKey);
-        if (cached) return cached;
+     async getAnime(id: string, options?: SourceRequestOptions): Promise<AnimeBase | null> {
+         const cacheKey = `anime:${id}`;
+         const cached = this.getCached<AnimeBase>(cacheKey);
+         if (cached) return cached;
 
-        try {
-            const cleanId = id.replace(/^akih-/, '');
-            const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}/`;
-            const response = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                signal: options?.signal,
-                timeout: options?.timeout || 15000
-            });
-            const $ = cheerio.load(response.data);
+         try {
+             const cleanId = id.replace(/^akih-/, '');
+             const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}/`;
+             const response = await axios.get(url, {
+                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                 signal: options?.signal,
+                 timeout: options?.timeout || 15000,
+                 proxy: options?.proxy
+             });
+             const $ = cheerio.load(response.data);
 
-            const title = $('h1').first().text().trim() || $('title').text().replace(' - Aki-H', '').trim();
-            const description = $('.description').first().text().trim() || '';
-            let image = $('meta[property="og:image"]').attr('content') || '';
-            if (!image) {
-                const firstImg = $('.film-poster-img').first();
-                image = firstImg.attr('data-src') || firstImg.attr('src') || '';
-            }
-            if (image && !image.startsWith('http')) {
-                image = `${this.baseUrl}${image.startsWith('/') ? '' : '/'}${image}`;
-            }
+             const title = $('h1').first().text().trim() || $('title').text().replace(' - Aki-H', '').trim();
+             const description = $('.description').first().text().trim() || '';
+             let image = $('meta[property="og:image"]').attr('content') || '';
+             if (!image) {
+                 const firstImg = $('.film-poster-img').first();
+                 image = firstImg.attr('data-src') || firstImg.attr('src') || '';
+             }
+             if (image && !image.startsWith('http')) {
+                 image = `${this.baseUrl}${image.startsWith('/') ? '' : '/'}${image}`;
+             }
 
-            // Extract genres
-            const genres = ['Hentai'];
-            $('.item-tags a').each((_, el) => {
-                const genre = $(el).text().trim();
-                if (genre) genres.push(genre);
-            });
+             // Extract genres
+             const genres = ['Hentai'];
+             $('.item-tags a').each((_, el) => {
+                 const genre = $(el).text().trim();
+                 if (genre) genres.push(genre);
+             });
 
-            const anime: AnimeBase = {
-                id,
-                title,
-                image,
-                description,
-                type: 'ONA',
-                status: 'Completed',
-                rating: 0,
-                episodes: 1,
-                genres
-            };
+             const anime: AnimeBase = {
+                 id,
+                 title,
+                 image,
+                 description,
+                 type: 'ONA',
+                 status: 'Completed',
+                 rating: 0,
+                 episodes: 1,
+                 genres
+             };
 
-            this.setCache(cacheKey, anime, this.cacheTTL.anime);
-            return anime;
-        } catch (error) {
-            this.handleError(error, 'getAnime');
-            return null;
-        }
-    }
+             this.setCache(cacheKey, anime, this.cacheTTL.anime);
+             return anime;
+         } catch (error) {
+             this.handleError(error, 'getAnime');
+             return null;
+         }
+     }
 
-    async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
-        const cleanId = animeId.replace(/^akih-/, '');
-        
-        try {
-            // First try to fetch the episode page which contains video links
-            const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}/`;
-            const response = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                signal: options?.signal,
-                timeout: options?.timeout || 15000
-            });
-            const $ = cheerio.load(response.data);
-            
-            const episodes: Episode[] = [];
-            let episodeNum = 1;
-
-            // Extract video links from the episode page (links to /watch/)
-            $('.live-thumbnail').each((_, el) => {
-                const $el = $(el);
-                const href = $el.attr('href') || '';
-                const title = $el.attr('title') || $el.find('.live-name a').text().trim();
-                
-                if (href.includes('/watch/')) {
-                    const videoId = href.replace(this.baseUrl, '').replace(/^\/watch\/|\/$/g, '');
-                    const epMatch = title.match(/Vol\s*(\d+)/i) || title.match(/Episode\s*(\d+)/i);
-                    const num = epMatch ? parseInt(epMatch[1]) : episodeNum++;
-                    
-                    if (videoId && !episodes.find(e => e.id === `akih-video/${videoId}`)) {
-                        episodes.push({
-                            id: `akih-video/${videoId}`,
-                            number: num,
-                            title: title || `Episode ${num}`,
-                            isFiller: false,
-                            hasDub: title.toLowerCase().includes('dub'),
-                            hasSub: !title.toLowerCase().includes('dub')
-                        });
-                    }
-                }
-            });
-
-            // Also try to find episode links in other formats
-            $('.episodes a, .episode-item a, .ep-item a').each((_, el) => {
-                const $el = $(el);
-                const href = $el.attr('href') || '';
-                const text = $el.text().trim();
-                
-                if (href.includes('/watch/')) {
-                    const videoId = href.replace(this.baseUrl, '').replace(/^\/watch\/|\/$/g, '');
-                    const epMatch = text.match(/episode\s*(\d+)/i);
-                    const num = epMatch ? parseInt(epMatch[1]) : episodeNum++;
-                    
-                    if (videoId && !episodes.find(e => e.id === `akih-video/${videoId}`)) {
-                        episodes.push({
-                            id: `akih-video/${videoId}`,
-                            number: num,
-                            title: text || `Episode ${num}`,
-                            isFiller: false,
-                            hasDub: text.toLowerCase().includes('dub'),
-                            hasSub: !text.toLowerCase().includes('dub')
-                        });
-                    }
-                }
-            });
-
-            if (episodes.length > 0) {
-                return episodes;
-            }
-        } catch (error) {
-            this.handleError(error, 'getEpisodes');
-        }
-
-        // Fallback: return a single episode with the original ID
-        return [{
-            id: `akih-video/${cleanId}`,
-            number: 1,
-            title: 'Full Video',
-            isFiller: false,
-            hasDub: false,
-            hasSub: true
-        }];
-    }
+     async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
+         const cleanId = animeId.replace(/^akih-/, '');
+         
+         try {
+             // First try to fetch the episode page which contains video links
+             const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}/`;
+             const response = await axios.get(url, {
+                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                 signal: options?.signal,
+                 timeout: options?.timeout || 15000,
+                 proxy: options?.proxy
+             });
+             const $ = cheerio.load(response.data);
+             
+             const episodes: Episode[] = [];
+             let episodeNum = 1;
+ 
+             // Extract video links from the episode page (links to /watch/)
+             $('.live-thumbnail').each((_, el) => {
+                 const $el = $(el);
+                 const href = $el.attr('href') || '';
+                 const title = $el.attr('title') || $el.find('.live-name a').text().trim();
+                 
+                 if (href.includes('/watch/')) {
+                     const videoId = href.replace(this.baseUrl, '').replace(/^\/watch\/|\/$/g, '');
+                     const epMatch = title.match(/Vol\s*(\d+)/i) || title.match(/Episode\s*(\d+)/i);
+                     const num = epMatch ? parseInt(epMatch[1]) : episodeNum++;
+                     
+                     if (videoId && !episodes.find(e => e.id === `akih-video/${videoId}`)) {
+                         episodes.push({
+                             id: `akih-video/${videoId}`,
+                             number: num,
+                             title: title || `Episode ${num}`,
+                             isFiller: false,
+                             hasDub: title.toLowerCase().includes('dub'),
+                             hasSub: !title.toLowerCase().includes('dub')
+                         });
+                     }
+                 }
+             });
+ 
+             // Also try to find episode links in other formats
+             $('.episodes a, .episode-item a, .ep-item a').each((_, el) => {
+                 const $el = $(el);
+                 const href = $el.attr('href') || '';
+                 const text = $el.text().trim();
+                 
+                 if (href.includes('/watch/')) {
+                     const videoId = href.replace(this.baseUrl, '').replace(/^\/watch\/|\/$/g, '');
+                     const epMatch = text.match(/episode\s*(\d+)/i);
+                     const num = epMatch ? parseInt(epMatch[1]) : episodeNum++;
+                     
+                     if (videoId && !episodes.find(e => e.id === `akih-video/${videoId}`)) {
+                         episodes.push({
+                             id: `akih-video/${videoId}`,
+                             number: num,
+                             title: text || `Episode ${num}`,
+                             isFiller: false,
+                             hasDub: text.toLowerCase().includes('dub'),
+                             hasSub: !text.toLowerCase().includes('dub')
+                         });
+                     }
+                 }
+             });
+ 
+             if (episodes.length > 0) {
+                 return episodes;
+             }
+         } catch (error) {
+             this.handleError(error, 'getEpisodes');
+         }
+ 
+         // Fallback: return a single episode with the original ID
+         return [{
+             id: `akih-video/${cleanId}`,
+             number: 1,
+             title: 'Full Video',
+             isFiller: false,
+             hasDub: false,
+             hasSub: true
+         }];
+     }
 
     async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         const cleanId = episodeId.replace(/^akih-(episode|video)\//, '');
@@ -302,26 +306,27 @@ export class AkiHSource extends BaseAnimeSource {
 
             logger.info(`[AkiH] Fetching watch page to extract video ID: ${watchUrl}`);
 
-            // Step 1: Fetch the watch page HTML to find displayvideo(type, videoId) call
-            let embedUrl: string | null = null;
-            try {
-             const htmlRes = await axios.get(watchUrl, {
-                     headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                     timeout: 15000
-                 });
-                 // Try to find displayvideo with two numbers, capture the second one (video ID)
-                 let videoIdMatch = htmlRes.data.match(/displayvideo\s*\(\s*\d+\s*,\s*(\d+)\s*\)/);
-                 if (!videoIdMatch) {
-                     // Try to find displayvideo with at least one number (capture first number)
-                     videoIdMatch = htmlRes.data.match(/displayvideo\s*\(\s*(\d+)/);
-                 }
-                 if (videoIdMatch) {
-                     embedUrl = `${this.baseUrl}/video/${videoIdMatch[1]}/`;
-                     logger.info(`[AkiH] Found embed video URL: ${embedUrl}`);
-                 }
-            } catch (e: any) {
-                logger.warn(`[AkiH] Could not fetch watch page HTML: ${e.message}`);
-            }
+             // Step 1: Fetch the watch page HTML to find displayvideo(type, videoId) call
+             let embedUrl: string | null = null;
+             try {
+              const htmlRes = await axios.get(watchUrl, {
+                      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                      timeout: 15000,
+                      proxy: options?.proxy
+                  });
+                  // Try to find displayvideo with two numbers, capture the second one (video ID)
+                  let videoIdMatch = htmlRes.data.match(/displayvideo\s*\(\s*\d+\s*,\s*(\d+)\s*\)/);
+                  if (!videoIdMatch) {
+                      // Try to find displayvideo with at least one number (capture first number)
+                      videoIdMatch = htmlRes.data.match(/displayvideo\s*\(\s*(\d+)/);
+                  }
+                  if (videoIdMatch) {
+                      embedUrl = `${this.baseUrl}/video/${videoIdMatch[1]}/`;
+                      logger.info(`[AkiH] Found embed video URL: ${embedUrl}`);
+                  }
+             } catch (e: any) {
+                 logger.warn(`[AkiH] Could not fetch watch page HTML: ${e.message}`);
+             }
 
             // Step 2: NEW METHOD - Fetch the /e/ page which contains the streaming.aki.today iframe
             logger.info(`[AkiH] Using new extraction method: fetch /e/ page for streaming.aki.today iframe`);
@@ -355,15 +360,16 @@ export class AkiHSource extends BaseAnimeSource {
             const iframeReferer = embedVideoId ? `https://v.aki-h.com/v2/${embedVideoId}` : watchUrl;
             logger.info(`[AkiH] Using iframe Referer: ${iframeReferer}`);
             
-            try {
-                const ePageResponse = await axios.get(ePageUrl, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                        'Referer': iframeReferer,
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    },
-                    timeout: 15000
-                });
+             try {
+                 const ePageResponse = await axios.get(ePageUrl, {
+                     headers: {
+                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                         'Referer': iframeReferer,
+                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                     },
+                     timeout: 15000,
+                     proxy: options?.proxy
+                 });
                 
                 logger.info(`[AkiH] /e/ page status: ${ePageResponse.status}, content length: ${ePageResponse.data.length}`);
                 
@@ -385,21 +391,33 @@ export class AkiHSource extends BaseAnimeSource {
                         puppeteer.use(stealthPlugin());
                     }
                     
-                    const launchOptions: any = {
-                        headless: true,
-                        args: [
-                            '--no-sandbox',
-                            '--disable-setuid-sandbox',
-                            '--disable-dev-shm-usage',
-                            '--disable-gpu',
-                            '--disable-web-security',
-                            '--disable-features=IsolateOrigins,site-per-process',
-                            '--ignore-certificate-errors',
-                            '--ignore-ssl-errors',
-                            '--ignore-certificate-errors-spki-list'
-                        ],
-                        timeout: 30000
-                    };
+                     const launchOptions: any = {
+                         headless: true,
+                         args: [
+                             '--no-sandbox',
+                             '--disable-setuid-sandbox',
+                             '--disable-dev-shm-usage',
+                             '--disable-gpu',
+                             '--disable-web-security',
+                             '--disable-features=IsolateOrigins,site-per-process',
+                             '--ignore-certificate-errors',
+                             '--ignore-ssl-errors',
+                             '--ignore-certificate-errors-spki-list'
+                         ],
+                         timeout: 30000
+                     };
+                     
+                     // Add proxy configuration if provided
+                     if (options?.proxy) {
+                         const proxyHost = options.proxy.host;
+                         const proxyPort = options.proxy.port;
+                         launchOptions.args.push(`--proxy-server=${proxyHost}:${proxyPort}`);
+                         
+                         // Note: Puppeteer doesn't have built-in proxy auth support in the same way as axios
+                         // For proxy authentication, we might need to use additional methods or rely on
+                         // the proxy being configured to allow the request without auth
+                         logger.info(`[AkiH] Using proxy: ${proxyHost}:${proxyPort}`);
+                     }
 
                     let streamBrowser = null;
                     try {
@@ -616,18 +634,27 @@ export class AkiHSource extends BaseAnimeSource {
                  puppeteer.use(stealthPlugin());
              }
              
-             const launchOptions: any = {
-                 headless: true,
-                 args: [
-                     '--no-sandbox',
-                     '--disable-setuid-sandbox',
-                     '--disable-dev-shm-usage',
-                     '--disable-gpu',
-                     '--disable-web-security',
-                     '--disable-features=IsolateOrigins,site-per-process'
-                 ],
-                 timeout: 15000
-             };
+              const launchOptions: any = {
+                  headless: true,
+                  args: [
+                      '--no-sandbox',
+                      '--disable-setuid-sandbox',
+                      '--disable-dev-shm-usage',
+                      '--disable-gpu',
+                      '--disable-web-security',
+                      '--disable-features=IsolateOrigins,site-per-process'
+                  ],
+                  timeout: 15000
+              };
+              
+              // Add proxy configuration if provided
+              if (options?.proxy) {
+                  const proxyHost = options.proxy.host;
+                  const proxyPort = options.proxy.port;
+                  launchOptions.args.push(`--proxy-server=${proxyHost}:${proxyPort}`);
+                  
+                  logger.info(`[AkiH] Using proxy: ${proxyHost}:${proxyPort}`);
+              }
 
             try {
                 browser = await puppeteer.launch(launchOptions);
@@ -795,14 +822,15 @@ export class AkiHSource extends BaseAnimeSource {
             if (iframeSrc) {
                 logger.info(`[AkiH] No sources on initial page, attempting iframe fetch with axios (debug showed this returns 200): ${iframeSrc}`);
                 try {
-                    const iframeResponse = await axios.get(iframeSrc, {
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                            'Referer': watchUrl,
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                        },
-                        timeout: 15000
-                    });
+                 const iframeResponse = await axios.get(iframeSrc, {
+                         headers: {
+                             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                             'Referer': watchUrl,
+                             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                         },
+                         timeout: 15000,
+                         proxy: options?.proxy
+                     });
                     
                     logger.info(`[AkiH] Iframe fetch status: ${iframeResponse.status}, content length: ${iframeResponse.data.length}`);
                     
@@ -932,26 +960,27 @@ export class AkiHSource extends BaseAnimeSource {
         return this.getLatest(page, options);
     }
 
-    async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
-        try {
-            const url = page > 1
-                ? `${this.baseUrl}/latest/page/${page}/`
-                : `${this.baseUrl}/latest/`;
-            
-            logger.info(`[AkiH] Fetching latest from: ${url}`);
-            
-            const response = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                signal: options?.signal,
-                timeout: options?.timeout || 15000
-            });
-            const $ = cheerio.load(response.data);
-            return this.parseAnimeItems($);
-        } catch (error) {
-            this.handleError(error, 'getLatest');
-            return [];
-        }
-    }
+     async getLatest(page: number = 1, options?: SourceRequestOptions): Promise<AnimeBase[]> {
+         try {
+             const url = page > 1
+                 ? `${this.baseUrl}/latest/page/${page}/`
+                 : `${this.baseUrl}/latest/`;
+             
+             logger.info(`[AkiH] Fetching latest from: ${url}`);
+             
+             const response = await axios.get(url, {
+                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                 signal: options?.signal,
+                 timeout: options?.timeout || 15000,
+                 proxy: options?.proxy
+             });
+             const $ = cheerio.load(response.data);
+             return this.parseAnimeItems($);
+         } catch (error) {
+             this.handleError(error, 'getLatest');
+             return [];
+         }
+     }
 
     async getByType(type: string, page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         return this.getLatest(page, options).then(results => ({
@@ -993,39 +1022,40 @@ export class AkiHSource extends BaseAnimeSource {
             .replace(/[^a-z0-9-]/g, '');
     }
 
-    async getByGenre(genre: string, page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
-        const cacheKey = `genre:${genre}:${page}`;
-        const cached = this.getCached<AnimeSearchResult>(cacheKey);
-        if (cached) return cached;
+     async getByGenre(genre: string, page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
+         const cacheKey = `genre:${genre}:${page}`;
+         const cached = this.getCached<AnimeSearchResult>(cacheKey);
+         if (cached) return cached;
 
-        try {
-            const genreSlug = this.genreToSlug(genre);
-            const url = page > 1
-                ? `${this.baseUrl}/genre/${genreSlug}/page/${page}/`
-                : `${this.baseUrl}/genre/${genreSlug}/`;
-            
-            logger.info(`[AkiH] Fetching genre page ${page}: ${url}`);
-            
-            const response = await axios.get(url, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                signal: options?.signal,
-                timeout: options?.timeout || 15000
-            });
-            const $ = cheerio.load(response.data);
-            const results = this.parseAnimeItems($);
+         try {
+             const genreSlug = this.genreToSlug(genre);
+             const url = page > 1
+                 ? `${this.baseUrl}/genre/${genreSlug}/page/${page}/`
+                 : `${this.baseUrl}/genre/${genreSlug}/`;
+             
+             logger.info(`[AkiH] Fetching genre page ${page}: ${url}`);
+             
+             const response = await axios.get(url, {
+                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                 signal: options?.signal,
+                 timeout: options?.timeout || 15000,
+                 proxy: options?.proxy
+             });
+             const $ = cheerio.load(response.data);
+             const results = this.parseAnimeItems($);
 
-            // Check for pagination
-            const hasNextPage = $('.pagination .next').length > 0;
-            let totalPages = page;
-            if (hasNextPage) totalPages = page + 1;
+             // Check for pagination
+             const hasNextPage = $('.pagination .next').length > 0;
+             let totalPages = page;
+             if (hasNextPage) totalPages = page + 1;
 
-            const result: AnimeSearchResult = {
-                results,
-                totalPages,
-                currentPage: page,
-                hasNextPage,
-                source: this.name
-            };
+             const result: AnimeSearchResult = {
+                 results,
+                 totalPages,
+                 currentPage: page,
+                 hasNextPage,
+                 source: this.name
+             };
 
             this.setCache(cacheKey, result, this.cacheTTL.search);
             return result;

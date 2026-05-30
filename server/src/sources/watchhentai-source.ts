@@ -9,6 +9,7 @@ import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
+import { getHentaiProxyConfig } from '../utils/proxy-config.js';
 
 export class WatchHentaiSource extends BaseAnimeSource {
     name = 'WatchHentai';
@@ -36,10 +37,12 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
+            const proxyConfig = getHentaiProxyConfig();
             const response = await axios.get(this.baseUrl, {
                 timeout: options?.timeout || 10000,
                 signal: options?.signal,
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                proxy: proxyConfig || options?.proxy
             });
             this.isAvailable = response.status === 200;
             return this.isAvailable;
@@ -94,6 +97,7 @@ export class WatchHentaiSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
+            const proxyConfig = getHentaiProxyConfig();
             const url = `${this.baseUrl}/?s=${encodeURIComponent(query)}`;
             const response = await axios.get(url, {
                 headers: { 
@@ -101,7 +105,8 @@ export class WatchHentaiSource extends BaseAnimeSource {
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: options?.timeout || 15000,
+                proxy: proxyConfig || options?.proxy
             });
             const $ = cheerio.load(response.data);
             const results = this.parseAnimeItems($);
@@ -128,6 +133,7 @@ export class WatchHentaiSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
+            const proxyConfig = getHentaiProxyConfig();
             const cleanId = id.replace(/^watchhentai-/, '');
             const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}`;
             const response = await axios.get(url, {
@@ -136,7 +142,8 @@ export class WatchHentaiSource extends BaseAnimeSource {
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: options?.timeout || 15000,
+                proxy: proxyConfig || options?.proxy
             });
             const $ = cheerio.load(response.data);
 
@@ -176,6 +183,7 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
         // Fetch the anime page to find video links
         try {
+            const proxyConfig = getHentaiProxyConfig();
             const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}`;
             const response = await axios.get(url, {
                 headers: { 
@@ -183,7 +191,8 @@ export class WatchHentaiSource extends BaseAnimeSource {
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: options?.timeout || 15000,
+                proxy: proxyConfig || options?.proxy
             });
             const $ = cheerio.load(response.data);
 
@@ -264,6 +273,7 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
             logger.info(`[WatchHentai] Fetching video page: ${url}`);
 
+            const proxyConfig = getHentaiProxyConfig();
             const response = await axios.get(url, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -271,7 +281,8 @@ export class WatchHentaiSource extends BaseAnimeSource {
                     'Accept-Language': 'en-US,en;q=0.5',
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: options?.timeout || 15000,
+                proxy: proxyConfig || options?.proxy
             });
 
             const html = response.data;
@@ -306,7 +317,8 @@ export class WatchHentaiSource extends BaseAnimeSource {
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: options?.timeout || 15000,
+                proxy: proxyConfig || options?.proxy
             });
 
             const playerHtml = playerResponse.data;
@@ -419,13 +431,15 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
             logger.info(`[WatchHentai] Fetching latest from: ${url}`);
 
+            const proxyConfig = getHentaiProxyConfig();
             const response = await axios.get(url, {
                 headers: { 
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: options?.timeout || 15000,
+                proxy: proxyConfig || options?.proxy
             });
             const $ = cheerio.load(response.data);
             return this.parseAnimeItems($);
@@ -483,13 +497,15 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
             logger.info(`[WatchHentai] Fetching genre page ${page}: ${url}`);
 
+            const proxyConfig = getHentaiProxyConfig();
             const response = await axios.get(url, {
                 headers: { 
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 15000
+                timeout: options?.timeout || 15000,
+                proxy: proxyConfig || options?.proxy
             });
             const $ = cheerio.load(response.data);
             const results = this.parseAnimeItems($);
