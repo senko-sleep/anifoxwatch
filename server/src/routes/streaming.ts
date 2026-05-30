@@ -183,7 +183,7 @@ const CDN_CONFIGS: Array<{ pattern: RegExp; configs: CdnCombo[] }> = [
     { pattern: /gogocdn/i, configs: [{ referer: 'https://gogoanime.run/', origin: 'https://gogoanime.run' }, { referer: 'https://gogoanime.ai/', origin: 'https://gogoanime.ai' }] },
     { pattern: /aniwatchtv|megacloud|rapid-cloud/i, configs: [{ referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
     { pattern: /watchhentai/i, configs: [{ referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' }, { referer: 'https://hentai19.net/', origin: 'https://hentai19.net' }] },
-    { pattern: /burntburst45/i, configs: [{ referer: 'https://aniwaves.ru/', origin: 'https://aniwaves.ru' }] },
+    { pattern: /burntburst|aniwaves/i, configs: [{ referer: 'https://aniwaves.ru/', origin: 'https://aniwaves.ru' }] },
     { pattern: /megaup|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|rrr\.|xm8\./i, configs: [{ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' }, { referer: 'https://animekai.to/', origin: 'https://animekai.to' }, { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
 ];
 
@@ -248,8 +248,8 @@ function setProtocolCache(domain: string, protocol: 'http' | 'https'): void {
 
 // MEMORY OPTIMIZATION: On Render/low-memory (512MB), use minimal cache; on high-memory, use more
 const IS_LOW_MEMORY = process.env.NODE_ENV === 'production' && !process.env.POSTGRES_URL;
-const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 2 * 1024 * 1024 : 50 * 1024 * 1024; // 2MB on Render, 50MB otherwise
-const SEGMENT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 5 * 1024 * 1024 : 100 * 1024 * 1024; // 5MB on Render, 100MB otherwise
+const SEGMENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 interface SegmentCacheEntry { data: Buffer; contentType: string; fetchedAt: number; size: number; lastUsed: number }
 const segmentCache = new Map<string, SegmentCacheEntry>();
@@ -290,7 +290,7 @@ function segmentCacheSet(url: string, data: Buffer, contentType: string): void {
 // Stream result cache
 // ---------------------------------------------------------------------------
 
-const STREAM_CACHE_TTL = 8 * 60 * 1000; // 8 minutes
+const STREAM_CACHE_TTL = 20 * 60 * 1000; // 20 minutes — long enough to survive most "re-watch" patterns
 // MEMORY OPTIMIZATION: Reduce cache on low-memory systems (Render free tier)
 const STREAM_CACHE_MAX = IS_LOW_MEMORY ? 20 : 200; // 20 entries on Render, 200 elsewhere
 
@@ -769,7 +769,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 
     const isFallback = response.dubFallback === true;
     streamCacheSet(cacheKey, response, isFallback ? 10000 : undefined);
-    res.set('Cache-Control', 'private, max-age=300');
+    res.set('Cache-Control', 'private, max-age=900'); // 15 min — matches client staleTime
     res.set('X-Stream-Cache', 'MISS');
     res.json(response);
 });

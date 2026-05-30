@@ -398,10 +398,10 @@ const Watch = () => {
     setSourceRetryIndex(0);
   }, [streamData, selectedServer, audioType, quality]);
 
-  // Show "server warming up" hint after 12s of loading
+  // Show "server warming up" hint after 18s of loading (was 12s before pipeline optimization)
   useEffect(() => {
     if (!streamLoading) { setStreamSlowWarning(false); return; }
-    const t = setTimeout(() => setStreamSlowWarning(true), 12000);
+    const t = setTimeout(() => setStreamSlowWarning(true), 18000);
     return () => clearTimeout(t);
   }, [streamLoading, selectedEpisode]);
 

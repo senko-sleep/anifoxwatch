@@ -254,8 +254,8 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
         queryKey: queryKeys.stream(episodeId, server, category),
         queryFn: () => apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle),
         enabled: enabled && episodeId.length > 0,
-        staleTime: 2 * 60 * 1000,   // 2 min — reuse when toggling sub/dub or returning quickly
-        gcTime: 5 * 60 * 1000,
+        staleTime: 15 * 60 * 1000,  // 15 min — stream URLs don't rotate fast; avoid re-fetching on remount
+        gcTime: 25 * 60 * 1000,     // Keep in memory for 25 min so episode switches feel instant
         // AbortError = hard timeout (10s). Don't retry or the UI can appear to "load forever".
         retry: (failureCount, error) => {
             if (error?.name === 'AbortError') return false;
@@ -269,6 +269,7 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
         refetchOnWindowFocus: false,
     });
 }
+
 
 /**
  * Fetches a dub-category stream once (when user is on SUB) to detect dub availability

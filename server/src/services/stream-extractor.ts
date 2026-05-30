@@ -19,6 +19,10 @@ interface ExtractionResult {
 class StreamExtractor {
     private browser: any = null;
     private browserLaunchPromise: Promise<any> | null = null;
+    // In-flight deduplication: if the same embed URL is being extracted concurrently,
+    // share the result instead of launching multiple Puppeteer pages.
+    private inFlight: Map<string, Promise<ExtractionResult>> = new Map();
+
 
     /**
      * Get or create browser instance (singleton)
@@ -294,10 +298,29 @@ class StreamExtractor {
 
     /**
      * Extract stream from embed URL directly (rapid-cloud, megacloud, etc.)
+     * Uses in-flight deduplication: concurrent calls for the same URL share one Puppeteer session.
      */
     async extractFromEmbed(embedUrl: string): Promise<ExtractionResult> {
+        // Dedup: return an existing in-flight extraction for the same URL
+        const existing = this.inFlight.get(embedUrl);
+        if (existing) {
+            logger.info(`[StreamExtractor] Reusing in-flight extraction for: ${embedUrl.substring(0, 80)}...`);
+            return existing;
+        }
+
         logger.info(`[StreamExtractor] Extracting from embed: ${embedUrl.substring(0, 80)}...`);
 
+        const extractionPromise = this._extractFromEmbedImpl(embedUrl);
+        this.inFlight.set(embedUrl, extractionPromise);
+
+        try {
+            return await extractionPromise;
+        } finally {
+            this.inFlight.delete(embedUrl);
+        }
+    }
+
+    private async _extractFromEmbedImpl(embedUrl: string): Promise<ExtractionResult> {
         let page: any = null;
         const streams: ExtractedStream[] = [];
         const subtitles: { url: string; lang: string }[] = [];
@@ -327,7 +350,7 @@ class StreamExtractor {
             try {
                 await page.goto(embedUrl, {
                     waitUntil: 'networkidle2',
-                    timeout: 60000
+                    timeout: 25000  // Reduced from 60s — the polling loop catches streams regardless
                 });
 
                 // Wait for video to load or m3u8 to be captured (dynamic polling)
@@ -351,6 +374,7 @@ class StreamExtractor {
             } catch (navError: any) {
                 logger.warn(`[StreamExtractor] Embed page navigation timeout, but proceeding with captured streams: ${navError.message}`);
             }
+
 
             // Get video src
             const videoSrc = await page.evaluate(() => {

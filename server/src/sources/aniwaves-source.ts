@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import * as cheerio from 'cheerio';
+import https from 'https';
 import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
@@ -21,18 +22,26 @@ export class AniwavesSource extends BaseAnimeSource {
     // Smart caching with TTL
     private cache: Map<string, { data: any; expires: number }> = new Map();
     private cacheTTL = {
-        search: 3 * 60 * 1000,
-        anime: 15 * 60 * 1000,
-        episodes: 10 * 60 * 1000,
-        stream: 2 * 60 * 60 * 1000,
-        servers: 60 * 60 * 1000,
+        search: 5 * 60 * 1000,
+        anime: 30 * 60 * 1000,
+        episodes: 30 * 60 * 1000,
+        stream: 6 * 60 * 60 * 1000,    // 6h — streams don't rotate that fast
+        servers: 4 * 60 * 60 * 1000,   // 4h — server lists are stable
     };
 
     constructor() {
         super();
+        // Reusable HTTPS agent — keeps TCP connections alive between requests
+        // to avoid the ~200ms handshake overhead on every API call.
+        const keepAliveAgent = new https.Agent({
+            keepAlive: true,
+            maxSockets: 10,
+            timeout: 15000,
+        });
         this.client = axios.create({
             baseURL: this.baseUrl,
-            timeout: 25000,
+            timeout: 10000,           // Reduced from 12s — fail faster, hit proxy sooner
+            httpsAgent: keepAliveAgent,
             headers: {
                 'Accept': 'application/json, text/html',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
@@ -57,23 +66,24 @@ export class AniwavesSource extends BaseAnimeSource {
             
             const proxies = [
                 `https://api.allorigins.win/raw?url=${encodeURIComponent(fullUrl)}`,
+                `https://corsproxy.io/?${encodeURIComponent(fullUrl)}`,
                 `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(fullUrl)}`,
-                `https://corsproxy.io/?${encodeURIComponent(fullUrl)}`
             ];
 
-            let lastError: any;
-            for (const proxyUrl of proxies) {
-                try {
-                    return await axios.get(proxyUrl, {
-                        signal: config.signal,
-                        timeout: 12000 // 12s per proxy — slow public proxies need breathing room
-                    });
-                } catch (proxyError: any) {
-                    lastError = proxyError;
+            // Race all proxies in parallel — whichever responds first wins.
+            // Any individual proxy that rejects is ignored; only a total failure rejects.
+            const proxyPromises = proxies.map(proxyUrl =>
+                axios.get(proxyUrl, {
+                    signal: config.signal,
+                    timeout: 5000 // 5s per proxy — tight budget, we race anyway
+                }).catch(err => {
                     logger.warn(`[Aniwaves] Proxy ${proxyUrl.split('/')[2]} failed`, undefined, this.name);
-                }
-            }
-            throw lastError;
+                    throw err;
+                })
+            );
+
+            // Promise.any resolves on the first success, rejects only if all fail
+            return await Promise.any(proxyPromises);
         }
     }
 
@@ -326,28 +336,34 @@ export class AniwavesSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const servers = await this.getEpisodeServers(episodeId, options);
-            const filtered = servers.filter(s => s.type === category);
-            
             let targetServerId = '';
             let resolvedCategory: 'sub' | 'dub' = category;
-            
-            if (serverId) {
-                const match = filtered.find(s => 
-                    s.name.toLowerCase() === serverId.toLowerCase() || 
-                    s.url === serverId
-                );
-                if (match) {
-                    targetServerId = match.url;
-                    resolvedCategory = match.type === 'dub' ? 'dub' : 'sub';
+
+            // If serverId is provided and looks like a direct link ID, use it directly to skip servers fetch
+            if (serverId && !serverId.includes(' ') && serverId.length > 5) {
+                targetServerId = serverId;
+                resolvedCategory = category;
+            } else {
+                const servers = await this.getEpisodeServers(episodeId, options);
+                const filtered = servers.filter(s => s.type === category);
+                
+                if (serverId) {
+                    const match = filtered.find(s => 
+                        s.name.toLowerCase() === serverId.toLowerCase() || 
+                        s.url === serverId
+                    );
+                    if (match) {
+                        targetServerId = match.url;
+                        resolvedCategory = match.type === 'dub' ? 'dub' : 'sub';
+                    }
                 }
-            }
-            
-            if (!targetServerId) {
-                const best = filtered.length > 0 ? filtered[0] : (servers.length > 0 ? servers[0] : null);
-                if (!best) return { sources: [], subtitles: [] };
-                targetServerId = best.url;
-                resolvedCategory = best.type === 'dub' ? 'dub' : 'sub';
+                
+                if (!targetServerId) {
+                    const best = filtered.length > 0 ? filtered[0] : (servers.length > 0 ? servers[0] : null);
+                    if (!best) return { sources: [], subtitles: [] };
+                    targetServerId = best.url;
+                    resolvedCategory = best.type === 'dub' ? 'dub' : 'sub';
+                }
             }
 
             // Step 1: Get the embed URL

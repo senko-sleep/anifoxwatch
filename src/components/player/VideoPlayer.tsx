@@ -290,21 +290,21 @@ export const VideoPlayer = ({
         liveSyncDurationCount: 3,
         liveMaxLatencyDurationCount: 5,
         liveDurationInfinity: true,
-        backBufferLength: onMobile ? 15 : 30,
-        maxBufferLength: onMobile ? 15 : 30,
-        maxMaxBufferLength: onMobile ? 30 : 60,
+        backBufferLength: onMobile ? 30 : 60,     // Increased: keep more video behind seek point
+        maxBufferLength: onMobile ? 30 : 60,      // Increased: buffer more video ahead to prevent stalls
+        maxMaxBufferLength: onMobile ? 60 : 120,  // Allow HLS.js to grow buffer on fast connections
         maxBufferHole: 0.5,
         startLevel: -1,
-        // Proxied streams through Vercel are 1–3 Mbps; start conservatively
-        // so ABR ramps up instead of picking 720p then stalling.
-        abrEwmaDefaultEstimate: onMobile ? 800000 : 2500000,
+        // Higher default estimate means HLS.js starts at a better quality level.
+        // Proxied streams typically sustain 1–5 Mbps through Vercel.
+        abrEwmaDefaultEstimate: onMobile ? 1_500_000 : 4_000_000,
         abrEwmaFastLive: 3,
         abrEwmaSlowLive: 9,
         abrEwmaFastVoD: 3,
         abrEwmaSlowVoD: 9,
         abrMaxWithRealBitrate: true,
         testBandwidth: true,
-        startFragPrefetch: !onMobile,
+        startFragPrefetch: true,  // Always prefetch — eliminates the initial "buffering" pause
         fragLoadingMaxRetry: 5,
         manifestLoadingMaxRetry: 4,
         levelLoadingMaxRetry: 4,
