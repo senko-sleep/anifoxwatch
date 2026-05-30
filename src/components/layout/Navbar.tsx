@@ -109,9 +109,9 @@ export const Navbar = () => {
         )}
       >
         {/* Top accent line — stronger orange glow */}
-        <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-fox-orange to-transparent opacity-80" />
+        <div className="hidden md:block absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-fox-orange to-transparent opacity-80" />
         {/* Subtle glow below accent */}
-        <div className="absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-fox-orange/[0.06] to-transparent pointer-events-none" />
+        <div className="hidden md:block absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-fox-orange/[0.06] to-transparent pointer-events-none" />
 
         <div className="container flex h-14 sm:h-16 items-center gap-2 sm:gap-3 min-w-0">
 
@@ -256,7 +256,7 @@ export const Navbar = () => {
 
             {/* Mobile: Search icon */}
             <button
-              className="md:hidden flex items-center justify-center w-9 h-9 rounded-xl bg-white/[0.06] border border-white/[0.08] text-zinc-300 hover:bg-white/[0.1] hover:text-white transition-all duration-200 touch-manipulation"
+              className="md:hidden flex items-center justify-center w-11 h-11 rounded-xl bg-white/[0.06] border border-white/[0.08] text-zinc-300 hover:bg-white/[0.1] hover:text-white transition-all duration-200 touch-manipulation"
               onClick={() => setIsMobileSearchOpen(true)}
               aria-label="Search"
             >
@@ -267,7 +267,7 @@ export const Navbar = () => {
             <Button
               variant="ghost"
               size="icon"
-              className="md:hidden hover:bg-white/[0.06] w-9 h-9 rounded-xl border border-white/[0.06] touch-manipulation"
+              className="md:hidden hover:bg-white/[0.06] w-11 h-11 rounded-xl border border-white/[0.06] touch-manipulation"
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             >
               {isMobileMenuOpen ? <X className="w-[18px] h-[18px]" /> : <Menu className="w-[18px] h-[18px]" />}
@@ -346,7 +346,7 @@ export const Navbar = () => {
             </div>
             <button
               onClick={() => setIsMobileSearchOpen(false)}
-              className="shrink-0 flex items-center justify-center w-9 h-9 rounded-xl bg-white/[0.06] text-zinc-400 hover:text-white transition-colors touch-manipulation"
+              className="shrink-0 flex items-center justify-center w-11 h-11 rounded-xl bg-white/[0.06] text-zinc-400 hover:text-white transition-colors touch-manipulation"
             >
               <X className="w-4 h-4" />
             </button>

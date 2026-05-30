@@ -274,7 +274,7 @@ const slides = useMemo(
                   <SynopsisText synopsis={synopsis} />
                 </div>
 
-                {/* CTA buttons */}
+                {/* CTA button */}
                 <div className="flex items-center gap-1.5 sm:gap-2 pt-0.5 sm:pt-1.5">
                   <Button
                     onClick={() =>
@@ -286,16 +286,6 @@ const slides = useMemo(
                   >
                     <Play className="h-2 w-2 sm:h-3.5 sm:w-3.5 fill-white" />
                     Watch
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-6 sm:h-10 gap-1 sm:gap-1.5 rounded-full border-white/[0.12] bg-white/[0.06] px-2 sm:px-5 text-[10px] font-medium text-zinc-200 backdrop-blur-sm hover:bg-white/[0.1] hover:border-white/20 hover:text-white sm:text-sm transition-all duration-200"
-                    onClick={() => navigate(watchPath, { state: { from: location.pathname + location.search } })}
-                  >
-                    <ChevronRight className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5" />
-                    <span className="sm:hidden">Details</span>
-                    <BookmarkPlus className="hidden sm:block h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Watchlist</span>
                   </Button>
                   <Link
                     to="/browse"
@@ -504,7 +494,7 @@ function SynopsisText({ synopsis }: { synopsis: string }) {
       <p
         ref={textRef}
         className={cn(
-          'text-[12px] leading-relaxed text-zinc-400/90 sm:text-sm transition-all duration-300',
+          'text-[11px] leading-relaxed text-zinc-400/90 sm:text-xs transition-all duration-300',
           !isExpanded && 'line-clamp-6'
         )}
       >

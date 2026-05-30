@@ -45,6 +45,15 @@ export default defineConfig(async ({ mode }) => {
     },
     build: {
       assetsInclude: ['**/*.svg', '**/*.ico', '**/*.webmanifest'],
+      cssCodeSplit: true,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+            'ui-vendor': ['lucide-react', '@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu']
+          }
+        }
+      }
     },
   };
 });

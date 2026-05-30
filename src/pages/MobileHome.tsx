@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Search, Shuffle, Play, Star, ChevronRight, Loader2,
+  Search, Shuffle, Loader2,
   Home, Compass, Calendar, RefreshCw, AlertCircle,
-  Sparkles, Captions, Clock,
+  Clock, ChevronRight,
 } from 'lucide-react';
-import { cn, ensureHttps } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { Logo } from '@/components/ui/Logo';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { AnimeSlider } from '@/components/home/AnimeSlider';
 import { ContinueWatching } from '@/components/home/ContinueWatching';
+import { MobileHero } from '@/components/home/MobileHeroSection';
 import { useWatchHistory } from '@/hooks/useWatchHistory';
 import { apiClient } from '@/lib/api-client';
 import {
@@ -21,7 +22,6 @@ import {
   useAnilistHomeUpcoming,
 } from '@/hooks/useAnilistHomeSections';
 import { useHeroAnime } from '@/hooks/useHeroAnimeMultiSource';
-import { getHeroTitle, formatHeroRating } from '@/hooks/useHeroAnimeMultiSource';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 // ─── Category chips ────────────────────────────────────────────────────────────
@@ -44,248 +44,6 @@ const NAV_ITEMS = [
   { to: '/browse',   label: 'Browse',   Icon: Compass  },
   { to: '/schedule', label: 'Schedule', Icon: Calendar },
 ] as const;
-
-// ─── Film grain texture ────────────────────────────────────────────────────────
-const FILM_GRAIN = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
-
-// ─── Cinematic mobile hero ─────────────────────────────────────────────────────
-function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>['heroAnime'] }) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { isLandscape } = useBreakpoint();
-
-  // ✦ FIX 1: Filter to include anime with banner OR cover image for display
-  const slides = useMemo(
-    () => heroAnime.filter(a => !!(a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large)),
-    [heroAnime]
-  );
-
-  const [idx, setIdx]         = useState(0);
-  const [prevIdx, setPrevIdx] = useState<number | null>(null);
-  const [panelVisible, setPanelVisible] = useState(true);
-  const touchStartX = useRef<number | null>(null);
-  const touchStartY = useRef<number | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isPaused    = useRef(false);
-
-  const count = slides.length;
-
-  const go = useCallback((next: number) => {
-    if (count === 0) return;
-    const n = ((next % count) + count) % count;
-    if (n === idx) return;
-    setPanelVisible(false);
-    setPrevIdx(idx);
-    setIdx(n);
-    setTimeout(() => setPanelVisible(true), 120);
-    setTimeout(() => setPrevIdx(null), 650);
-  }, [idx, count]);
-
-  // Reset index if slide list shrinks
-  useEffect(() => {
-    if (idx >= count && count > 0) setIdx(0);
-  }, [count, idx]);
-
-  // Auto-advance
-  useEffect(() => {
-    if (count <= 1) return;
-    const tick = () => { if (!isPaused.current) go(idx + 1); };
-    intervalRef.current = setInterval(tick, 8000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [idx, count, go]);
-
-  // Pause on tab hidden
-  useEffect(() => {
-    const onVis = () => { isPaused.current = document.hidden; };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, []);
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-    touchStartY.current = e.touches[0].clientY;
-    isPaused.current = true;
-    if (intervalRef.current) clearInterval(intervalRef.current);
-  };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null || touchStartY.current === null) return;
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    const dy = e.changedTouches[0].clientY - touchStartY.current;
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 36) go(dx < 0 ? idx + 1 : idx - 1);
-    touchStartX.current = null;
-    touchStartY.current = null;
-    setTimeout(() => { isPaused.current = false; }, 1000);
-  };
-
-  if (!slides.length) {
-    return (
-      <div
-        className="mx-4 rounded-2xl shimmer"
-        style={{ height: isLandscape ? 'clamp(180px, 42vh, 260px)' : 'clamp(320px, 62vh, 480px)' }}
-      />
-    );
-  }
-
-  const anime       = slides[idx];
-  const title       = getHeroTitle(anime);
-  const rating      = formatHeroRating(anime.averageScore);
-  const watchPath   = anime.source === 'anilist' ? `/watch?id=anilist-${anime.id}` : `/watch?id=${anime.id}`;
-  const formatLabel = (anime.format || 'TV').replace(/_/g, ' ');
-  const seasonLabel = [anime.season, anime.seasonYear].filter(Boolean).join(' ');
-  const epCount     = anime.episodes != null && anime.episodes > 0 ? `${anime.episodes} eps` : null;
-  const runtime     = anime.duration  != null && anime.duration  > 0 ? `${anime.duration}m`  : null;
-
-  return (
-    <div
-      className="mx-4 relative select-none overflow-hidden rounded-2xl"
-      style={{
-        height: isLandscape ? '42vh' : 'clamp(320px, 62vh, 480px)',
-        overscrollBehaviorX: 'contain',
-        touchAction: 'pan-y',
-      }}
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
-      role="region"
-      aria-roledescription="carousel"
-      aria-label="Featured anime"
-    >
-{/* ── Background slides ─────────────────────────────────── */}
-       {slides.map((a, i) => {
-         const bg = ensureHttps(a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large || '');
-         const hasBanner = !!a.bannerImage;
-         const isActive = i === idx;
-         const isPrev   = i === prevIdx;
-         if (!isActive && !isPrev) return null;
-         return (
-           <div
-             key={a.id}
-             className={cn(
-               'absolute inset-0 transition-opacity duration-[600ms] will-change-[opacity]',
-               isActive ? 'opacity-100 z-[1]' : 'opacity-0 z-[0]'
-             )}
-             aria-hidden={!isActive}
-           >
-             <img
-               src={bg}
-               alt=""
-               className="w-full h-full object-cover"
-               style={{ objectPosition: hasBanner ? 'center 30%' : 'center top' }}
-               loading={i === 0 ? 'eager' : 'lazy'}
-               decoding="async"
-               referrerPolicy="no-referrer"
-               draggable={false}
-             />
-           </div>
-         );
-       })}
-
-      {/* ── Gradient layers ─── */}
-      <div className="pointer-events-none absolute inset-0 z-[2]">
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              'linear-gradient(to top, #080a0f 0%, #080a0f 32%, rgba(8,10,15,0.92) 52%, rgba(8,10,15,0.35) 72%, transparent 90%)',
-          }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#080a0f]/60 via-[#080a0f]/15 to-transparent" />
-        <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-[#080a0f]/70 to-transparent" />
-      </div>
-
-      {/* Film grain */}
-      <div
-        className="pointer-events-none absolute inset-0 z-[3] opacity-[0.06] mix-blend-overlay"
-        style={{ backgroundImage: FILM_GRAIN }}
-      />
-
-      {/* Orange glow */}
-      <div
-        className="pointer-events-none absolute bottom-0 left-0 z-[3] w-full h-[50%] opacity-[0.15]"
-        style={{ background: 'radial-gradient(ellipse at 20% 100%, hsl(28 95% 55% / 1) 0%, transparent 60%)' }}
-      />
-
-      {/* ── SPOTLIGHT badge — top left ────────────────────────── */}
-      <div className="absolute top-3 left-4 z-[4] flex items-center gap-2">
-        <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.2em] text-fox-orange drop-shadow-md">
-          <Sparkles className="w-3 h-3" />Spotlight
-        </span>
-        {seasonLabel && (
-          <span className="text-[10px] text-white/55 uppercase tracking-wide drop-shadow-md">· {seasonLabel}</span>
-        )}
-      </div>
-
-      {/* ── Overlaid content — bottom of hero ─────────────────── */}
-      <div
-        className={cn(
-          'absolute inset-x-0 bottom-0 z-[5] px-4 pb-6 transition-all duration-300 ease-out',
-          panelVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'
-        )}
-      >
-        {/* Title */}
-        <h1
-          className="font-display font-bold leading-[1.15] tracking-tight text-white line-clamp-2 mb-2.5 drop-shadow-lg"
-          style={{ fontSize: 'clamp(22px, 6vw, 30px)' }}
-        >
-          {title}
-        </h1>
-
-        {/* Metadata row */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-4 text-[11px]">
-          {rating && (
-            <span className="inline-flex items-center gap-1 font-bold text-amber-300 bg-amber-400/10 px-2 py-0.5 rounded-full">
-              <Star className="w-3 h-3 fill-amber-400 text-amber-400" />{rating}
-            </span>
-          )}
-          <span className="font-semibold uppercase tracking-wide text-white/70 bg-white/10 px-2 py-0.5 rounded-full">{formatLabel}</span>
-          {epCount && <span className="text-zinc-400 bg-white/[0.07] px-2 py-0.5 rounded-full">{epCount}</span>}
-          {seasonLabel && <span className="text-zinc-400 bg-white/[0.07] px-2 py-0.5 rounded-full">{seasonLabel}</span>}
-          <span className="inline-flex items-center gap-0.5 font-semibold text-sky-300 bg-sky-400/10 px-2 py-0.5 rounded-full">
-            <Captions className="w-3 h-3" />Sub+Dub
-          </span>
-        </div>
-
-        {/* CTA buttons */}
-        <div className="flex gap-2.5 mb-4">
-          <button
-            onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
-            className="flex-1 flex items-center justify-center gap-2 bg-fox-orange text-white text-[13px] font-bold h-11 rounded-2xl shadow-lg shadow-fox-orange/40 active:scale-[0.97] transition-transform touch-manipulation"
-          >
-            <Play className="w-4 h-4 fill-white" />Watch Now
-          </button>
-          <button
-            onClick={() => navigate(`/browse?q=${encodeURIComponent(title)}`)}
-            className="flex items-center justify-center gap-1.5 text-[13px] font-semibold text-white/90 h-11 px-4 rounded-2xl bg-white/10 backdrop-blur-sm border border-white/15 active:scale-[0.97] transition-transform touch-manipulation"
-          >
-            Details<ChevronRight className="w-3.5 h-3.5 opacity-60" />
-          </button>
-        </div>
-
-        {/* Slide dots */}
-        {count > 1 && (
-          <div className="flex items-center justify-center gap-[5px]" role="tablist" aria-label="Slide navigation">
-            {slides.slice(0, 8).map((_, i) => (
-              <button
-                key={i}
-                onClick={() => go(i)}
-                aria-label={`Slide ${i + 1}`}
-                aria-selected={i === idx}
-                role="tab"
-                className="touch-manipulation p-1"
-              >
-                <span className={cn(
-                  'block rounded-full transition-all duration-300',
-                  i === idx
-                    ? 'w-6 h-[3px] bg-fox-orange shadow-[0_0_6px] shadow-fox-orange/70'
-                    : 'w-[3px] h-[3px] bg-white/25 hover:bg-white/50'
-                )} />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ─── Section row ───────────────────────────────────────────────────────────────
 function MobileSection({
@@ -359,12 +117,12 @@ function MobileHeader({ onSearch, onRandom, isLoadingRandom }: {
         <Logo size="sm" />
       </Link>
 
-      {/* Right actions — 40px touch targets */}
+      {/* Right actions — 44px touch targets */}
       <div className="flex items-center gap-1.5">
         <button
           onClick={onRandom}
           disabled={isLoadingRandom}
-          className="w-10 h-10 rounded-xl bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-zinc-400 active:scale-90 transition-transform touch-manipulation disabled:opacity-40"
+          className="w-11 h-11 rounded-xl bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-zinc-400 active:scale-90 transition-transform touch-manipulation disabled:opacity-40"
           aria-label="Random anime"
         >
           {isLoadingRandom
@@ -373,7 +131,7 @@ function MobileHeader({ onSearch, onRandom, isLoadingRandom }: {
         </button>
         <button
           onClick={onSearch}
-          className="w-10 h-10 rounded-xl bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-zinc-400 active:scale-90 transition-transform touch-manipulation"
+          className="w-11 h-11 rounded-xl bg-white/[0.06] border border-white/[0.08] flex items-center justify-center text-zinc-400 active:scale-90 transition-transform touch-manipulation"
           aria-label="Search"
         >
           <Search className="w-4 h-4" />
@@ -606,13 +364,13 @@ export const MobileHome = () => {
         {/* Continue Watching */}
         {history.length > 0 && (
           <section>
-            <div className="flex items-center justify-between mb-2 px-4">
+            <div className="flex items-center justify-between mb-2" style={{ paddingLeft: '16px', paddingRight: '16px' }}>
               <div className="flex items-center gap-2">
                 <span className="w-[3px] h-4 rounded-full bg-fox-orange shadow-[0_0_6px] shadow-fox-orange/60 shrink-0" />
                 <h2 className="text-[13px] font-bold text-white">Continue Watching</h2>
               </div>
             </div>
-            <div className="px-4">
+            <div style={{ paddingLeft: '16px', paddingRight: '16px' }}>
               <ContinueWatching items={history} onRemove={removeFromHistory} />
             </div>
           </section>

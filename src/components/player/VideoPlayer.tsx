@@ -1067,11 +1067,6 @@ const handleVisibilityChange = () => {
     if (!container || !video) return;
 
     if (document.fullscreenElement || (video as any).webkitDisplayingFullscreen) {
-      if (document.exitFullscreen) {
-        await document.exitFullscreen();
-      } else if ((video as any).webkitExitFullscreen) {
-        (video as any).webkitExitFullscreen();
-      }
       if (isMobile() && screen.orientation && (screen.orientation as any).unlock) {
         try {
           (screen.orientation as any).unlock();
@@ -1079,26 +1074,34 @@ const handleVisibilityChange = () => {
           playerLog('warn', 'Orientation unlock failed', e);
         }
       }
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if ((video as any).webkitExitFullscreen) {
+        (video as any).webkitExitFullscreen();
+      }
     } else {
-      if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
+      let enteredFs = false;
+      if (container.requestFullscreen) {
+        try {
+          await container.requestFullscreen();
+          enteredFs = true;
+        } catch (e) {
+          playerLog('warn', 'container.requestFullscreen failed', e);
+        }
+      }
+
+      if (enteredFs && isMobile() && screen.orientation && (screen.orientation as any).lock) {
         try {
           await (screen.orientation as any).lock('landscape');
         } catch (e) {
           playerLog('warn', 'Orientation lock failed', e);
         }
-      }
-
-      if (isMobile() && (video as any).webkitEnterFullscreen) {
+      } else if (!enteredFs && isMobile() && (video as any).webkitEnterFullscreen) {
         try {
           (video as any).webkitEnterFullscreen();
-          return;
         } catch (e) {
-          playerLog('warn', 'webkitEnterFullscreen failed, falling back to container fullscreen', e);
+          playerLog('warn', 'webkitEnterFullscreen failed', e);
         }
-      }
-
-      if (container.requestFullscreen) {
-        await container.requestFullscreen();
       }
     }
   }, [isMobile]);
@@ -1176,19 +1179,18 @@ const handleVisibilityChange = () => {
         isLandscapeLockedRef.current = false;
         setIsLandscapeLocked(false);
       } else {
-        // Lock to landscape
-        if (screen.orientation && (screen.orientation as any).lock) {
-          await (screen.orientation as any).lock('landscape');
-        }
-        // Enter fullscreen
-        if ((video as any).webkitEnterFullscreen) {
-          try {
-            (video as any).webkitEnterFullscreen();
-          } catch (_e) {
-            if (container.requestFullscreen) await container.requestFullscreen();
-          }
-        } else if (container.requestFullscreen) {
+        // Enter fullscreen FIRST
+        let enteredFs = false;
+        if (container.requestFullscreen) {
           await container.requestFullscreen();
+          enteredFs = true;
+        } else if ((video as any).webkitEnterFullscreen) {
+          (video as any).webkitEnterFullscreen();
+        }
+
+        // Lock orientation AFTER
+        if (enteredFs && screen.orientation && (screen.orientation as any).lock) {
+          await (screen.orientation as any).lock('landscape');
         }
         isLandscapeLockedRef.current = true;
         setIsLandscapeLocked(true);

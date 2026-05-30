@@ -697,12 +697,12 @@ const Browse = () => {
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder="Search anime..."
-                    className="pl-9 h-10 sm:h-9 bg-white/[0.04] border border-white/[0.06] rounded-lg text-sm focus:ring-0 focus-visible:ring-0 focus:border-white/[0.12] transition-colors placeholder:text-zinc-600"
+                    className="pl-10 h-11 sm:h-9 bg-white/[0.04] border border-white/[0.06] rounded-xl text-base sm:text-sm focus:ring-0 focus-visible:ring-0 focus:border-white/[0.12] transition-colors placeholder:text-zinc-600"
                   />
                   {query && (
                     <button
                       onClick={() => setQuery('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors touch-manipulation"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 w-8 h-8 sm:w-6 sm:h-6 rounded flex items-center justify-center text-zinc-500 hover:text-zinc-300 transition-colors touch-manipulation"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -810,10 +810,10 @@ const Browse = () => {
                 {/* Mobile Filter Button */}
                 <Sheet open={isMobileFiltersOpen} onOpenChange={setIsMobileFiltersOpen}>
                   <SheetTrigger asChild>
-                    <button className="lg:hidden relative flex items-center justify-center w-10 h-10 sm:w-8 sm:h-8 rounded-lg bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.06] transition-colors touch-manipulation">
-                      <SlidersHorizontal className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-zinc-500" />
+                    <button className="lg:hidden relative flex items-center justify-center w-11 h-11 sm:w-9 sm:h-9 rounded-xl bg-white/[0.04] border border-white/[0.06] hover:bg-white/[0.06] transition-colors touch-manipulation shrink-0">
+                      <SlidersHorizontal className="w-5 h-5 sm:w-4 sm:h-4 text-zinc-500" />
                       {activeFilterCount > 0 && (
-                        <span className="absolute -top-1 -right-1 w-4 h-4 sm:w-3.5 sm:h-3.5 rounded-full bg-fox-orange text-white text-[8px] sm:text-[7px] font-bold flex items-center justify-center">
+                        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-fox-orange text-white text-[9px] sm:text-[8px] font-bold flex items-center justify-center shadow-md">
                           {activeFilterCount}
                         </span>
                       )}
@@ -841,15 +841,15 @@ const Browse = () => {
                           key={opt.id}
                           onClick={opt.id === 'shuffle' ? handleShuffle : () => { setBrowseSortBy(opt.id as BrowseSortOption); setPage(1); }}
                           className={cn(
-                            "flex items-center gap-1 px-2.5 py-2 rounded-md text-[11px] font-medium transition-colors touch-manipulation",
+                            "flex items-center gap-1.5 px-3 h-11 sm:h-8 sm:py-2 rounded-xl sm:rounded-md text-[13px] sm:text-[11px] font-medium transition-colors touch-manipulation shrink-0",
                             isActive
-                              ? "bg-white/[0.08] text-white"
-                              : "text-zinc-500"
+                              ? "bg-white/[0.08] text-white shadow-sm"
+                              : "text-zinc-500 bg-white/[0.02]"
                           )}
                           title={opt.label}
                         >
-                          <Icon className="w-3.5 h-3.5" />
-                          <span className="text-[10px]">{opt.label}</span>
+                          <Icon className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                          <span>{opt.label}</span>
                         </button>
                       );
                     })}
@@ -871,7 +871,7 @@ const Browse = () => {
                   {/* Mobile Content Mode */}
                   <Select value={mode} onValueChange={(v: 'safe' | 'mixed' | 'adult') => { setMode(v); setPage(1); }}>
                     <SelectTrigger className={cn(
-                      "w-[88px] h-9 rounded-lg text-[11px] font-medium bg-white/[0.04] border border-white/[0.06] transition-colors touch-manipulation",
+                      "w-[100px] sm:w-[88px] h-11 sm:h-9 rounded-xl sm:rounded-lg text-[13px] sm:text-[11px] font-medium bg-white/[0.04] border border-white/[0.06] transition-colors touch-manipulation",
                       mode !== 'safe' && "border-fox-orange/30 text-fox-orange"
                     )}>
                       <SelectValue placeholder="Content" />
@@ -894,7 +894,7 @@ const Browse = () => {
 
           {/* Scrollable Results Area */}
           <div ref={resultsContainerRef} className="flex-1 overflow-y-auto overscroll-contain scrollbar-thin">
-            <div className="px-3 sm:px-4 lg:px-6 py-4 pb-24 md:pb-4">
+            <div className="px-3 sm:px-4 lg:px-6 py-4 pb-[100px] md:pb-4">
               <div className="max-w-[1600px] mx-auto">
                 {/* Active Filters */}
                 {activeFilterCount > 0 && (
