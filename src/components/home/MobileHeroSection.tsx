@@ -1,24 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Play, Star, Sparkles, Captions } from 'lucide-react';
-import { cn, ensureHttps } from '@/lib/utils';
+import { Play, Star, Sparkles, Captions, Film } from 'lucide-react';
+import { cn, ensureHttps, pickAnimePoster } from '@/lib/utils';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { useHeroAnime, getHeroTitle, formatHeroRating } from '@/hooks/useHeroAnimeMultiSource';
 
 const FILM_GRAIN = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
-
-// ─── Cinematic mobile hero — FIXED ────────────────────────────────────────────
-//
-// Fixes applied:
-//  1. Card uses a flex-column layout instead of pure absolute positioning for
-//     the content panel, so the card always grows to fit its content.
-//  2. The background image is absolutely positioned behind everything while
-//     the foreground content is in normal flow — no more clipping.
-//  3. Pagination dots live OUTSIDE the card (below it) so they never overlap
-//     buttons and never get clipped by overflow-hidden.
-//  4. minHeight is enforced via both the outer wrapper AND the image, so the
-//     card never collapses on wide/landscape viewports.
-//  5. The gradient overlay now covers the full image height reliably.
 
 export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>['heroAnime'] }) {
   const navigate = useNavigate();
@@ -73,6 +60,7 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
     isPaused.current = true;
     if (intervalRef.current) clearInterval(intervalRef.current);
   };
+
   const onTouchEnd = (e: React.TouchEvent) => {
     if (touchStartX.current === null || touchStartY.current === null) return;
     const dx = e.changedTouches[0].clientX - touchStartX.current;
@@ -88,11 +76,10 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
     return (
       <div className="mx-4">
         <div
-          className="rounded-2xl shimmer"
-          style={{ height: isLandscape ? '260px' : '420px' }}
+          className="rounded-2xl shimmer bg-zinc-900 border border-white/[0.06]"
+          style={{ aspectRatio: '16 / 9' }}
         />
-        {/* dots placeholder */}
-        <div style={{ height: '28px' }} />
+        <div style={{ height: '24px' }} />
       </div>
     );
   }
@@ -104,172 +91,207 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
   const formatLabel = (anime.format || 'TV').replace(/_/g, ' ');
   const seasonLabel = [anime.season, anime.seasonYear].filter(Boolean).join(' ');
   const epCount     = anime.episodes != null && anime.episodes > 0 ? `${anime.episodes} eps` : null;
+  const posterSrc = (() => {
+    if (anime.coverImage && typeof anime.coverImage === 'object') {
+      return anime.coverImage.extraLarge || anime.coverImage.large || '';
+    }
+    return pickAnimePoster(anime as any);
+  })();
 
-  // FIX: Image height is fixed independently from the card's flex content.
-  // The card is now a flex-column; the image section has a fixed height and the
-  // content panel sits below it — both in normal flow, not stacked absolutely.
-  // This prevents content from ever being clipped or the card from collapsing.
-  const imgHeight = isLandscape ? '220px' : '280px';
+  // Strip HTML and clean description
+  const cleanDescription = (() => {
+    if (!anime.description) return '';
+    let desc = anime.description.replace(/<[^>]*>/g, '').trim();
+    desc = desc
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>');
+    return desc;
+  })();
+
+  const displayDescription = (() => {
+    if (cleanDescription && cleanDescription.length > 10) return cleanDescription;
+    const g = anime.genres && Array.isArray(anime.genres)
+      ? anime.genres.slice(0, 3).join(', ')
+      : '';
+    return g
+      ? `${title} — A premium ${g} anime. Follow the journey on AniFox.`
+      : `${title} — Start watching now on AniFox.`;
+  })();
 
   return (
-    <div className="mx-4 select-none" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-
-      {/* ── CARD ─────────────────────────────────────────────────────────────── */}
-      {/* FIX: removed overflow-hidden from outer wrapper; moved to image section only */}
+    <div
+      className="mx-4 select-none"
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
+      {/* ── CARD — Widescreen display box with aspect ratio 16/9 ─────────────────── */}
       <div
-        className="relative rounded-2xl bg-zinc-900"
+        className="relative rounded-2xl overflow-hidden bg-zinc-900 border border-white/[0.06] shadow-2xl shadow-black/80"
         role="region"
         aria-roledescription="carousel"
         aria-label="Featured anime"
         style={{
-          // FIX: no fixed height — card grows with content naturally
-          minHeight: isLandscape ? '280px' : '380px',
+          aspectRatio: '16 / 9',
           overscrollBehaviorX: 'contain',
           touchAction: 'pan-y',
         }}
       >
+        {/* ── Background slides — absolute crossfade ─────────────── */}
+        {slides.map((a, i) => {
+          const bg = ensureHttps(a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large || '');
+          const isActive = i === idx;
+          const isPrev   = i === prevIdx;
+          if (!isActive && !isPrev) return null;
+          return (
+            <div
+              key={a.id}
+              className={cn(
+                'absolute inset-0 transition-opacity duration-[600ms] will-change-[opacity]',
+                isActive ? 'opacity-100 z-[1]' : 'opacity-0 z-[0]'
+              )}
+              aria-hidden={!isActive}
+            >
+              <img
+                src={bg}
+                alt=""
+                className="w-full h-full object-cover"
+                style={{ objectPosition: 'center 20%' }}
+                loading={i === 0 ? 'eager' : 'lazy'}
+                decoding="async"
+                referrerPolicy="no-referrer"
+                draggable={false}
+              />
+            </div>
+          );
+        })}
 
-        {/* ── Image section (clipped independently) ────────────────────────── */}
+        {/* Deep bottom-heavy cinematic overlay for clear content contrast */}
         <div
-          className="relative w-full overflow-hidden rounded-t-2xl"
-          style={{ height: imgHeight }}
-        >
-          {/* Background slides */}
-          {slides.map((a, i) => {
-            const bg = ensureHttps(a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large || '');
-            const isActive = i === idx;
-            const isPrev   = i === prevIdx;
-            if (!isActive && !isPrev) return null;
-            return (
-              <div
-                key={a.id}
-                className={cn(
-                  'absolute inset-0 transition-opacity duration-[600ms] will-change-[opacity]',
-                  isActive ? 'opacity-100 z-[1]' : 'opacity-0 z-[0]'
-                )}
-                aria-hidden={!isActive}
-              >
-                <img
-                  src={bg}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  style={{ objectPosition: 'center top' }}
-                  loading={i === 0 ? 'eager' : 'lazy'}
-                  decoding="async"
-                  referrerPolicy="no-referrer"
-                  draggable={false}
-                />
-              </div>
-            );
-          })}
+          className="pointer-events-none absolute inset-0 z-[2]"
+          style={{
+            background: 'linear-gradient(to bottom, rgba(10,10,15,0.3) 0%, rgba(10,10,15,0.7) 40%, rgba(8,10,15,0.96) 72%, #080a0f 100%)',
+          }}
+        />
 
-          {/* Gradient: covers full image, fades strongly at bottom into card bg */}
-          <div
-            className="pointer-events-none absolute inset-0 z-[2]"
-            style={{
-              background: 'linear-gradient(to bottom, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0.05) 40%, rgba(24,18,12,0.7) 80%, #080a0f 100%)',
-            }}
-          />
+        {/* Film grain */}
+        <div
+          className="pointer-events-none absolute inset-0 z-[3] opacity-[0.04] mix-blend-overlay"
+          style={{ backgroundImage: FILM_GRAIN }}
+        />
 
-          {/* Film grain */}
-          <div
-            className="pointer-events-none absolute inset-0 z-[3] opacity-[0.06] mix-blend-overlay"
-            style={{ backgroundImage: FILM_GRAIN }}
-          />
+        {/* Subtle warm accent glow at bottom-left */}
+        <div
+          className="pointer-events-none absolute bottom-0 left-0 z-[3] w-[60%] h-[60%] opacity-[0.12]"
+          style={{ background: 'radial-gradient(ellipse at 0% 100%, hsl(28 95% 55% / 1) 0%, transparent 65%)' }}
+        />
 
-          {/* Orange glow */}
-          <div
-            className="pointer-events-none absolute bottom-0 left-0 z-[3] w-full h-[50%] opacity-[0.15]"
-            style={{ background: 'radial-gradient(ellipse at 20% 100%, hsl(28 95% 55% / 1) 0%, transparent 60%)' }}
-          />
-
-          {/* SPOTLIGHT badge */}
-          <div className="absolute top-3 left-4 z-[4] flex items-center gap-2">
-            <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.2em] text-fox-orange drop-shadow-md">
-              <Sparkles className="w-3 h-3" />Spotlight
+        {/* ── SPOTLIGHT badge — top left ─────────────────────────────────── */}
+        <div className="absolute top-[10px] left-[12px] z-[4] flex items-center gap-1 bg-black/45 backdrop-blur-md px-2 py-0.5 rounded-full border border-white/[0.04]">
+          <span className="flex items-center gap-0.5 text-[7.5px] font-bold uppercase tracking-[0.18em] text-fox-orange drop-shadow-sm">
+             <Sparkles className="w-2 h-2" />Spotlight
+          </span>
+          {seasonLabel && (
+             <span className="text-[7.5px] text-white/50 font-medium uppercase tracking-wide">
+              · {seasonLabel}
             </span>
-            {seasonLabel && (
-              <span className="text-[10px] text-white/55 uppercase tracking-wide drop-shadow-md">
-                · {seasonLabel}
-              </span>
-            )}
-          </div>
+          )}
         </div>
 
-        {/* ── Content panel — in normal flow, below the image ──────────────── */}
-        {/* FIX: This is no longer absolutely positioned. It's a regular flex   */}
-        {/* column inside the card, so it always occupies real vertical space   */}
-        {/* and can never be clipped or overflow the card boundary.             */}
+        {/* ── CONTENT CONTAINER — bottom anchored info pane ─────────── */}
         <div
           className={cn(
-            'flex flex-col transition-all duration-300 ease-out',
+            'absolute inset-x-0 bottom-0 z-[4] flex gap-3 items-end transition-all duration-300 ease-out p-3 pb-2.5 pt-8',
             panelVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'
           )}
-          style={{ padding: '14px 16px 16px 16px' }}
         >
-          {/* Title */}
-          <h1
-            className="font-display font-bold leading-[1.2] tracking-tight text-white mb-2.5 drop-shadow-lg"
-            style={{
-              fontSize: 'clamp(18px, 5vw, 22px)',
-              fontWeight: 700,
-              whiteSpace: 'normal',
-              wordBreak: 'break-word',
-              // FIX: clamp to 2 lines max so very long titles don't blow up layout
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-            }}
-          >
-            {title}
-          </h1>
+          {/* Left side: Mini Portrait Cover Card */}
+          <div className="w-[62px] shrink-0 aspect-[2/3] rounded-lg overflow-hidden shadow-lg border border-white/10 relative bg-zinc-950 flex-none z-10">
+            {posterSrc ? (
+              <img
+                src={ensureHttps(posterSrc)}
+                alt={title}
+                className="w-full h-full object-cover"
+                loading="eager"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-full h-full bg-zinc-900 flex items-center justify-center">
+                <Film className="w-4 h-4 text-zinc-700" />
+              </div>
+            )}
+          </div>
 
-          {/* Metadata row — wraps cleanly on narrow screens */}
-          <div
-            className="flex flex-wrap items-center mb-2 text-[11px]"
-            style={{ gap: '6px' }}
-          >
-            {rating && (
-              <span className="inline-flex items-center gap-1 font-bold text-amber-300 bg-amber-400/10 px-2 py-0.5 rounded-full">
-                <Star className="w-3 h-3 fill-amber-400 text-amber-400" />{rating}
+          {/* Right side: Title, Sleek Badges, and Description */}
+          <div className="flex-1 flex flex-col justify-end min-w-0">
+            <h1
+              className="font-display font-black text-white leading-tight mb-1 tracking-tight text-shadow"
+              style={{
+                fontSize: 'clamp(11px, 3.8vw, 13px)',
+                display: '-webkit-box',
+                WebkitLineClamp: 1,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+            >
+              {title}
+            </h1>
+
+            {/* Makeover: Black & Sleek Unified Badges Container */}
+            <div className="bg-zinc-950/80 border border-zinc-800/80 backdrop-blur-md rounded-lg py-1 px-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 shadow-sm w-full mb-1">
+              {rating && (
+                <>
+                  <span className="flex items-center gap-0.5 text-[7.5px] font-extrabold text-amber-400">
+                    <Star className="w-2 h-2 fill-amber-400 text-amber-400" />
+                    {rating}
+                  </span>
+                  <span className="w-px h-2 bg-zinc-800" />
+                </>
+              )}
+              <span className="text-[7.5px] font-bold text-zinc-300 uppercase tracking-wider">
+                {formatLabel}
               </span>
-            )}
-            <span className="font-semibold uppercase tracking-wide text-white/70 bg-white/10 px-2 py-0.5 rounded-full">
-              {formatLabel}
-            </span>
-            {epCount && (
-              <span className="text-zinc-400 bg-white/[0.07] px-2 py-0.5 rounded-full">{epCount}</span>
-            )}
-            {seasonLabel && (
-              <span className="text-zinc-400 bg-white/[0.07] px-2 py-0.5 rounded-full">{seasonLabel}</span>
-            )}
-          </div>
+              {epCount && (
+                <>
+                  <span className="w-px h-2 bg-zinc-800" />
+                  <span className="text-[7.5px] font-semibold text-zinc-400">
+                    {epCount}
+                  </span>
+                </>
+              )}
+              <span className="w-px h-2 bg-zinc-800" />
+              <span className="flex items-center gap-0.5 text-[7.5px] font-semibold text-sky-400">
+                <Captions className="w-2 h-2 text-sky-400" />
+                Sub+Dub
+              </span>
+            </div>
 
-          {/* Sub+Dub badge — always its own row */}
-          <div className="flex items-center mb-3">
-            <span className="inline-flex items-center gap-0.5 font-semibold text-sky-300 bg-sky-400/10 px-2 py-0.5 rounded-full text-[11px]">
-              <Captions className="w-3 h-3" />Sub+Dub
-            </span>
+            {/* Description Synopsis next to the card/details */}
+            <p className="text-[9.5px] text-zinc-400 line-clamp-2 leading-relaxed font-medium">
+              {displayDescription}
+            </p>
           </div>
-
-          {/* CTA button */}
-          <button
-            onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
-            className="flex items-center justify-center gap-2 bg-fox-orange text-white text-[13px] font-bold rounded-2xl shadow-lg shadow-fox-orange/40 active:scale-[0.97] transition-transform touch-manipulation w-full"
-            style={{ minHeight: '48px' }}
-          >
-            <Play className="w-4 h-4 fill-white" />Watch Now
-          </button>
         </div>
       </div>
 
-      {/* ── Pagination dots — OUTSIDE the card so they never clip ────────────── */}
-      {/* FIX: Moved from inside the absolute content panel to outside the card  */}
+      {/* Watch Now Button below the 16/9 hero card */}
+      <div className="mt-3">
+        <button
+          onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
+          className="w-full h-9 bg-gradient-to-r from-fox-orange to-orange-600 hover:from-orange-500 hover:to-orange-700 text-white font-bold rounded-xl shadow-md shadow-fox-orange/20 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 text-[11px] uppercase tracking-wider touch-manipulation"
+        >
+          <Play className="w-3 h-3 fill-white text-white" />
+          Watch Now
+        </button>
+      </div>
+
+      {/* ── Pagination dots — outside card ───────────────────────────────────── */}
       {count > 1 && (
         <div
-          className="flex items-center justify-center"
-          style={{ marginTop: '10px', marginBottom: '2px' }}
+           className="flex items-center justify-center"
+           style={{ marginTop: '8px', marginBottom: '2px' }}
           role="tablist"
           aria-label="Slide navigation"
         >
@@ -281,16 +303,16 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
               aria-selected={i === idx}
               role="tab"
               className="touch-manipulation"
-              style={{ margin: '0 3px', padding: '4px' }} // extra tap area
+              style={{ margin: '0 2.5px', padding: '4px' }}
             >
               <span
                 className={cn(
                   'block rounded-full transition-all duration-300',
-                  i === idx ? 'bg-fox-orange' : 'bg-white/30'
+                  i === idx ? 'bg-fox-orange' : 'bg-white/20'
                 )}
                 style={{
-                  width:  i === idx ? '20px' : '7px',  // active dot stretches to pill
-                  height: '7px',
+                  width:  i === idx ? '18px' : '6px',
+                  height: '6px',
                 }}
               />
             </button>
