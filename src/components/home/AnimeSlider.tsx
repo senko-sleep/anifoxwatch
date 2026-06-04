@@ -143,7 +143,7 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
       <div
         ref={scrollRef}
         onScroll={checkScroll}
-        className="flex gap-2.5 sm:gap-3.5 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4 -mx-1 px-1"
+        className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4 -mx-1 px-1"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
       >
         {anime.map((item) => {
@@ -176,15 +176,15 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
               className={cn('shrink-0 group/card touch-manipulation flex flex-col', cardWidths[cardSize])}
             >
               {/* ── Poster ───────────────────────────────────────── */}
-              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-zinc-900/90 ring-1 ring-white/[0.05] transition-all duration-300 group-hover/card:ring-white/[0.14] group-hover/card:shadow-xl group-hover/card:shadow-black/50 group-hover/card:-translate-y-0.5">
+              <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-zinc-900/90 ring-1 ring-white/[0.08] transition-all duration-300 group-hover/card:ring-white/20 group-hover/card:shadow-xl group-hover/card:shadow-black/50 group-hover/card:-translate-y-1">
 
                 <SliderImage src={ensureHttps(item.image)} alt={item.title} />
 
                 {/* Type badge — top left */}
                 {item.type && (
-                  <div className="absolute top-1.5 left-1.5 z-10">
+                  <div className="absolute top-2 left-2 z-10">
                     <span className={cn(
-                      'text-[9px] font-bold px-1.5 py-[3px] rounded-md backdrop-blur-sm border',
+                      'text-[10px] font-bold px-2 py-1 rounded-lg backdrop-blur-md shadow-sm border',
                       typeStyle.bg, typeStyle.text, typeStyle.border
                     )}>
                       {item.type}
@@ -194,45 +194,24 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
 
                 {/* Rating — top right */}
                 {rating !== null && (
-                  <div className="absolute top-1.5 right-1.5 z-10">
-                    <span className="inline-flex items-center gap-0.5 text-[9.5px] font-bold text-amber-300 bg-black/65 backdrop-blur-sm px-1.5 py-[3px] rounded-md border border-amber-500/20">
-                      <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+                  <div className="absolute top-2 right-2 z-10">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-black/70 backdrop-blur-md px-2 py-1 rounded-lg shadow-sm border border-amber-500/20">
+                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
                       {rating.toFixed(1)}
                     </span>
                   </div>
                 )}
 
-                {/* Airing / new badge — bottom left */}
-                <div className="absolute bottom-1.5 left-1.5 z-10 flex gap-1">
-                  {isOngoing && (
-                    <span className="flex items-center gap-1 px-1.5 py-[2px] rounded-md bg-black/70 backdrop-blur-sm text-[9px] font-bold text-emerald-400 border border-emerald-500/20">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                {/* Airing badge — bottom left */}
+                {isOngoing && (
+                  <div className="absolute bottom-2 left-2 z-10">
+                    <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[10px] font-bold text-white shadow-sm">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
                       Airing
-                    </span>
-                  )}
-                  {hasSub && (
-                    <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-sky-300 bg-sky-950/80 backdrop-blur-sm px-1.5 py-[2px] rounded-md border border-sky-500/20">
-                      <Subtitles className="w-2.5 h-2.5" />
-                      {item.subCount}
-                    </span>
-                  )}
-                  {hasDub && (
-                    <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-green-300 bg-green-950/80 backdrop-blur-sm px-1.5 py-[2px] rounded-md border border-green-500/20">
-                      <Mic className="w-2.5 h-2.5" />
-                      {item.dubCount}
-                    </span>
-                  )}
-                </div>
-
-                {/* Duration — bottom right */}
-                {item.duration && (
-                  <div className="absolute bottom-1.5 right-1.5 z-10">
-                    <span className="inline-flex items-center gap-0.5 px-1.5 py-[2px] rounded-md bg-black/70 backdrop-blur-sm text-[9px] font-bold text-zinc-300 border border-white/[0.07]">
-                      <Clock className="w-2.5 h-2.5 opacity-60" />
-                      {item.duration}
                     </span>
                   </div>
                 )}
+
 
                 {/* ── Hover reveal panel ───────────────────────────────── */}
                 <div className="absolute inset-0 z-20 pointer-events-none opacity-0 translate-y-1 group-hover/card:opacity-100 group-hover/card:translate-y-0 transition-all duration-300 ease-out">
@@ -324,12 +303,12 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
               </div>
 
               {/* ── Title + meta below card ──────────────────────── */}
-              <div className="mt-2.5 px-0.5 flex flex-col gap-0.5">
-                <p className="font-semibold text-xs sm:text-[13px] text-zinc-200 group-hover/card:text-fox-orange transition-colors duration-200 line-clamp-2 leading-[1.2] tracking-tight">
+              <div className="mt-3 px-0.5 flex flex-col gap-1.5">
+                <p className="font-semibold text-xs sm:text-sm text-zinc-100 group-hover/card:text-fox-orange transition-colors duration-200 line-clamp-2 leading-snug tracking-tight">
                   {item.title}
                 </p>
                 {metaParts.length > 0 && (
-                  <p className="text-[10px] font-medium text-zinc-600 leading-none mt-0.5">
+                  <p className="text-[10.5px] font-medium text-zinc-500 leading-none">
                     {metaParts.join(' · ')}
                   </p>
                 )}

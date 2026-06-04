@@ -111,7 +111,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                         state={{ from: location.pathname + location.search }}
                         className="shrink-0 w-48 sm:w-56 group/card touch-manipulation"
                     >
-                        <div className="relative aspect-video rounded-xl overflow-hidden bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-950 shadow-lg ring-1 ring-white/5">
+                        <div className="relative aspect-video rounded-xl overflow-hidden bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-950 shadow-lg ring-1 ring-white/[0.08] transition-all duration-300 group-hover/card:ring-white/20 group-hover/card:shadow-xl group-hover/card:-translate-y-1">
                             {showHeroImg ? (
                                 <img
                                     key={`hero-${item.animeId}-${mainSrc.slice(-48)}`}
@@ -166,7 +166,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
 
                             {/* Episode badge - top left */}
                             <div className="absolute top-2 left-2 z-10">
-                                <Badge className="bg-fox-orange/90 hover:bg-fox-orange text-white text-[10px] font-medium px-2 py-0.5 backdrop-blur-sm border-0">
+                                <Badge className="bg-fox-orange/90 hover:bg-fox-orange text-white text-[10px] font-bold px-2.5 py-1 rounded-lg backdrop-blur-md shadow-sm border-0">
                                     EP {item.episodeNumber}
                                 </Badge>
                             </div>
@@ -174,7 +174,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                             {/* Time left - bottom right */}
                             {item.duration > 0 && item.timestamp < item.duration && (
                                 <div className="absolute bottom-2 right-2 z-10">
-                                    <span className="text-[10px] text-white/60 bg-black/50 px-1.5 py-0.5 rounded backdrop-blur-sm">
+                                    <span className="text-[10px] font-medium text-white/80 bg-black/70 backdrop-blur-md px-2 py-1 rounded-lg shadow-sm">
                                         {Math.max(0, Math.floor((item.duration - item.timestamp) / 60))}m left
                                     </span>
                                 </div>
@@ -196,8 +196,8 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                             </Button>
                         </div>
 
-                        <div className="mt-2 sm:mt-2.5">
-                            <h3 className="font-medium text-xs sm:text-sm line-clamp-1 group-hover/card:text-fox-orange transition-colors">
+                        <div className="mt-3">
+                            <h3 className="font-semibold text-xs sm:text-sm text-zinc-100 line-clamp-1 group-hover/card:text-fox-orange transition-colors">
                                 {item.animeTitle}
                             </h3>
                         </div>

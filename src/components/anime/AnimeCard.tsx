@@ -24,7 +24,7 @@ interface AnimeCardProps {
   anime: Anime;
   className?: string;
   style?: React.CSSProperties;
-  onMouseEnter?: () => void;
+  onMouseEnter?: (e: React.MouseEvent) => void;
 }
 
 const TYPE_BADGE: Record<string, string> = {
@@ -42,7 +42,7 @@ const TYPE_BADGE: Record<string, string> = {
  */
 const loadedImageCache = new Set<string>();
 
-export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardProps) => {
+export const AnimeCard = ({ anime, className, style, onMouseEnter: onCardMouseEnter }: AnimeCardProps) => {
   const navigateId = anime.streamingId || anime.id;
   const navigate   = useNavigate();
   const location   = useLocation();
@@ -129,13 +129,13 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
       style={style}
       onMouseEnter={(e) => {
         setHovered(true);
-        onMouseEnter?.(e);
+        onCardMouseEnter?.(e);
       }}
       onMouseLeave={() => setHovered(false)}
       onClick={handleClick}
       className={cn('group relative flex flex-col cursor-pointer touch-manipulation', className)}
     >
-      <div className="relative aspect-[2/3] overflow-hidden rounded-xl bg-zinc-900/90 ring-1 ring-white/[0.05] transition-all duration-300 group-hover:ring-white/15 group-hover:shadow-lg group-hover:shadow-black/40">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-xl bg-zinc-900/90 ring-1 ring-white/[0.08] transition-all duration-300 group-hover:ring-white/20 group-hover:shadow-xl group-hover:shadow-black/50 group-hover:-translate-y-1">
 
         {!posterSrc && (
           <div className="absolute inset-0 bg-zinc-900 flex flex-col items-center justify-center gap-2">
@@ -187,40 +187,35 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
         )}
 
         {/* Top-left: type badge - always visible */}
-        <div className="absolute top-1.5 left-1.5 z-10">
+        <div className="absolute top-2 left-2 z-10">
           <span className={cn(
-            'text-[10px] font-semibold px-1.5 py-[3px] rounded-md text-white backdrop-blur-sm',
+            'text-[10px] font-semibold px-2 py-1 rounded-lg text-white backdrop-blur-md shadow-sm',
             typeColor
           )}>
             {anime.type}
           </span>
         </div>
 
-        {/* Top-right: rating - only on hover */}
+        {/* Top-right: rating - always visible */}
         {rating !== null && (
-          <div className="absolute top-1.5 right-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-            <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-white bg-black/60 backdrop-blur-sm px-1.5 py-[3px] rounded-md">
-              <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
+          <div className="absolute top-2 right-2 z-10">
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-white bg-black/70 backdrop-blur-md px-2 py-1 rounded-lg shadow-sm">
+              <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
               {rating.toFixed(1)}
             </span>
           </div>
         )}
 
 
-        {/* Bottom-right: duration & airing indicator - only on hover */}
-        <div className="absolute bottom-1.5 right-1.5 z-10 flex flex-col items-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-          {anime.duration && (
-            <span className="px-1.5 py-[2px] rounded bg-black/70 backdrop-blur-md text-[9px] font-bold text-zinc-200 shadow-sm border border-white/5">
-              {anime.duration}
-            </span>
-          )}
-          {anime.status === 'Ongoing' && (
-            <span className="flex items-center gap-1 px-1.5 py-[2px] rounded bg-black/70 backdrop-blur-md text-[9px] font-bold text-emerald-400 shadow-sm border border-white/5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        {/* Bottom-left: airing indicator - always visible */}
+        {anime.status === 'Ongoing' && (
+          <div className="absolute bottom-2 left-2 z-10">
+            <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-500/90 backdrop-blur-md text-[10px] font-bold text-white shadow-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
               Airing
             </span>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Hover: full context — synopsis, genres, status, audio, CTA (does not hide the title below) */}
         <div
@@ -320,13 +315,13 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter }: AnimeCardPr
         </div>
       </div>
 
-      {/* Title below card — always visible (hover no longer hides it) */}
-      <div className="mt-2.5 px-0.5 flex flex-col gap-1 overflow-hidden">
-        <p className="font-bold text-xs sm:text-[13px] text-zinc-200 group-hover:text-fox-orange line-clamp-2 leading-[1.15] tracking-tight transition-colors duration-200">
+      {/* Title below card — always visible */}
+      <div className="mt-3 px-0.5 flex flex-col gap-1.5 overflow-hidden">
+        <p className="font-semibold text-sm sm:text-base text-zinc-100 group-hover:text-fox-orange line-clamp-2 leading-snug tracking-tight transition-colors duration-200">
           {anime.title}
         </p>
         {metaParts.length > 0 && (
-          <p className="text-[10.5px] font-medium text-zinc-500 leading-none">
+          <p className="text-xs font-medium text-zinc-500 leading-none">
             {metaParts.join(' · ')}
           </p>
         )}
