@@ -126,11 +126,11 @@ export function getApiConfig(): ApiConfig {
     // This fixes deployments on arbitrary Vercel domains (preview URLs, forks, custom domains).
     const sameOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
-    // Only use Firebase-specific configuration if VITE_API_URL is not explicitly set
-    if (isFirebaseHosting && !envApiUrl) {
+    // Force Render API for Firebase hosting
+    if (isFirebaseHosting) {
         return {
             deployment: 'firebase',
-            baseUrl: API_DEPLOYMENTS.firebase,
+            baseUrl: 'https://anifoxwatch-dko2.onrender.com',
             timeout: 30000,
             retries: 3
         };

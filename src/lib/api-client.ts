@@ -792,6 +792,29 @@ class AnimeApiClient {
 const primaryBase = this.apiBase();
             try {
                 const data = await tryFetch(primaryBase);
+                // Convert relative proxy URLs to absolute URLs pointing to the API base
+                if (data.sources) {
+                    data.sources = data.sources.map((s: VideoSource) => {
+                        if (s.url && s.url.startsWith('/api/stream/proxy')) {
+                            return {
+                                ...s,
+                                url: `${primaryBase}${s.url}`
+                            };
+                        }
+                        return s;
+                    });
+                }
+                if (data.subtitles) {
+                    data.subtitles = data.subtitles.map((s: VideoSubtitle) => {
+                        if (s.url && s.url.startsWith('/api/stream/proxy')) {
+                            return {
+                                ...s,
+                                url: `${primaryBase}${s.url}`
+                            };
+                        }
+                        return s;
+                    });
+                }
                 console.log(`[API] ✅ Stream received:`, {
                     sources: data.sources?.length || 0,
                     qualities: data.sources?.map((s: any) => s.quality).join(', '),
