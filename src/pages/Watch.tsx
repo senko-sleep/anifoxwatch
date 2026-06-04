@@ -129,6 +129,10 @@ const Watch = () => {
   const [isSwitchingEpisode, setIsSwitchingEpisode] = useState(false);
   const [streamSlowWarning, setStreamSlowWarning] = useState(false);
 
+  // Track the previously-seen animeId so the reset effect only fires on actual *navigation*
+  // (cleanAnimeId changing), not on the initial mount where selectedAnimeId is already correct.
+  const prevCleanAnimeIdRef = useRef<string>(cleanAnimeId);
+
   // Refs
   const playerRef = useRef<HTMLDivElement>(null);
   const lastPlayerErrorTimeRef = useRef<number>(0);
@@ -227,6 +231,10 @@ const Watch = () => {
   useDocumentTitle(anime?.title ?? 'Watch', Boolean(anime?.title) ? false : true);
 
   useEffect(() => {
+    // Only reset when the user navigates to a *different* anime — skip on initial mount
+    // where prevCleanAnimeIdRef.current already equals cleanAnimeId (both set to the same value).
+    if (prevCleanAnimeIdRef.current === cleanAnimeId) return;
+    prevCleanAnimeIdRef.current = cleanAnimeId;
     setSelectedAnimeId('');
     setSelectedEpisode(null);
     setSelectedEpisodeNum(1);
@@ -398,10 +406,10 @@ const Watch = () => {
     setSourceRetryIndex(0);
   }, [streamData, selectedServer, audioType, quality]);
 
-  // Show "server warming up" hint after 18s of loading (was 12s before pipeline optimization)
+  // Show "server warming up" hint after 8s of loading — lets users know the server is working
   useEffect(() => {
     if (!streamLoading) { setStreamSlowWarning(false); return; }
-    const t = setTimeout(() => setStreamSlowWarning(true), 18000);
+    const t = setTimeout(() => setStreamSlowWarning(true), 8000);
     return () => clearTimeout(t);
   }, [streamLoading, selectedEpisode]);
 
