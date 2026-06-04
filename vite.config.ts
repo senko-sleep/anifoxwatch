@@ -49,8 +49,16 @@ export default defineConfig(async ({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks: {
-            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-            'ui-vendor': ['lucide-react', '@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu']
+            // Keep React and related UI libraries together to avoid circular
+            // chunk dependencies that can cause runtime initialization issues.
+            'react-vendor': [
+              'react',
+              'react-dom',
+              'react-router-dom',
+              'lucide-react',
+              '@radix-ui/react-dialog',
+              '@radix-ui/react-dropdown-menu'
+            ]
           }
         }
       }

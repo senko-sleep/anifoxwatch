@@ -354,11 +354,14 @@ function validateDubStream(result: any): boolean {
 // URL helpers
 // ---------------------------------------------------------------------------
 
-const getProxyBaseUrl = (req: Request): string => {
-    const forwarded = req.get('x-forwarded-proto');
-    const host = req.get('host') || 'localhost:3001';
-    const protocol = forwarded || (process.env.NODE_ENV === 'production' ? 'https' : 'http');
-    return `${protocol}://${host}/api/stream/proxy`;
+const getProxyBaseUrl = (_req: Request): string => {
+    // Same-origin relative paths: works with Vite dev proxy (:8081), Vercel, and Firebase hosting.
+    // Absolute localhost:3001 links break when the SPA is on another port.
+    const envBase = process.env.BASE_URL?.replace(/\/$/, '');
+    if (envBase && !envBase.includes('localhost:3001') && !envBase.includes('127.0.0.1:3001')) {
+        return `${envBase}/api/stream/proxy`;
+    }
+    return '/api/stream/proxy';
 };
 
 const proxyUrl = (url: string, proxyBase: string, referer?: string): string => {

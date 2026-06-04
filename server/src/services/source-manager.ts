@@ -3400,6 +3400,16 @@ export class SourceManager {
         type RaceResult = { source: string; data: StreamingData; success: boolean };
 
         const pickOrder = buildStreamingPickOrder(resolvedEpisodeId);
+        // Episode already has a source-native ID (e.g. aniwaves-82570&eps=1) — cross-source
+        // only duplicates Puppeteer embed extraction and adds 15–20s cold-start latency.
+        const skipCrossSourceFallback = hasSourcePrefix && !isAnilistId && finalSources.length > 0;
+        const effectivePickOrder = skipCrossSourceFallback
+            ? pickOrder.filter((name) => name !== 'cross-source')
+            : pickOrder;
+        if (skipCrossSourceFallback && pickOrder.includes('cross-source')) {
+            console.log(`   ⏭️ Skipping cross-source fallback (native ${primarySource?.name ?? 'source'} episode ID)`);
+        }
+
         const allResults: RaceResult[] = [];
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3412,7 +3422,7 @@ export class SourceManager {
         const localPriority = STREAM_PRIORITY;
 
         const result = await new Promise<StreamingData>((resolveStream) => {
-            let pending = pickOrder.length;
+            let pending = effectivePickOrder.length;
 
             const pickBestAndResolve = (force = false) => {
                 if (resolved) return;
@@ -3452,7 +3462,7 @@ export class SourceManager {
                 const candidates = realOk.length > 0 ? realOk : ok;
                 // Pick the highest-priority successful source
                 let best: RaceResult | null = null;
-                for (const name of pickOrder) {
+                for (const name of effectivePickOrder) {
                     const match = candidates.find(r => r.source === name);
                     if (match) { best = match; break; }
                 }
@@ -3478,7 +3488,7 @@ export class SourceManager {
                 if (ok.length === 0) return;
 
                 // Check if the top-priority source already responded (success or fail)
-                const topPriority = pickOrder[0];
+                const topPriority = effectivePickOrder[0];
                 const topResult = allResults.find(r => r.source === topPriority);
                 if (topResult) {
                     // Top priority responded — pick best now
@@ -3590,7 +3600,7 @@ export class SourceManager {
             }
 
             // Cross-source title-based fallback
-            if (pickOrder.includes('cross-source')) {
+            if (effectivePickOrder.includes('cross-source')) {
                 Promise.race([
                 this.crossSourceStreamingFallback(episodeId, server, category, episodeNum, anilistId, forcedTitle),
                 new Promise<StreamingData | null>((resolve) =>

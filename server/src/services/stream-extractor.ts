@@ -22,7 +22,18 @@ class StreamExtractor {
     // In-flight deduplication: if the same embed URL is being extracted concurrently,
     // share the result instead of launching multiple Puppeteer pages.
     private inFlight: Map<string, Promise<ExtractionResult>> = new Map();
+    private resultCache: Map<string, { result: ExtractionResult; timestamp: number }> = new Map();
+    private readonly RESULT_CACHE_TTL_MS = 30 * 60 * 1000;
 
+
+    /** Pre-launch Puppeteer so the first watch request avoids a 10–15s cold start. */
+    async warmBrowser(): Promise<void> {
+        try {
+            await this.getBrowser();
+        } catch (error) {
+            logger.warn(`[StreamExtractor] Browser warm-up failed: ${error}`);
+        }
+    }
 
     /**
      * Get or create browser instance (singleton)
@@ -301,6 +312,12 @@ class StreamExtractor {
      * Uses in-flight deduplication: concurrent calls for the same URL share one Puppeteer session.
      */
     async extractFromEmbed(embedUrl: string): Promise<ExtractionResult> {
+        const cached = this.resultCache.get(embedUrl);
+        if (cached && Date.now() - cached.timestamp < this.RESULT_CACHE_TTL_MS && cached.result.success) {
+            logger.info(`[StreamExtractor] Cache hit for embed: ${embedUrl.substring(0, 80)}...`);
+            return cached.result;
+        }
+
         // Dedup: return an existing in-flight extraction for the same URL
         const existing = this.inFlight.get(embedUrl);
         if (existing) {
@@ -310,7 +327,13 @@ class StreamExtractor {
 
         logger.info(`[StreamExtractor] Extracting from embed: ${embedUrl.substring(0, 80)}...`);
 
-        const extractionPromise = this._extractFromEmbedImpl(embedUrl);
+        const extractionPromise = this._extractFromEmbedImpl(embedUrl)
+            .then((result) => {
+                if (result.success && result.streams.length > 0) {
+                    this.resultCache.set(embedUrl, { result, timestamp: Date.now() });
+                }
+                return result;
+            });
         this.inFlight.set(embedUrl, extractionPromise);
 
         try {

@@ -6,7 +6,7 @@ import { VideoPlayer } from '../components/player/VideoPlayer';
 import { EpisodeList } from '../components/player/EpisodeList';
 import { StreamingControls } from '../components/player/StreamingControls';
 import { DownloadManager } from '../components/player/DownloadManager';
-import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers, useDubStreamProbe, usePrefetchNextEpisode } from '@/hooks/useAnime';
+import { useAnime, useEpisodes, useStreamingLinks, useEpisodeServers, useDubStreamProbe, usePrefetchNextEpisode, usePrefetchDubStream } from '@/hooks/useAnime';
 import { ping } from '@/utils/keep-alive';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -118,7 +118,7 @@ const Watch = () => {
       if (prefs[animeId] === 'dub') return 'dub';
       if (prefs[animeId] === 'sub') return 'sub';
     } catch { /* ignore */ }
-    return 'dub';
+    return 'sub';
   });
   const [audioManuallySet, setAudioManuallySet] = useState(false);
   const [quality, setQuality] = useState<QualityType>('auto');
@@ -519,6 +519,15 @@ const Watch = () => {
   const anilistIdForPrefetch = cleanAnimeId.startsWith('anilist-')
     ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined
     : undefined;
+
+  usePrefetchDubStream(selectedEpisodeForCurrentAnime || '', !!selectedEpisodeForCurrentAnime, {
+    episodeNum: selectedEpisodeNum,
+    anilistId: anilistIdForPrefetch,
+    animeTitle: anime?.title,
+    hasDub: Boolean(currentEpisode?.hasDub || metadataIndicatesDub),
+    subStreamReady: audioType === 'sub' && !streamLoading && (streamData?.sources?.length ?? 0) > 0,
+  });
+
   useEffect(() => {
     if (!episodes?.length || !selectedEpisode || !cleanAnimeId) return;
     if (streamLoading || !(streamData?.sources?.length)) return;
@@ -585,10 +594,7 @@ const Watch = () => {
       return;
     }
 
-    // No stored preference: auto-switch to dub only when confirmed available
-    if (currentHasDub && audioType !== 'dub') {
-      setAudioType('dub');
-    }
+    // No stored preference: keep sub for fast first playback (dub is prefetched in background).
   }, [
     currentEpisode, 
     anime, 

@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiClient, SourceHealth, StreamingData, EpisodeServer, ScheduleResponse, LeaderboardResponse, SeasonalResponse } from '@/lib/api-client';
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
@@ -347,6 +348,29 @@ export function useRecommendedSource() {
 /**
  * Hook to prefetch episode data for smoother navigation
  */
+/**
+ * Prefetch dub stream in the background while sub is playing so toggling DUB feels instant.
+ */
+export function usePrefetchDubStream(
+    episodeId: string,
+    enabled: boolean,
+    options?: { episodeNum?: number; anilistId?: number; animeTitle?: string; hasDub?: boolean; subStreamReady?: boolean }
+) {
+    const queryClient = useQueryClient();
+    const { episodeNum, anilistId, animeTitle, hasDub, subStreamReady } = options ?? {};
+
+    useEffect(() => {
+        if (!enabled || !episodeId || !hasDub || !subStreamReady) return;
+        const streamKey = queryKeys.stream(episodeId, undefined, 'dub');
+        if (queryClient.getQueryData(streamKey)) return;
+        queryClient.prefetchQuery({
+            queryKey: streamKey,
+            queryFn: () => apiClient.getStreamingLinks(episodeId, undefined, 'dub', episodeNum, anilistId, animeTitle),
+            staleTime: 15 * 60 * 1000,
+        });
+    }, [enabled, episodeId, hasDub, subStreamReady, episodeNum, anilistId, animeTitle, queryClient]);
+}
+
 export function usePrefetchNextEpisode() {
     const queryClient = useQueryClient();
 
