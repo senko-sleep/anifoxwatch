@@ -1080,6 +1080,15 @@ const handleVisibilityChange = () => {
         (video as any).webkitExitFullscreen();
       }
     } else {
+      // Lock orientation to landscape BEFORE entering fullscreen on mobile
+      if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
+        try {
+          await (screen.orientation as any).lock('landscape');
+        } catch (e) {
+          playerLog('warn', 'Orientation lock failed', e);
+        }
+      }
+
       let enteredFs = false;
       if (container.requestFullscreen) {
         try {
@@ -1090,13 +1099,16 @@ const handleVisibilityChange = () => {
         }
       }
 
-      if (enteredFs && isMobile() && screen.orientation && (screen.orientation as any).lock) {
+      // Ensure orientation lock is attempted even if fullscreen entered via video element
+      if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
         try {
           await (screen.orientation as any).lock('landscape');
         } catch (e) {
           playerLog('warn', 'Orientation lock failed', e);
         }
-      } else if (!enteredFs && isMobile() && (video as any).webkitEnterFullscreen) {
+      }
+
+      if (!enteredFs && isMobile() && (video as any).webkitEnterFullscreen) {
         try {
           (video as any).webkitEnterFullscreen();
         } catch (e) {

@@ -1138,7 +1138,6 @@ const Watch = () => {
             )} ref={playerRef}>
               {/* Video Player Container */}
               <div className="relative group">
-                <div className="absolute -inset-1 bg-gradient-to-r from-fox-orange/20 to-purple-600/20 rounded-2xl blur opacity-30 group-hover:opacity-60 transition duration-1000"></div>
                 <div className="relative aspect-[16/9] bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
                   <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/20 pointer-events-none z-10" />
                   {/* HD Effect overlay */}
