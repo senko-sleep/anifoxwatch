@@ -257,9 +257,9 @@ function setProtocolCache(domain: string, protocol: 'http' | 'https'): void {
 // Segment cache (in-memory LRU)
 // ---------------------------------------------------------------------------
 
-// MEMORY OPTIMIZATION: On Render/low-memory (512MB), use minimal cache; on high-memory, use more
+// MEMORY OPTIMIZATION: On Render/low-memory (512MB), use 30MB cache; on high-memory, use 100MB
 const IS_LOW_MEMORY = process.env.NODE_ENV === 'production' && !process.env.POSTGRES_URL;
-const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 5 * 1024 * 1024 : 100 * 1024 * 1024; // 5MB on Render, 100MB otherwise
+const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 30 * 1024 * 1024 : 100 * 1024 * 1024; // 30MB on Render (fits ~15-20 segments), 100MB otherwise
 const SEGMENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 interface SegmentCacheEntry { data: Buffer; contentType: string; fetchedAt: number; size: number; lastUsed: number }
@@ -997,8 +997,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             ? { rejectUnauthorized: false, ciphers: 'DEFAULT:@SECLEVEL=0' }
             : undefined;
 
-        // Use shorter timeout for segments (they should be fast) vs manifests
-        const timeoutMs = (isSegment && !isM3u8) ? 15_000 : 60_000;
+        // Segments must be fast — 8s timeout so stalled CDN connections fail quickly
+        // and the client watchdog can escalate before the 18s fatal trigger.
+        // Manifests are infrequent so stay at 60s.
+        const timeoutMs = (isSegment && !isM3u8) ? 8_000 : 60_000;
 
         return axios({
             method: 'get',
@@ -1188,8 +1190,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 break;
             }
             logger.warn(`[PROXY] Attempt ${attempt + 1}/${refererCombos.length} failed (${combo.referer}): ${errMsg}${status ? ` (Status: ${status})` : ''} (Code: ${errCode})`, { requestId });
-            // Longer delay for manifest requests — CDN rotation + referer combos take time
-            if (attempt < refererCombos.length - 1) await new Promise(r => setTimeout(r, isM3u8 ? 800 : 300));
+            // Shorter delay between retries to reduce client-side buffering stalls.
+            // Manifests: 400ms (was 800ms). Segments: 100ms (was 300ms).
+            if (attempt < refererCombos.length - 1) await new Promise(r => setTimeout(r, isM3u8 ? 400 : 100));
         }
     }
 

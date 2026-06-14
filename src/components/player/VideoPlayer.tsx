@@ -118,6 +118,15 @@ export const VideoPlayer = ({
   const errorFiredRef = useRef(false);
   const lastErrorTimeRef = useRef(0);
 
+  // Stall watchdog refs
+  const stallWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastPlayheadRef = useRef<number>(0);
+  const stallDurationRef = useRef<number>(0); // ms the playhead hasn't moved
+
+  // Hls.js fatal error recovery attempt counters (reset on successful frag load)
+  const mediaRecoveryAttemptsRef = useRef(0);
+  const networkRecoveryAttemptsRef = useRef(0);
+
   // Background MP4 cache for offline playback (non-M3U8 streams like WatchHentai)
   const bgDownloadControllerRef = useRef<AbortController | null>(null);
   const cachedBlobUrlRef = useRef<string | null>(null);
@@ -272,6 +281,16 @@ export const VideoPlayer = ({
     errorFiredRef.current = false;
     outroCountdownFiredRef.current = false;
 
+    // Reset stall watchdog + recovery counters for the new source
+    if (stallWatchdogRef.current) {
+      clearInterval(stallWatchdogRef.current);
+      stallWatchdogRef.current = null;
+    }
+    lastPlayheadRef.current = 0;
+    stallDurationRef.current = 0;
+    mediaRecoveryAttemptsRef.current = 0;
+    networkRecoveryAttemptsRef.current = 0;
+
     playerLog('info', 'Initializing video player', {
       src: resolvedSrc.substring(0, 100) + '...',
       isM3U8,
@@ -296,7 +315,7 @@ export const VideoPlayer = ({
         backBufferLength: onMobile ? 30 : 60,
         maxBufferLength: onMobile ? 45 : 90,
         maxMaxBufferLength: onMobile ? 90 : 180,
-        maxBufferHole: 0.5,
+        maxBufferHole: 1.5,        // Skip gaps up to 1.5s to avoid decoder stalls
         // ── ABR / quality selection ───────────────────────────────────────
         // Start auto-quality — let ABR pick based on bandwidth probe.
         // High default estimate so ABR starts at a good level immediately.
@@ -318,14 +337,14 @@ export const VideoPlayer = ({
         levelLoadingMaxRetry: 4,
         fragLoadingRetryDelay: 200,    // Faster retry cycle
         manifestLoadingRetryDelay: 400,
-        fragLoadingTimeOut: 12000,
+        fragLoadingTimeOut: 7000,  // Must be < 8s server timeout so client aborts first
         manifestLoadingTimeOut: 10000,
         levelLoadingTimeOut: 10000,
-        nudgeOffset: 0.1,
-        nudgeMaxRetry: 5,
+        nudgeOffset: 0.2,
+        nudgeMaxRetry: 8,          // More nudge attempts before giving up
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 15000;
+          xhr.timeout = 8000;      // Match fragLoadingTimeOut
         }
       });
 
@@ -418,38 +437,66 @@ export const VideoPlayer = ({
 
         if (data.fatal) {
           switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
+            case Hls.ErrorTypes.NETWORK_ERROR: {
               if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR) {
                 setError('Failed to load video manifest. The stream may be unavailable.');
                 onError?.('manifest_load_error');
               } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
-                // If we've already had many frag load errors, don't keep retrying
                 if (fragLoadErrorCount >= 4) {
                   playerLog('error', 'Fatal frag load error after repeated failures — requesting source switch');
                   hls.destroy();
                   setError('Cannot load video segments. Switching to another server…');
                   onError?.('frag_load_error');
                 } else {
-                  playerLog('warn', 'Fragment load error, attempting recovery via startLoad');
-                  hls.startLoad();
+                  networkRecoveryAttemptsRef.current++;
+                  if (networkRecoveryAttemptsRef.current > 3) {
+                    playerLog('error', 'Too many network recovery attempts — requesting source switch');
+                    hls.destroy();
+                    setError('Network error — switching to another server…');
+                    onError?.('frag_load_error');
+                  } else {
+                    playerLog('warn', `Network recovery attempt ${networkRecoveryAttemptsRef.current}/3 — startLoad`);
+                    hls.startLoad();
+                  }
                 }
               } else {
-                playerLog('warn', 'Network error, attempting recovery via startLoad');
-                hls.startLoad();
+                networkRecoveryAttemptsRef.current++;
+                if (networkRecoveryAttemptsRef.current > 3) {
+                  playerLog('error', 'Network errors exceeded recovery limit — requesting source switch');
+                  hls.destroy();
+                  setError('Network error — switching to another server…');
+                  onError?.('manifest_load_error');
+                } else {
+                  playerLog('warn', `Network error, recovery attempt ${networkRecoveryAttemptsRef.current}/3 — startLoad`);
+                  hls.startLoad();
+                }
               }
               break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              // If we already have parse errors, don't keep recovering — escalate
+            }
+            case Hls.ErrorTypes.MEDIA_ERROR: {
               if (fragParseErrorCount >= 2) {
                 playerLog('error', 'Media error with prior frag parsing errors — escalating to source switch');
                 hls.destroy();
                 setError('Stream is corrupted. Switching to another server…');
                 onError?.('frag_parsing_error');
               } else {
-                playerLog('warn', 'Media error, attempting recovery');
-                hls.recoverMediaError();
+                mediaRecoveryAttemptsRef.current++;
+                if (mediaRecoveryAttemptsRef.current === 1) {
+                  playerLog('warn', 'Media error — attempting recoverMediaError (attempt 1)');
+                  hls.recoverMediaError();
+                } else if (mediaRecoveryAttemptsRef.current === 2) {
+                  playerLog('warn', 'Media error — swapAudioCodec + recoverMediaError (attempt 2)');
+                  hls.swapAudioCodec();
+                  hls.recoverMediaError();
+                } else {
+                  playerLog('error', `Media error unrecoverable after ${mediaRecoveryAttemptsRef.current} attempts — requesting source switch`);
+                  hls.destroy();
+                  setError('Stream is unplayable. Switching to another server…');
+                  onError?.('frag_parsing_error');
+                }
               }
               break;
+            }
             default:
               setError('An unexpected error occurred. Try a different server.');
               onError?.('unknown_error');
@@ -459,15 +506,85 @@ export const VideoPlayer = ({
         }
       });
 
-      // Reset frag load error counter on successful fragment load
+      // Reset frag load error counter + recovery attempt counters on successful fragment load
       hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
         fragLoadErrorCount = 0; // Reset on success
+        mediaRecoveryAttemptsRef.current = 0;
+        networkRecoveryAttemptsRef.current = 0;
         playerLog('info', `Fragment loaded`, {
           sn: data.frag.sn,
           duration: data.frag.duration?.toFixed(2) + 's',
           size: (data.frag.stats.total / 1024).toFixed(1) + 'KB'
         });
       });
+
+      // ── Stall watchdog ────────────────────────────────────────────────────
+      // Runs every 1 second while the video is supposed to be playing.
+      // Escalates: startLoad (3s) → buffer nudge (5s) → recoverMediaError (10s) → fatal (18s)
+      if (stallWatchdogRef.current) clearInterval(stallWatchdogRef.current);
+      lastPlayheadRef.current = 0;
+      stallDurationRef.current = 0;
+
+      const WATCHDOG_INTERVAL_MS = 1000;
+      stallWatchdogRef.current = setInterval(() => {
+        const v = videoRef.current;
+        if (!v || !hlsRef.current) return;
+        // Only watch when the player should be advancing
+        if (v.paused || v.seeking || v.ended || v.readyState < 2) {
+          // Reset stall counter whenever we're legitimately not playing
+          stallDurationRef.current = 0;
+          lastPlayheadRef.current = v.currentTime;
+          return;
+        }
+
+        const now = v.currentTime;
+        if (Math.abs(now - lastPlayheadRef.current) > 0.05) {
+          // Playhead is advancing — reset stall counter
+          stallDurationRef.current = 0;
+          lastPlayheadRef.current = now;
+          return;
+        }
+
+        // Playhead is stuck
+        stallDurationRef.current += WATCHDOG_INTERVAL_MS;
+        const stalledMs = stallDurationRef.current;
+        playerLog('warn', `Watchdog: playhead stuck for ${(stalledMs / 1000).toFixed(1)}s at ${now.toFixed(2)}s`);
+
+        if (stalledMs >= 18_000) {
+          // Escalate to fatal — trigger source failover
+          playerLog('error', 'Watchdog: stall timeout (18s) — requesting server switch');
+          clearInterval(stallWatchdogRef.current!);
+          stallWatchdogRef.current = null;
+          hlsRef.current?.destroy();
+          setError('Video stalled. Switching to another server…');
+          onError?.('stall_timeout_error');
+        } else if (stalledMs >= 10_000) {
+          playerLog('warn', 'Watchdog: 10s stall — attempting recoverMediaError');
+          try { hlsRef.current?.recoverMediaError(); } catch { /* ignore */ }
+        } else if (stalledMs >= 5_000) {
+          // Buffer nudge — seek over a tiny gap
+          playerLog('warn', 'Watchdog: 5s stall — attempting buffer nudge');
+          try {
+            const buf = v.buffered;
+            let nudged = false;
+            for (let i = 0; i < buf.length; i++) {
+              const gap = buf.start(i) - now;
+              if (gap > 0 && gap < 2.5) {
+                v.currentTime = buf.start(i) + 0.1;
+                nudged = true;
+                break;
+              }
+            }
+            if (!nudged && buf.length > 0) {
+              // Generic micro-nudge to unblock decoder
+              v.currentTime = now + 0.1;
+            }
+          } catch { /* ignore */ }
+        } else if (stalledMs >= 3_000) {
+          playerLog('warn', 'Watchdog: 3s stall — calling startLoad');
+          try { hlsRef.current?.startLoad(); } catch { /* ignore */ }
+        }
+      }, WATCHDOG_INTERVAL_MS);
 
       // Stall recovery: if the browser fires 'stalled' while HLS.js is active,
       // kick startLoad() to resume downloading segments immediately.
@@ -640,6 +757,10 @@ export const VideoPlayer = ({
         video.pause();
         video.src = '';
         video.load();
+      }
+      if (stallWatchdogRef.current) {
+        clearInterval(stallWatchdogRef.current);
+        stallWatchdogRef.current = null;
       }
       if (hlsRef.current) {
         playerLog('info', 'Destroying HLS instance');

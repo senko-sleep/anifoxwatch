@@ -108,18 +108,19 @@ export class AniwavesSource extends BaseAnimeSource {
         })();
 
         // Build all transports: [0] = direct, [1..N] = proxies
-        const buildTransport = (index: number): Promise<any> => {
+        const buildTransport = (index: number, signal?: AbortSignal): Promise<any> => {
             if (index === 0) {
                 // Direct request
                 return this.client.get(urlPath, {
                     ...config,
+                    signal: signal ?? config.signal,
                     timeout: config.timeout ?? 7000,
                 });
             }
             // Proxy request
             const proxyUrl = this.PROXIES[index - 1](fullUrl);
             return axios.get(proxyUrl, {
-                signal: config.signal,
+                signal: signal ?? config.signal,
                 timeout: 4000, // tight per-proxy budget — we race anyway
             });
         };
@@ -152,7 +153,7 @@ export class AniwavesSource extends BaseAnimeSource {
         const transportCount = 1 + this.PROXIES.length; // direct + proxies
 
         const racePromises = Array.from({ length: transportCount }, (_, i) =>
-            buildTransport(i)
+            buildTransport(i, raceController.signal)
                 .then(response => ({ response, index: i }))
                 .catch(() => null) // individual failures return null; Promise.any filters them
         );
