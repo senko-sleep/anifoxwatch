@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
-import { Watch } from '@/pages/Watch';
+import Watch from '@/pages/Watch';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 /**

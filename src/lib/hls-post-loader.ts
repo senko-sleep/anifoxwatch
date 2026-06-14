@@ -148,7 +148,7 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
       xhr.setRequestHeader('Range', `bytes=${context.rangeStart}-${context.rangeEnd}`);
     }
 
-    xhr.timeout = config.timeout || 30000;
+    xhr.timeout = config.timeout || 5000;
     xhr.responseType = context.responseType || 'text';
 
     xhr.onload = () => {

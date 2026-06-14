@@ -997,10 +997,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             ? { rejectUnauthorized: false, ciphers: 'DEFAULT:@SECLEVEL=0' }
             : undefined;
 
-        // Segments must be fast — 8s timeout so stalled CDN connections fail quickly
-        // and the client watchdog can escalate before the 18s fatal trigger.
+        // Segments must be fast — 5s timeout so stalled CDN connections fail quickly
+        // and the client watchdog can escalate before the 12s fatal trigger.
         // Manifests are infrequent so stay at 60s.
-        const timeoutMs = (isSegment && !isM3u8) ? 8_000 : 60_000;
+        const timeoutMs = (isSegment && !isM3u8) ? 5_000 : 60_000;
 
         return axios({
             method: 'get',
@@ -1378,6 +1378,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Segments are immutable — same URL always returns the same bytes.
     // immutable tells browsers to never revalidate even on reload.
     res.set('Cache-Control', isSegment || isVideo ? 'public, max-age=86400, immutable' : 'public, max-age=3600');
+    if (isSegment && !proxyResponse.headers['content-length']) {
+        res.set('Transfer-Encoding', 'chunked');
+    }
     res.status(proxyResponse.status);
 
     // Buffer cacheable segments; pipe everything else directly

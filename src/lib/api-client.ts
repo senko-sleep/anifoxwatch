@@ -732,8 +732,8 @@ class AnimeApiClient {
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
             // Hard timeout so the UI never spins forever.
-            // Fail fast at 20s — if the backend hasn’t responded by then, try failover.
-            const streamTimeoutMs = 20_000;
+            // Fail fast at 12s — if the backend hasn’t responded by then, try failover.
+            const streamTimeoutMs = 12_000;
             // One attempt here — HiAnime REST fallback below has its own bounded budget.
             const maxAttempts = 1;
             let lastErr: Error | null = null;

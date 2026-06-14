@@ -313,14 +313,14 @@ export const VideoPlayer = ({
         // Larger buffers prevent stalls on momentary slow patches.
         // Desktop: 90s ahead, 60s back. Mobile: 45s ahead, 30s back.
         backBufferLength: onMobile ? 30 : 60,
-        maxBufferLength: onMobile ? 45 : 90,
+        maxBufferLength: onMobile ? 30 : 60,
         maxMaxBufferLength: onMobile ? 90 : 180,
         maxBufferHole: 1.5,        // Skip gaps up to 1.5s to avoid decoder stalls
         // ── ABR / quality selection ───────────────────────────────────────
         // Start auto-quality — let ABR pick based on bandwidth probe.
         // High default estimate so ABR starts at a good level immediately.
         startLevel: -1,
-        abrEwmaDefaultEstimate: onMobile ? 2_000_000 : 6_000_000,
+        abrEwmaDefaultEstimate: onMobile ? 1_500_000 : 2_500_000,
         abrEwmaFastLive: 2,
         abrEwmaSlowLive: 8,
         abrEwmaFastVoD: 2,
@@ -329,6 +329,7 @@ export const VideoPlayer = ({
         testBandwidth: true,
         // Downgrade quality early (4 segments) to avoid stalls instead of waiting
         maxStarvationDelay: 4,
+        maxLoadingDelay: 4,
         highBufferWatchdogPeriod: 2,
         // ── Prefetch & retries ────────────────────────────────────────────
         startFragPrefetch: true,
@@ -337,14 +338,14 @@ export const VideoPlayer = ({
         levelLoadingMaxRetry: 4,
         fragLoadingRetryDelay: 200,    // Faster retry cycle
         manifestLoadingRetryDelay: 400,
-        fragLoadingTimeOut: 7000,  // Must be < 8s server timeout so client aborts first
+        fragLoadingTimeOut: 5000,  // Must be < 8s server timeout so client aborts first
         manifestLoadingTimeOut: 10000,
         levelLoadingTimeOut: 10000,
         nudgeOffset: 0.2,
         nudgeMaxRetry: 8,          // More nudge attempts before giving up
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 8000;      // Match fragLoadingTimeOut
+          xhr.timeout = 5000;      // Match fragLoadingTimeOut
         }
       });
 
@@ -519,13 +520,13 @@ export const VideoPlayer = ({
       });
 
       // ── Stall watchdog ────────────────────────────────────────────────────
-      // Runs every 1 second while the video is supposed to be playing.
-      // Escalates: startLoad (3s) → buffer nudge (5s) → recoverMediaError (10s) → fatal (18s)
+      // Runs every 500ms while the video is supposed to be playing.
+      // Escalates: startLoad (1.5s) → buffer nudge (3s) → recoverMediaError (6s) → fatal (12s)
       if (stallWatchdogRef.current) clearInterval(stallWatchdogRef.current);
       lastPlayheadRef.current = 0;
       stallDurationRef.current = 0;
 
-      const WATCHDOG_INTERVAL_MS = 1000;
+      const WATCHDOG_INTERVAL_MS = 500;
       stallWatchdogRef.current = setInterval(() => {
         const v = videoRef.current;
         if (!v || !hlsRef.current) return;
@@ -550,20 +551,20 @@ export const VideoPlayer = ({
         const stalledMs = stallDurationRef.current;
         playerLog('warn', `Watchdog: playhead stuck for ${(stalledMs / 1000).toFixed(1)}s at ${now.toFixed(2)}s`);
 
-        if (stalledMs >= 18_000) {
+        if (stalledMs >= 12_000) {
           // Escalate to fatal — trigger source failover
-          playerLog('error', 'Watchdog: stall timeout (18s) — requesting server switch');
+          playerLog('error', 'Watchdog: stall timeout (12s) — requesting server switch');
           clearInterval(stallWatchdogRef.current!);
           stallWatchdogRef.current = null;
           hlsRef.current?.destroy();
           setError('Video stalled. Switching to another server…');
           onError?.('stall_timeout_error');
-        } else if (stalledMs >= 10_000) {
-          playerLog('warn', 'Watchdog: 10s stall — attempting recoverMediaError');
+        } else if (stalledMs >= 6_000) {
+          playerLog('warn', 'Watchdog: 6s stall — attempting recoverMediaError');
           try { hlsRef.current?.recoverMediaError(); } catch { /* ignore */ }
-        } else if (stalledMs >= 5_000) {
+        } else if (stalledMs >= 3_000) {
           // Buffer nudge — seek over a tiny gap
-          playerLog('warn', 'Watchdog: 5s stall — attempting buffer nudge');
+          playerLog('warn', 'Watchdog: 3s stall — attempting buffer nudge');
           try {
             const buf = v.buffered;
             let nudged = false;
@@ -580,8 +581,8 @@ export const VideoPlayer = ({
               v.currentTime = now + 0.1;
             }
           } catch { /* ignore */ }
-        } else if (stalledMs >= 3_000) {
-          playerLog('warn', 'Watchdog: 3s stall — calling startLoad');
+        } else if (stalledMs >= 1_500) {
+          playerLog('warn', 'Watchdog: 1.5s stall — calling startLoad');
           try { hlsRef.current?.startLoad(); } catch { /* ignore */ }
         }
       }, WATCHDOG_INTERVAL_MS);
@@ -1026,7 +1027,7 @@ const handleVisibilityChange = () => {
                  }
                } else {
                  // Resume segment loading immediately when the user returns to the tab
-                 // so HLS can pick up where it left off without retrying from scratch.
+                 // so HLS can pick up where it can resume without restarting.
                  if (hlsRef.current && typeof hlsRef.current.startLoad === 'function') {
                    try { hlsRef.current.startLoad(); } catch { /* ignore */ }
                  }
@@ -1041,6 +1042,8 @@ const handleVisibilityChange = () => {
     video.addEventListener('ended', handleEnded);
     video.addEventListener('waiting', handleWaiting);
     video.addEventListener('canplay', handleCanPlay);
+    video.addEventListener('canplaythrough', handleCanPlay);
+    video.addEventListener('playing', handleCanPlay);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
@@ -1052,6 +1055,8 @@ const handleVisibilityChange = () => {
       video.removeEventListener('ended', handleEnded);
       video.removeEventListener('waiting', handleWaiting);
       video.removeEventListener('canplay', handleCanPlay);
+      video.removeEventListener('canplaythrough', handleCanPlay);
+      video.removeEventListener('playing', handleCanPlay);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [intro, outro, onEnded, hasNextEpisode, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, autoFullscreen, isMobile]);
