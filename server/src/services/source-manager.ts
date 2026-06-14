@@ -3319,13 +3319,10 @@ export class SourceManager {
         const ordered = [...sourcesToTry].sort((a, b) => scoreSource(b.name) - scoreSource(a.name));
         let finalSources = ordered;
 
-        // Force Aniwaves to be first for all non-adult content no matter what
+        // For standard (non-adult) anime, only use Aniwaves and nothing else as instructed by the user
         if (!isAdultContent) {
-            const aniwavesIdx = finalSources.findIndex(s => s.name === 'Aniwaves');
-            if (aniwavesIdx > -1) {
-                const [aniwaves] = finalSources.splice(aniwavesIdx, 1);
-                finalSources.unshift(aniwaves);
-            }
+            const aniwaves = finalSources.find(s => s.name === 'Aniwaves');
+            finalSources = aniwaves ? [aniwaves] : [];
         } else if (primarySource) {
             const primaryIdx = finalSources.findIndex(s => s.name === primarySource.name);
             if (primaryIdx > -1) {
@@ -3795,7 +3792,7 @@ export class SourceManager {
         // Registered, currently enabled sources to try for cross-source fallback.
         // 2026-05-22: only Aniwaves is verified working for non-adult content.
         // Dead sources removed to prevent wasted timeout cycles.
-        const dubSources = ['Aniwaves', 'AnimeKai'];
+        const dubSources = ['Aniwaves'];
         const subSources = ['Aniwaves'];
         const sourceNames = category === 'dub' ? dubSources : subSources;
         
@@ -4774,9 +4771,7 @@ export class SourceManager {
 
             const sourceNamesToTry = includeAdultSources
                 ? ['AkiH', 'WatchHentai', 'Hanime']
-                : animeType === 'Movie'
-                ? ['Aniwaves', 'Gogoanime', 'AllAnime', '9Anime', 'GogoOrAt']
-                : ['Aniwaves', 'Gogoanime', 'AllAnime', '9Anime', 'GogoOrAt'];
+                : ['Aniwaves'];
             const sourcesToTry = sourceNamesToTry
                 .map((name) => this.sources.get(name))
                 .filter(s => s && s.isAvailable) as StreamingSource[];

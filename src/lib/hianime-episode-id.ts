@@ -23,6 +23,8 @@ export function normalizeAnimeEpisodeIdForHianimeRest(raw: string): string {
 }
 
 export function isHianimeStyleEpisodeId(episodeId: string): boolean {
+    if (episodeId.toLowerCase().startsWith('anilist-')) return false;
+    if (/^(aniwaves|aniwave|hanime|watchhentai|akih)-/i.test(episodeId)) return false;
     const n = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
     return /^[^/?#]+\?ep=[^&?#]+$/i.test(n);
 }

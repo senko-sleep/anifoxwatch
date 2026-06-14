@@ -654,7 +654,8 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     let streamData: any = { sources: [], subtitles: [] };
     let lastError: string | null = null;
 
-    if (isHianimeStyleEpisodeId(episodeIdForRest)) {
+    const isAdultRoute = /^(hanime|watchhentai|akih)-/i.test(episodeId);
+    if (isAdultRoute && isHianimeStyleEpisodeId(episodeIdForRest)) {
         try {
             streamData = await tryFetchHianimeRestStreamingData({
                 episodeId: episodeIdForRest,
