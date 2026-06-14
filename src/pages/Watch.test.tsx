@@ -1,5 +1,5 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
-import { BrowserRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router-dom';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import Watch from '@/pages/Watch';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -9,6 +9,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  * Tests that episodes other than episode 1 load correctly
  */
 
+import { getApiConfig } from '@/lib/api-config';
+
 const queryClient = new QueryClient({
     defaultOptions: {
         queries: { retry: false },
@@ -16,12 +18,13 @@ const queryClient = new QueryClient({
 });
 
 function renderWatch(initialEntries: string[]) {
+    console.log('[TEST] Render Watch with initialEntries:', initialEntries, 'API Config:', getApiConfig());
     return render(
-        <BrowserRouter initialEntries={initialEntries}>
+        <MemoryRouter initialEntries={initialEntries}>
             <QueryClientProvider client={queryClient}>
                 <Watch />
             </QueryClientProvider>
-        </BrowserRouter>
+        </MemoryRouter>
     );
 }
 
@@ -34,9 +37,7 @@ describe('Watch Page - Episode Loading Fix', () => {
         renderWatch(['/watch?id=anilist-189046&ep=1']);
         
         // Wait for episode data to load
-        await waitFor(() => {
-            expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
-        }, { timeout: 10000 });
+        await screen.findByText('Episodes', {}, { timeout: 10000 });
         
         // Verify episode 1 is selected
         const episodeElements = screen.getAllByText(/episode/i);
@@ -47,9 +48,7 @@ describe('Watch Page - Episode Loading Fix', () => {
         renderWatch(['/watch?id=anilist-189046&ep=4']);
         
         // Wait for episode data to load
-        await waitFor(() => {
-            expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
-        }, { timeout: 10000 });
+        await screen.findByText('Episodes', {}, { timeout: 10000 });
         
         // Verify episode 4 is selected
         const episodeElements = screen.getAllByText(/episode/i);
@@ -60,47 +59,37 @@ describe('Watch Page - Episode Loading Fix', () => {
         const { rerender } = renderWatch(['/watch?id=anilist-189046&ep=1']);
         
         // Wait for initial load
-        await waitFor(() => {
-            expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
-        }, { timeout: 10000 });
+        await screen.findByText('Episodes', {}, { timeout: 10000 });
         
         // Change to episode 4
         rerender(
-            <BrowserRouter initialEntries={['/watch?id=anilist-189046&ep=4']}>
+            <MemoryRouter initialEntries={['/watch?id=anilist-189046&ep=4']}>
                 <QueryClientProvider client={queryClient}>
                     <Watch />
                 </QueryClientProvider>
-            </BrowserRouter>
+            </MemoryRouter>
         );
         
         // Wait for new episode data to load
-        await waitFor(() => {
-            expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
-        }, { timeout: 10000 });
+        await screen.findByText('Episodes', {}, { timeout: 10000 });
     });
 
     it('should load different anime correctly', async () => {
         renderWatch(['/watch?id=anilist-182205&ep=1']);
         
         // Wait for episode data to load
-        await waitFor(() => {
-            expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
-        }, { timeout: 10000 });
+        await screen.findByText('Episodes', {}, { timeout: 10000 });
     });
 
     it('should maintain anime and episode sync when selectedAnimeId and cleanAnimeId change', async () => {
         renderWatch(['/watch?id=anilist-189046&ep=1']);
         
-        await waitFor(() => {
-            expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
-        }, { timeout: 10000 });
+        await screen.findByText('Episodes', {}, { timeout: 10000 });
         
         // Simulate navigating to different anime
         renderWatch(['/watch?id=anilist-182205&ep=4']);
         
-        await waitFor(() => {
-            expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
-        }, { timeout: 10000 });
+        await screen.findByText('Episodes', {}, { timeout: 10000 });
     });
 });
 

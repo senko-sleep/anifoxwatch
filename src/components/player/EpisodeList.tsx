@@ -211,9 +211,9 @@ export function EpisodeList({
               No episodes found
             </div>
           ) : (
-            filteredEpisodes.map(episode => (
+            filteredEpisodes.map((episode, index) => (
               <button
-                key={episode.id}
+                key={`${episode.id}-${index}`}
                 ref={selectedEpisodeId === episode.id ? selectedEpisodeRef : null}
                 onClick={() => onEpisodeSelect(episode.id, episode.number)}
                 className={cn(

@@ -284,7 +284,7 @@ class AnimeApiClient {
         if (typeof window !== 'undefined') {
             window.addEventListener('online', () => { this._online = true; });
             window.addEventListener('offline', () => { this._online = false; });
-            this._online = navigator.onLine;
+            this._online = navigator.onLine !== false;
         }
     }
 

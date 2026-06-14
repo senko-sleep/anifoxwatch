@@ -997,10 +997,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             ? { rejectUnauthorized: false, ciphers: 'DEFAULT:@SECLEVEL=0' }
             : undefined;
 
-        // Segments must be fast — 5s timeout so stalled CDN connections fail quickly
+        // Segments must be fast — 10s timeout so stalled CDN connections fail quickly
         // and the client watchdog can escalate before the 12s fatal trigger.
         // Manifests are infrequent so stay at 60s.
-        const timeoutMs = (isSegment && !isM3u8) ? 5_000 : 60_000;
+        const timeoutMs = (isSegment && !isM3u8) ? 10_000 : 60_000;
 
         return axios({
             method: 'get',
