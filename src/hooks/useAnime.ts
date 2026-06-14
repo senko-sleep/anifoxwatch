@@ -374,7 +374,7 @@ export function usePrefetchDubStream(
 export function usePrefetchNextEpisode() {
     const queryClient = useQueryClient();
 
-    return (animeId: string, episodeId: string, category?: string, episodeNum?: number, anilistId?: number) => {
+    return (animeId: string, episodeId: string, category?: string, episodeNum?: number, anilistId?: number, animeTitle?: string) => {
         // Prefetch episodes if not already cached
         if (!queryClient.getQueryData(queryKeys.episodes(animeId))) {
             queryClient.prefetchQuery({
@@ -391,13 +391,15 @@ export function usePrefetchNextEpisode() {
                 staleTime: 60 * 60 * 1000,
             });
         }
-        // Prefetch streaming links (auto server) so video loads instantly on episode switch
+        // Prefetch streaming links (auto server) so video loads instantly on episode switch.
+        // 15min staleTime matches the live streaming hook — data stays fresh for the whole
+        // watch session without re-fetching when the user clicks Next Episode.
         const streamKey = queryKeys.stream(episodeId, undefined, category);
         if (!queryClient.getQueryData(streamKey)) {
             queryClient.prefetchQuery({
                 queryKey: streamKey,
-                queryFn: () => apiClient.getStreamingLinks(episodeId, undefined, category, episodeNum, anilistId),
-                staleTime: 2 * 60 * 1000,
+                queryFn: () => apiClient.getStreamingLinks(episodeId, undefined, category, episodeNum, anilistId, animeTitle),
+                staleTime: 15 * 60 * 1000,
             });
         }
     };

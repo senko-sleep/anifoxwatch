@@ -535,11 +535,11 @@ const Watch = () => {
     if (idx >= 0 && idx < episodes.length - 1) {
       const next = episodes[idx + 1];
       const timeoutId = window.setTimeout(() => {
-        prefetchNext(cleanAnimeId, next.id, audioType, next.number, anilistIdForPrefetch);
+        prefetchNext(cleanAnimeId, next.id, audioType, next.number, anilistIdForPrefetch, anime?.title);
       }, 1500);
       return () => window.clearTimeout(timeoutId);
     }
-  }, [episodes, selectedEpisode, cleanAnimeId, audioType, prefetchNext, anilistIdForPrefetch, streamLoading, streamData]);
+  }, [episodes, selectedEpisode, cleanAnimeId, audioType, prefetchNext, anilistIdForPrefetch, streamLoading, streamData, anime?.title]);
 
   // Helper: get/set per-anime audio preference
   const getAnimeAudioPref = useCallback((animeId: string): AudioType | null => {

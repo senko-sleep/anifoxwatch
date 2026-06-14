@@ -13,6 +13,10 @@ import { streamExtractor } from '../services/stream-extractor.js';
  * - Direct metadata scraping via AJAX
  * - Episode list and server extraction
  * - Stream resolution via EchoVideo embed extraction
+ * - Parallel transport racing: fires direct + all proxies simultaneously,
+ *   resolves on the first success — eliminates sequential fallback latency.
+ * - Connection winner cache: remembers which transport won per URL prefix
+ *   so subsequent requests skip the race and go straight to the winner.
  */
 export class AniwavesSource extends BaseAnimeSource {
     name = 'Aniwaves';
@@ -29,18 +33,33 @@ export class AniwavesSource extends BaseAnimeSource {
         servers: 4 * 60 * 60 * 1000,   // 4h — server lists are stable
     };
 
+    // ─── Connection winner cache ────────────────────────────────────────────
+    // Stores which transport (index: 0 = direct, 1-3 = proxy) succeeded last.
+    // Key = URL path prefix (first 2 segments), Value = transport index.
+    // This lets repeat requests skip the race entirely and hit the winner first.
+    private transportWinner: Map<string, number> = new Map();
+    private readonly TRANSPORT_WINNER_TTL = 10 * 60 * 1000; // 10 minutes
+    private transportWinnerExpiry: Map<string, number> = new Map();
+
+    // Proxy list (stable — update here if proxies change)
+    private readonly PROXIES = [
+        (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+        (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+        (url: string) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    ];
+
     constructor() {
         super();
         // Reusable HTTPS agent — keeps TCP connections alive between requests
         // to avoid the ~200ms handshake overhead on every API call.
         const keepAliveAgent = new https.Agent({
             keepAlive: true,
-            maxSockets: 10,
-            timeout: 15000,
+            maxSockets: 15,
+            timeout: 12000,
         });
         this.client = axios.create({
             baseURL: this.baseUrl,
-            timeout: 10000,           // Reduced from 12s — fail faster, hit proxy sooner
+            timeout: 7000,           // Fail fast — parallel race makes this safe
             httpsAgent: keepAliveAgent,
             headers: {
                 'Accept': 'application/json, text/html',
@@ -50,40 +69,118 @@ export class AniwavesSource extends BaseAnimeSource {
         });
     }
 
+    // ─── Transport winner helpers ───────────────────────────────────────────
+
+    private getWinnerKey(urlPath: string): string {
+        // Key on the first 2 path segments e.g. "/ajax/episode" from "/ajax/episode/list/1234"
+        const parts = urlPath.split('/').filter(Boolean).slice(0, 2);
+        return parts.join('/');
+    }
+
+    private getCachedWinner(urlPath: string): number | null {
+        const key = this.getWinnerKey(urlPath);
+        const expiry = this.transportWinnerExpiry.get(key);
+        if (!expiry || Date.now() > expiry) {
+            this.transportWinner.delete(key);
+            this.transportWinnerExpiry.delete(key);
+            return null;
+        }
+        const winner = this.transportWinner.get(key);
+        return winner !== undefined ? winner : null;
+    }
+
+    private setCachedWinner(urlPath: string, transportIndex: number): void {
+        const key = this.getWinnerKey(urlPath);
+        this.transportWinner.set(key, transportIndex);
+        this.transportWinnerExpiry.set(key, Date.now() + this.TRANSPORT_WINNER_TTL);
+    }
+
+    // ─── Parallel fetch with winner cache ──────────────────────────────────
+
     private async fetchWithProxyFallback(urlPath: string, config: any = {}): Promise<any> {
-        try {
-            const response = await this.client.get(urlPath, config);
-            return response;
-        } catch (error: any) {
-            if (axios.isCancel(error) || error.name === 'AbortError') throw error;
-            logger.warn(`[Aniwaves] Direct fetch failed for ${urlPath}, trying proxies...`, undefined, this.name);
-            
-            let fullUrl = `${this.baseUrl}${urlPath}`;
+        const fullUrl = (() => {
+            let u = `${this.baseUrl}${urlPath}`;
             if (config.params) {
                 const searchParams = new URLSearchParams(config.params);
-                fullUrl += `?${searchParams.toString()}`;
+                u += `?${searchParams.toString()}`;
             }
-            
-            const proxies = [
-                `https://api.allorigins.win/raw?url=${encodeURIComponent(fullUrl)}`,
-                `https://corsproxy.io/?${encodeURIComponent(fullUrl)}`,
-                `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(fullUrl)}`,
-            ];
+            return u;
+        })();
 
-            // Race all proxies in parallel — whichever responds first wins.
-            // Any individual proxy that rejects is ignored; only a total failure rejects.
-            const proxyPromises = proxies.map(proxyUrl =>
-                axios.get(proxyUrl, {
-                    signal: config.signal,
-                    timeout: 5000 // 5s per proxy — tight budget, we race anyway
-                }).catch(err => {
-                    logger.warn(`[Aniwaves] Proxy ${proxyUrl.split('/')[2]} failed`, undefined, this.name);
-                    throw err;
-                })
+        // Build all transports: [0] = direct, [1..N] = proxies
+        const buildTransport = (index: number): Promise<any> => {
+            if (index === 0) {
+                // Direct request
+                return this.client.get(urlPath, {
+                    ...config,
+                    timeout: config.timeout ?? 7000,
+                });
+            }
+            // Proxy request
+            const proxyUrl = this.PROXIES[index - 1](fullUrl);
+            return axios.get(proxyUrl, {
+                signal: config.signal,
+                timeout: 4000, // tight per-proxy budget — we race anyway
+            });
+        };
+
+        // Check if we have a winner cached for this path prefix
+        const cachedWinner = this.getCachedWinner(urlPath);
+
+        if (cachedWinner !== null) {
+            // Try the known winner first — if it fails, fall through to full race
+            try {
+                const response = await buildTransport(cachedWinner);
+                return response;
+            } catch {
+                // Winner degraded — evict and run a full race below
+                const key = this.getWinnerKey(urlPath);
+                this.transportWinner.delete(key);
+                this.transportWinnerExpiry.delete(key);
+                logger.warn(`[Aniwaves] Cached transport #${cachedWinner} failed for ${urlPath} — running full race`, undefined, this.name);
+            }
+        }
+
+        // ── Full parallel race: fire all transports simultaneously ──────────
+        // AbortController lets us cancel the losers once a winner resolves.
+        const raceController = new AbortController();
+        const parentSignal = config.signal as AbortSignal | undefined;
+
+        // Forward parent abort to race controller
+        parentSignal?.addEventListener('abort', () => raceController.abort(), { once: true });
+
+        const transportCount = 1 + this.PROXIES.length; // direct + proxies
+
+        const racePromises = Array.from({ length: transportCount }, (_, i) =>
+            buildTransport(i)
+                .then(response => ({ response, index: i }))
+                .catch(() => null) // individual failures return null; Promise.any filters them
+        );
+
+        try {
+            // Promise.any resolves on the first non-null success
+            const winner = await Promise.any(
+                racePromises.map(p =>
+                    p.then(result => {
+                        if (!result) throw new Error('transport failed');
+                        return result;
+                    })
+                )
             );
 
-            // Promise.any resolves on the first success, rejects only if all fail
-            return await Promise.any(proxyPromises);
+            // Cancel remaining in-flight requests
+            raceController.abort();
+
+            // Cache this transport as the winner for this path prefix
+            this.setCachedWinner(urlPath, winner.index);
+
+            const label = winner.index === 0 ? 'direct' : `proxy[${winner.index}]`;
+            logger.info(`[Aniwaves] Race winner: ${label} for ${urlPath}`, undefined, this.name);
+
+            return winner.response;
+        } catch {
+            // All transports failed
+            throw new Error(`[Aniwaves] All transports failed for ${urlPath}`);
         }
     }
 
@@ -195,6 +292,44 @@ export class AniwavesSource extends BaseAnimeSource {
         if (cached) return cached;
 
         const slug = id.replace('aniwaves-', '');
+
+        // Fire episode list prefetch concurrently with the anime page fetch
+        // so by the time getEpisodes() is called the data is already in cache.
+        const numericId = slug.split('-').pop() || '';
+        const episodeCacheKey = `episodes:${id}`;
+        const episodesCached = this.getCached<Episode[]>(episodeCacheKey);
+        if (!episodesCached && numericId) {
+            // Fire-and-forget — don't await; errors are silently ignored
+            this.fetchWithProxyFallback(`/ajax/episode/list/${numericId}`, { signal: options?.signal })
+                .then(resp => {
+                    if (resp.data?.status === 200 && resp.data?.result) {
+                        const $ = cheerio.load(resp.data.result);
+                        const episodes: Episode[] = [];
+                        $('.episodes.number li a').each((_, el) => {
+                            const $el = $(el);
+                            const epId = $el.attr('data-ids') || '';
+                            const num = parseInt($el.attr('data-num') || '0');
+                            const title = $el.attr('title') || `Episode ${num}`;
+                            if (epId && num > 0) {
+                                episodes.push({
+                                    id: `aniwaves-${epId}`,
+                                    number: num,
+                                    title,
+                                    isFiller: false,
+                                    hasSub: $el.attr('data-sub') === '1',
+                                    hasDub: $el.attr('data-dub') === '1'
+                                });
+                            }
+                        });
+                        if (episodes.length > 0) {
+                            this.setCache(episodeCacheKey, episodes, this.cacheTTL.episodes);
+                            logger.info(`[Aniwaves] Prefetched ${episodes.length} episodes for ${id}`, undefined, this.name);
+                        }
+                    }
+                })
+                .catch(() => { /* ignore prefetch errors */ });
+        }
+
         try {
             const response = await this.fetchWithProxyFallback(`/watch/${slug}`, {
                 signal: options?.signal,
@@ -406,7 +541,7 @@ export class AniwavesSource extends BaseAnimeSource {
 
              const streamData: StreamingData = {
                 sources: extraction.streams
-                    .filter(s => /\.(m3u8|mp4|mkv|ts)(\?|$)/i.test(s.url) || s.url.includes('/hls/'))
+                    .filter(s => /\.(m3u8|mp4|mkv|ts)(\\?|$)/i.test(s.url) || s.url.includes('/hls/'))
                     .map(s => ({
                         url: s.url,
                         quality: s.quality as any,

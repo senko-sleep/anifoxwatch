@@ -290,26 +290,34 @@ export const VideoPlayer = ({
         liveSyncDurationCount: 3,
         liveMaxLatencyDurationCount: 5,
         liveDurationInfinity: true,
-        backBufferLength: onMobile ? 30 : 60,     // Increased: keep more video behind seek point
-        maxBufferLength: onMobile ? 30 : 60,      // Increased: buffer more video ahead to prevent stalls
-        maxMaxBufferLength: onMobile ? 60 : 120,  // Allow HLS.js to grow buffer on fast connections
+        // ── Buffer sizing ─────────────────────────────────────────────────
+        // Larger buffers prevent stalls on momentary slow patches.
+        // Desktop: 90s ahead, 60s back. Mobile: 45s ahead, 30s back.
+        backBufferLength: onMobile ? 30 : 60,
+        maxBufferLength: onMobile ? 45 : 90,
+        maxMaxBufferLength: onMobile ? 90 : 180,
         maxBufferHole: 0.5,
+        // ── ABR / quality selection ───────────────────────────────────────
+        // Start auto-quality — let ABR pick based on bandwidth probe.
+        // High default estimate so ABR starts at a good level immediately.
         startLevel: -1,
-        // Higher default estimate means HLS.js starts at a better quality level.
-        // Proxied streams typically sustain 1–5 Mbps through Vercel.
-        abrEwmaDefaultEstimate: onMobile ? 1_500_000 : 4_000_000,
-        abrEwmaFastLive: 3,
-        abrEwmaSlowLive: 9,
-        abrEwmaFastVoD: 3,
-        abrEwmaSlowVoD: 9,
+        abrEwmaDefaultEstimate: onMobile ? 2_000_000 : 6_000_000,
+        abrEwmaFastLive: 2,
+        abrEwmaSlowLive: 8,
+        abrEwmaFastVoD: 2,
+        abrEwmaSlowVoD: 8,
         abrMaxWithRealBitrate: true,
         testBandwidth: true,
-        startFragPrefetch: true,  // Always prefetch — eliminates the initial "buffering" pause
-        fragLoadingMaxRetry: 5,
+        // Downgrade quality early (4 segments) to avoid stalls instead of waiting
+        maxStarvationDelay: 4,
+        highBufferWatchdogPeriod: 2,
+        // ── Prefetch & retries ────────────────────────────────────────────
+        startFragPrefetch: true,
+        fragLoadingMaxRetry: 8,
         manifestLoadingMaxRetry: 4,
         levelLoadingMaxRetry: 4,
-        fragLoadingRetryDelay: 500,
-        manifestLoadingRetryDelay: 500,
+        fragLoadingRetryDelay: 200,    // Faster retry cycle
+        manifestLoadingRetryDelay: 400,
         fragLoadingTimeOut: 12000,
         manifestLoadingTimeOut: 10000,
         levelLoadingTimeOut: 10000,
@@ -332,9 +340,11 @@ export const VideoPlayer = ({
 
         setAvailableLevels(data.levels.map(l => ({ height: l.height, bitrate: l.bitrate })));
 
-        const maxLevel = data.levels.length - 1;
-        hls.currentLevel = maxLevel;
-        setCurrentLevel(maxLevel);
+        // Let ABR pick quality automatically — forcing maxLevel before bandwidth
+        // is measured causes stalls when the connection can't sustain it.
+        // The high abrEwmaDefaultEstimate above means ABR will still start high.
+        hls.currentLevel = -1; // -1 = ABR auto
+        setCurrentLevel(-1);
 
         setIsLoading(false);
         video.play().catch((e) => {
@@ -457,6 +467,15 @@ export const VideoPlayer = ({
           duration: data.frag.duration?.toFixed(2) + 's',
           size: (data.frag.stats.total / 1024).toFixed(1) + 'KB'
         });
+      });
+
+      // Stall recovery: if the browser fires 'stalled' while HLS.js is active,
+      // kick startLoad() to resume downloading segments immediately.
+      video.addEventListener('stalled', () => {
+        if (hlsRef.current) {
+          playerLog('warn', 'Video stalled — resuming HLS segment load');
+          try { hlsRef.current.startLoad(); } catch { /* ignore */ }
+        }
       });
 
       hlsRef.current = hls;
@@ -862,7 +881,8 @@ export const VideoPlayer = ({
     };
     const handleWaiting = () => {
       if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
-      waitingTimerRef.current = setTimeout(() => setIsLoading(true), 400);
+      // 800ms debounce — avoids spinner flash during brief ABR quality switches
+      waitingTimerRef.current = setTimeout(() => setIsLoading(true), 800);
     };
     const handleCanPlay = () => {
       if (waitingTimerRef.current) {

@@ -19,6 +19,17 @@ import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streami
 
 const router = Router();
 
+// ── Persistent HTTPS agent for proxy segment fetches ───────────────────────
+// Reuses TCP connections across the ~350 segments in a 24-minute episode.
+// Without keepAlive each segment pays a full TCP+TLS handshake (~80-200ms).
+const proxyKeepAliveAgent = new https.Agent({
+    keepAlive: true,
+    maxSockets: 25,
+    maxFreeSockets: 10,
+    timeout: 20000,
+    scheduling: 'fifo',
+});
+
 // ---------------------------------------------------------------------------
 // Constants & environment
 // ---------------------------------------------------------------------------
@@ -996,7 +1007,11 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             timeout: timeoutMs,
             maxRedirects: 5,
             validateStatus: (s: number) => s < 400,
-            ...(agentOptions ? { httpsAgent: new https.Agent(agentOptions) } : {}),
+            // Use the persistent keepAlive agent for segment fetches;
+            // relax TLS when requested.
+            ...(agentOptions
+                ? { httpsAgent: new https.Agent({ ...agentOptions }) }
+                : { httpsAgent: proxyKeepAliveAgent }),
         });
     };
 
@@ -1356,7 +1371,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.set('Access-Control-Allow-Headers', 'Range');
     res.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
-    res.set('Cache-Control', isSegment || isVideo ? 'public, max-age=86400' : 'public, max-age=3600');
+    // Segments are immutable — same URL always returns the same bytes.
+    // immutable tells browsers to never revalidate even on reload.
+    res.set('Cache-Control', isSegment || isVideo ? 'public, max-age=86400, immutable' : 'public, max-age=3600');
     res.status(proxyResponse.status);
 
     // Buffer cacheable segments; pipe everything else directly
