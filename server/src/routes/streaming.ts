@@ -26,7 +26,7 @@ const proxyKeepAliveAgent = new https.Agent({
     keepAlive: true,
     maxSockets: 25,
     maxFreeSockets: 10,
-    timeout: 20000,
+    timeout: 30000,
     scheduling: 'fifo',
 });
 
@@ -885,6 +885,15 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         logger.warn(`[PROXY] Remote proxy failed for ISP-blocked ${domain} — falling back to local rotation`, { requestId });
     }
 
+    // Render.com network is blocked by many CDNs - forward segments to Vercel proxy
+    const isRender = process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID != null;
+    if (isRender && isSegment && !isM3u8 && process.env.IS_REMOTE_PROXY !== 'true') {
+        logger.info(`[PROXY] Render detected — routing segment to Vercel proxy`, { domain, requestId });
+        const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'Render segment fast-path');
+        if (ok) return;
+        logger.warn(`[PROXY] Vercel proxy failed for Render segment — falling back to local rotation`, { requestId });
+    }
+
     const isResolvable = await isDomainResolvable(domain);
     if (!isResolvable) {
         if (process.env.IS_REMOTE_PROXY !== 'true' && !isIspBlockedDomain(domain)) {
@@ -1005,10 +1014,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             ? { rejectUnauthorized: false, ciphers: 'DEFAULT:@SECLEVEL=0' }
             : undefined;
 
-        // Segments must be fast — 20s timeout for echovideo CDN which is slow
-        // and the client watchdog can escalate before the 30s fatal trigger.
+        // Segments must be fast — 30s timeout for slow CDNs (echovideo, megaup)
+        // Matches client-side fragLoadingTimeOut to prevent server timeout before client
         // Manifests are infrequent so stay at 60s.
-        const timeoutMs = (isSegment && !isM3u8) ? 20_000 : 60_000;
+        const timeoutMs = (isSegment && !isM3u8) ? 30_000 : 60_000;
 
         return axios({
             method: 'get',
@@ -1312,7 +1321,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 url,
                 headers: segmentHeaders,
                 responseType: 'stream',
-                timeout: 20_000,
+                timeout: 30_000,
                 maxRedirects: 5,
             });
         }

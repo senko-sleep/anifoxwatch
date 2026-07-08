@@ -338,14 +338,14 @@ export const VideoPlayer = ({
         levelLoadingMaxRetry: 4,
         fragLoadingRetryDelay: 200,    // Faster retry cycle
         manifestLoadingRetryDelay: 400,
-        fragLoadingTimeOut: 20000,  // Increased to 20s for slow echovideo CDN
-        manifestLoadingTimeOut: 10000,
-        levelLoadingTimeOut: 10000,
+        fragLoadingTimeOut: 30000,  // Increased to 30s for slow CDNs
+        manifestLoadingTimeOut: 15000,
+        levelLoadingTimeOut: 15000,
         nudgeOffset: 0.2,
         nudgeMaxRetry: 8,          // More nudge attempts before giving up
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 20000;      // Match fragLoadingTimeOut
+          xhr.timeout = 30000;      // Match fragLoadingTimeOut
         }
       });
 
