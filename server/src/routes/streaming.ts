@@ -166,7 +166,6 @@ const ISP_BLOCKED_DOMAINS = new Set([
     'megaup.nl',
     'megaup.live',
     'megaup.to',
-    'burntburst',
 ]);
 
 function isDeadDomain(url: string): boolean {
@@ -365,7 +364,7 @@ function validateDubStream(result: any): boolean {
 // URL helpers
 // ---------------------------------------------------------------------------
 
-const getProxyBaseUrl = (_req: Request): string => {
+const getProxyBaseUrl = (req: Request): string => {
     // Same-origin relative paths: works with Vite dev proxy (:8081), Vercel, and Firebase hosting.
     // Absolute localhost:3001 links break when the SPA is on another port.
     const envBase = process.env.BASE_URL?.replace(/\/$/, '');
@@ -400,17 +399,24 @@ const rewriteM3u8Content = (
 ): string => {
     const urlNoQuery = originalUrl.split('?')[0].split('#')[0];
     const baseUrl = urlNoQuery.substring(0, urlNoQuery.lastIndexOf('/') + 1);
+    const origin = new URL(originalUrl).origin;
 
     return content.split('\n').map(line => {
         const t = line.trim();
         if (t.startsWith('#') && t.includes('URI="')) {
             return line.replace(/URI="([^"]+)"/g, (_match, uri) => {
-                const abs = uri.startsWith('http') ? uri : `${baseUrl}${uri}`;
+                const abs = uri.startsWith('http') ? uri : uri.startsWith('/') 
+                    ? `${origin}${uri}` 
+                    : `${baseUrl}${uri}`;
                 return `URI="${proxyUrl(abs, proxyBase, referer)}"`;
             });
         }
         if (!t || t.startsWith('#')) return line;
-        const abs = t.startsWith('http') ? t : `${baseUrl}${t}`;
+        // Handle absolute paths (starting with /) by using origin + path
+        // For echovideo CDN, paths like /cdn/... need the full origin
+        const abs = t.startsWith('http') ? t : t.startsWith('/') 
+            ? `${origin}${t}` 
+            : `${baseUrl}${t}`;
         return proxyUrl(abs, proxyBase, referer);
     }).join('\n');
 };
@@ -842,7 +848,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Megaup CDN uses obfuscated extensions (.gif, .jpg, .png) for real video segments
     const isMegaupDomain = /megaup\.(cc|nl|live|to)|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|burntburst45|rrr\.|xm8\.|dev\d*app/i.test(domain);
     const hasObfuscatedExt = /\.(gif|jpg|jpeg|png|webp)$/i.test(urlObj.pathname);
-    const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt);
+    // Echovideo CDN segments don't have extensions - they're just CDN URLs
+    const isEchovideoSegment = /echovideo\.(to|ru)/.test(domain) && !url.includes('.m3u8');
+    const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt) || isEchovideoSegment;
     const isVideo = url.endsWith('.mp4');
 
     // Serve cached segments without hitting upstream
@@ -997,10 +1005,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             ? { rejectUnauthorized: false, ciphers: 'DEFAULT:@SECLEVEL=0' }
             : undefined;
 
-        // Segments must be fast — 10s timeout so stalled CDN connections fail quickly
-        // and the client watchdog can escalate before the 12s fatal trigger.
+        // Segments must be fast — 20s timeout for echovideo CDN which is slow
+        // and the client watchdog can escalate before the 30s fatal trigger.
         // Manifests are infrequent so stay at 60s.
-        const timeoutMs = (isSegment && !isM3u8) ? 10_000 : 60_000;
+        const timeoutMs = (isSegment && !isM3u8) ? 20_000 : 60_000;
 
         return axios({
             method: 'get',
@@ -1239,23 +1247,80 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         return;
     }
 
-    if (proxyResponse.status >= 400) {
-        proxyResponse.data?.resume?.();
-        res.set('Access-Control-Allow-Origin', '*').status(proxyResponse.status).json({ error: 'Upstream error', status: proxyResponse.status, domain });
+    if (proxyResponse!.status >= 400) {
+        proxyResponse!.data?.resume?.();
+        res.set('Access-Control-Allow-Origin', '*').status(proxyResponse!.status).json({ error: 'Upstream error', status: proxyResponse!.status, domain });
         return;
     }
 
     // ---------- M3U8 manifest handling ----------
-    const upstreamCt = proxyResponse.headers['content-type'] || '';
+    const upstreamCt = proxyResponse!.headers['content-type'] || '';
     const isUpstreamM3u8 =
         upstreamCt.includes('x-mpegurl') ||
         upstreamCt.includes('vnd.apple.mpegurl') ||
         url.includes('.m3u8') ||
         (domain.includes('shop21pro.site') && !url.includes('.ts') && !url.includes('.m4s'));
 
+    // For echovideo, we need to check the actual content to distinguish between manifests and segments
+    // Echovideo segment manifests don't have .m3u8 extension but contain HLS playlist content
+    let isEchovideoManifest = false;
+    if (isEchovideoSegment && !isUpstreamM3u8) {
+        // Read the content to check if it's actually a manifest
+        const content = await streamToString(proxyResponse!.data);
+        isEchovideoManifest = content.includes('#EXTM3U');
+        
+        if (isEchovideoManifest) {
+            // It's a manifest, process it
+            try {
+                // Reject manifests whose segments resolve to known ad CDNs
+                if (isAdPoisonedManifest(content, url)) {
+                    logger.warn(`⚠️ [MANIFEST AD-POISONED] Manifest from ${domain} contains ad CDN segments instead of real video data. Rejecting stream.`, { url: url.substring(0, 200), requestId });
+                    res.set('Access-Control-Allow-Origin', '*').status(502).json({
+                        error: 'Ad-poisoned manifest',
+                        reason: 'ad_cdn_segments',
+                        domain,
+                        message: 'HLS manifest contains segments from ad/tracking CDNs instead of real video data',
+                    });
+                    return;
+                }
+
+                const rewritten = rewriteM3u8Content(content, url, proxyBase, refererParam || refererCombos[0]?.referer);
+                res.set('Content-Type', 'application/vnd.apple.mpegurl');
+                res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+                res.set('Pragma', 'no-cache');
+                res.set('Expires', '0');
+                res.set('Access-Control-Allow-Origin', '*');
+                res.set('Vary', 'Origin');
+                res.send(rewritten);
+                logger.info(`[PROXY] Rewrote m3u8 from ${domain}`, { domain, originalSize: content.length, requestId });
+            } catch (err) {
+                logger.error(`[PROXY] Failed to process m3u8 from ${domain}`, err as Error);
+                res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Failed to process manifest' });
+            }
+            return;
+        } else {
+            // It's a segment, re-fetch since we consumed the stream
+            const segmentHeaders: Record<string, string> = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': refererParam || refererCombos[0]?.referer || 'https://aniwaves.ru',
+                'Origin': 'https://aniwaves.ru',
+            };
+            proxyResponse = await axios({
+                method: 'get',
+                url,
+                headers: segmentHeaders,
+                responseType: 'stream',
+                timeout: 20_000,
+                maxRedirects: 5,
+            });
+        }
+    }
+
     if (isUpstreamM3u8) {
         try {
-            const content = await streamToString(proxyResponse.data);
+            const content = await streamToString(proxyResponse!.data);
 
             // Reject manifests whose segments resolve to known ad CDNs
             if (isAdPoisonedManifest(content, url)) {
@@ -1289,7 +1354,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     // Guard: reject responses from ad CDN domains (ad blobs disguised as segments)
     if (isAdCdnUrl(url)) {
-        proxyResponse.data?.resume?.();
+        proxyResponse!.data?.resume?.();
         logger.warn(`[PROXY] Blocked ad CDN segment: ${domain}`, { url: url.substring(0, 200), requestId });
         res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Ad CDN content blocked', reason: 'ad_cdn', domain });
         return;
@@ -1302,7 +1367,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         
         // Strict block for non-media types (HTML/JSON/JS)
         if (NON_VIDEO_CONTENT_TYPES.some(bad => ctLower.includes(bad))) {
-            proxyResponse.data?.resume?.();
+            proxyResponse!.data?.resume?.();
             logger.warn(`[PROXY] Blocked strict non-video content type: ${upstreamCt}`, { domain, requestId });
             res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Non-video content type blocked', contentType: upstreamCt, domain });
             return;
@@ -1314,7 +1379,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             const isAdDomain = isAdCdnUrl(url);
 
             if (isAdDomain) {
-                proxyResponse.data?.resume?.();
+                proxyResponse!.data?.resume?.();
                 logger.warn(`[PROXY] Blocked ad image segment: ${domain}`, { url: url.substring(0, 100), requestId });
                 res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Ad image segment blocked', domain });
                 return;
@@ -1322,9 +1387,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
             if (!isKnownCdn) {
                 // Potential ad disguised as image on unknown domain - check size
-                const size = parseInt(proxyResponse.headers['content-length'] || '0', 10);
+                const size = parseInt(proxyResponse!.headers['content-length'] || '0', 10);
                 if (size > 0 && size < 100 * 1024) { // < 100KB on unknown domain
-                    proxyResponse.data?.resume?.();
+                    proxyResponse!.data?.resume?.();
                     logger.warn(`[PROXY] Blocked small unknown image segment (${size} bytes): ${domain}`, { requestId });
                     res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Small unknown image segment blocked', domain });
                     return;
@@ -1340,12 +1405,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     const effectiveCt = req._normalizedCt || upstreamCt.toLowerCase();
 
-    if (proxyResponse.headers['content-length'] && !proxyResponse.headers['content-encoding']) {
-        res.set('Content-Length', proxyResponse.headers['content-length']);
+    if (proxyResponse!.headers['content-length'] && !proxyResponse!.headers['content-encoding']) {
+        res.set('Content-Length', proxyResponse!.headers['content-length']);
     }
-    if (proxyResponse.headers['content-range']) res.set('Content-Range', proxyResponse.headers['content-range']);
+    if (proxyResponse!.headers['content-range']) res.set('Content-Range', proxyResponse!.headers['content-range']);
 
-    const hasAcceptRanges = proxyResponse.headers['accept-ranges'];
+    const hasAcceptRanges = proxyResponse!.headers['accept-ranges'];
     if (hasAcceptRanges) {
         res.set('Accept-Ranges', hasAcceptRanges);
     } else if (effectiveCt.startsWith('video/') || effectiveCt === 'application/octet-stream' ||
@@ -1378,36 +1443,36 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Segments are immutable — same URL always returns the same bytes.
     // immutable tells browsers to never revalidate even on reload.
     res.set('Cache-Control', isSegment || isVideo ? 'public, max-age=86400, immutable' : 'public, max-age=3600');
-    if (isSegment && !proxyResponse.headers['content-length']) {
+    if (isSegment && !proxyResponse!.headers['content-length']) {
         res.set('Transfer-Encoding', 'chunked');
     }
-    res.status(proxyResponse.status);
+    res.status(proxyResponse!.status);
 
     // Buffer cacheable segments; pipe everything else directly
-    if (isSegment && !req.headers.range && proxyResponse.status === 200) {
+    if (isSegment && !req.headers.range && proxyResponse!.status === 200) {
         const MAX_CACHE_SEGMENT = 4 * 1024 * 1024;
         const chunks: Buffer[] = [];
         let total = 0;
         let overflow = false;
 
-        proxyResponse.data.on('data', (chunk: Buffer) => {
+        proxyResponse!.data.on('data', (chunk: Buffer) => {
             total += chunk.length;
             if (total > MAX_CACHE_SEGMENT) { overflow = true; return; }
             chunks.push(chunk);
         });
-        proxyResponse.data.on('end', () => {
+        proxyResponse!.data.on('end', () => {
             if (!overflow && total > 0) {
                 const buf = Buffer.concat(chunks);
                 segmentCacheSet(url!, buf, upstreamCt || 'video/MP2T');
             }
         });
-        proxyResponse.data.on('error', (err: Error) => logger.error(`[PROXY] Segment buffer error from ${domain}`, err));
-        proxyResponse.data.pipe(res);
+        proxyResponse!.data.on('error', (err: Error) => logger.error(`[PROXY] Segment buffer error from ${domain}`, err));
+        proxyResponse!.data.pipe(res);
     } else {
-        proxyResponse.data.pipe(res);
+        proxyResponse!.data.pipe(res);
     }
 
-    proxyResponse.data.on('error', (err: Error) => {
+    proxyResponse!.data.on('error', (err: Error) => {
         logger.error(`[PROXY] Stream error from ${domain}`, err);
         if (!res.headersSent) res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Stream error' });
         else res.end();

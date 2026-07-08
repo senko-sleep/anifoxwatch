@@ -62,37 +62,18 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
     const isManifest = url.includes('.m3u8') || context.type === 'manifest' || context.type === 'level';
 
     if (isProxied) {
-      try {
-        const urlParams = new URL(url, window.location.origin).searchParams;
-        const actualUrl = urlParams.get('url');
-
-        if (actualUrl) {
-          // Extract proxy base (everything before ?)
-          const proxyBase = url.substring(0, url.indexOf('?'));
-
-          // Check manifest cache first (skip for segments)
-          if (isManifest) {
-            const cached = manifestCacheGet(url);
-            if (cached) {
-              const stats: LoadStats = { trequest: performance.now(), tfirst: performance.now(), tload: performance.now(), retry: 0 };
-              callbacks.onSuccess(
-                { url: context.url, data: cached, code: 200 },
-                stats,
-                context
-              );
-              return;
-            }
-          }
-
-          // Use POST request for long URLs (> 1000 chars to be safe)
-          if (actualUrl.length > 1000) {
-            const referer = urlParams.get('referer') || '';
-            this.loadViaPost(proxyBase, actualUrl, referer, context, config, callbacks, isManifest);
-            return;
-          }
+      // Check manifest cache first (skip for segments)
+      if (isManifest) {
+        const cached = manifestCacheGet(url);
+        if (cached) {
+          const stats: LoadStats = { trequest: performance.now(), tfirst: performance.now(), tload: performance.now(), retry: 0 };
+          callbacks.onSuccess(
+            { url: context.url, data: cached, code: 200 },
+            stats,
+            context
+          );
+          return;
         }
-      } catch (e) {
-        console.error('[PostProxyLoader] Failed to parse proxied URL', e);
       }
     } else if (url.includes('.key')) {
       // Automatic proxy for cross-origin key files to avoid CORS blocks.
@@ -104,7 +85,7 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
       return;
     }
 
-    // For proxied manifest URLs (non-POST path): wrap success to cache response
+    // For proxied manifest URLs: wrap success to cache response
     if (isProxied && isManifest) {
       const originalOnSuccess = callbacks.onSuccess.bind(callbacks);
       const wrappedCallbacks = {
@@ -124,7 +105,7 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
       return;
     }
 
-    // Fall back to default loader for non-proxied or short proxied URLs.
+    // Fall back to default loader for all URLs (including proxied segments).
     super.load(context, config, callbacks);
   }
 
