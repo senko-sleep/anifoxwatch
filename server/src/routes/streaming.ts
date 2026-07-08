@@ -365,17 +365,8 @@ function validateDubStream(result: any): boolean {
 // ---------------------------------------------------------------------------
 
 const getProxyBaseUrl = (req: Request): string => {
-    // For Firebase hosting (web.app/firebaseapp.com), use absolute Render URL
-    // since the API is on a different domain
-    const host = req.headers.host || '';
-    const isFirebase = host.includes('web.app') || host.includes('firebaseapp.com');
-    
-    if (isFirebase) {
-        // Firebase frontend → Render API
-        return 'https://anifoxwatch-dko2.onrender.com/api/stream/proxy';
-    }
-    
-    // Same-origin relative paths: works with Vite dev proxy (:8081), Vercel
+    // Same-origin relative paths: works with Vite dev proxy (:8081), Vercel, and Firebase hosting.
+    // Absolute localhost:3001 links break when the SPA is on another port.
     const envBase = process.env.BASE_URL?.replace(/\/$/, '');
     if (envBase && !envBase.includes('localhost:3001') && !envBase.includes('127.0.0.1:3001')) {
         return `${envBase}/api/stream/proxy`;

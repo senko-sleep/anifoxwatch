@@ -3814,10 +3814,10 @@ export class SourceManager {
                 (async () => {
                     try {
                         // For dub category, try multiple search strategies
-                        const cleanTitle = title.replace(/\s+\d+(st|nd|rd|th)\s+season/i, '').replace(/\s+season\s+\d+/i, '').trim();
+                        // Keep season numbers for better matching - don't strip them
                         const searchTitles = category === 'dub'
-                            ? [title, `${title} dub`, `${title} (Dub)`, `${cleanTitle} dub`]
-                            : [title, cleanTitle];
+                            ? [title, `${title} dub`, `${title} (Dub)`]
+                            : [title];
 
                         let searchResult: AnimeSearchResult | null = null;
                         let bestMatch: AnimeBase | null = null;
@@ -3873,6 +3873,8 @@ export class SourceManager {
                         if (streamData?.sources?.length > 0 && !resolved) {
                             console.log(`   ✅ ${srcName}: ${streamData.sources.length} streaming sources (${category})`);
                             resolved = true;
+                            // Mark the winning source in the response
+                            streamData.source = srcName;
                             resolve(streamData);
                         }
                     } catch (err) {
