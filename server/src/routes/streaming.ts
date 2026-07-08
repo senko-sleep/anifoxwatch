@@ -886,12 +886,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     // Render.com network is blocked by many CDNs - forward segments to Vercel proxy
-    const isRender = process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID != null;
-    if (isRender && isSegment && !isM3u8 && process.env.IS_REMOTE_PROXY !== 'true') {
-        logger.info(`[PROXY] Render detected — routing segment to Vercel proxy`, { domain, requestId });
-        const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'Render segment fast-path');
+    // Also forward if FORCE_REMOTE_PROXY is set for testing
+    const isRender = process.env.RENDER === 'true' || process.env.RENDER_SERVICE_ID != null || process.env.RENDER_APP_NAME != null;
+    const forceRemote = process.env.FORCE_REMOTE_PROXY === 'true';
+    if ((isRender || forceRemote) && isSegment && !isM3u8 && process.env.IS_REMOTE_PROXY !== 'true') {
+        logger.info(`[PROXY] ${isRender ? 'Render' : 'Force'} detected — routing segment to Vercel proxy`, { domain, requestId, isRender, forceRemote });
+        const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'Segment fast-path');
         if (ok) return;
-        logger.warn(`[PROXY] Vercel proxy failed for Render segment — falling back to local rotation`, { requestId });
+        logger.warn(`[PROXY] Vercel proxy failed for segment — falling back to local rotation`, { requestId });
     }
 
     const isResolvable = await isDomainResolvable(domain);
