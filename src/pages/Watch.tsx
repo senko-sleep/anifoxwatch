@@ -919,35 +919,35 @@ const Watch = () => {
         </div>
 
         <main className="flex-1">
-          {/* Episode nav + title + sub/dub — one compact row */}
-          <div className="px-3 py-2.5 bg-zinc-900/80 border-b border-white/[0.05]">
+          {/* Episode nav + title + sub/dub — premium compact bar */}
+          <div className="px-3 py-2.5 bg-gradient-to-b from-zinc-900 to-zinc-900/80 border-b border-white/[0.06] backdrop-blur-sm">
             <div className="flex items-center gap-2">
-              <button onClick={() => navigate(backUrl)} className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 active:bg-white/10 touch-manipulation">
-                <ArrowLeft className="w-4 h-4 text-white/70" />
+              <button onClick={() => navigate(backUrl)} className="shrink-0 w-8 h-8 flex items-center justify-center rounded-xl bg-white/[0.06] active:bg-white/[0.12] touch-manipulation border border-white/[0.05]">
+                <ArrowLeft className="w-4 h-4 text-white/80" />
               </button>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] text-fox-orange/80 font-medium uppercase tracking-wider truncate">{anime?.title}</p>
-                <p className="text-xs font-semibold text-white truncate">
-                  Ep {currentEpisode?.number || selectedEpisodeNum}
+                <p className="text-[9px] text-fox-orange font-bold uppercase tracking-widest truncate leading-none mb-0.5">{anime?.title}</p>
+                <p className="text-[12px] font-semibold text-white truncate leading-snug">
+                  Episode {currentEpisode?.number || selectedEpisodeNum}
                   {currentEpisode?.title && currentEpisode.title !== `Episode ${currentEpisode.number}` && (
-                    <span className="text-zinc-400 font-normal"> — {currentEpisode.title}</span>
+                    <span className="text-zinc-400 font-normal text-[11px]"> — {currentEpisode.title}</span>
                   )}
                 </p>
               </div>
-              {/* Sub/Dub toggle */}
-              <div className="flex items-center gap-1 shrink-0">
+              {/* Sub/Dub pill toggle */}
+              <div className="flex items-center rounded-lg overflow-hidden border border-white/[0.08] shrink-0">
                 {(currentEpisode?.hasSub !== false) && (
                   <button
                     onClick={() => { setAudioManuallySet(true); setAudioType('sub'); }}
-                    className={cn("px-2 py-1 rounded text-[10px] font-bold touch-manipulation transition-colors",
-                      audioType === 'sub' ? "bg-fox-orange text-white" : "bg-white/10 text-white/60")}
+                    className={cn("px-2.5 py-1.5 text-[10px] font-bold touch-manipulation transition-colors",
+                      audioType === 'sub' ? "bg-fox-orange text-white" : "bg-transparent text-white/50 active:bg-white/5")}
                   >SUB</button>
                 )}
                 {dubAvailable && (
                   <button
                     onClick={() => { setAudioManuallySet(true); setAudioType('dub'); }}
-                    className={cn("px-2 py-1 rounded text-[10px] font-bold touch-manipulation transition-colors",
-                      audioType === 'dub' ? "bg-green-500 text-white" : "bg-white/10 text-white/60")}
+                    className={cn("px-2.5 py-1.5 text-[10px] font-bold touch-manipulation transition-colors",
+                      audioType === 'dub' ? "bg-green-500 text-white" : "bg-transparent text-white/50 active:bg-white/5")}
                   >DUB</button>
                 )}
               </div>
@@ -956,20 +956,22 @@ const Watch = () => {
                 onClick={handleLandscapeMode}
                 title={isLandscapeLocked ? 'Unlock orientation' : 'Watch in landscape'}
                 className={cn(
-                  "w-8 h-8 flex items-center justify-center rounded-lg touch-manipulation transition-colors shrink-0",
-                  isLandscapeLocked ? "bg-fox-orange/20 text-fox-orange" : "bg-white/5 text-white/60 active:bg-white/10"
+                  "w-8 h-8 flex items-center justify-center rounded-xl touch-manipulation transition-all shrink-0 border",
+                  isLandscapeLocked
+                    ? "bg-fox-orange/20 text-fox-orange border-fox-orange/30"
+                    : "bg-white/[0.06] text-white/60 active:bg-white/[0.12] border-white/[0.05]"
                 )}
               >
-                <RotateCw className="w-4 h-4" />
+                <RotateCw className="w-3.5 h-3.5" />
               </button>
               {/* Prev/Next */}
               <div className="flex items-center gap-1 shrink-0">
                 <button onClick={handlePrevEpisode} disabled={!hasPrev}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 disabled:opacity-30 active:bg-white/10 touch-manipulation">
+                  className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/[0.06] disabled:opacity-25 active:bg-white/[0.12] touch-manipulation border border-white/[0.05]">
                   <ChevronLeft className="w-4 h-4 text-white" />
                 </button>
                 <button onClick={handleNextEpisode} disabled={!hasNext}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 disabled:opacity-30 active:bg-white/10 touch-manipulation">
+                  className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/[0.06] disabled:opacity-25 active:bg-white/[0.12] touch-manipulation border border-white/[0.05]">
                   <ChevronRight className="w-4 h-4 text-white" />
                 </button>
               </div>
@@ -978,77 +980,125 @@ const Watch = () => {
 
           {/* Server selector — compact, only shown when servers are loaded */}
           {servers && servers.filter(s => s.name.toLowerCase() !== 'default').length > 1 && (
-            <div className="px-3 py-2 bg-zinc-900/60 border-b border-white/[0.04] flex items-center gap-2 overflow-x-auto scrollbar-none">
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider shrink-0">Server</span>
+            <div className="px-3 py-2 bg-zinc-900/40 border-b border-white/[0.04] flex items-center gap-2 overflow-x-auto scrollbar-none">
+              <span className="text-[9px] text-zinc-500 uppercase tracking-widest shrink-0 font-semibold">Server</span>
               {servers.filter(s => s.name.toLowerCase() !== 'default').map(s => (
                 <button
                   key={s.name}
                   onClick={() => { setSelectedServer(s.name); setUserPickedServer(true); setServerRetryCount(0); }}
                   className={cn(
-                    "shrink-0 px-2.5 py-1 rounded-full text-[10px] font-medium touch-manipulation transition-colors",
-                    selectedServer === s.name ? "bg-fox-orange text-white" : "bg-white/8 text-white/60 active:bg-white/15"
+                    "shrink-0 px-3 py-1 rounded-full text-[10px] font-semibold touch-manipulation transition-all",
+                    selectedServer === s.name
+                      ? "bg-fox-orange text-white shadow-sm shadow-fox-orange/30"
+                      : "bg-white/[0.06] text-white/50 active:bg-white/[0.12] border border-white/[0.06]"
                   )}
                 >{s.name}</button>
               ))}
             </div>
           )}
 
-          {/* Episode List — right below the player where it belongs */}
-          <div className="px-3 pt-3 pb-2">
-            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2.5">
-              Episodes <span className="text-zinc-600">{episodes?.length || 0}</span>
-            </p>
-            <div className="space-y-1.5">
+          {/* Episode List — Premium 2-column card grid */}
+          <div className="px-3 pt-4 pb-2">
+            {/* Section header */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-1 h-4 rounded-full bg-fox-orange" />
+                <p className="text-[11px] font-bold text-white/90 uppercase tracking-wider">Episodes</p>
+                <span className="text-[10px] text-zinc-600 font-medium">{episodes?.length || 0}</span>
+              </div>
+              {/* Watched count */}
+              {(() => {
+                const watchedCount = episodes?.filter(ep => {
+                  const prog = getEpisodeProgress(ep.number);
+                  return prog >= 0.9;
+                }).length || 0;
+                return watchedCount > 0 ? (
+                  <span className="text-[10px] text-green-500/80 font-medium">✓ {watchedCount} watched</span>
+                ) : null;
+              })()}
+            </div>
+
+            {/* 2-column card grid */}
+            <div className="grid grid-cols-2 gap-2">
               {episodes?.map((ep) => {
                 const progress = getEpisodeProgress(ep.number);
                 const isActive = selectedEpisode === ep.id;
+                const isWatched = progress >= 0.9;
+                const isInProgress = progress > 0.02 && progress < 0.9;
                 return (
                   <button
                     key={ep.id}
                     onClick={() => handleEpisodeSelect(ep.id, ep.number)}
                     className={cn(
-                      "w-full rounded-xl text-left relative overflow-hidden touch-manipulation active:scale-[0.98] transition-all duration-150",
+                      "relative rounded-xl text-left overflow-hidden touch-manipulation active:scale-[0.97] transition-all duration-150 flex flex-col",
                       isActive
-                        ? "bg-fox-orange shadow-md shadow-fox-orange/30"
-                        : "bg-white/[0.04] active:bg-white/[0.08] border border-white/[0.05]"
+                        ? "ring-2 ring-fox-orange shadow-lg shadow-fox-orange/30"
+                        : isWatched
+                        ? "bg-white/[0.025] border border-white/[0.04]"
+                        : "bg-white/[0.05] border border-white/[0.07] active:bg-white/[0.09]"
                     )}
                   >
-                    <div className="flex items-center gap-3 px-3 py-2.5 relative z-10">
-                      <span className={cn(
-                        "w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0",
-                        isActive ? "bg-white/25 text-white" : "bg-white/[0.07] text-white/60"
-                      )}>
-                        {isActive ? <Play className="w-3.5 h-3.5 fill-current" /> : ep.number}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className={cn("text-[13px] font-medium truncate leading-snug", isActive ? "text-white" : "text-white/80")}>
-                          {ep.title || `Episode ${ep.number}`}
-                        </p>
-<div className="flex items-center gap-2 mt-0.5">
-                           {ep.hasSub !== false && (
-                             <span className={cn("text-[10px] font-medium", isActive ? "text-white/60" : "text-sky-400/60")}>SUB</span>
-                           )}
-                           {(() => {
-                             const effectiveDubCount = anime?.dubCount ?? 0;
-                             const epHasDub = ep.hasDub || dubAvailable || (effectiveDubCount > 0 && ep.number <= effectiveDubCount);
-                             return epHasDub ? (
-                               <span className={cn("text-[10px] font-medium", isActive ? "text-white/60" : "text-green-400/60")}>DUB</span>
-                             ) : null;
-                           })()}
-                           {progress > 0 && progress < 0.9 && (
-                            <span className={cn("text-[10px] font-semibold", isActive ? "text-white/70" : "text-fox-orange")}>{Math.round(progress * 100)}%</span>
+                    {/* Card body */}
+                    <div className="flex flex-col p-2.5 gap-1.5 flex-1">
+                      {/* Episode number pill */}
+                      <div className="flex items-center justify-between">
+                        <span className={cn(
+                          "inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold flex-shrink-0",
+                          isActive
+                            ? "bg-fox-orange/90 text-white"
+                            : isWatched
+                            ? "bg-green-500/15 text-green-500"
+                            : "bg-white/[0.08] text-white/70"
+                        )}>
+                          {isActive ? (
+                            <Play className="w-3 h-3 fill-current" />
+                          ) : isWatched ? (
+                            <span className="text-[10px]">✓</span>
+                          ) : (
+                            ep.number
                           )}
-                          {progress >= 0.9 && (
-                            <span className={cn("text-[10px] font-semibold", isActive ? "text-white/70" : "text-green-400")}>✓ Watched</span>
+                        </span>
+
+                        {/* Progress badge or sub/dub */}
+                        <div className="flex items-center gap-1 ml-1">
+                          {isWatched && !isActive && (
+                            <span className="text-[9px] font-bold text-green-500 bg-green-500/10 px-1 py-0.5 rounded">Done</span>
                           )}
+                          {isInProgress && !isActive && (
+                            <span className="text-[9px] font-bold text-fox-orange bg-fox-orange/10 px-1 py-0.5 rounded">{Math.round(progress * 100)}%</span>
+                          )}
+                          {!isWatched && !isInProgress && (() => {
+                            const effectiveDubCount = anime?.dubCount ?? 0;
+                            const epHasDub = ep.hasDub || dubAvailable || (effectiveDubCount > 0 && ep.number <= effectiveDubCount);
+                            return epHasDub ? (
+                              <span className="text-[9px] text-green-500/70 font-medium">DUB</span>
+                            ) : null;
+                          })()}
                         </div>
                       </div>
+
+                      {/* Episode title */}
+                      <p className={cn(
+                        "text-[11px] leading-snug line-clamp-2 font-medium",
+                        isActive ? "text-white" : isWatched ? "text-white/40" : "text-white/75"
+                      )}>
+                        {ep.title && ep.title !== `Episode ${ep.number}` ? ep.title : `Episode ${ep.number}`}
+                      </p>
                     </div>
-                    {/* Progress bar */}
-                    {progress > 0 && !isActive && (
-                      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/[0.06]">
+
+                    {/* Active glow gradient */}
+                    {isActive && (
+                      <div className="absolute inset-0 bg-fox-orange/10 pointer-events-none" />
+                    )}
+
+                    {/* Progress bar at bottom */}
+                    {progress > 0 && (
+                      <div className="h-[3px] bg-white/[0.06] w-full flex-shrink-0">
                         <div
-                          className={cn("h-full transition-all", progress >= 0.9 ? "bg-green-500" : "bg-fox-orange")}
+                          className={cn(
+                            "h-full transition-all duration-500",
+                            isWatched ? "bg-green-500" : "bg-fox-orange"
+                          )}
                           style={{ width: `${Math.min(100, progress * 100)}%` }}
                         />
                       </div>
@@ -1059,10 +1109,10 @@ const Watch = () => {
             </div>
           </div>
 
-          {/* About — compact, at the bottom */}
-          <div className="px-3 pt-2 pb-6">
-            <div className="flex gap-3 p-3 rounded-xl bg-white/[0.03]">
-              <img src={anime?.image} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover" referrerPolicy="no-referrer" />
+          {/* About — compact card at the bottom */}
+          <div className="px-3 pt-2 pb-safe pb-6">
+            <div className="flex gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/[0.04]">
+              <img src={anime?.image} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover shadow-lg" referrerPolicy="no-referrer" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-white leading-tight truncate">{anime?.title}</p>
                 {anime?.titleJapanese && <p className="text-[10px] italic text-zinc-500 truncate mt-0.5">{anime.titleJapanese}</p>}
@@ -1073,7 +1123,11 @@ const Watch = () => {
                     </span>
                   )}
                   <span className="text-[10px] text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded">{anime?.type}</span>
-                  {anime?.status && <span className="text-[10px] text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded">{anime.status}</span>}
+                  {anime?.status && <span className={cn(
+                    "text-[10px] px-1.5 py-0.5 rounded",
+                    anime.status === 'Ongoing' ? "text-green-400 bg-green-500/10" :
+                    anime.status === 'Completed' ? "text-blue-400 bg-blue-500/10" : "text-yellow-400 bg-yellow-500/10"
+                  )}>{anime.status}</span>}
                 </div>
                 {plainDescription(anime?.description) && (
                   <p className="mt-2 text-[11px] leading-relaxed text-zinc-500 line-clamp-3">{plainDescription(anime?.description)}</p>
@@ -1453,6 +1507,7 @@ const Watch = () => {
                     anime={anime}
                     serversHaveDub={dubAvailable}
                     dubCount={anime?.dubCount ?? 0}
+                    animeId={cleanAnimeId}
                   />
                 </div>
               </div>

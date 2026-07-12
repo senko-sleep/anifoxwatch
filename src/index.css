@@ -179,6 +179,14 @@
 }
 
 @layer utilities {
+  /* Safe-area padding utilities for notched phones (iPhone X+) */
+  .pb-safe {
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+
   .text-gradient-orange {
     @apply bg-clip-text text-transparent;
     background-image: var(--gradient-orange);

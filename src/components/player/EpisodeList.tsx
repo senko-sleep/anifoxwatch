@@ -12,7 +12,8 @@ import {
   ChevronUp,
   Mic,
   Subtitles,
-  Filter
+  Filter,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   Select,
@@ -33,6 +34,8 @@ interface EpisodeListProps {
   serversHaveDub?: boolean;
   /** How many episodes are actually dubbed — used for per-episode badge accuracy */
   dubCount?: number;
+  /** Anime ID used to read watch-progress from localStorage */
+  animeId?: string;
 }
 
 type SortOrder = 'asc' | 'desc';
@@ -45,6 +48,7 @@ export function EpisodeList({
   anime,
   serversHaveDub = false,
   dubCount,
+  animeId,
 }: EpisodeListProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
@@ -52,6 +56,29 @@ export function EpisodeList({
   const [showFillers, setShowFillers] = useState(true);
   const selectedEpisodeRef = useRef<HTMLButtonElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // Read watch progress from localStorage (same key as VideoPlayer saves)
+  const getEpisodeProgress = (epNumber: number): number => {
+    if (!animeId) return 0;
+    try {
+      const key = `video-position-${animeId}-${epNumber}`;
+      const saved = localStorage.getItem(key);
+      if (!saved) return 0;
+      const position = parseFloat(saved);
+      if (!position || position <= 0) return 0;
+      // Try to get full duration from watch history for accurate %
+      try {
+        const historyJSON = localStorage.getItem('anistream_watch_history');
+        if (historyJSON) {
+          const history = JSON.parse(historyJSON);
+          const item = history.find((h: any) => h.animeId === animeId && h.episodeNumber === epNumber);
+          if (item?.duration > 0) return Math.min(1, position / item.duration);
+        }
+      } catch { /* ignore */ }
+      // Fallback: assume 24-min episode
+      return Math.min(1, position / (24 * 60));
+    } catch { return 0; }
+  };
 
   // Auto-scroll to selected episode within the episode list only
   useEffect(() => {
@@ -217,74 +244,108 @@ export function EpisodeList({
                 ref={selectedEpisodeId === episode.id ? selectedEpisodeRef : null}
                 onClick={() => onEpisodeSelect(episode.id, episode.number)}
                 className={cn(
-                  "w-full p-2 rounded-lg text-left transition-all",
+                  "w-full p-2 rounded-lg text-left transition-all relative overflow-hidden",
                   "hover:bg-fox-orange/10 group",
                   selectedEpisodeId === episode.id
                     ? "bg-fox-orange/20 border border-fox-orange/50"
-                    : "bg-background/30"
+                    : "bg-background/30",
                 )}
               >
-                <div className="flex items-start gap-2">
-                  {/* Episode number */}
-                  <div className={cn(
-                    "w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-xs",
-                    "bg-fox-surface font-medium",
-                    selectedEpisodeId === episode.id && "bg-fox-orange text-white"
-                  )}>
-                    {selectedEpisodeId === episode.id ? (
-                      <Play className="w-3 h-3 fill-current" />
-                    ) : (
-                      episode.number
-                    )}
-                  </div>
-
-                  {/* Episode info */}
-                  <div className="flex-1 min-w-0">
-                    <p className={cn(
-                      "font-medium text-xs leading-tight",
-                      selectedEpisodeId === episode.id && "text-fox-orange",
-                      "line-clamp-2" // Allow up to 2 lines for longer titles
-                    )}>
-                      {episode.title !== `Episode ${episode.number}`
-                        ? episode.title
-                        : `Episode ${episode.number}`
-                      }
-                    </p>
-
-{(() => {
-                       // Per-episode dub accuracy: use dubCount cutoff when per-ep flag is ambiguous
-                       const effectiveDubCount = dubCount ?? anime?.dubCount ?? 0;
-                       // Prefer serversHaveDub (from server list) over unreliable per-ep hasDub
-                       // serversHaveDub indicates the source actually has dub servers available
-                       const epHasDub = episode.hasDub || serversHaveDub || (effectiveDubCount > 0 && episode.number <= effectiveDubCount);
-                       // Show SUB if explicitly true, or fall back to it only when no DUB is available
-                       // (some sources like animekai-source don't set hasSub per-episode; others like dub-only
-                       // sources correctly set hasSub=false to suppress the SUB badge)
-                       const epHasSub = episode.hasSub !== false ? true : !serversHaveDub;
-                       return (
-                         <div className="flex items-center gap-1 mt-0.5 flex-wrap">
-                           {epHasSub && (
-                             <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
-                               <Subtitles className="w-2 h-2 flex-shrink-0" />
-                               SUB
-                             </span>
-                           )}
-                          {epHasDub && (
-                            <span className="flex items-center gap-0.5 text-[10px] text-green-500 whitespace-nowrap">
-                              <Mic className="w-2 h-2 flex-shrink-0" />
-                              DUB
-                            </span>
-                          )}
-                          {episode.isFiller && (
-                            <Badge variant="outline" className="text-[9px] px-1 py-0 text-yellow-500 border-yellow-500/50 whitespace-nowrap">
-                              Filler
-                            </Badge>
+                {(() => {
+                  const progress = getEpisodeProgress(episode.number);
+                  const isWatched = progress >= 0.9;
+                  const isInProgress = progress > 0.02 && progress < 0.9;
+                  const isActive = selectedEpisodeId === episode.id;
+                  return (
+                    <>
+                      <div className={cn(
+                        "flex items-start gap-2",
+                        isWatched && !isActive && "opacity-60"
+                      )}>
+                        {/* Episode number */}
+                        <div className={cn(
+                          "w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 text-xs",
+                          "bg-fox-surface font-medium",
+                          isActive && "bg-fox-orange text-white",
+                          isWatched && !isActive && "bg-green-500/20 text-green-500"
+                        )}>
+                          {isActive ? (
+                            <Play className="w-3 h-3 fill-current" />
+                          ) : isWatched ? (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          ) : (
+                            episode.number
                           )}
                         </div>
-                      );
-                    })()}
-                  </div>
-                </div>
+
+                        {/* Episode info */}
+                        <div className="flex-1 min-w-0">
+                          <p className={cn(
+                            "font-medium text-xs leading-tight",
+                            isActive && "text-fox-orange",
+                            isWatched && !isActive && "text-muted-foreground",
+                            "line-clamp-2"
+                          )}>
+                            {episode.title !== `Episode ${episode.number}`
+                              ? episode.title
+                              : `Episode ${episode.number}`
+                            }
+                          </p>
+
+{(() => {
+                             // Per-episode dub accuracy: use dubCount cutoff when per-ep flag is ambiguous
+                             const effectiveDubCount = dubCount ?? anime?.dubCount ?? 0;
+                             // Prefer serversHaveDub (from server list) over unreliable per-ep hasDub
+                             // serversHaveDub indicates the source actually has dub servers available
+                             const epHasDub = episode.hasDub || serversHaveDub || (effectiveDubCount > 0 && episode.number <= effectiveDubCount);
+                             // Show SUB if explicitly true, or fall back to it only when no DUB is available
+                             // (some sources like animekai-source don't set hasSub per-episode; others like dub-only
+                             // sources correctly set hasSub=false to suppress the SUB badge)
+                             const epHasSub = episode.hasSub !== false ? true : !serversHaveDub;
+                             return (
+                               <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                 {epHasSub && (
+                                   <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
+                                     <Subtitles className="w-2 h-2 flex-shrink-0" />
+                                     SUB
+                                   </span>
+                                 )}
+                                {epHasDub && (
+                                  <span className="flex items-center gap-0.5 text-[10px] text-green-500 whitespace-nowrap">
+                                    <Mic className="w-2 h-2 flex-shrink-0" />
+                                    DUB
+                                  </span>
+                                )}
+                                {episode.isFiller && (
+                                  <Badge variant="outline" className="text-[9px] px-1 py-0 text-yellow-500 border-yellow-500/50 whitespace-nowrap">
+                                    Filler
+                                  </Badge>
+                                )}
+                                {/* Watch progress indicators */}
+                                {isWatched && !isActive && (
+                                  <span className="text-[10px] font-semibold text-green-500 whitespace-nowrap">✓ Watched</span>
+                                )}
+                                {isInProgress && !isActive && (
+                                  <span className="text-[10px] font-semibold text-fox-orange whitespace-nowrap">{Math.round(progress * 100)}%</span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Progress bar at bottom of card */}
+                      {progress > 0 && !isActive && (
+                        <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-white/[0.05]">
+                          <div
+                            className={cn("h-full transition-all duration-300", isWatched ? "bg-green-500" : "bg-fox-orange")}
+                            style={{ width: `${Math.min(100, progress * 100)}%` }}
+                          />
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </button>
             ))
           )}

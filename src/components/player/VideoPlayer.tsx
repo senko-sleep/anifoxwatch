@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
-import { VideoPreview } from './VideoPreview';
+import { VideoPreview, VideoPreviewHandle } from './VideoPreview';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -113,6 +113,11 @@ export const VideoPlayer = ({
   const retryCountRef = useRef(0);
   const maxRetries = 3;
   const waitingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bufferingKickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track consecutive slow fragment loads for proactive quality-drop
+  const slowFragCountRef = useRef(0);
+  const SLOW_FRAG_THRESHOLD = 3;
+  const videoPreviewRef = useRef<VideoPreviewHandle>(null);
 
   // Track if we've already fired an error for the current source to prevent infinite loops
   const errorFiredRef = useRef(false);
@@ -155,6 +160,7 @@ export const VideoPlayer = ({
   const outroCountdownFiredRef = useRef(false);
   const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isBuffering, setIsBuffering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hlsStats, setHlsStats] = useState<{ level: number; bandwidth: number } | null>(null);
   const [availableLevels, setAvailableLevels] = useState<{ height: number; bitrate: number }[]>([]);
@@ -286,10 +292,16 @@ export const VideoPlayer = ({
       clearInterval(stallWatchdogRef.current);
       stallWatchdogRef.current = null;
     }
+    if (bufferingKickTimerRef.current) {
+      clearTimeout(bufferingKickTimerRef.current);
+      bufferingKickTimerRef.current = null;
+    }
     lastPlayheadRef.current = 0;
     stallDurationRef.current = 0;
+    slowFragCountRef.current = 0;
     mediaRecoveryAttemptsRef.current = 0;
     networkRecoveryAttemptsRef.current = 0;
+    setIsBuffering(false);
 
     playerLog('info', 'Initializing video player', {
       src: resolvedSrc.substring(0, 100) + '...',
@@ -512,10 +524,35 @@ export const VideoPlayer = ({
         fragLoadErrorCount = 0; // Reset on success
         mediaRecoveryAttemptsRef.current = 0;
         networkRecoveryAttemptsRef.current = 0;
+
+        // ── Proactive quality-drop on slow network ──────────────────────────
+        // If the fragment took longer to load than its own playback duration,
+        // the buffer will drain faster than it fills → stall incoming.
+        // Drop one ABR level early to stay ahead of the stall.
+        const loadMs = data.frag.stats.loading.end - data.frag.stats.loading.start;
+        const fragDurationMs = (data.frag.duration || 5) * 1000;
+        if (loadMs > fragDurationMs * 0.85) {
+          slowFragCountRef.current++;
+          playerLog('warn', `Slow fragment: loaded in ${loadMs.toFixed(0)}ms vs ${fragDurationMs.toFixed(0)}ms playback (count: ${slowFragCountRef.current})`);
+          if (slowFragCountRef.current >= SLOW_FRAG_THRESHOLD) {
+            const currentLvl = hlsRef.current?.currentLevel ?? -1;
+            if (currentLvl > 0) {
+              hlsRef.current!.currentLevel = currentLvl - 1;
+              setCurrentLevel(currentLvl - 1);
+              playerLog('info', `Proactive quality drop: level ${currentLvl} → ${currentLvl - 1}`);
+            }
+            slowFragCountRef.current = 0; // Reset after drop
+          }
+        } else {
+          // Good load speed — gradually restore auto-ABR after 3 fast frags
+          if (slowFragCountRef.current > 0) slowFragCountRef.current--;
+        }
+
         playerLog('info', `Fragment loaded`, {
           sn: data.frag.sn,
           duration: data.frag.duration?.toFixed(2) + 's',
-          size: (data.frag.stats.total / 1024).toFixed(1) + 'KB'
+          size: (data.frag.stats.total / 1024).toFixed(1) + 'KB',
+          loadMs: loadMs.toFixed(0) + 'ms'
         });
       });
 
@@ -535,14 +572,17 @@ export const VideoPlayer = ({
           // Reset stall counter whenever we're legitimately not playing
           stallDurationRef.current = 0;
           lastPlayheadRef.current = v.currentTime;
+          // Clear buffering indicator when not playing
+          setIsBuffering(false);
           return;
         }
 
         const now = v.currentTime;
         if (Math.abs(now - lastPlayheadRef.current) > 0.05) {
-          // Playhead is advancing — reset stall counter
+          // Playhead is advancing — reset stall counter, clear buffering indicator
           stallDurationRef.current = 0;
           lastPlayheadRef.current = now;
+          setIsBuffering(false);
           return;
         }
 
@@ -551,17 +591,32 @@ export const VideoPlayer = ({
         const stalledMs = stallDurationRef.current;
         playerLog('warn', `Watchdog: playhead stuck for ${(stalledMs / 1000).toFixed(1)}s at ${now.toFixed(2)}s`);
 
-        if (stalledMs >= 12_000) {
+        // Show buffering indicator after 800ms of stall
+        if (stalledMs >= 800) setIsBuffering(true);
+
+        if (stalledMs >= 8_000) {
           // Escalate to fatal — trigger source failover
-          playerLog('error', 'Watchdog: stall timeout (12s) — requesting server switch');
+          playerLog('error', 'Watchdog: stall timeout (8s) — requesting server switch');
           clearInterval(stallWatchdogRef.current!);
           stallWatchdogRef.current = null;
+          setIsBuffering(false);
           hlsRef.current?.destroy();
           setError('Video stalled. Switching to another server…');
           onError?.('stall_timeout_error');
         } else if (stalledMs >= 6_000) {
           playerLog('warn', 'Watchdog: 6s stall — attempting recoverMediaError');
           try { hlsRef.current?.recoverMediaError(); } catch { /* ignore */ }
+        } else if (stalledMs >= 4_000) {
+          // Decoder-kick trick: briefly drop playback rate to 0 then restore
+          // This shakes loose a frozen decoder pipeline without seeking
+          playerLog('warn', 'Watchdog: 4s stall — applying decoder-kick (rate 0→1)');
+          try {
+            const savedRate = v.playbackRate;
+            v.playbackRate = 0;
+            setTimeout(() => {
+              if (v && !v.paused) v.playbackRate = savedRate || 1;
+            }, 80);
+          } catch { /* ignore */ }
         } else if (stalledMs >= 3_000) {
           // Buffer nudge — seek over a tiny gap
           playerLog('warn', 'Watchdog: 3s stall — attempting buffer nudge');
@@ -576,7 +631,17 @@ export const VideoPlayer = ({
                 break;
               }
             }
-            if (!nudged && buf.length > 0) {
+            if (!nudged) {
+              // Also check if we're between buffered ranges
+              for (let i = 0; i < buf.length; i++) {
+                if (buf.start(i) > now + 0.1) {
+                  v.currentTime = buf.start(i) + 0.05;
+                  nudged = true;
+                  break;
+                }
+              }
+            }
+            if (!nudged) {
               // Generic micro-nudge to unblock decoder
               v.currentTime = now + 0.1;
             }
@@ -587,14 +652,28 @@ export const VideoPlayer = ({
         }
       }, WATCHDOG_INTERVAL_MS);
 
-      // Stall recovery: if the browser fires 'stalled' while HLS.js is active,
-      // kick startLoad() to resume downloading segments immediately.
-      video.addEventListener('stalled', () => {
+      // Stall / waiting recovery: kick startLoad immediately when browser signals
+      // it's waiting for data. Also show buffering indicator.
+      const onStalledOrWaiting = () => {
         if (hlsRef.current) {
-          playerLog('warn', 'Video stalled — resuming HLS segment load');
+          playerLog('warn', 'Video stalled/waiting — resuming HLS segment load');
           try { hlsRef.current.startLoad(); } catch { /* ignore */ }
         }
-      });
+        // Show buffering spinner after short debounce (avoids flash on quick ABR switches)
+        if (bufferingKickTimerRef.current) clearTimeout(bufferingKickTimerRef.current);
+        bufferingKickTimerRef.current = setTimeout(() => setIsBuffering(true), 400);
+      };
+      const onPlayingAgain = () => {
+        if (bufferingKickTimerRef.current) {
+          clearTimeout(bufferingKickTimerRef.current);
+          bufferingKickTimerRef.current = null;
+        }
+        setIsBuffering(false);
+      };
+      video.addEventListener('stalled', onStalledOrWaiting);
+      video.addEventListener('waiting', onStalledOrWaiting);
+      video.addEventListener('playing', onPlayingAgain);
+      video.addEventListener('canplay', onPlayingAgain);
 
       hlsRef.current = hls;
     } else if (isM3U8 && video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -762,6 +841,10 @@ export const VideoPlayer = ({
       if (stallWatchdogRef.current) {
         clearInterval(stallWatchdogRef.current);
         stallWatchdogRef.current = null;
+      }
+      if (bufferingKickTimerRef.current) {
+        clearTimeout(bufferingKickTimerRef.current);
+        bufferingKickTimerRef.current = null;
       }
       if (hlsRef.current) {
         playerLog('info', 'Destroying HLS instance');
@@ -934,6 +1017,9 @@ export const VideoPlayer = ({
       const time = video.currentTime;
       setCurrentTime(time);
 
+      // Capture a frame snapshot for the hover preview
+      videoPreviewRef.current?.captureFrame(video, time);
+
       if (Math.floor(time) % 2 === 0 && time > 5 && video.duration - time > 10) {
         savePosition(time);
 
@@ -1004,7 +1090,13 @@ export const VideoPlayer = ({
     const handleWaiting = () => {
       if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
       // 800ms debounce — avoids spinner flash during brief ABR quality switches
-      waitingTimerRef.current = setTimeout(() => setIsLoading(true), 800);
+      waitingTimerRef.current = setTimeout(() => {
+        setIsLoading(true);
+        // Also ensure HLS is actively loading segments
+        if (hlsRef.current) {
+          try { hlsRef.current.startLoad(); } catch { /* ignore */ }
+        }
+      }, 800);
     };
     const handleCanPlay = () => {
       if (waitingTimerRef.current) {
@@ -1012,6 +1104,7 @@ export const VideoPlayer = ({
         waitingTimerRef.current = null;
       }
       setIsLoading(false);
+      setIsBuffering(false);
     };
 
 const handleVisibilityChange = () => {
@@ -1623,7 +1716,7 @@ const handleVisibilityChange = () => {
         </div>
       )}
 
-      {/* Loading spinner */}
+      {/* Initial loading spinner */}
       {isLoading && !error && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity duration-200">
           <div className="flex flex-col items-center gap-4">
@@ -1632,6 +1725,16 @@ const handleVisibilityChange = () => {
             {hlsStats && (
               <p className="text-white/60 text-xs">{hlsStats.level}p • {(hlsStats.bandwidth / 1000000).toFixed(1)} Mbps</p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Mid-playback buffering indicator — shown when playhead stalls but stream is still alive */}
+      {isBuffering && !isLoading && !error && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+          <div className="flex flex-col items-center gap-2 bg-black/50 backdrop-blur-sm px-5 py-3 rounded-2xl border border-white/10 animate-in fade-in duration-300">
+            <div className="w-8 h-8 border-[3px] border-fox-orange/30 border-t-fox-orange rounded-full animate-spin" />
+            <p className="text-white/70 text-xs font-medium">Buffering…</p>
           </div>
         </div>
       )}
@@ -1902,16 +2005,15 @@ const handleVisibilityChange = () => {
                 }}
               />
 
-              {/* Video Preview */}
+              {/* Video Preview — reads frames from the main video element */}
               <VideoPreview
-                src={src}
-                isM3U8={isM3U8}
-                currentTime={currentTime}
+                ref={videoPreviewRef}
+                videoRef={videoRef}
                 duration={duration}
                 isHovering={isProgressHovering || isProgressTouching}
                 mouseX={isProgressTouching ? progressTouchX : progressMouseX}
                 containerRef={progressContainerRef}
-                poster={poster}
+                poster={poster ?? ''}
               />
             </div>
 
