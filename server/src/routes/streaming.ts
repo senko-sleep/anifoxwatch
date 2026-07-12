@@ -365,12 +365,36 @@ function validateDubStream(result: any): boolean {
 // ---------------------------------------------------------------------------
 
 const getProxyBaseUrl = (req: Request): string => {
-    // Same-origin relative paths: works with Vite dev proxy (:8081), Vercel, and Firebase hosting.
-    // Absolute localhost:3001 links break when the SPA is on another port.
+    // Priority 1: Explicit BASE_URL env var (highest confidence)
     const envBase = process.env.BASE_URL?.replace(/\/$/, '');
     if (envBase && !envBase.includes('localhost:3001') && !envBase.includes('127.0.0.1:3001')) {
         return `${envBase}/api/stream/proxy`;
     }
+
+    // Priority 2: Render.com automatically injects RENDER_EXTERNAL_URL with the service's
+    // public HTTPS URL. Without this, proxy URLs are relative (/api/stream/proxy?...) which
+    // only work when the SPA and API share the same origin. Since the frontend is on Firebase
+    // (anifoxwatch.web.app) and the API is on Render, relative URLs break playback.
+    const renderExternalUrl = process.env.RENDER_EXTERNAL_URL?.replace(/\/$/, '');
+    if (renderExternalUrl) {
+        return `${renderExternalUrl}/api/stream/proxy`;
+    }
+
+    // Priority 3: Other known platform env vars
+    const cleverUrl = process.env.CLEVER_APP_URL?.replace(/\/$/, '');
+    if (cleverUrl) {
+        return `${cleverUrl}/api/stream/proxy`;
+    }
+
+    // Priority 4: Infer from incoming request (works for same-origin deployments like Vercel)
+    // Only use this when the API and frontend are co-hosted on the same origin.
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.headers['host'];
+    if (host && !String(host).includes('localhost') && !String(host).includes('127.0.0.1')) {
+        return `${proto}://${host}/api/stream/proxy`;
+    }
+
+    // Fallback: relative path (only works for same-origin setups)
     return '/api/stream/proxy';
 };
 
@@ -542,6 +566,29 @@ function reconstructEpisodeId(episodeId: string, query: Record<string, any>): st
     
     return `${episodeId}?ep=${String(query.ep)}`;
 }
+
+/**
+ * @route GET /api/stream/diag/proxy-config
+ * @description Show what proxy base URL the server is using (diagnostic).
+ */
+router.get('/diag/proxy-config', (req: Request, res: Response): void => {
+    const proxyBase = getProxyBaseUrl(req);
+    res.json({
+        proxyBase,
+        env: {
+            BASE_URL: process.env.BASE_URL || null,
+            RENDER_EXTERNAL_URL: process.env.RENDER_EXTERNAL_URL || null,
+            CLEVER_APP_URL: process.env.CLEVER_APP_URL || null,
+            NODE_ENV: process.env.NODE_ENV || null,
+        },
+        requestHeaders: {
+            host: req.headers.host || null,
+            'x-forwarded-host': req.headers['x-forwarded-host'] || null,
+            'x-forwarded-proto': req.headers['x-forwarded-proto'] || null,
+        },
+        isAbsolute: proxyBase.startsWith('http'),
+    });
+});
 
 /**
  * @route GET /api/stream/diag/animekai

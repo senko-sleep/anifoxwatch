@@ -25,6 +25,10 @@
         {
           "key": "ENABLE_MIRO_PUPPETEER",
           "value": "0"
+        },
+        {
+          "key": "BASE_URL",
+          "value": "https://anifoxwatch-dko2.onrender.com"
         }
       ],
       "disk": {
