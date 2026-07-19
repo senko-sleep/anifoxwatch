@@ -6,9 +6,10 @@
  */
 export const REGISTERED_SOURCE_NAMES: readonly string[] = [
     // ── VERIFIED WORKING ──────────────────────────────────────
-    'Aniwaves',           // ✅ Primary: EchoVideo → burntburst45.store HLS
+    'Yomi',               // ✅ Primary: Yomi.to embedded MegaPlay/AnimePlay/VidNest/etc.
+    'Aniwaves',           // ✅ Fallback: EchoVideo → burntburst45.store HLS
 
     // ── HENTAI SOURCES ─────────────────────────────────────────
-    'Hanime',             // ✅ hanime.tv - Hentai streaming with blob URL extraction (first fallback - optimized for speed)
-    'WatchHentai',        // ✅ watchhentai.net - Hentai streaming (second fallback)
+    'Hanime',             // ✅ hanime.tv - Hentai streaming with blob URL extraction
+    'WatchHentai',        // ✅ watchhentai.net - Hentai streaming
 ];

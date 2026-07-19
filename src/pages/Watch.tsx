@@ -35,8 +35,14 @@ import { toast } from 'sonner';
 type AudioType = 'sub' | 'dub';
 
 const EMBED_DOMAINS = ['streamwish', 'mega.nz', 'hqq.tv', 'streamtape', 'doodstream', 'mp4upload', 'sendvid', 'ok.ru'];
+// Aniwaves / EchoVideo embeds are domain-locked — loading them in our iframe yields
+// "Embedding blocked on this site". Treat them as non-embeddable so the player never
+// tries to render them (and instead fails over to a real stream source).
+const DOMAIN_LOCKED_EMBED = /aniwaves\.ru|echovideo|burntburst|play\.echovideo/i;
 const isEmbedUrl = (url: string) => {
   const lower = url.toLowerCase();
+  if (!lower) return false;
+  if (DOMAIN_LOCKED_EMBED.test(lower)) return false;
   if (lower.includes('.m3u8') || lower.includes('.mp4')) return false;
   // Streamtape /get_video? and tapecontent CDN are direct video links, not embed pages
   if ((lower.includes('streamtape') || lower.includes('tapecontent')) && lower.includes('get_video')) return false;
@@ -275,6 +281,8 @@ const Watch = () => {
   useEffect(() => {
     if (!servers?.length || serversLoading) return;
     if (userPickedServer) return;
+    // Don't auto-select if stream is already loading to avoid aborting the initial fetch
+    if (streamLoading) return;
 
     // Filter servers by current audio type (sub/dub), fall back to all servers
     const audioTypeServers = servers.filter(s =>
@@ -289,8 +297,9 @@ const Watch = () => {
     if (defaultServer) {
       console.log('[Watch] Auto-selecting default server:', defaultServer.name);
       setSelectedServer(defaultServer.name);
+      setUserPickedServer(true); // Mark as user-picked to prevent re-triggering
     }
-  }, [servers, serversLoading, userPickedServer, audioType]);
+  }, [servers, serversLoading, userPickedServer, audioType, streamLoading]);
 
 
 
@@ -837,9 +846,13 @@ const Watch = () => {
   // If the best available source is an embed page (HTML), show an iframe instead of VideoPlayer
   const embedFallbackUrl = (() => {
     if (!videoSource) return null;
-    // Server-side flagged as embed fallback — use raw originalUrl so iframe JS works
+    // Server-side flagged as embed fallback — use raw originalUrl so iframe JS works.
+    // Skip domain-locked embeds (aniwaves/echovideo) — rendering them in our iframe
+    // triggers "Embedding blocked on this site", so let the caller fail over instead.
     if ((videoSource as { isEmbed?: boolean }).isEmbed) {
-      return (videoSource as { originalUrl?: string }).originalUrl || videoSource.url || null;
+      const raw = (videoSource as { originalUrl?: string }).originalUrl || videoSource.url || '';
+      if (DOMAIN_LOCKED_EMBED.test(raw)) return null;
+      return raw || null;
     }
     const raw = (videoSource as { originalUrl?: string }).originalUrl || videoSource.url || '';
     if (isEmbedUrl(raw)) return raw;

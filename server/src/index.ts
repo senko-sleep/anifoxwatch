@@ -325,7 +325,8 @@ const startServer = async (port: number) => {
         `);
         console.log(`📡 Registered sources (same as SourceManager constructor): ${REGISTERED_SOURCE_NAMES.join(' → ')}`);
         // Warm Puppeteer in the background so the first /api/stream/watch is not blocked on browser launch.
-        void streamExtractor.warmBrowser();
+        // TODO: Re-enable after fixing browser launch crash
+        // void streamExtractor.warmBrowser();
     });
 
     // Connection timeout settings to prevent hanging connections

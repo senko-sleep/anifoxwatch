@@ -423,12 +423,31 @@ export class AniwavesSource extends BaseAnimeSource {
         if (cached) return cached;
 
         const epParams = episodeId.replace('aniwaves-', '');
-        const [id, epsPart] = epParams.split('&eps=');
-        const eps = epsPart || '';
+        let id = '';
+        let eps = '';
+
+        if (epParams.includes('&eps=')) {
+            const parts = epParams.split('&eps=');
+            id = parts[0];
+            eps = parts[1];
+        } else if (epParams.includes('?ep=')) {
+            const parts = epParams.split('?ep=');
+            id = parts[0];
+            eps = parts[1];
+        } else if (epParams.includes('/ep-')) {
+            const parts = epParams.split('/ep-');
+            id = parts[0];
+            eps = parts[1];
+        } else {
+            id = epParams;
+            eps = '1';
+        }
+
+        const numericId = id.split('-').pop() || '';
 
         try {
             const response = await this.fetchWithProxyFallback('/ajax/server/list', {
-                params: { servers: id, eps: eps },
+                params: { servers: numericId, eps: eps },
                 signal: options?.signal
             });
 
@@ -476,7 +495,7 @@ export class AniwavesSource extends BaseAnimeSource {
             let resolvedCategory: 'sub' | 'dub' = category;
 
             // If serverId is provided and looks like a direct link ID, use it directly to skip servers fetch
-            if (serverId && !serverId.includes(' ') && serverId.length > 5) {
+            if (serverId && !serverId.includes(' ') && serverId.length > 30) {
                 targetServerId = serverId;
                 resolvedCategory = category;
             } else {
@@ -513,48 +532,58 @@ export class AniwavesSource extends BaseAnimeSource {
             }
 
             const embedUrl = response.data.result.url;
-            logger.info(`[Aniwaves] Found embed URL: ${embedUrl}`, undefined, this.name);
+            logger.info(`[Aniwaves] Found embed URL: ${embedUrl}. Extracting direct stream links...`, undefined, this.name);
 
-            // Step 2: Extract final stream from embed
-            const extraction = await streamExtractor.extractFromEmbed(embedUrl);
-            
-            if (!extraction.success || extraction.streams.length === 0) {
-                logger.warn(`[Aniwaves] Failed to extract streams from embed: ${embedUrl}`, undefined, this.name);
-                return {
-                    sources: [{
-                        url: embedUrl,
-                        quality: 'auto',
-                        isM3U8: false,
-                        isEmbed: true,
-                        isDirect: true,
-                        server: 'Aniwaves Embed',
-                    }],
-                    subtitles: [],
-                    headers: {
-                        'Referer': this.baseUrl,
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-                    },
-                    source: this.name,
-                    category: resolvedCategory,
-                    dubFallback: category === 'dub' && resolvedCategory === 'sub'
-                };
+            let extractedSources: VideoSource[] = [];
+            let extractedSubtitles: any[] = [];
+            let origin = this.baseUrl;
+            try {
+                const extraction = await streamExtractor.extractFromEmbed(embedUrl);
+                if (extraction.success && extraction.streams.length > 0) {
+                    extractedSources = extraction.streams
+                        .filter(s => {
+                            const u = s.url.toLowerCase();
+                            return !u.includes('ping.gif') && !u.includes('analytics') && !u.includes('jwplayer') && !u.includes('/ping');
+                        })
+                        .map(s => ({
+                            url: s.url,
+                            quality: s.quality || 'auto',
+                            isM3U8: s.url.includes('.m3u8') || s.type === 'hls',
+                            isEmbed: false,
+                            isDirect: false,
+                            server: serverId || 'Aniwaves',
+                        }));
+                    extractedSubtitles = extraction.subtitles || [];
+                    try {
+                        origin = new URL(embedUrl).origin;
+                    } catch {
+                        origin = this.baseUrl;
+                    }
+                    logger.info(`[Aniwaves] Successfully extracted ${extractedSources.length} streams`, undefined, this.name);
+                } else {
+                    logger.warn(`[Aniwaves] Stream extraction failed: ${extraction.error || 'No streams found'}. Falling back to embed URL`, undefined, this.name);
+                }
+            } catch (extError: any) {
+                logger.error(`[Aniwaves] Error extracting streams: ${extError.message}`, undefined, this.name);
             }
 
-             const streamData: StreamingData = {
-                sources: extraction.streams
-                    .filter(s => /\.(m3u8|mp4|mkv|ts)(\\?|$)/i.test(s.url) || s.url.includes('/hls/'))
-                    .map(s => ({
-                        url: s.url,
-                        quality: s.quality as any,
-                        isM3U8: s.url.includes('.m3u8') || s.url.includes('/hls/')
-                    })),
-                subtitles: extraction.subtitles.map(sub => ({
-                    url: sub.url,
-                    lang: sub.lang,
-                    label: sub.lang
-                })),
+            // Aniwaves' embed URL is domain-locked — it only renders on aniwaves.ru
+            // and authorized domains, so loading it in our iframe yields:
+            //   "Embedding blocked on this site"
+            // Never return it as an isEmbed fallback. Instead, return no sources so the
+            // caller fails over to another source / the sub fallback instead of a broken
+            // embed that the browser cannot load.
+            if (extractedSources.length === 0) {
+                logger.warn(`[Aniwaves] No direct streams extracted for ${embedUrl} — returning empty (no domain-locked embed fallback)`, undefined, this.name);
+                return { sources: [], subtitles: [] };
+            }
+
+            const streamData: StreamingData = {
+                sources: extractedSources,
+                subtitles: extractedSubtitles,
                 headers: {
-                    'Referer': this.baseUrl,
+                    'Referer': origin,
+                    'Origin': origin,
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
                 },
                 source: this.name,

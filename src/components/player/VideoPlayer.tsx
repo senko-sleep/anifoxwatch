@@ -139,6 +139,18 @@ export const VideoPlayer = ({
   // Blob URL created for native HLS manifest pre-fetch (iOS workaround)
   const nativeHlsBlobUrlRef = useRef<string | null>(null);
 
+  // --- Stall/Loading loop guards -------------------------------------------
+  // Give HLS a grace period after source change before we escalate “stuck”.
+  // Many streams keep playhead at ~0 until first fragments are decoded.
+  const initialLoadUntilMsRef = useRef<number>(0);
+
+  // Prevent concurrent recoveries / repeated destroy() calls.
+  const recoveryInProgressRef = useRef<boolean>(false);
+
+  // Ensure we only escalate the stall watchdog once per source.
+  const watchdogEscalatedRef = useRef<boolean>(false);
+
+
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -170,6 +182,7 @@ export const VideoPlayer = ({
   const [isPiPActive, setIsPiPActive] = useState(false);
 
   // Position persistence state
+  // (Also used to keep duration/scrubbing stable when durationchange is unreliable.)
   const [savedPosition, setSavedPosition] = useState(0);
   const [showPositionRestored, setShowPositionRestored] = useState(false);
 
@@ -292,6 +305,11 @@ export const VideoPlayer = ({
       clearInterval(stallWatchdogRef.current);
       stallWatchdogRef.current = null;
     }
+    watchdogEscalatedRef.current = false;
+    recoveryInProgressRef.current = false;
+    // 12s grace period for first decode; avoids false “stuck” during manifest/frag startup
+    initialLoadUntilMsRef.current = Date.now() + 12_000;
+
     if (bufferingKickTimerRef.current) {
       clearTimeout(bufferingKickTimerRef.current);
       bufferingKickTimerRef.current = null;
@@ -345,16 +363,16 @@ export const VideoPlayer = ({
         highBufferWatchdogPeriod: 2,
         // ── Prefetch & retries ────────────────────────────────────────────
         startFragPrefetch: true,
-        fragLoadingMaxRetry: 8,
-        manifestLoadingMaxRetry: 4,
-        levelLoadingMaxRetry: 4,
-        fragLoadingRetryDelay: 200,    // Faster retry cycle
-        manifestLoadingRetryDelay: 400,
-        fragLoadingTimeOut: 30000,  // Increased to 30s for slow CDNs
-        manifestLoadingTimeOut: 15000,
-        levelLoadingTimeOut: 15000,
-        nudgeOffset: 0.2,
-        nudgeMaxRetry: 8,          // More nudge attempts before giving up
+        fragLoadingMaxRetry: 12,    // Increased retry attempts for better reliability
+        manifestLoadingMaxRetry: 6,
+        levelLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 100,    // Faster retry cycle
+        manifestLoadingRetryDelay: 200,
+        fragLoadingTimeOut: 45000,  // Increased to 45s for slow CDNs
+        manifestLoadingTimeOut: 25000,
+        levelLoadingTimeOut: 25000,
+        nudgeOffset: 0.1,          // Smaller nudge for smoother recovery
+        nudgeMaxRetry: 12,         // More nudge attempts before giving up
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
           xhr.timeout = 30000;      // Match fragLoadingTimeOut
@@ -364,7 +382,23 @@ export const VideoPlayer = ({
       hls.loadSource(resolvedSrc);
       hls.attachMedia(video);
 
+      // ── Startup watchdog ─────────────────────────────────────────────────
+      // If the manifest never parses (e.g. proxy hangs on the upstream CDN, or
+      // the deployed API forwards every segment to a dead remote proxy), HLS.js
+      // stays silent and the UI spins "Loading stream…" forever. Surface a real
+      // error and trigger server failover so the user is never stuck.
+      const manifestParsedRef = { current: false };
+      const startupTimer = setTimeout(() => {
+        if (manifestParsedRef.current) return;
+        playerLog('error', 'Startup timeout — manifest did not parse within 18s. Requesting server switch.');
+        try { hls.destroy(); } catch { /* ignore */ }
+        setError('Stream took too long to start. Switching to another server…');
+        onError?.('startup_timeout_error');
+      }, 18_000);
+
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+        manifestParsedRef.current = true;
+        clearTimeout(startupTimer);
         playerLog('info', 'Manifest parsed', {
           levels: data.levels.length,
           qualities: data.levels.map(l => `${l.height}p`)
@@ -410,6 +444,11 @@ export const VideoPlayer = ({
       const FRAG_PARSE_ERROR_THRESHOLD = 4; // After 4 consecutive frag parse errors, stream is corrupted
 
       hls.on(Hls.Events.ERROR, (_, data) => {
+        // A fatal/parse error means the manifest parsed but the stream is dead.
+        // Cancel the startup watchdog so it can't later nuke a (re)tried stream
+        // and trigger a spurious failover loop ("stuck on loading").
+        clearTimeout(startupTimer);
+
         playerLog('error', 'HLS error', {
           type: data.type,
           details: data.details,
@@ -594,18 +633,38 @@ export const VideoPlayer = ({
         // Show buffering indicator after 800ms of stall
         if (stalledMs >= 800) setIsBuffering(true);
 
+        // During initial startup, avoid escalating into fatal/reload loops.
+        // If playhead is still at ~0, HLS may just be decoding/initializing.
+        if (Date.now() < initialLoadUntilMsRef.current) {
+          return;
+        }
+
         if (stalledMs >= 8_000) {
           // Escalate to fatal — trigger source failover
+          if (watchdogEscalatedRef.current) return;
+          watchdogEscalatedRef.current = true;
           playerLog('error', 'Watchdog: stall timeout (8s) — requesting server switch');
           clearInterval(stallWatchdogRef.current!);
           stallWatchdogRef.current = null;
           setIsBuffering(false);
-          hlsRef.current?.destroy();
+          try {
+            hlsRef.current?.destroy();
+          } catch { /* ignore */ }
           setError('Video stalled. Switching to another server…');
           onError?.('stall_timeout_error');
+
         } else if (stalledMs >= 6_000) {
+          // Recovery can be expensive; avoid doing it repeatedly in a tight loop.
+          if (recoveryInProgressRef.current) return;
+          recoveryInProgressRef.current = true;
           playerLog('warn', 'Watchdog: 6s stall — attempting recoverMediaError');
-          try { hlsRef.current?.recoverMediaError(); } catch { /* ignore */ }
+          try {
+            hlsRef.current?.recoverMediaError();
+          } catch { /* ignore */ }
+          setTimeout(() => {
+            recoveryInProgressRef.current = false;
+          }, 1500);
+
         } else if (stalledMs >= 4_000) {
           // Decoder-kick trick: briefly drop playback rate to 0 then restore
           // This shakes loose a frozen decoder pipeline without seeking
@@ -858,6 +917,25 @@ export const VideoPlayer = ({
     };
   }, [src, isM3U8, onError, loadSavedPosition]);
 
+  // Keep duration in sync — some HLS sources never reliably emit durationchange,
+  // which breaks scrubbing UI and can appear as “not playable”.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    let raf = 0;
+    const tick = () => {
+      const d = v.duration;
+      if (Number.isFinite(d) && d > 0 && Math.abs(d - duration) > 0.25) {
+        setDuration(d);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [src]);
+
   // Background MP4 cache
   useEffect(() => {
     if (isM3U8 || !src) return;
@@ -1071,7 +1149,6 @@ export const VideoPlayer = ({
         }
       }
     };
-    const handleDurationChange = () => setDuration(video.duration);
     const handleProgress = () => {
       if (video.buffered.length > 0) {
         setBuffered(video.buffered.end(video.buffered.length - 1));
@@ -1107,29 +1184,47 @@ export const VideoPlayer = ({
       setIsBuffering(false);
     };
 
-const handleVisibilityChange = () => {
-               if (document.visibilityState === 'hidden') {
-                 if (video.currentTime > 5) {
-                   savePosition(video.currentTime);
-                 }
-                 // Pause HLS segment loading so backgrounded tabs don't accumulate
-                 // ERR_NETWORK_IO_SUSPENDED errors that block the scheduler long enough
-                 // to cancel active fetches (e.g. BYFMS failover).
-                 if (hlsRef.current && typeof hlsRef.current.stopLoad === 'function') {
-                   try { hlsRef.current.stopLoad(); } catch { /* ignore */ }
-                 }
-               } else {
-                 // Resume segment loading immediately when the user returns to the tab
-                 // so HLS can pick up where it can resume without restarting.
-                 if (hlsRef.current && typeof hlsRef.current.startLoad === 'function') {
-                   try { hlsRef.current.startLoad(); } catch { /* ignore */ }
-                 }
-               }
-             };
+    // Some code paths rely on duration being present to update scrubbing UI.
+    // This was referenced as `handleDurationChange` in event listeners but not implemented.
+    const handleDurationChange = () => {
+      const d = video.duration;
+      if (Number.isFinite(d) && d > 0) {
+        setDuration(d);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (video.currentTime > 5) {
+          savePosition(video.currentTime);
+        }
+        // Pause HLS segment loading so backgrounded tabs don't accumulate
+        // ERR_NETWORK_IO_SUSPENDED errors that block the scheduler long enough
+        // to cancel active fetches (e.g. BYFMS failover).
+        if (hlsRef.current && typeof hlsRef.current.stopLoad === 'function') {
+          try {
+            hlsRef.current.stopLoad();
+          } catch {
+            /* ignore */
+          }
+        }
+      } else {
+        // Resume segment loading immediately when the user returns to the tab
+        // so HLS can pick up where it can resume without restarting.
+        if (hlsRef.current && typeof hlsRef.current.startLoad === 'function') {
+          try {
+            hlsRef.current.startLoad();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    };
 
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
     video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('loadedmetadata', handleDurationChange);
     video.addEventListener('durationchange', handleDurationChange);
     video.addEventListener('progress', handleProgress);
     video.addEventListener('ended', handleEnded);

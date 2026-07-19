@@ -142,10 +142,15 @@ export function useEpisodes(animeId: string, enabled: boolean = true, source?: s
                 const resolved = await apiClient.resolveAniListToStreamingId(animeId);
                 if (resolved?.streamingId) fetchId = resolved.streamingId;
             }
-            return apiClient.getEpisodes(fetchId, source);
+            const episodes = await apiClient.getEpisodes(fetchId, source);
+            console.log('[useEpisodes] Fetched episodes:', {
+ animeId, fetchId, source, episodeCount: episodes.length });
+            return episodes;
         },
         enabled: enabled && animeId.length > 0,
         staleTime: 10 * 60 * 1000,
+        retry: 2,
+        retryDelay: 1000,
     });
 }
 
@@ -253,12 +258,22 @@ export function useEpisodeServers(episodeId: string, enabled: boolean = true) {
 export function useStreamingLinks(episodeId: string, server?: string, category?: string, enabled: boolean = true, episodeNum?: number, anilistId?: number, animeTitle?: string) {
     return useQuery<StreamingData, Error>({
         queryKey: queryKeys.stream(episodeId, server, category),
-        queryFn: () => apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle),
+        queryFn: async () => {
+            console.log('[useStreamingLinks] Fetching stream:', { episodeId, server, category, episodeNum, anilistId, animeTitle });
+            const result = await apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle);
+            console.log('[useStreamingLinks] Stream result:', {
+                sourceCount: result.sources?.length || 0,
+                source: result.source,
+                hasSources: (result.sources?.length || 0) > 0
+            });
+            return result;
+        },
         enabled: enabled && episodeId.length > 0,
         staleTime: 15 * 60 * 1000,  // 15 min — stream URLs don't rotate fast; avoid re-fetching on remount
         gcTime: 25 * 60 * 1000,     // Keep in memory for 25 min so episode switches feel instant
         // AbortError = hard timeout (10s). Don't retry or the UI can appear to "load forever".
         retry: (failureCount, error) => {
+            console.log('[useStreamingLinks] Retry attempt:', failureCount, 'Error:', error);
             if (error?.name === 'AbortError') return false;
             const status = (error as { status?: number })?.status;
             if (status === 404) return false;

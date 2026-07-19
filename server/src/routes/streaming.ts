@@ -14,7 +14,7 @@ import { logger } from '../utils/logger.js';
 import axios, { type AxiosResponse } from 'axios';
 import https from 'node:https';
 import { lookup } from 'dns/promises';
-import { Readable } from 'node:stream';
+import { Readable, PassThrough } from 'node:stream';
 import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streaming.js';
 
 const router = Router();
@@ -193,7 +193,7 @@ const CDN_CONFIGS: Array<{ pattern: RegExp; configs: CdnCombo[] }> = [
     { pattern: /gogocdn/i, configs: [{ referer: 'https://gogoanime.run/', origin: 'https://gogoanime.run' }, { referer: 'https://gogoanime.ai/', origin: 'https://gogoanime.ai' }] },
     { pattern: /aniwatchtv|megacloud|rapid-cloud/i, configs: [{ referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
     { pattern: /watchhentai/i, configs: [{ referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' }, { referer: 'https://hentai19.net/', origin: 'https://hentai19.net' }] },
-    { pattern: /burntburst|aniwaves/i, configs: [{ referer: 'https://aniwaves.ru/', origin: 'https://aniwaves.ru' }] },
+    { pattern: /burntburst|aniwaves|echovideo/i, configs: [{ referer: 'https://aniwaves.ru/', origin: 'https://aniwaves.ru' }, { referer: 'https://play.echovideo.ru/', origin: 'https://play.echovideo.ru' }] },
     { pattern: /megaup|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|rrr\.|xm8\./i, configs: [{ referer: 'https://megaup.nl/', origin: 'https://megaup.nl' }, { referer: 'https://animekai.to/', origin: 'https://animekai.to' }, { referer: 'https://aniwatchtv.to/', origin: 'https://aniwatchtv.to' }] },
 ];
 
@@ -261,8 +261,15 @@ const IS_LOW_MEMORY = process.env.NODE_ENV === 'production' && !process.env.POST
 const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 30 * 1024 * 1024 : 100 * 1024 * 1024; // 30MB on Render (fits ~15-20 segments), 100MB otherwise
 const SEGMENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
+// Manifest cache - m3u8 manifests are small but critical for startup performance
+const MANIFEST_CACHE_MAX_ENTRIES = 500; // Cache up to 500 manifests
+const MANIFEST_CACHE_TTL = 5 * 60 * 1000; // 5 minutes - manifests change less frequently
+
 interface SegmentCacheEntry { data: Buffer; contentType: string; fetchedAt: number; size: number; lastUsed: number }
+interface ManifestCacheEntry { data: string; fetchedAt: number; lastUsed: number }
+
 const segmentCache = new Map<string, SegmentCacheEntry>();
+const manifestCache = new Map<string, ManifestCacheEntry>();
 let segmentCacheBytes = 0;
 
 function segmentCacheEvict(): void {
@@ -294,6 +301,37 @@ function segmentCacheSet(url: string, data: Buffer, contentType: string): void {
     segmentCache.set(url, { data, contentType, fetchedAt: Date.now(), lastUsed: Date.now(), size: data.length });
     segmentCacheBytes += data.length;
     segmentCacheEvict();
+}
+
+function manifestCacheEvict(): void {
+    // LRU eviction for manifests
+    if (manifestCache.size <= MANIFEST_CACHE_MAX_ENTRIES) return;
+    const entries = [...manifestCache.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+    const toEvict = entries.slice(0, manifestCache.size - MANIFEST_CACHE_MAX_ENTRIES);
+    for (const [key] of toEvict) {
+        manifestCache.delete(key);
+    }
+}
+
+function manifestCacheGet(url: string): string | null {
+    const entry = manifestCache.get(url);
+    if (!entry) return null;
+    if (Date.now() - entry.fetchedAt > MANIFEST_CACHE_TTL) {
+        manifestCache.delete(url);
+        return null;
+    }
+    entry.lastUsed = Date.now();
+    return entry.data;
+}
+
+function manifestCacheSet(url: string, data: string): void {
+    const existing = manifestCache.get(url);
+    manifestCache.set(url, { data, fetchedAt: Date.now(), lastUsed: Date.now() });
+    if (existing) {
+        // Update in place, no size change for manifests
+    } else {
+        manifestCacheEvict();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -835,9 +873,9 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     response.server = successServer;
     response.triedServers = explicitServer ? [explicitServer] : ['auto'];
 
-    const isFallback = response.dubFallback === true;
+    const isFallback = response.dubFallback === true || response.sources.some(s => s.isEmbed);
     streamCacheSet(cacheKey, response, isFallback ? 10000 : undefined);
-    res.set('Cache-Control', 'private, max-age=900'); // 15 min — matches client staleTime
+    res.set('Cache-Control', isFallback ? 'private, no-cache, no-store, must-revalidate' : 'private, max-age=900');
     res.set('X-Stream-Cache', 'MISS');
     res.json(response);
 });
@@ -899,6 +937,21 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const isEchovideoSegment = /echovideo\.(to|ru)/.test(domain) && !url.includes('.m3u8');
     const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt) || isEchovideoSegment;
     const isVideo = url.endsWith('.mp4');
+
+    // Serve cached manifests without hitting upstream
+    if (isM3u8 && !req.headers.range) {
+        const cachedManifest = manifestCacheGet(url);
+        if (cachedManifest) {
+            res.set('Content-Type', 'application/vnd.apple.mpegurl');
+            res.set('Content-Length', String(cachedManifest.length));
+            res.set('Access-Control-Allow-Origin', '*');
+            res.set('Cache-Control', 'public, max-age=300');
+            res.set('X-Manifest-Cache', 'HIT');
+            res.status(200).send(cachedManifest);
+            logger.info(`[PROXY] Manifest cache HIT: ${url.substring(0, 80)}...`, { requestId });
+            return;
+        }
+    }
 
     // Serve cached segments without hitting upstream
     if (isSegment && !req.headers.range) {
@@ -1022,6 +1075,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         'rrr.': { referer: 'https://megaup.nl/', origin: 'https://megaup.nl' },
         'gogocdn': { referer: 'https://gogoanime.run/' },
         'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
+        'echovideo': { referer: 'https://play.echovideo.ru/', origin: 'https://play.echovideo.ru' },
+        'hlsxszt3': { referer: 'https://play.echovideo.ru/', origin: 'https://play.echovideo.ru' },
         'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
         'owocdn': { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
         'vault': { referer: 'https://kwik.cx/', origin: 'https://kwik.cx' },
@@ -1379,6 +1434,20 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         try {
             const content = await streamToString(proxyResponse!.data);
 
+            // A real HLS manifest always begins with #EXTM3U. If the upstream
+            // returned HTML/JSON (ad page, ISP block, error body), reject it so
+            // the client fails over to the next server instead of loading garbage.
+            if (!content.includes('#EXTM3U') && !(isEchovideoSegment && content.includes('#EXTINF'))) {
+                logger.warn(`⚠️ [MANIFEST NOT-HLS] Upstream returned a non-manifest body from ${domain} (first bytes: ${content.slice(0, 40).replace(/\s+/g, ' ').substring(0, 40)}). Rejecting.`, { requestId });
+                proxyResponse!.data?.resume?.();
+                res.set('Access-Control-Allow-Origin', '*').status(502).json({
+                    error: 'Non-manifest body rejected',
+                    reason: 'body_not_hls',
+                    domain,
+                });
+                return;
+            }
+
             // Reject manifests whose segments resolve to known ad CDNs
             if (isAdPoisonedManifest(content, url)) {
                 logger.warn(`⚠️ [MANIFEST AD-POISONED] Manifest from ${domain} contains ad CDN segments instead of real video data. Rejecting stream.`, { url: url.substring(0, 200), requestId });
@@ -1406,6 +1475,109 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         }
         return;
     }
+
+    // ---------- Body-level sanity check (anti-poison) ----------
+    // Headers alone are unreliable: ad/block pages often arrive as
+    // application/octet-stream or with NO content-type, which sneaks past
+    // the header checks below and reaches HLS.js — producing a corrupt
+    // blob (ERR_FILE_NOT_FOUND / NotSupportedError: "no supported
+    // source found") that poisons the media buffer and stalls playback.
+    // HLS segments are MPEG-TS (sync byte 0x47) or fMP4 (starts with
+    // an MP4 box like "ftyp"/"moov"/"mdat"). Anything starting with
+    // '<' (HTML/XML) or '{' (JSON) is NOT video — reject it so the
+    // client fails over to the next server instead of buffering garbage.
+    const looksLikeSegment =
+      isSegment || url.includes('.ts') || url.includes('.m4s') ||
+      url.endsWith('.mp4') || isEchovideoSegment;
+    const looksLikeManifest = isM3u8 || isUpstreamM3u8 || isEchovideoManifest;
+
+    // When the byte-sniffer below rejects a non-video body, set this so the
+    // rest of the handler bails instead of processing a destroyed stream.
+    let bodyRejected = false;
+
+    if (looksLikeSegment || looksLikeManifest) {
+      // Minimal destructive peek: read the first ~16 bytes to sniff the body.
+      const head: Buffer[] = [];
+      let headBytes = 0;
+      let poisoned = false;
+      const MAX_HEAD = 16;
+      const sniff = (chunk: Buffer): boolean => {
+        head.push(chunk);
+        headBytes += chunk.length;
+        if (headBytes >= MAX_HEAD) {
+          const joined = Buffer.concat(head);
+          const first = joined[0];
+          const second = joined[1];
+          // HTML/XML starts with '<'
+          if (first === 0x3c /* '<' */) poisoned = true;
+          // JSON starts with '{' or '['
+          if (first === 0x7b /* '{' */ || first === 0x5b /* '[' */) poisoned = true;
+          // MPEG-TS sync byte
+          const isTs = first === 0x47;
+          // fMP4 boxes start with a 4-byte big-endian size then "ftyp"/"moov"...
+          const isFmp4 =
+            (joined.length >= 8) &&
+            (joined.slice(4, 8).toString('latin1').includes('ftyp') ||
+             joined.slice(4, 8).toString('latin1').includes('moov') ||
+             joined.slice(4, 8).toString('latin1').includes('mdat'));
+          void second;
+          if (!isTs && !isFmp4) {
+            // Not an obvious video signature AND looks like text — reject.
+            if (poisoned || joined.toString('latin1', 0, Math.min(headBytes, 8)).match(/[<>{}]/)) {
+              poisoned = true;
+            }
+          }
+          return true; // stop sniffing
+        }
+        return false;
+      };
+
+      const origStream = proxyResponse!.data;
+      const sniffer = new PassThrough();
+      let aborted = false;
+      const rejectPoison = (reason: string) => {
+        if (aborted) return;
+        aborted = true;
+        bodyRejected = true;
+        try { origStream.destroy(); } catch { /* ignore */ }
+        try { sniffer.destroy(); } catch { /* ignore */ }
+        logger.warn(`[PROXY] Rejected ${looksLikeManifest ? 'manifest' : 'segment'} with non-video body from ${domain} (${reason})`, { requestId });
+        if (!res.headersSent) {
+          res.set('Access-Control-Allow-Origin', '*')
+            .status(502)
+            .json({ error: 'Non-video body rejected', reason: 'body_not_video', domain });
+        } else {
+          res.end();
+        }
+      };
+
+      origStream.on('data', (chunk: Buffer) => {
+        if (aborted) return;
+        if (!sniffer.write(chunk)) { /* backpressure */ }
+        if (sniff(chunk)) {
+          if (poisoned) {
+            rejectPoison(looksLikeManifest ? 'manifest_html_or_json' : 'segment_html_or_json');
+          }
+        }
+      });
+      origStream.on('end', () => { if (!aborted) sniffer.end(); });
+      origStream.on('error', (err: any) => {
+        if (aborted) return;
+        aborted = true;
+        bodyRejected = true;
+        try { sniffer.destroy(); } catch { /* ignore */ }
+        if (!res.headersSent) {
+          res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Stream error', domain });
+        } else { res.end(); }
+        logger.error(`[PROXY] Upstream stream error for ${domain}`, err);
+      });
+
+      // Replace the stream the rest of the handler will pipe.
+      (proxyResponse! as any).data = sniffer;
+    }
+
+    // A non-video body was rejected above — stop before processing a dead stream.
+    if (bodyRejected) return;
 
     // ---------- Video/binary content ----------
 
@@ -1524,6 +1696,24 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             }
         });
         proxyResponse!.data.on('error', (err: Error) => logger.error(`[PROXY] Segment buffer error from ${domain}`, err));
+        proxyResponse!.data.pipe(res);
+    } else if (isM3u8 && !req.headers.range && proxyResponse!.status === 200) {
+        // Cache m3u8 manifests to improve startup performance
+        const chunks: Buffer[] = [];
+        let total = 0;
+
+        proxyResponse!.data.on('data', (chunk: Buffer) => {
+            chunks.push(chunk);
+            total += chunk.length;
+        });
+        proxyResponse!.data.on('end', () => {
+            if (total > 0 && total < 1024 * 1024) { // Only cache manifests < 1MB
+                const manifest = Buffer.concat(chunks).toString('utf-8');
+                manifestCacheSet(url!, manifest);
+                logger.info(`[PROXY] Manifest cached: ${url!.substring(0, 80)}... (${total} bytes)`, { requestId });
+            }
+        });
+        proxyResponse!.data.on('error', (err: Error) => logger.error(`[PROXY] Manifest buffer error from ${domain}`, err));
         proxyResponse!.data.pipe(res);
     } else {
         proxyResponse!.data.pipe(res);

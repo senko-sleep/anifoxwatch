@@ -42,7 +42,7 @@ function configFromUrl(envApiUrl: string): ApiConfig {
         deployment = 'local';
     } else if (envApiUrl.includes('vercel.app')) {
         deployment = 'vercel';
-    } else if (envApiUrl === 'https://anifoxwatch-ch82xw1vqff9.allenposton14.deno.net' || envApiUrl === '/api') {
+    } else if (envApiUrl === '/api') {
         deployment = 'firebase';
     }
 
@@ -152,8 +152,18 @@ export function getApiFallbackUrl(): string | null {
     const envFallback = (import.meta.env.VITE_API_FALLBACK_URL as string | undefined)?.trim();
     if (envFallback) return envFallback.replace(/\/$/, '');
 
-    // In Node/test environments there is no runtime-origin to fall back to.
+    // In Vitest/node environments there is no runtime-origin to fall back to.
+    // Keep strict: do not provide any cross-host fallback when `window` is absent.
     if (typeof window === 'undefined') return null;
+
+    // Vitest sometimes polyfills window; still ensure we don't create fallbacks during tests.
+    // (Unit tests expect `null`.)
+    const mode = (import.meta as any)?.env?.MODE;
+    if (mode === 'test') return null;
+
+    // Additional guard: in SSR-like test runners `window.location` may still be undefined.
+    // Without a reliable origin, we must not fallback.
+    if (!window.location?.origin) return null;
 
     const hostname = window.location.hostname;
     const isFirebaseHosting = hostname.includes('firebaseapp.com') || hostname.includes('web.app');

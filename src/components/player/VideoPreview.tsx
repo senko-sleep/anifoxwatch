@@ -32,7 +32,7 @@ export interface VideoPreviewProps {
 
 const PREVIEW_W = 224;
 const PREVIEW_H = 126; // 16:9
-const SEEK_DEBOUNCE_MS = 80; // wait this long after the last mousemove before seeking
+const SEEK_DEBOUNCE_MS = 50; // Reduced debounce for more responsive previews
 const SEEKED_TIMEOUT_MS = 800; // show loading state if seeked takes longer than this
 
 // â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -118,8 +118,8 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
   const seekTo = useCallback((time: number) => {
     const hidden = hiddenVideoRef.current;
     if (!hidden || !hidden.src) return;
-    // Skip if already at this frame (within a quarter-second tolerance)
-    if (Math.abs(time - lastSeekTimeRef.current) < 0.25) return;
+    // Skip if already at this frame (reduced tolerance for smoother previews)
+    if (Math.abs(time - lastSeekTimeRef.current) < 0.05) return;
 
     lastSeekTimeRef.current = time;
     setIsSeeking(true);

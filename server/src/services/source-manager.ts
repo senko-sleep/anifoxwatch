@@ -4,6 +4,7 @@ import {
     AkiHSource,
     WatchHentaiSource,
     HanimeSource,
+    YomiSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
 import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
@@ -71,6 +72,7 @@ export class SourceManager {
 
     // Source capabilities mapping
     private sourceCapabilities: Map<string, SourceCapabilities> = new Map([
+        ['Yomi', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['AnimeHeaven', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
         ['GogoOrAt', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['9Anime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
@@ -139,10 +141,13 @@ export class SourceManager {
 
     constructor() {
         // ✅ PRIMARY (verified working)
+        this.registerSource(new YomiSource());
+
+        // ✅ FALLBACK
         this.registerSource(new AniwavesSource());
 
         // ✅ HENTAI SOURCES (for adult anime)
-        this.registerSource(new HanimeSource()); // First fallback - optimized for speed
+        this.registerSource(new HanimeSource());
         this.registerSource(new WatchHentaiSource());
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
@@ -1097,8 +1102,9 @@ export class SourceManager {
         if (source !== primarySource) {
             // Proprietary IDs like '80914&eps=5' cannot be safely rewritten for other sources.
             if (/[\$&?]eps?=/i.test(rawId)) return null;
-            // Pure numeric IDs cannot be safely rewritten
-            if (/^\d+$/.test(rawId)) return null;
+            // Pure numeric IDs cannot be safely rewritten — except for sources that
+            // natively handle AniList numeric IDs (e.g. Yomi builds its own watch URLs).
+            if (/^\d+$/.test(rawId) && !['Yomi'].includes(source.name)) return null;
         }
 
         if (source === primarySource || !hasSourcePrefix) return episodeId;
@@ -1108,15 +1114,15 @@ export class SourceManager {
     private getStreamingSource(id: string): StreamingSource | null {
         const lowerId = id.toLowerCase();
 
-        // Check for AniList IDs first - these need special handling
+        // Check for AniList IDs first - Yomi handles these natively
         if (lowerId.startsWith('anilist-')) {
-            // AniList IDs don't have direct streaming links
-            // They'll need to be looked up by title or use fallback
-            // Return the primary source for title-based search fallback
-            const primarySource = this.getAvailableSource();
-            if (primarySource) {
-                logger.debug(`[SourceManager] AniList ID detected, using fallback source: ${primarySource.name}`);
-                return primarySource;
+            const yomi = this.sources.get('Yomi') as StreamingSource | undefined;
+            if (yomi?.isAvailable) {
+                return yomi;
+            }
+            const fallback = this.getAvailableSource();
+            if (fallback) {
+                return fallback;
             }
             return null;
         }
@@ -3250,7 +3256,7 @@ export class SourceManager {
             }
             
             // Add primary source if not already added
-            if (!hasExplicitServer) {
+            if (!hasExplicitServer || !this.sources.has(server!)) {
                 const primaryMatchesId = primarySource && hasSourcePrefix && primarySource.getStreamingLinks;
                 if (primaryMatchesId && primarySource!.isAvailable && !sourcesToTry.includes(primarySource!)) {
                     sourcesToTry.push(primarySource!);
@@ -3319,10 +3325,11 @@ export class SourceManager {
         const ordered = [...sourcesToTry].sort((a, b) => scoreSource(b.name) - scoreSource(a.name));
         let finalSources = ordered;
 
-        // For standard (non-adult) anime, only use Aniwaves and nothing else as instructed by the user
+        // For standard (non-adult) anime, use Yomi first, then Aniwaves as fallback
         if (!isAdultContent) {
+            const yomi = finalSources.find(s => s.name === 'Yomi');
             const aniwaves = finalSources.find(s => s.name === 'Aniwaves');
-            finalSources = aniwaves ? [aniwaves] : [];
+            finalSources = [yomi, aniwaves].filter(Boolean) as any[];
         } else if (primarySource) {
             const primaryIdx = finalSources.findIndex(s => s.name === primarySource.name);
             if (primaryIdx > -1) {
@@ -3365,10 +3372,7 @@ export class SourceManager {
             const sources = finalSources.map(s => s.name);
             
             if (category === 'dub') {
-                // For dubs, we have specific sources that are much more reliable.
-                // AllAnime is the absolute gold standard for dub discovery.
-                // Gogoanime is also very reliable for dubs.
-                const preferred = ['Aniwaves', 'Wcofun', 'AllAnime', 'Gogoanime', 'AnimeKai'];
+                const preferred = ['Yomi', 'Aniwaves', 'Wcofun', 'AllAnime', 'Gogoanime', 'AnimeKai'];
                 const others = sources.filter(s => !preferred.includes(s));
                 return [...preferred, ...others, 'cross-source'];
             }
@@ -3790,10 +3794,8 @@ export class SourceManager {
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
         // Registered, currently enabled sources to try for cross-source fallback.
-        // 2026-05-22: only Aniwaves is verified working for non-adult content.
-        // Dead sources removed to prevent wasted timeout cycles.
-        const dubSources = ['Aniwaves'];
-        const subSources = ['Aniwaves'];
+        const dubSources = ['Yomi', 'Aniwaves'];
+        const subSources = ['Yomi', 'Aniwaves'];
         const sourceNames = category === 'dub' ? dubSources : subSources;
         
         const consumetSources = sourceNames
