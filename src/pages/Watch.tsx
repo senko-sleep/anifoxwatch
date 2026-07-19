@@ -1294,14 +1294,14 @@ const Watch = () => {
                             </Button>
                           )}
                         </div>
-                        {streamError && (
+                        {streamError && streamError.name !== 'AbortError' && !streamError.message?.toLowerCase().includes('abort') && (
                           <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg w-full">
                             <p className="text-xs text-red-400 font-mono text-left">
-                              Error: {streamError instanceof Error ? streamError.message : 
-                                      typeof streamError === 'object' ? 
-                                        (streamError as any).message || 
-                                        (streamError as any).error || 
-                                        JSON.stringify(streamError, Object.getOwnPropertyNames(streamError).filter(k => typeof (streamError as any)[k] !== 'function')) : 
+                              Error: {streamError instanceof Error ? streamError.message :
+                                      typeof streamError === 'object' ?
+                                        (streamError as any).message ||
+                                        (streamError as any).error ||
+                                        JSON.stringify(streamError, Object.getOwnPropertyNames(streamError).filter(k => typeof (streamError as any)[k] !== 'function')) :
                                         String(streamError)}
                             </p>
                           </div>

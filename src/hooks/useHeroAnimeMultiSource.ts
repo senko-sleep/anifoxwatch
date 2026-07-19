@@ -253,21 +253,16 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
   const out: HeroAnime[] = [];
   let jikanCalls = 0;
 
+  // Skip Jikan synopsis fetching for faster initial load
+  // If description is missing, we'll still show the anime with available metadata
   for (const m of shuffled) {
     if (out.length >= 20) break;
 
     let desc = cleanDescription((m.description as string) || '');
-    const idMal = m.idMal != null ? Number(m.idMal) : null;
 
-    if (isPlaceholderAnimeDescription(desc) && idMal != null && Number.isFinite(idMal) && jikanCalls < 14) {
-      jikanCalls += 1;
-      await new Promise((r) => setTimeout(r, 380));
-      const j = await fetchJikanSynopsis(idMal);
-      if (j) desc = j;
-    }
-
-    if (isPlaceholderAnimeDescription(desc) || desc.length < 45) {
-      continue;
+    // Accept anime even with short/missing descriptions for faster load
+    if (desc.length < 20) {
+      desc = 'No description available.';
     }
 
     out.push({
