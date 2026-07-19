@@ -1296,8 +1296,13 @@ const Watch = () => {
                         </div>
                         {streamError && (
                           <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg w-full">
-                            <p className="text-xs text-red-400 font-mono text-left truncate">
-                              Error: {typeof streamError === 'object' ? JSON.stringify(streamError) : String(streamError)}
+                            <p className="text-xs text-red-400 font-mono text-left">
+                              Error: {streamError instanceof Error ? streamError.message : 
+                                      typeof streamError === 'object' ? 
+                                        (streamError as any).message || 
+                                        (streamError as any).error || 
+                                        JSON.stringify(streamError, Object.getOwnPropertyNames(streamError).filter(k => typeof (streamError as any)[k] !== 'function')) : 
+                                        String(streamError)}
                             </p>
                           </div>
                         )}

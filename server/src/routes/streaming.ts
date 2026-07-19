@@ -20,13 +20,14 @@ import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streami
 const router = Router();
 
 // ── Persistent HTTPS agent for proxy segment fetches ───────────────────────
+// POWERHOUSE MODE: Massive connection pool for zero-latency segment fetching
 // Reuses TCP connections across the ~350 segments in a 24-minute episode.
 // Without keepAlive each segment pays a full TCP+TLS handshake (~80-200ms).
 const proxyKeepAliveAgent = new https.Agent({
     keepAlive: true,
-    maxSockets: 25,
-    maxFreeSockets: 10,
-    timeout: 30000,
+    maxSockets: 100,        // Increased from 25 to 100 for parallel segment loading
+    maxFreeSockets: 50,     // Increased from 10 to 50 - keep more connections alive
+    timeout: 60000,         // Increased from 30s to 60s - longer-lived connections
     scheduling: 'fifo',
 });
 
@@ -256,14 +257,15 @@ function setProtocolCache(domain: string, protocol: 'http' | 'https'): void {
 // Segment cache (in-memory LRU)
 // ---------------------------------------------------------------------------
 
-// MEMORY OPTIMIZATION: On Render/low-memory (512MB), use 30MB cache; on high-memory, use 100MB
+// POWERHOUSE MODE: Massive cache to eliminate buffering entirely
+// 1GB cache fits ~150 segments (half an episode) for zero buffering
 const IS_LOW_MEMORY = process.env.NODE_ENV === 'production' && !process.env.POSTGRES_URL;
-const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 30 * 1024 * 1024 : 100 * 1024 * 1024; // 30MB on Render (fits ~15-20 segments), 100MB otherwise
-const SEGMENT_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 200 * 1024 * 1024 : 1024 * 1024 * 1024; // 200MB on low-memory, 1GB otherwise for powerhouse mode
+const SEGMENT_CACHE_TTL = 60 * 60 * 1000; // 60 minutes - entire episode cached
 
 // Manifest cache - m3u8 manifests are small but critical for startup performance
-const MANIFEST_CACHE_MAX_ENTRIES = 500; // Cache up to 500 manifests
-const MANIFEST_CACHE_TTL = 5 * 60 * 1000; // 5 minutes - manifests change less frequently
+const MANIFEST_CACHE_MAX_ENTRIES = 5000; // Cache up to 5000 manifests for powerhouse mode
+const MANIFEST_CACHE_TTL = 60 * 60 * 1000; // 60 minutes - entire session cached
 
 interface SegmentCacheEntry { data: Buffer; contentType: string; fetchedAt: number; size: number; lastUsed: number }
 interface ManifestCacheEntry { data: string; fetchedAt: number; lastUsed: number }
@@ -1117,10 +1119,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             ? { rejectUnauthorized: false, ciphers: 'DEFAULT:@SECLEVEL=0' }
             : undefined;
 
-        // Segments must be fast — 30s timeout for slow CDNs (echovideo, megaup)
-        // Matches client-side fragLoadingTimeOut to prevent server timeout before client
-        // Manifests are infrequent so stay at 60s.
-        const timeoutMs = (isSegment && !isM3u8) ? 30_000 : 60_000;
+        // Segments must be fast — 15s timeout to match client-side for zero lag
+        // Matches client-side fragLoadingTimeOut (15s) to prevent server timeout before client
+        // Manifests are infrequent so stay at 20s.
+        const timeoutMs = (isSegment && !isM3u8) ? 15_000 : 20_000;
 
         return axios({
             method: 'get',

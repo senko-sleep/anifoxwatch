@@ -7,6 +7,7 @@
   forwardRef,
   useLayoutEffect,
 } from 'react';
+import Hls from 'hls.js';
 
 // â”€â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -32,8 +33,8 @@ export interface VideoPreviewProps {
 
 const PREVIEW_W = 224;
 const PREVIEW_H = 126; // 16:9
-const SEEK_DEBOUNCE_MS = 50; // Reduced debounce for more responsive previews
-const SEEKED_TIMEOUT_MS = 800; // show loading state if seeked takes longer than this
+const SEEK_DEBOUNCE_MS = 100; // Increased debounce to reduce rapid seeks
+const SEEKED_TIMEOUT_MS = 3000; // Increased timeout for HLS buffering (3s)
 
 // â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -45,6 +46,7 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
   const [position, setPosition] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [hlsReady, setHlsReady] = useState(false);
 
   const hiddenVideoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -53,6 +55,7 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
   const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSrcRef = useRef<string>('');
   const lastSeekTimeRef = useRef<number>(-1);
+  const hlsRef = useRef<Hls | null>(null);
 
   // Backwards-compat: captureFrame is now a no-op since we seek live
   useImperativeHandle(ref, () => ({
@@ -88,16 +91,94 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
       const src = mainVideo.currentSrc || mainVideo.src;
       if (!src || src === lastSrcRef.current) return;
       lastSrcRef.current = src;
-      hidden.src = src;
-      hidden.load();
       setIsReady(false);
+      setHlsReady(false);
       lastSeekTimeRef.current = -1;
+
+      // Check if it's an HLS stream
+      const isHls = src.includes('.m3u8') || src.includes('m3u8');
+
+      if (isHls && Hls.isSupported()) {
+        // Destroy existing HLS instance
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
+        }
+
+        // Create new HLS instance for preview
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+          backBufferLength: 5,
+          maxBufferLength: 10,
+          maxMaxBufferLength: 20,
+          // Optimized for seeking: smaller buffers, faster startup
+          startLevel: -1,
+          abrEwmaDefaultEstimate: 500_000, // Start low for quick seek
+          fragLoadingMaxRetry: 3,
+          manifestLoadingMaxRetry: 2,
+          fragLoadingRetryDelay: 100,
+          manifestLoadingRetryDelay: 200,
+          fragLoadingTimeOut: 5000,
+          manifestLoadingTimeOut: 8000,
+        });
+
+        hls.loadSource(src);
+        hls.attachMedia(hidden);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          console.log('[VideoPreview] HLS manifest parsed, ready for seeking');
+          // Start playing muted in background to enable seeking
+          hidden.play().then(() => {
+            console.log('[VideoPreview] Hidden video started playing');
+            // Pause immediately after first frame to save bandwidth
+            setTimeout(() => {
+              hidden.pause();
+              setHlsReady(true);
+            }, 500);
+          }).catch((err) => {
+            console.warn('[VideoPreview] Autoplay blocked:', err);
+            hidden.pause();
+            setHlsReady(true);
+          });
+        });
+
+        hls.on(Hls.Events.FRAG_LOADED, (event, data) => {
+          console.log('[VideoPreview] HLS fragment loaded:', data.frag.sn);
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          console.error('[VideoPreview] HLS error:', data.type, data.details, data.fatal);
+          if (data.fatal) {
+            hls.destroy();
+            hlsRef.current = null;
+            setHlsReady(false);
+          }
+        });
+
+        hlsRef.current = hls;
+      } else {
+        // Direct video source (MP4, etc.)
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
+        }
+        hidden.src = src;
+        hidden.load();
+        hidden.pause();
+      }
     };
 
     // Sync immediately and whenever the main video's src changes
     syncSrc();
     mainVideo.addEventListener('loadedmetadata', syncSrc);
-    return () => mainVideo.removeEventListener('loadedmetadata', syncSrc);
+    return () => {
+      mainVideo.removeEventListener('loadedmetadata', syncSrc);
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
   }, [videoRef]);
 
   // â”€â”€ Paint one frame to the canvas via rAF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -107,17 +188,32 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
     if (!hidden || !canvas) return;
     if (hidden.readyState < 2 || hidden.videoWidth === 0) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
-    ctx.drawImage(hidden, 0, 0, PREVIEW_W, PREVIEW_H);
-    setIsReady(true);
-    setIsSeeking(false);
+
+    try {
+      ctx.drawImage(hidden, 0, 0, PREVIEW_W, PREVIEW_H);
+      setIsReady(true);
+      setIsSeeking(false);
+    } catch (err) {
+      // CORS error - video is tainted, can't capture
+      console.warn('[VideoPreview] Canvas capture failed (CORS):', err);
+      setIsSeeking(false);
+    }
   }, []);
 
   // â”€â”€ Seek the hidden video to a target time â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const seekTo = useCallback((time: number) => {
     const hidden = hiddenVideoRef.current;
+    const hls = hlsRef.current;
     if (!hidden || !hidden.src) return;
+    
+    // For HLS, wait until manifest is parsed before seeking
+    if (hls && hls.media === hidden && !hlsReady) {
+      console.log('[VideoPreview] HLS not ready yet, skipping seek');
+      return;
+    }
+    
     // Skip if already at this frame (reduced tolerance for smoother previews)
     if (Math.abs(time - lastSeekTimeRef.current) < 0.05) return;
 
@@ -135,6 +231,13 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
     };
 
     hidden.addEventListener('seeked', onSeeked);
+
+    // For HLS, ensure we start loading before seeking
+    if (hls && hls.media === hidden) {
+      // Trigger HLS to start loading if needed
+      hls.startLoad(time);
+    }
+
     hidden.currentTime = time;
 
     // Guard: if seeked never fires (e.g. cross-origin restriction), paint what we have
@@ -143,7 +246,7 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(paintFrame);
     }, SEEKED_TIMEOUT_MS);
-  }, [paintFrame]);
+  }, [paintFrame, hlsReady]);
 
   // â”€â”€ Track mouse/touch position â†’ debounced seek â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   useEffect(() => {
@@ -215,7 +318,7 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
           ) : (
             <div className="absolute inset-0 bg-zinc-900" />
           )}
-          {isSeeking && (
+          {(isSeeking || !hlsReady) && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
             </div>

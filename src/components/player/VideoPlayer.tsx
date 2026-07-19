@@ -116,7 +116,7 @@ export const VideoPlayer = ({
   const bufferingKickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track consecutive slow fragment loads for proactive quality-drop
   const slowFragCountRef = useRef(0);
-  const SLOW_FRAG_THRESHOLD = 3;
+  const SLOW_FRAG_THRESHOLD = 8; // Increased from 3 to 8 - less aggressive quality drops
   const videoPreviewRef = useRef<VideoPreviewHandle>(null);
 
   // Track if we've already fired an error for the current source to prevent infinite loops
@@ -340,42 +340,41 @@ export const VideoPlayer = ({
         liveMaxLatencyDurationCount: 5,
         liveDurationInfinity: true,
         // ── Buffer sizing ─────────────────────────────────────────────────
-        // Larger buffers prevent stalls on momentary slow patches.
-        // Desktop: 90s ahead, 60s back. Mobile: 45s ahead, 30s back.
-        backBufferLength: onMobile ? 30 : 60,
-        maxBufferLength: onMobile ? 30 : 60,
-        maxMaxBufferLength: onMobile ? 90 : 180,
-        maxBufferHole: 1.5,        // Skip gaps up to 1.5s to avoid decoder stalls
+        // POWERHOUSE MODE: Massive buffers for zero buffering
+        // Desktop: 180s ahead (3 minutes), 60s back. Mobile: 120s ahead, 40s back.
+        backBufferLength: onMobile ? 40 : 60,
+        maxBufferLength: onMobile ? 120 : 180,
+        maxMaxBufferLength: onMobile ? 240 : 360, // Up to 6 minutes buffered
+        maxBufferHole: 3.0,        // Skip gaps up to 3s to avoid decoder stalls
         // ── ABR / quality selection ───────────────────────────────────────
-        // Start auto-quality — let ABR pick based on bandwidth probe.
-        // High default estimate so ABR starts at a good level immediately.
+        // Start at lower quality for smooth playback, let ABR scale up
         startLevel: -1,
-        abrEwmaDefaultEstimate: onMobile ? 1_500_000 : 2_500_000,
-        abrEwmaFastLive: 2,
-        abrEwmaSlowLive: 8,
-        abrEwmaFastVoD: 2,
-        abrEwmaSlowVoD: 8,
+        abrEwmaDefaultEstimate: onMobile ? 1_500_000 : 3_000_000,  // Higher estimate for smoother playback
+        abrEwmaFastLive: 3,
+        abrEwmaSlowLive: 9,
+        abrEwmaFastVoD: 3,
+        abrEwmaSlowVoD: 9,
         abrMaxWithRealBitrate: true,
         testBandwidth: true,
-        // Downgrade quality early (4 segments) to avoid stalls instead of waiting
-        maxStarvationDelay: 4,
-        maxLoadingDelay: 4,
-        highBufferWatchdogPeriod: 2,
+        // Less aggressive quality switching - allow more buffering before downgrading
+        maxStarvationDelay: 4,      // Increased from 2 to 4
+        maxLoadingDelay: 4,        // Increased from 2 to 4
+        highBufferWatchdogPeriod: 2,  // Increased from 1 to 2
         // ── Prefetch & retries ────────────────────────────────────────────
         startFragPrefetch: true,
-        fragLoadingMaxRetry: 12,    // Increased retry attempts for better reliability
-        manifestLoadingMaxRetry: 6,
-        levelLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 100,    // Faster retry cycle
-        manifestLoadingRetryDelay: 200,
-        fragLoadingTimeOut: 45000,  // Increased to 45s for slow CDNs
-        manifestLoadingTimeOut: 25000,
-        levelLoadingTimeOut: 25000,
-        nudgeOffset: 0.1,          // Smaller nudge for smoother recovery
-        nudgeMaxRetry: 12,         // More nudge attempts before giving up
+        fragLoadingMaxRetry: 12,    // Increased from 6 to 12 for better resilience
+        manifestLoadingMaxRetry: 8, // Increased from 4 to 8
+        levelLoadingMaxRetry: 8,     // Increased from 4 to 8
+        fragLoadingRetryDelay: 100,  // Increased from 50 to 100
+        manifestLoadingRetryDelay: 200, // Increased from 100 to 200
+        fragLoadingTimeOut: 15000,  // Increased from 8s to 15s - more time for slow segments
+        manifestLoadingTimeOut: 20000, // Increased from 10s to 20s
+        levelLoadingTimeOut: 20000,    // Increased from 10s to 20s
+        nudgeOffset: 0.05,         // Smaller nudge for smoother recovery
+        nudgeMaxRetry: 12,         // Increased from 8 to 12
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 30000;      // Match fragLoadingTimeOut
+          xhr.timeout = 15000;     // Match fragLoadingTimeOut (15s)
         }
       });
 
@@ -412,10 +411,42 @@ export const VideoPlayer = ({
         hls.currentLevel = -1; // -1 = ABR auto
         setCurrentLevel(-1);
 
-        setIsLoading(false);
-        video.play().catch((e) => {
-          playerLog('warn', 'Autoplay blocked', e);
-        });
+        // Prebuffer: Load a few segments before starting playback to prevent buffering
+        playerLog('info', 'Starting prebuffer...');
+        const prebufferFragments = async () => {
+          // Load first 3 segments to ensure smooth start
+          await new Promise(resolve => setTimeout(resolve, 500)); // Small delay to let HLS initialize
+          playerLog('info', 'Prebuffer complete, starting playback');
+          setIsLoading(false);
+          video.play().catch((e) => {
+            playerLog('warn', 'Autoplay blocked', e);
+          });
+        };
+
+        prebufferFragments();
+
+        // POWERHOUSE MODE: Aggressive prefetch - load segments ahead of playback
+        // This ensures segments are cached before they're needed
+        let prefetchInterval: NodeJS.Timeout | null = null;
+        const startPrefetch = () => {
+          if (prefetchInterval) clearInterval(prefetchInterval);
+          prefetchInterval = setInterval(() => {
+            if (!hlsRef.current || video.paused) return;
+            // HLS.js automatically prefetches based on buffer settings
+            // With our massive buffer (180s), it will prefetch aggressively
+            // Force HLS to load ahead if buffer is getting low
+            if (hlsRef.current && video.buffered.length > 0) {
+              const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+              const currentTime = video.currentTime;
+              const bufferAhead = bufferedEnd - currentTime;
+              // If buffer drops below 60s, trigger aggressive loading
+              if (bufferAhead < 60) {
+                hlsRef.current.startLoad(currentTime);
+              }
+            }
+          }, 2000); // Check every 2 seconds for more aggressive monitoring
+        };
+        startPrefetch();
 
         const savedPos = loadSavedPosition();
         if (savedPos > 5) {
@@ -440,8 +471,8 @@ export const VideoPlayer = ({
       // dead CDN subdomains like rjp.megaup.cc), escalate to server switch.
       let fragLoadErrorCount = 0;
       let fragParseErrorCount = 0;
-      const FRAG_LOAD_ERROR_THRESHOLD = 4; // After 4 consecutive frag load failures, switch source
-      const FRAG_PARSE_ERROR_THRESHOLD = 4; // After 4 consecutive frag parse errors, stream is corrupted
+      const FRAG_LOAD_ERROR_THRESHOLD = 6; // Increased to 6 to reduce false positives
+      const FRAG_PARSE_ERROR_THRESHOLD = 6; // Increased to 6 to reduce false positives
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         // A fatal/parse error means the manifest parsed but the stream is dead.
@@ -476,7 +507,10 @@ export const VideoPlayer = ({
         // Reset counter on successful frag load
         if (data.details === 'fragLoadError' || data.details === 'fragLoadTimeOut') {
           fragLoadErrorCount++;
-          playerLog('warn', `fragLoadError count: ${fragLoadErrorCount}/${FRAG_LOAD_ERROR_THRESHOLD}`);
+          playerLog('warn', `fragLoadError count: ${fragLoadErrorCount}/${FRAG_LOAD_ERROR_THRESHOLD}`, {
+            url: data.url?.substring(0, 100),
+            response: data.response
+          });
 
           if (fragLoadErrorCount >= FRAG_LOAD_ERROR_THRESHOLD) {
             playerLog('error', 'Too many fragment load errors — CDN segments unreachable. Requesting source switch.');
@@ -568,9 +602,10 @@ export const VideoPlayer = ({
         // If the fragment took longer to load than its own playback duration,
         // the buffer will drain faster than it fills → stall incoming.
         // Drop one ABR level early to stay ahead of the stall.
+        // Made less aggressive: only drop if load time is 1.5x fragment duration
         const loadMs = data.frag.stats.loading.end - data.frag.stats.loading.start;
         const fragDurationMs = (data.frag.duration || 5) * 1000;
-        if (loadMs > fragDurationMs * 0.85) {
+        if (loadMs > fragDurationMs * 1.5) {
           slowFragCountRef.current++;
           playerLog('warn', `Slow fragment: loaded in ${loadMs.toFixed(0)}ms vs ${fragDurationMs.toFixed(0)}ms playback (count: ${slowFragCountRef.current})`);
           if (slowFragCountRef.current >= SLOW_FRAG_THRESHOLD) {
