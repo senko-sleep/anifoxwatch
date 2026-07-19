@@ -64,18 +64,17 @@ class StreamExtractor {
                     '--window-size=1920,1080',
                     '--disable-web-security',
                     '--disable-features=IsolateOrigins,site-per-process',
-                    '--js-flags="--max-old-space-size=256"'
+                    '--js-flags="--max-old-space-size=256"',
+                    '--no-zygote'
                 ]
             });
 
             this.browserLaunchPromise = Promise.race([
                 launchPromise,
-                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 15000))
+                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 8000))
             ]);
 
             this.browser = await this.browserLaunchPromise;
-            this.browserLaunchPromise = null;
-
             logger.info('[StreamExtractor] Browser launched');
             return this.browser;
         } catch (error) {
@@ -86,15 +85,15 @@ class StreamExtractor {
     }
 
     private activePages = 0;
-    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 4 : 8;
+    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 8 : 12;
 
     /**
      * Create a new page with proper settings
      */
     private async createPage(): Promise<any> {
-        // Simple concurrency limit
+        // Simple concurrency limit - reduced delay from 500ms to 100ms
         while (this.activePages >= this.MAX_CONCURRENT_PAGES) {
-            await this.delay(500);
+            await this.delay(100);
         }
         this.activePages++;
 
@@ -372,13 +371,13 @@ class StreamExtractor {
 
             try {
                 await page.goto(embedUrl, {
-                    waitUntil: 'networkidle2',
-                    timeout: 25000  // Reduced from 60s — the polling loop catches streams regardless
+                    waitUntil: 'domcontentloaded',
+                    timeout: 10000  // Reduced from 25s to 10s
                 });
 
                 // Wait for video to load or m3u8 to be captured (dynamic polling)
                 let m3u8WaitTime = 0;
-                while (capturedM3u8s.size === 0 && m3u8WaitTime < 10000) {
+                while (capturedM3u8s.size === 0 && m3u8WaitTime < 4000) {
                     await this.delay(200);
                     m3u8WaitTime += 200;
                 }
@@ -390,8 +389,8 @@ class StreamExtractor {
                         let playWaitTime = 0;
                         while (capturedM3u8s.size === 0 && playWaitTime < 5000) {
                             await this.delay(200);
-                            playWaitTime += 200;
-                        }
+                            playWaitTime += 200;2
+                        }2
                     } catch { }
                 }
             } catch (navError: any) {
