@@ -547,7 +547,7 @@ export class AniwavesSource extends BaseAnimeSource {
                         })
                         .map(s => ({
                             url: s.url,
-                            quality: s.quality || 'auto',
+                            quality: (s.quality || 'auto') as '360p' | '480p' | '720p' | '1080p' | 'auto' | 'default',
                             isM3U8: s.url.includes('.m3u8') || s.type === 'hls',
                             isEmbed: false,
                             isDirect: false,
@@ -564,7 +564,7 @@ export class AniwavesSource extends BaseAnimeSource {
                     logger.warn(`[Aniwaves] Stream extraction failed: ${extraction.error || 'No streams found'}. Falling back to embed URL`, undefined, this.name);
                 }
             } catch (extError: any) {
-                logger.error(`[Aniwaves] Error extracting streams: ${extError.message}`, undefined, this.name);
+                logger.error(`[Aniwaves] Error extracting streams: ${extError.message}`, extError, undefined, this.name);
             }
 
             // Aniwaves' embed URL is domain-locked — it only renders on aniwaves.ru
