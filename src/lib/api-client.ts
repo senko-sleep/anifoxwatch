@@ -731,9 +731,11 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            // FAST STARTUP: Reduced timeout to match test performance (under 12s target)
-            const streamTimeoutMs = 8_000;
-            // Single attempt - let Watch page handle retries
+            // Hard timeout so the UI never spins forever.
+            // Fail fast at 12s — if the backend hasn't responded by then, try failover.
+            // Use longer timeout for Render.com (slower cold starts) vs Vercel
+            const isRender = base.includes('onrender.com');
+            const streamTimeoutMs = isRender ? 25_000 : 12_000;
             const maxAttempts = 1;
             let lastErr: Error | null = null;
 

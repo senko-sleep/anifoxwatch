@@ -3575,8 +3575,11 @@ export class SourceManager {
                 }
 
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
-                const isPrimary = source === primarySource;
-                 const streamReliabilityOpts = { timeout: isPrimary ? 8_000 : 5_000, maxAttempts: 1 };
+                 const isPrimary = source === primarySource;
+                 // Primary source gets a larger budget: Aniwaves embed extraction
+                 // uses Puppeteer which cold-starts at ~10-15s on first call. Keep
+                 // this below STREAM_GLOBAL_MAX_MS (12s) but above the cold-start floor.
+                 const streamReliabilityOpts = { timeout: isPrimary ? 11_000 : 5_000, maxAttempts: 1 };
                 const sourceStart = Date.now();
                 this.executeReliablyStream(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
