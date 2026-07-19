@@ -271,17 +271,20 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
         enabled: enabled && episodeId.length > 0,
         staleTime: 15 * 60 * 1000,  // 15 min — stream URLs don't rotate fast; avoid re-fetching on remount
         gcTime: 25 * 60 * 1000,     // Keep in memory for 25 min so episode switches feel instant
-        // AbortError = hard timeout (10s). Don't retry or the UI can appear to "load forever".
+        // FAST STARTUP: Reduced retries to avoid abort signal conflicts
         retry: (failureCount, error) => {
             console.log('[useStreamingLinks] Retry attempt:', failureCount, 'Error:', error);
+            // Don't retry on abort errors - let Watch page handle failover
             if (error?.name === 'AbortError') return false;
             const status = (error as { status?: number })?.status;
-            if (status === 404) return false;
+            // Don't retry on 404 or client errors
+            if (status && status >= 400 && status < 500) return false;
             const msg = String((error as Error)?.message || '');
             if (/404|no streaming sources found/i.test(msg)) return false;
-            return failureCount < 2;
+            // Only retry once for network errors
+            return failureCount < 1;
         },
-        retryDelay: (attempt: number) => Math.min(2000 * Math.pow(2, attempt), 10000),
+        retryDelay: 1000, // Fixed 1s delay
         refetchOnWindowFocus: false,
     });
 }

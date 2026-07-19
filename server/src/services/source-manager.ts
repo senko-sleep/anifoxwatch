@@ -806,7 +806,7 @@ export class SourceManager {
     private async speedTestSources(
         sources: VideoSource[],
         headers?: Record<string, string>,
-        timeoutMs: number = 2500
+        timeoutMs: number = 1500
     ): Promise<VideoSource[]> {
         if (!sources || sources.length === 0) return [];
         
@@ -3414,10 +3414,10 @@ export class SourceManager {
         const allResults: RaceResult[] = [];
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
-        const GRACE_PERIOD = 2000;
-        const CROSS_SOURCE_FALLBACK_MAX_MS = 45_000;
-        const STREAM_GLOBAL_MAX_MS = 60_000;
-        const ONLY_IP_LOCKED_WAIT_MS = 3_500;
+        const GRACE_PERIOD = 500;
+        const CROSS_SOURCE_FALLBACK_MAX_MS = 8_000;
+        const STREAM_GLOBAL_MAX_MS = 12_000;
+        const ONLY_IP_LOCKED_WAIT_MS = 2_000;
 
         // Use existing priority from above
         const localPriority = STREAM_PRIORITY;
@@ -3576,7 +3576,7 @@ export class SourceManager {
 
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
                 const isPrimary = source === primarySource;
-                 const streamReliabilityOpts = { timeout: isPrimary ? 45_000 : 8_000, maxAttempts: 1 };
+                 const streamReliabilityOpts = { timeout: isPrimary ? 8_000 : 5_000, maxAttempts: 1 };
                 const sourceStart = Date.now();
                 this.executeReliablyStream(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
@@ -3629,18 +3629,12 @@ export class SourceManager {
 
         });
 
-        // Run speed test to verify stream links and filter/prioritize them before returning
+        // Skip speed test for faster startup - return first working source immediately
+        // Speed test adds 1.5s+ overhead which is unacceptable for 12s target
         if (result && result.sources && result.sources.length > 0) {
-            try {
-                const testedSources = await this.speedTestSources(result.sources, result.headers);
-                result.sources = testedSources;
-                
-                // Update cache with the speed-tested and sorted links
-                const cacheKey = `${episodeId}:${server || 'default'}:${category || 'sub'}:${anilistId || ''}`;
-                this.streamingLinksCache.set(cacheKey, { data: result, timestamp: Date.now() });
-            } catch (err) {
-                console.error(`❌ [SourceManager] Error running speed test:`, err);
-            }
+            // Update cache with the untested links (speed test disabled for performance)
+            const cacheKey = `${episodeId}:${server || 'default'}:${category || 'sub'}:${anilistId || ''}`;
+            this.streamingLinksCache.set(cacheKey, { data: result, timestamp: Date.now() });
         }
 
         return result;

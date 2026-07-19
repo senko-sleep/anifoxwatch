@@ -336,45 +336,34 @@ export const VideoPlayer = ({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        liveSyncDurationCount: 3,
-        liveMaxLatencyDurationCount: 5,
-        liveDurationInfinity: true,
         // ── Buffer sizing ─────────────────────────────────────────────────
-        // POWERHOUSE MODE: Massive buffers for zero buffering
-        // Desktop: 180s ahead (3 minutes), 60s back. Mobile: 120s ahead, 40s back.
-        backBufferLength: onMobile ? 40 : 60,
-        maxBufferLength: onMobile ? 120 : 180,
-        maxMaxBufferLength: onMobile ? 240 : 360, // Up to 6 minutes buffered
-        maxBufferHole: 3.0,        // Skip gaps up to 3s to avoid decoder stalls
+        // FAST STARTUP MODE: Minimal buffers for instant playback (matching test)
+        backBufferLength: onMobile ? 8 : 10,
+        maxBufferLength: onMobile ? 20 : 30,
+        maxMaxBufferLength: onMobile ? 40 : 60,
+        maxBufferHole: 3.0,
         // ── ABR / quality selection ───────────────────────────────────────
-        // Start at lower quality for smooth playback, let ABR scale up
-        startLevel: -1,
-        abrEwmaDefaultEstimate: onMobile ? 1_500_000 : 3_000_000,  // Higher estimate for smoother playback
-        abrEwmaFastLive: 3,
-        abrEwmaSlowLive: 9,
-        abrEwmaFastVoD: 3,
-        abrEwmaSlowVoD: 9,
-        abrMaxWithRealBitrate: true,
-        testBandwidth: true,
-        // Less aggressive quality switching - allow more buffering before downgrading
-        maxStarvationDelay: 4,      // Increased from 2 to 4
-        maxLoadingDelay: 4,        // Increased from 2 to 4
-        highBufferWatchdogPeriod: 2,  // Increased from 1 to 2
+        // Start at lowest quality for fastest initial load (matching test)
+        startLevel: 0,
+        abrEwmaDefaultEstimate: onMobile ? 800_000 : 1_500_000,
+        // ── Timeouts (matching test) ───────────────────────────────────────
+        fragLoadingTimeOut: 8000,
+        manifestLoadingTimeOut: 10000,
+        levelLoadingTimeOut: 10000,
         // ── Prefetch & retries ────────────────────────────────────────────
         startFragPrefetch: true,
-        fragLoadingMaxRetry: 12,    // Increased from 6 to 12 for better resilience
-        manifestLoadingMaxRetry: 8, // Increased from 4 to 8
-        levelLoadingMaxRetry: 8,     // Increased from 4 to 8
-        fragLoadingRetryDelay: 100,  // Increased from 50 to 100
-        manifestLoadingRetryDelay: 200, // Increased from 100 to 200
-        fragLoadingTimeOut: 15000,  // Increased from 8s to 15s - more time for slow segments
-        manifestLoadingTimeOut: 20000, // Increased from 10s to 20s
-        levelLoadingTimeOut: 20000,    // Increased from 10s to 20s
-        nudgeOffset: 0.05,         // Smaller nudge for smoother recovery
-        nudgeMaxRetry: 12,         // Increased from 8 to 12
+        fragLoadingMaxRetry: 4,
+        manifestLoadingMaxRetry: 3,
+        levelLoadingMaxRetry: 3,
+        fragLoadingRetryDelay: 100,
+        manifestLoadingRetryDelay: 200,
+        maxStarvationDelay: 2,
+        maxLoadingDelay: 2,
+        nudgeOffset: 0.05,
+        nudgeMaxRetry: 6,
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 15000;     // Match fragLoadingTimeOut (15s)
+          xhr.timeout = 8000;
         }
       });
 
@@ -389,11 +378,11 @@ export const VideoPlayer = ({
       const manifestParsedRef = { current: false };
       const startupTimer = setTimeout(() => {
         if (manifestParsedRef.current) return;
-        playerLog('error', 'Startup timeout — manifest did not parse within 18s. Requesting server switch.');
+        playerLog('error', 'Startup timeout — manifest did not parse within 10s. Requesting server switch.');
         try { hls.destroy(); } catch { /* ignore */ }
         setError('Stream took too long to start. Switching to another server…');
         onError?.('startup_timeout_error');
-      }, 18_000);
+      }, 10_000);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
         manifestParsedRef.current = true;
@@ -411,29 +400,22 @@ export const VideoPlayer = ({
         hls.currentLevel = -1; // -1 = ABR auto
         setCurrentLevel(-1);
 
-        // Prebuffer: Load a few segments before starting playback to prevent buffering
-        playerLog('info', 'Starting prebuffer...');
-        const prebufferFragments = async () => {
-          // Load first 3 segments to ensure smooth start
-          await new Promise(resolve => setTimeout(resolve, 500)); // Small delay to let HLS initialize
-          playerLog('info', 'Prebuffer complete, starting playback');
-          setIsLoading(false);
-          video.play().catch((e) => {
-            playerLog('warn', 'Autoplay blocked', e);
-          });
-        };
+        // FAST STARTUP: Start playback immediately without prebuffer delay
+        playerLog('info', 'Starting playback immediately');
+        setIsLoading(false);
+        video.play().catch((e) => {
+          playerLog('warn', 'Autoplay blocked', e);
+        });
 
-        prebufferFragments();
-
-        // POWERHOUSE MODE: Aggressive prefetch - load segments ahead of playback
-        // This ensures segments are cached before they're needed
+        // FAST STARTUP MODE: HLS.js automatically prefetches based on buffer settings
+        // With our optimized buffer (30s), it will prefetch efficiently for instant playback
         let prefetchInterval: NodeJS.Timeout | null = null;
         const startPrefetch = () => {
           if (prefetchInterval) clearInterval(prefetchInterval);
           prefetchInterval = setInterval(() => {
             if (!hlsRef.current || video.paused) return;
             // HLS.js automatically prefetches based on buffer settings
-            // With our massive buffer (180s), it will prefetch aggressively
+            // With our optimized buffer (30s), it will prefetch efficiently
             // Force HLS to load ahead if buffer is getting low
             if (hlsRef.current && video.buffered.length > 0) {
               const bufferedEnd = video.buffered.end(video.buffered.length - 1);
@@ -471,8 +453,8 @@ export const VideoPlayer = ({
       // dead CDN subdomains like rjp.megaup.cc), escalate to server switch.
       let fragLoadErrorCount = 0;
       let fragParseErrorCount = 0;
-      const FRAG_LOAD_ERROR_THRESHOLD = 6; // Increased to 6 to reduce false positives
-      const FRAG_PARSE_ERROR_THRESHOLD = 6; // Increased to 6 to reduce false positives
+      const FRAG_LOAD_ERROR_THRESHOLD = 6; // Back to original threshold
+      const FRAG_PARSE_ERROR_THRESHOLD = 6; // Back to original threshold
 
       hls.on(Hls.Events.ERROR, (_, data) => {
         // A fatal/parse error means the manifest parsed but the stream is dead.

@@ -304,11 +304,17 @@ const Watch = () => {
 
 
 
-  // Auto-failover on stream error
+  // Auto-failover on stream error (simplified - less aggressive)
   useEffect(() => {
     if (!streamError || !servers?.length) return;
+    // Skip abort errors - they're normal during server changes
     if (streamError.name === 'AbortError' || streamError.message?.toLowerCase().includes('abort')) {
-      console.log('[Watch] ⏭️ Skipping failover because stream fetch was aborted (likely due to server change)');
+      console.log('[Watch] ⏭️ Skipping failover - stream fetch aborted (normal during server change)');
+      return;
+    }
+    // Don't failover on 404 - might be episode-specific
+    if ((streamError as any).status === 404) {
+      console.log('[Watch] ⏭️ Skipping failover - 404 error (episode not available)');
       return;
     }
     const realServers = servers;
@@ -318,7 +324,7 @@ const Watch = () => {
     console.log(`[Watch] 🔄 Failover to server: ${nextServer.name} (attempt ${serverRetryCount + 1}/${realServers.length})`);
     toast.info(`Switching to server ${nextServer.name}...`, {
       description: `Attempt ${serverRetryCount + 1} of ${realServers.length}`,
-      duration: 3000,
+      duration: 2000,
     });
     setSelectedServer(nextServer.name);
     setUserPickedServer(true);
@@ -351,7 +357,7 @@ const Watch = () => {
     }
   }, [streamError]);
 
-  // Handle video player errors
+  // Handle video player errors (less aggressive - allow recovery)
   const handlePlayerError = useCallback((error: string) => {
     // Debounce: prevent rapid-fire retries
     const now = Date.now();
@@ -380,6 +386,18 @@ const Watch = () => {
       return;
     }
 
+    // Allow failover for fragment parsing errors after HLS recovery attempts
+    if (error === 'frag_parsing_error') {
+      console.log('[Watch] 🔄 Fragment parsing errors exhausted - switching server');
+      // Continue to server switching logic below
+    }
+
+    // Allow failover on startup timeout - stream is not loading
+    if (error === 'startup_timeout_error') {
+      console.log('[Watch] 🔄 Startup timeout - switching server');
+      // Continue to server switching logic below
+    }
+
     // Try next source URL (same server) first
     if (sourceRetryIndex + 1 < sources.length) {
       console.log(`[Watch] 🔄 Trying next source (index ${sourceRetryIndex + 1}/${sources.length - 1})`);
@@ -397,7 +415,7 @@ const Watch = () => {
       setUserPickedServer(true);
       setServerRetryCount(prev => prev + 1);
     }
-  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType]);
+  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType, refetchStream]);
 
   // Reset retry count when episode or audio changes (new stream fetch)
   useEffect(() => {

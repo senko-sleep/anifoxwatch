@@ -731,12 +731,9 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            // Hard timeout so the UI never spins forever.
-            // Fail fast at 12s — if the backend hasn’t responded by then, try failover.
-            // Use longer timeout for Render.com (slower cold starts) vs Vercel
-            const isRender = base.includes('onrender.com');
-            const streamTimeoutMs = isRender ? 25_000 : 12_000;
-            // One attempt here — HiAnime REST fallback below has its own bounded budget.
+            // FAST STARTUP: Reduced timeout to match test performance (under 12s target)
+            const streamTimeoutMs = 8_000;
+            // Single attempt - let Watch page handle retries
             const maxAttempts = 1;
             let lastErr: Error | null = null;
 
@@ -760,7 +757,7 @@ class AnimeApiClient {
                         }
                         lastErr = err;
                         if (attempt < maxAttempts - 1) {
-                            await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+                            await new Promise(r => setTimeout(r, 1000));
                             continue;
                         }
                         throw err;
@@ -773,16 +770,9 @@ class AnimeApiClient {
                 } catch (e) {
                     clearTimeout(timeoutId);
                     lastErr = e as Error;
-                    // Don't retry non-retryable errors
-                    const isAbort =
-                        lastErr.name === 'AbortError' ||
-                        (lastErr as any)?.name === 'TimeoutError' ||
-                        String(lastErr.message || '').toLowerCase().includes('aborted');
-                    if (!isAbort && !(lastErr as any).status && !lastErr.message?.includes('fetch')) {
-                        throw lastErr;
-                    }
+                    // Simplified error handling - let Watch page handle aborts gracefully
                     if (attempt < maxAttempts - 1) {
-                        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+                        await new Promise(r => setTimeout(r, 1000));
                         continue;
                     }
                     throw lastErr;
