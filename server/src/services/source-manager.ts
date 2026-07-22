@@ -227,8 +227,8 @@ export class SourceManager {
         for (const [name, source] of sourcesToRecover) {
             try {
                 const isHealthy = await Promise.race([
-                    source.healthCheck({ timeout: 12000 }),
-                    new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 12000))
+                    source.healthCheck({ timeout: 45000 }), // Increased from 12s to 45s for Vercel
+                    new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 45000))
                 ]);
 
                 if (isHealthy !== false) {
@@ -336,9 +336,9 @@ export class SourceManager {
             try {
                 console.log(`   🔍 Verifying ${name}...`);
                 const isHealthy = await Promise.race([
-                    source.healthCheck({ timeout: 12000 }),
+                    source.healthCheck({ timeout: 45000 }), // Increased from 12s to 45s for Vercel
                     new Promise<boolean>((resolve) => 
-                        setTimeout(() => resolve(true), 12000) // Default to true on timeout
+                        setTimeout(() => resolve(true), 45000) // Default to true on timeout for Vercel
                     )
                 ]);
                 
