@@ -630,7 +630,7 @@ async function forwardToRemoteProxy(
     const remoteProxy = process.env.REMOTE_PROXY_URL || DEFAULT_REMOTE_STREAM_PROXY;
     const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
     try {
-        const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 5000, maxRedirects: 5 });
+        const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 15000, maxRedirects: 5 });
         const ct = remoteResp.headers['content-type'] || 'application/vnd.apple.mpegurl';
         res.setHeader('Content-Type', ct);
         res.setHeader('Access-Control-Allow-Origin', '*');
