@@ -1118,7 +1118,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         'gogocdn': { referer: 'https://gogoanime.run/' },
         'fast4speed': { referer: 'https://allanime.day', origin: 'https://allanime.day' },
         'echovideo': { referer: 'https://play.echovideo.ru/', origin: 'https://play.echovideo.ru' },
-        'hlsxszt3': { referer: 'https://play.echovideo.ru/', origin: 'https://play.echovideo.ru' },
+        'hlsxszt': { referer: 'https://play.echovideo.ru/', origin: 'https://play.echovideo.ru' },
+        'roburnt': { referer: 'https://play.echovideo.ru/', origin: 'https://play.echovideo.ru' },
+        'dpopdrop': { referer: 'https://play.echovideo.ru/', origin: 'https://play.echovideo.ru' },
         'hstorage': { referer: 'https://watchhentai.net/', origin: 'https://watchhentai.net' },
         'owocdn': { referer: 'https://kwik.si/', origin: 'https://kwik.si' },
         'vault': { referer: 'https://kwik.cx/', origin: 'https://kwik.cx' },
@@ -1680,11 +1682,11 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const isKnownVideoCdn = Object.keys(proxyCdnConfig).some(key => domain.includes(key));
     const isImage = IMAGE_CONTENT_TYPES.some(img => upstreamCt.toLowerCase().includes(img));
 
-    if (isImage && isKnownVideoCdn) {
-        // Force video content type for obfuscated segments so HLS.js/Player accepts them
+    if (isSegment || (isImage && (isKnownVideoCdn || url.includes('/cdn/')))) {
+        // Force video content type for all HLS segments & obfuscated images so HLS.js/Player accepts them without corruption errors
         res.set('Content-Type', 'video/MP2T');
-    } else if (isOctetStream && isKnownVideoCdn) {
-        res.set('Content-Type', 'video/mp4');
+    } else if (isOctetStream) {
+        res.set('Content-Type', isVideo ? 'video/mp4' : 'video/MP2T');
     } else if (upstreamCt) {
         res.set('Content-Type', upstreamCt);
     } else if (url.includes('.ts')) {
