@@ -3,11 +3,11 @@ export const API_DOCS_MARKDOWN = `
 
 ## Overview
 
-A complete anime streaming API (Express on Vercel), providing search, details, episodes, and streaming sources for anime content.
+A complete anime streaming API (Express on Render.com), providing search, details, episodes, and streaming sources for anime content.
 
-**Base URL:** \`https://anifoxwatch.vercel.app\`  
+**Base URL:** \`https://anifoxwatch-dko2.onrender.com\`  
 **API Version:** \`2.18.2\`  
-**Environment:** \`vercel-node\`
+**Environment:** \`render-node\`
 
 ## Features
 
@@ -35,16 +35,16 @@ A complete anime streaming API (Express on Vercel), providing search, details, e
 
 \`\`\`bash
 # Get trending anime
-curl "https://anifoxwatch.vercel.app/api/home"
+curl "https://anifoxwatch-dko2.onrender.com/api/home"
 
 # Search for anime
-curl "https://anifoxwatch.vercel.app/api/search?q=naruto"
+curl "https://anifoxwatch-dko2.onrender.com/api/search?q=naruto"
 
 # Get anime details
-curl "https://anifoxwatch.vercel.app/api/anime/naruto-123"
+curl "https://anifoxwatch-dko2.onrender.com/api/anime/naruto-123"
 
 # Get streaming sources
-curl "https://anifoxwatch.vercel.app/api/episode/sources?animeEpisodeId=naruto-ep-1"
+curl "https://anifoxwatch-dko2.onrender.com/api/episode/sources?animeEpisodeId=naruto-ep-1"
 \`\`\`
 
 ## System Endpoints
@@ -71,9 +71,9 @@ curl "https://anifoxwatch.vercel.app/health"
 - **Description:** API version information
 
 \`\`\`bash
-curl "https://anifoxwatch.vercel.app/v"
+curl "https://anifoxwatch-dko2.onrender.com/v"
 # Response: aniwatch-api: v2.18.2
-#          environment: vercel-node
+#          environment: render-node
 \`\`\`
 
 ## Core API Endpoints
@@ -109,7 +109,7 @@ curl "https://anifoxwatch.vercel.app/v"
 
 **Example:**
 \`\`\`bash
-curl "https://anifoxwatch.vercel.app/api/search?q=naruto&page=1"
+curl "https://anifoxwatch-dko2-ono.nderncomder.com/api/search?q=naruto&page=1"
 \`\`\`
 
 **Response:**
@@ -191,7 +191,7 @@ curl "https://anifoxwatch.vercel.app/api/search?q=naruto&page=1"
 
 **Example:**
 \`\`\`bash
-curl "https://anifoxwatch.vercel.app/api/anime/naruto-123"
+curl "https://anifoxwatcheveacpliappime/naruto-123"
 \`\`\`
 
 **Response:**
@@ -300,7 +300,7 @@ curl "https://anifoxwatch.vercel.app/api/episode/servers?animeEpisodeId=naruto-e
 
 **Example:**
 \`\`\`bash
-curl "https://anifoxwatch.vercel.app/api/episode/sources?animeEpisodeId=naruto-ep-1&server=vidstreaming&category=sub"
+curl "https://anifoxwatch-dko2.onrender.com/api/episode/sources?animeEpisodeId=naruto-ep-1&server=vidstreaming&category=sub"
 \`\`\`
 
 **Response:**
@@ -413,9 +413,9 @@ All API responses follow this structure:
 
 ## Support
 
-- **API Documentation:** \`https://anifoxwatch.vercel.app/help\`
-- **Health Check:** \`https://anifoxwatch.vercel.app/health\`
-- **Version Info:** \`https://anifoxwatch.vercel.app/v\`
+- **API Documentation:** \`https://anifoxwatch-dko2.onrender.com/help\`
+- **Health Check:** \`https://anifoxwatch-dko2.onrender.com/health\`
+- **Version Info:** \`https://anifoxwatch-dko2.onrender.com/v\`
 
 ## License
 

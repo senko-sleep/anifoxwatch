@@ -27,7 +27,7 @@ const proxyKeepAliveAgent = new https.Agent({
     keepAlive: true,
     maxSockets: 100,        // Increased from 25 to 100 for parallel segment loading
     maxFreeSockets: 50,     // Increased from 10 to 50 - keep more connections alive
-    timeout: 60000,         // Increased from 30s to 60s - longer-lived connections
+    timeout: 90000,         // Increased from 60s to 90s - longer-lived connections for CDN blocking
     scheduling: 'fifo',
 });
 
@@ -37,7 +37,7 @@ const proxyKeepAliveAgent = new https.Agent({
 
 const DEFAULT_REMOTE_STREAM_PROXY =
     process.env.DEFAULT_REMOTE_STREAM_PROXY ||
-    'https://anistream-proxy.vercel.app/api/stream/proxy';
+    'https://anifoxwatch-dko2.onrender.com/api/stream/proxy';
 
 /** How long to wait for a dub result before accepting a sub fallback (ms). */
 const DUB_PATIENCE_MS = 25_000; // Increased to 25s to allow for deep fallbacks
@@ -167,6 +167,8 @@ const ISP_BLOCKED_DOMAINS = new Set([
     'megaup.nl',
     'megaup.live',
     'megaup.to',
+    'roburnt10.store',
+    'px.roburnt10.store',
 ]);
 
 function isDeadDomain(url: string): boolean {

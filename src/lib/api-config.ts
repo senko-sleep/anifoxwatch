@@ -41,7 +41,7 @@ export const API_DEPLOYMENTS = {
      * `window.location.origin` (your current deployment domain) instead of a hardcoded app.
      */
     vercel: '',
-    firebase: 'https://anifoxwatch.vercel.app',
+    firebase: 'https://anifoxwatch-dko2.onrender.com',
     custom: '',
     /** Optional HiAnime REST host for status checks (same shape as VITE_ANIWATCH_API_URL). */
     hianimeRest: (import.meta.env.VITE_ANIWATCH_API_URL as string | undefined)?.trim() || '',
@@ -183,7 +183,7 @@ export function getApiFallbackUrl(): string | null {
 
     const hostname = window.location.hostname;
     const isFirebaseHosting = hostname.includes('firebaseapp.com') || hostname.includes('web.app');
-    if (isFirebaseHosting) return 'https://anifoxwatch.vercel.app';
+    if (isFirebaseHosting) return null;
 
     const sameOrigin = (window.location?.origin || '').replace(/\/$/, '');
     const primary = (getApiConfig().baseUrl || '').replace(/\/$/, '');

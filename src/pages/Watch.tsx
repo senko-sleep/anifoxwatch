@@ -277,28 +277,33 @@ const Watch = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodes, cleanAnimeId]);
 
-  // Auto-select default server (neko_senko preferred) when servers are loaded
+  // Auto-select default server ONLY when: stream has genuinely failed (non-abort),
+  // we have no sources yet, and user hasn't already picked a server.
+  // Previously this fired on streamLoading→false which aborted the in-flight fallback fetch.
   useEffect(() => {
     if (!servers?.length || serversLoading) return;
     if (userPickedServer || selectedServer || (streamData?.sources?.length ?? 0) > 0) return;
-    // Don't auto-select if stream is already loading to avoid aborting the initial fetch
+    // Never fire while stream is still loading (would abort in-flight request)
     if (streamLoading) return;
+    // Never fire on AbortError — the fallback host is still in-flight; don't interrupt it
+    if (!streamError || streamError.name === 'AbortError' ||
+        streamError.message?.toLowerCase().includes('abort')) return;
+    // Only fire on a real error (network failure, 5xx, etc.) — let the server's auto-routing
+    // handle server selection first; only intervene when that fully fails.
 
-    // Filter servers by current audio type (sub/dub), fall back to all servers
     const audioTypeServers = servers.filter(s =>
       audioType === 'dub' ? s.type === 'dub' : s.type === 'sub'
     );
     const targetServers = audioTypeServers.length > 0 ? audioTypeServers : servers;
 
-    // Prefer neko_senko, otherwise pick the first available server (including 'default')
     const defaultServer = targetServers.find(s => s.name.toLowerCase().includes('neko_senko'))
       || targetServers[0];
 
     if (defaultServer) {
-      console.log('[Watch] Auto-selecting default server:', defaultServer.name);
+      console.log('[Watch] Auto-selecting server after stream error:', defaultServer.name);
       setSelectedServer(defaultServer.name);
     }
-  }, [servers, serversLoading, userPickedServer, audioType, streamLoading]);
+  }, [servers, serversLoading, userPickedServer, audioType, streamLoading, streamError, streamData]);
 
 
 
