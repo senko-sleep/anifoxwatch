@@ -28,7 +28,9 @@
   ],
   "env": {
     "NODE_ENV": "production",
-    "CORS_ORIGIN": "*"
+    "CORS_ORIGIN": "*",
+    "DEFAULT_REMOTE_STREAM_PROXY": "https://api.allorigins.win/raw?url=",
+    "REMOTE_PROXY_URL": "https://api.allorigins.win/raw?url="
   },
   "regions": ["iad1"]
 }
