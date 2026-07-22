@@ -16,8 +16,8 @@ const circuitBreakers = new Map<string, CircuitBreakerState>();
 
 // Default circuit breaker settings - optimized for reliability with slow sources
 const DEFAULT_CIRCUIT_SETTINGS = {
-    maxFailures: 5, // Increased to 5 to prevent AnimeKai/sources from being knocked offline too quickly by parallel requests
-    resetTime: 15000, // 15s recovery - allow faster recovery from transient network hiccups
+    maxFailures: 8, // Increased from 5 to 8 to prevent false positives from transient issues
+    resetTime: 10000, // Reduced from 15s to 10s for faster recovery
     timeout: 90000 // 90s timeout — increased significantly for slow sources and Vercel cold starts
 };
 
@@ -55,7 +55,9 @@ function recordFailure(sourceName: string) {
     circuit.lastFailureTime = Date.now();
     circuit.lastAttemptTime = Date.now();
 
-    if (circuit.failureCount >= circuit.maxFailures) {
+    // Only trip circuit if we've hit max failures AND at least 5 seconds have passed since first failure
+    // This prevents rapid-fire parallel requests from tripping the circuit
+    if (circuit.failureCount >= circuit.maxFailures && (Date.now() - circuit.lastFailureTime) > 5000) {
         circuit.state = 'open';
         logger.circuitBreakerTripped(
             sourceName,
@@ -319,6 +321,20 @@ export function healthCheckMiddleware(req: Request, res: Response) {
         memory: process.memoryUsage(),
         circuits
     });
+}
+
+/**
+ * Force reset a circuit breaker for a specific source (useful for manual recovery)
+ */
+export function forceResetCircuitBreaker(sourceName: string): void {
+    const circuit = circuitBreakers.get(sourceName);
+    if (circuit) {
+        circuit.state = 'closed';
+        circuit.failureCount = 0;
+        circuit.lastFailureTime = 0;
+        circuit.lastAttemptTime = 0;
+        logger.info(`[CircuitBreaker] Force reset for ${sourceName}`);
+    }
 }
 
 export { getCircuitBreaker, isCircuitBreakerOpen, recordSuccess, recordFailure };

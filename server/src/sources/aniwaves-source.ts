@@ -40,6 +40,7 @@ export class AniwavesSource extends BaseAnimeSource {
     private transportWinner: Map<string, number> = new Map();
     private readonly TRANSPORT_WINNER_TTL = 10 * 60 * 1000; // 10 minutes
     private transportWinnerExpiry: Map<string, number> = new Map();
+    private transportFailureCount: Map<string, number> = new Map(); // Track consecutive failures per winner
 
     // Proxy list (stable — update here if proxies change)
     private readonly PROXIES = [
@@ -93,6 +94,21 @@ export class AniwavesSource extends BaseAnimeSource {
         const key = this.getWinnerKey(urlPath);
         this.transportWinner.set(key, transportIndex);
         this.transportWinnerExpiry.set(key, Date.now() + this.TRANSPORT_WINNER_TTL);
+        this.transportFailureCount.delete(key); // Reset failure count on success
+    }
+
+    private recordTransportFailure(urlPath: string): void {
+        const key = this.getWinnerKey(urlPath);
+        const currentFailures = this.transportFailureCount.get(key) || 0;
+        this.transportFailureCount.set(key, currentFailures + 1);
+        
+        // If a cached winner fails 3+ times, evict it immediately
+        if (currentFailures >= 2) {
+            this.transportWinner.delete(key);
+            this.transportWinnerExpiry.delete(key);
+            this.transportFailureCount.delete(key);
+            logger.warn(`[Aniwaves] Evicted corrupted transport winner for ${urlPath} after ${currentFailures + 1} failures`, undefined, this.name);
+        }
     }
 
     // ─── Parallel fetch with winner cache ──────────────────────────────────
@@ -134,7 +150,9 @@ export class AniwavesSource extends BaseAnimeSource {
                 const response = await buildTransport(cachedWinner);
                 return response;
             } catch {
-                // Winner degraded — evict and run a full race below
+                // Record failure and potentially evict
+                this.recordTransportFailure(urlPath);
+                // Evict and run a full race below
                 const key = this.getWinnerKey(urlPath);
                 this.transportWinner.delete(key);
                 this.transportWinnerExpiry.delete(key);
