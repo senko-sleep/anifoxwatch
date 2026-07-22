@@ -407,8 +407,21 @@ export class HanimeSource extends BaseAnimeSource {
                     logger.warn(`[Hanime] Could not extract stream URLs from ${url}`);
                 }
             } catch (puppeteerError: any) {
-                logger.warn(`[Hanime] Puppeteer extraction failed: ${puppeteerError.message}`);
+                logger.warn(`[Hanime] Puppeteer extraction failed (${puppeteerError.message}) - attempting WatchHentai fallback`);
                 if (browser) await browser.close();
+            }
+
+            // Fallback to WatchHentai for adult streaming when Puppeteer/Hanime extraction is unavailable
+            try {
+                const { WatchHentaiSource } = await import('./watchhentai-source.js');
+                const wh = new WatchHentaiSource();
+                const whRes = await wh.getStreamingLinks(episodeId, server, category, options);
+                if (whRes.sources.length > 0) {
+                    logger.info(`[Hanime] ✅ WatchHentai fallback succeeded with ${whRes.sources.length} sources`);
+                    return whRes;
+                }
+            } catch (e: any) {
+                logger.warn(`[Hanime] WatchHentai fallback error: ${e.message}`);
             }
 
             logger.warn(`[Hanime] No stream URL found for ${url}`);
