@@ -486,6 +486,14 @@ export class AniwavesSource extends BaseAnimeSource {
     }
 
     async getStreamingLinks(episodeId: string, serverId?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
+        // Bare AniList IDs (anilist-189046) are not Aniwaves internal IDs.
+        // The old code would do id.split('-').pop() → '189046' and call
+        // /ajax/server/list?servers=189046 which always returns 0 results.
+        // Cross-source fallback will handle these via title search instead.
+        if (episodeId.startsWith('anilist-') && !episodeId.startsWith('aniwaves-')) {
+            return { sources: [], subtitles: [] };
+        }
+
         const cacheKey = `stream:${episodeId}:${serverId || 'default'}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached) return cached;

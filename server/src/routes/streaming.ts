@@ -545,6 +545,71 @@ async function streamToString(stream: Readable, maxSize = 5 * 1024 * 1024): Prom
     return Buffer.concat(chunks).toString('utf-8');
 }
 
+async function checkEchovideoManifest(proxyResponse: { data: Readable }): Promise<{ isManifest: boolean; content?: string }> {
+    return new Promise((resolve) => {
+        const stream = proxyResponse.data;
+        const chunks: Buffer[] = [];
+        let totalSize = 0;
+        let decided = false;
+
+        const cleanup = () => {
+            stream.removeListener('data', onData);
+            stream.removeListener('end', onEnd);
+            stream.removeListener('error', onError);
+        };
+
+        const onData = (chunk: Buffer) => {
+            if (decided) return;
+            chunks.push(chunk);
+            totalSize += chunk.length;
+
+            const head = Buffer.concat(chunks).toString('utf-8', 0, Math.min(totalSize, 4096));
+            if (head.includes('#EXTM3U')) {
+                if (totalSize > 2 * 1024 * 1024) {
+                    decided = true;
+                    cleanup();
+                    resolve({ isManifest: true, content: Buffer.concat(chunks).toString('utf-8') });
+                }
+            } else if (totalSize >= 512 || head.includes('#EXTINF') || head.startsWith('G') || head.includes('ftyp') || head.includes('moov')) {
+                decided = true;
+                cleanup();
+
+                const passThrough = new PassThrough();
+                for (const c of chunks) {
+                    passThrough.write(c);
+                }
+                stream.pipe(passThrough);
+                proxyResponse.data = passThrough as any;
+
+                resolve({ isManifest: false });
+            }
+        };
+
+        const onEnd = () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            const fullStr = Buffer.concat(chunks).toString('utf-8');
+            if (fullStr.includes('#EXTM3U')) {
+                resolve({ isManifest: true, content: fullStr });
+            } else {
+                resolve({ isManifest: false });
+            }
+        };
+
+        const onError = () => {
+            if (decided) return;
+            decided = true;
+            cleanup();
+            resolve({ isManifest: false });
+        };
+
+        stream.on('data', onData);
+        stream.on('end', onEnd);
+        stream.on('error', onError);
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Remote proxy helper (shared between /watch and /proxy)
 // ---------------------------------------------------------------------------
@@ -1379,13 +1444,11 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Echovideo segment manifests don't have .m3u8 extension but contain HLS playlist content
     let isEchovideoManifest = false;
     if (isEchovideoSegment && !isUpstreamM3u8) {
-        // Read the content to check if it's actually a manifest
-        const content = await streamToString(proxyResponse!.data);
-        isEchovideoManifest = content.includes('#EXTM3U');
-        
-        if (isEchovideoManifest) {
-            // It's a manifest, process it
-            try {
+        try {
+            const check = await checkEchovideoManifest(proxyResponse!);
+            if (check.isManifest && check.content) {
+                isEchovideoManifest = true;
+                const content = check.content;
                 // Reject manifests whose segments resolve to known ad CDNs
                 if (isAdPoisonedManifest(content, url)) {
                     logger.warn(`⚠️ [MANIFEST AD-POISONED] Manifest from ${domain} contains ad CDN segments instead of real video data. Rejecting stream.`, { url: url.substring(0, 200), requestId });
@@ -1407,28 +1470,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 res.set('Vary', 'Origin');
                 res.send(rewritten);
                 logger.info(`[PROXY] Rewrote m3u8 from ${domain}`, { domain, originalSize: content.length, requestId });
-            } catch (err) {
-                logger.error(`[PROXY] Failed to process m3u8 from ${domain}`, err as Error);
-                res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Failed to process manifest' });
+                return;
             }
-            return;
-        } else {
-            // It's a segment, re-fetch since we consumed the stream
-            const segmentHeaders: Record<string, string> = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                'Accept': '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Referer': refererParam || refererCombos[0]?.referer || 'https://aniwaves.ru',
-                'Origin': 'https://aniwaves.ru',
-            };
-            proxyResponse = await axios({
-                method: 'get',
-                url,
-                headers: segmentHeaders,
-                responseType: 'stream',
-                timeout: 30_000,
-                maxRedirects: 5,
-            });
+        } catch (err) {
+            logger.error(`[PROXY] Failed checking Echovideo manifest`, err as Error);
         }
     }
 

@@ -297,7 +297,6 @@ const Watch = () => {
     if (defaultServer) {
       console.log('[Watch] Auto-selecting default server:', defaultServer.name);
       setSelectedServer(defaultServer.name);
-      setUserPickedServer(true); // Mark as user-picked to prevent re-triggering
     }
   }, [servers, serversLoading, userPickedServer, audioType, streamLoading]);
 

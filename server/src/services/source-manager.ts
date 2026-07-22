@@ -3248,10 +3248,11 @@ export class SourceManager {
         if (!isAnilistId || hasExplicitServer) {
             // If explicit server is provided, prioritize it
             if (hasExplicitServer) {
-                const explicitSource = this.sources.get(server) as StreamingSource;
+                const canonicalName = REGISTERED_SOURCE_NAMES.find(n => n.toLowerCase() === server!.toLowerCase() || server!.toLowerCase().startsWith(n.toLowerCase())) || server!;
+                const explicitSource = (this.sources.get(canonicalName) || this.sources.get(server!)) as StreamingSource;
                 if (explicitSource?.isAvailable && explicitSource.getStreamingLinks && !sourcesToTry.includes(explicitSource)) {
                     sourcesToTry.push(explicitSource);
-                    console.log(`   🎯 Explicit server requested: ${server}`);
+                    console.log(`   🎯 Explicit server requested: ${server} (mapped to ${explicitSource.name})`);
                 }
             }
             
@@ -3402,7 +3403,7 @@ export class SourceManager {
 
         const pickOrder = buildStreamingPickOrder(resolvedEpisodeId);
         // Episode already has a source-native ID (e.g. aniwaves-82570&eps=1) — cross-source
-        // only duplicates Puppeteer embed extraction and adds 15–20s cold-start latency.
+        // only duplicates embed extraction and adds latency.
         const skipCrossSourceFallback = hasSourcePrefix && !isAnilistId && finalSources.length > 0;
         const effectivePickOrder = skipCrossSourceFallback
             ? pickOrder.filter((name) => name !== 'cross-source')
@@ -3415,8 +3416,10 @@ export class SourceManager {
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
         const GRACE_PERIOD = 500;
-        const CROSS_SOURCE_FALLBACK_MAX_MS = 8_000;
-        const STREAM_GLOBAL_MAX_MS = 12_000;
+        // Raised from 8 s → 20 s: title-search chain (AniList API + search + episodes + streams) needs ~15 s
+        const CROSS_SOURCE_FALLBACK_MAX_MS = 20_000;
+        // Raised from 12 s → 23 s: must outlast the 25 s client abort minus network RTT.
+        const STREAM_GLOBAL_MAX_MS = 23_000;
         const ONLY_IP_LOCKED_WAIT_MS = 2_000;
 
         // Use existing priority from above
@@ -3429,28 +3432,20 @@ export class SourceManager {
                 if (resolved) return;
                 const ok = allResults.filter(r => r.success);
                 if (ok.length === 0) return false;
-                // Prefer sources with real M3U8/MP4 streams over embed-only fallbacks
                 const hasRealStream = (r: RaceResult) =>
                     r.data.sources.some((s) => {
                         const u = (s as { originalUrl?: string }).originalUrl || s.url || '';
                         return u.includes('.m3u8') || u.includes('.mp4') || u.includes('.mpd');
                     });
-                // Strongly prefer proxyable streams (M3U8/HLS) over IP-locked sources
-                // (e.g. Streamtape /get_video URLs whose CDN token is bound to the
-                // server IP — breaks when proxied through serverless/Vercel).
                 const hasProxyableStream = (r: RaceResult) =>
                     r.data.sources.some((s) => {
                         if ((s as { ipLocked?: boolean }).ipLocked) return false;
                         const u = (s as { originalUrl?: string }).originalUrl || s.url || '';
-                        // Streamtape direct videos are IP-locked even without the flag
                         if ((u.includes('streamtape') || u.includes('tapecontent')) && u.includes('get_video')) return false;
                         return u.includes('.m3u8') || u.includes('.mp4') || u.includes('.mpd');
                     });
                 const proxyableOk = ok.filter(hasProxyableStream);
 
-                // If only IP-locked/embed-only sources are available and there are still pending
-                // requests (cross-source fallback may return HLS), briefly wait — but don't stall
-                // the UI into a global timeout when no proxyable streams exist.
                 if (!force && proxyableOk.length === 0 && pending > 0) {
                     const elapsed = Date.now() - startTime;
                     if (elapsed < ONLY_IP_LOCKED_WAIT_MS) {
@@ -3461,7 +3456,6 @@ export class SourceManager {
 
                 const realOk = proxyableOk.length > 0 ? proxyableOk : ok.filter(hasRealStream);
                 const candidates = realOk.length > 0 ? realOk : ok;
-                // Pick the highest-priority successful source
                 let best: RaceResult | null = null;
                 for (const name of effectivePickOrder) {
                     const match = candidates.find(r => r.source === name);
@@ -3475,10 +3469,7 @@ export class SourceManager {
                     best.data.sources[0]?.quality || 'unknown', duration);
                 timer.end();
                 console.log(`   ✅ Picked stream source: ${best.source} (${best.data.sources.length} URLs, ${duration}ms)`);
-                
-                // Cache the result to prevent loops on player retries
                 this.streamingLinksCache.set(cacheKey, { data: best.data, timestamp: Date.now() });
-                
                 resolveStream(best.data);
                 return true;
             };
@@ -3488,30 +3479,21 @@ export class SourceManager {
                 const ok = allResults.filter(r => r.success);
                 if (ok.length === 0) return;
 
-                // Check if the top-priority source already responded (success or fail)
                 const topPriority = effectivePickOrder[0];
                 const topResult = allResults.find(r => r.source === topPriority);
                 if (topResult) {
-                    // Top priority responded — pick best now
                     pickBestAndResolve();
                     return;
                 }
 
-                // First success arrived but top priority hasn't responded yet.
-                // Start a grace period — if top priority responds within GRACE_PERIOD, use it.
-                // For DUBs, if we get a result from a very reliable source (AllAnime/Gogoanime), 
-                // resolve instantly to satisfy "instant" requirement.
                 if (!graceTimer) {
                     const firstSuccess = ok[0].source;
                     const isHighPriorityDub = category === 'dub' && (firstSuccess === 'Aniwaves' || firstSuccess === 'Wcofun' || firstSuccess === 'AllAnime' || firstSuccess === 'Gogoanime' || firstSuccess === 'AnimeKai' || firstSuccess === 'GogoOrAt' || firstSuccess === 'cross-source');
-                    
                     if (isHighPriorityDub) {
                         console.log(`   ⚡ High-priority source (${firstSuccess}) available, resolving instantly!`);
                         pickBestAndResolve();
                         return;
                     }
-
-
                     console.log(`   ⏱️ First stream available (${firstSuccess}), waiting ${GRACE_PERIOD}ms for higher-priority source...`);
                     graceTimer = setTimeout(() => {
                         graceTimer = null;
@@ -3523,12 +3505,10 @@ export class SourceManager {
             const onDone = () => {
                 pending--;
                 tryResolve();
-                // Check results — if everything finished but no sources, return empty
                 if (pending <= 0 && !resolved) {
                     const hasSuccess = allResults.some(r => r.success);
                     if (!hasSuccess) {
                         console.log(`   ❌ All sources failed for ${episodeId}`);
-                        // Cache the failure to prevent infinite loops
                         this.negativeStreamingCache.set(cacheKey, { timestamp: Date.now() });
                         resolved = true;
                         if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
@@ -3536,8 +3516,6 @@ export class SourceManager {
                         resolveStream({ sources: [], subtitles: [] });
                         return;
                     }
-
-                    // All sources done, pick whatever we have (force=true bypasses IP-lock wait)
                     if (!pickBestAndResolve(true)) {
                         resolved = true;
                         if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
@@ -3549,7 +3527,7 @@ export class SourceManager {
                 }
             };
 
-            // Global safety — return 404 before the client feels stuck forever (~60s fetches)
+            // Global safety net — resolve before client's 25 s abort fires
             setTimeout(() => {
                 if (!resolved) {
                     console.log(`   ⏰ Global streaming timeout (${STREAM_GLOBAL_MAX_MS}ms) — resolving with best available`);
@@ -3564,7 +3542,6 @@ export class SourceManager {
             }, STREAM_GLOBAL_MAX_MS);
 
             for (const source of finalSources) {
-                // If the source is already resolved via another parallel branch, skip
                 if (resolved) break;
                 const idToUse = this.resolveStreamingEpisodeId(resolvedEpisodeId, source, primarySource, hasSourcePrefix, rawId);
                 if (!idToUse) {
@@ -3575,11 +3552,9 @@ export class SourceManager {
                 }
 
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
-                 const isPrimary = source === primarySource;
-                 // Primary source gets a larger budget: Aniwaves embed extraction
-                 // uses Puppeteer which cold-starts at ~10-15s on first call. Keep
-                 // this below STREAM_GLOBAL_MAX_MS (12s) but above the cold-start floor.
-                 const streamReliabilityOpts = { timeout: isPrimary ? 11_000 : 5_000, maxAttempts: 1 };
+                // Raised from 5 s → 11 s for all sources: HTTP-based Yomi/Aniwaves
+                // no longer need 15 s Puppeteer cold-start but still need ~5-10 s for fetches.
+                const streamReliabilityOpts = { timeout: 11_000, maxAttempts: 1 };
                 const sourceStart = Date.now();
                 this.executeReliablyStream(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
@@ -3602,6 +3577,7 @@ export class SourceManager {
                 })
                 .finally(onDone);
             }
+
 
             // Cross-source title-based fallback
             if (effectivePickOrder.includes('cross-source')) {

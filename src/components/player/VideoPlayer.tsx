@@ -327,6 +327,14 @@ export const VideoPlayer = ({
       hlsSupported: Hls.isSupported()
     });
 
+    let startupTimer: ReturnType<typeof setTimeout> | null = null;
+    let prefetchInterval: ReturnType<typeof setInterval> | null = null;
+
+    // Hoisted here so the cleanup return below can always reference them,
+    // regardless of which playback branch (HLS.js / native / direct) runs.
+    let onStalledOrWaiting: () => void = () => {};
+    let onPlayingAgain: () => void = () => {};
+
     if (isM3U8 && Hls.isSupported()) {
       if (hlsRef.current) {
         hlsRef.current.destroy();
@@ -346,24 +354,24 @@ export const VideoPlayer = ({
         // Start at lowest quality for fastest initial load (matching test)
         startLevel: 0,
         abrEwmaDefaultEstimate: onMobile ? 800_000 : 1_500_000,
-        // ── Timeouts (matching test) ───────────────────────────────────────
-        fragLoadingTimeOut: 8000,
-        manifestLoadingTimeOut: 10000,
-        levelLoadingTimeOut: 10000,
+        // ── Timeouts ───────────────────────────────────────
+        fragLoadingTimeOut: 20000,
+        manifestLoadingTimeOut: 25000,
+        levelLoadingTimeOut: 20000,
         // ── Prefetch & retries ────────────────────────────────────────────
         startFragPrefetch: true,
         fragLoadingMaxRetry: 4,
         manifestLoadingMaxRetry: 3,
         levelLoadingMaxRetry: 3,
-        fragLoadingRetryDelay: 100,
-        manifestLoadingRetryDelay: 200,
-        maxStarvationDelay: 2,
-        maxLoadingDelay: 2,
+        fragLoadingRetryDelay: 200,
+        manifestLoadingRetryDelay: 300,
+        maxStarvationDelay: 4,
+        maxLoadingDelay: 4,
         nudgeOffset: 0.05,
         nudgeMaxRetry: 6,
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 8000;
+          xhr.timeout = 25000;
         }
       });
 
@@ -371,22 +379,23 @@ export const VideoPlayer = ({
       hls.attachMedia(video);
 
       // ── Startup watchdog ─────────────────────────────────────────────────
-      // If the manifest never parses (e.g. proxy hangs on the upstream CDN, or
-      // the deployed API forwards every segment to a dead remote proxy), HLS.js
-      // stays silent and the UI spins "Loading stream…" forever. Surface a real
-      // error and trigger server failover so the user is never stuck.
+      // Give stream 25s to parse manifest before considering it a failure.
+      // 10s was too aggressive for cold-start stream proxying (~10-12s).
       const manifestParsedRef = { current: false };
-      const startupTimer = setTimeout(() => {
+      startupTimer = setTimeout(() => {
         if (manifestParsedRef.current) return;
-        playerLog('error', 'Startup timeout — manifest did not parse within 10s. Requesting server switch.');
+        playerLog('error', 'Startup timeout — manifest did not parse within 25s. Requesting server switch.');
         try { hls.destroy(); } catch { /* ignore */ }
         setError('Stream took too long to start. Switching to another server…');
         onError?.('startup_timeout_error');
-      }, 10_000);
+      }, 25_000);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
         manifestParsedRef.current = true;
-        clearTimeout(startupTimer);
+        if (startupTimer) {
+          clearTimeout(startupTimer);
+          startupTimer = null;
+        }
         playerLog('info', 'Manifest parsed', {
           levels: data.levels.length,
           qualities: data.levels.map(l => `${l.height}p`)
@@ -409,7 +418,6 @@ export const VideoPlayer = ({
 
         // FAST STARTUP MODE: HLS.js automatically prefetches based on buffer settings
         // With our optimized buffer (30s), it will prefetch efficiently for instant playback
-        let prefetchInterval: NodeJS.Timeout | null = null;
         const startPrefetch = () => {
           if (prefetchInterval) clearInterval(prefetchInterval);
           prefetchInterval = setInterval(() => {
@@ -460,7 +468,10 @@ export const VideoPlayer = ({
         // A fatal/parse error means the manifest parsed but the stream is dead.
         // Cancel the startup watchdog so it can't later nuke a (re)tried stream
         // and trigger a spurious failover loop ("stuck on loading").
-        clearTimeout(startupTimer);
+        if (startupTimer) {
+          clearTimeout(startupTimer);
+          startupTimer = null;
+        }
 
         playerLog('error', 'HLS error', {
           type: data.type,
@@ -730,7 +741,9 @@ export const VideoPlayer = ({
 
       // Stall / waiting recovery: kick startLoad immediately when browser signals
       // it's waiting for data. Also show buffering indicator.
-      const onStalledOrWaiting = () => {
+      // NOTE: these variables are declared in the outer effect scope so that the
+      // cleanup return() can always call removeEventListener on them.
+      onStalledOrWaiting = () => {
         if (hlsRef.current) {
           playerLog('warn', 'Video stalled/waiting — resuming HLS segment load');
           try { hlsRef.current.startLoad(); } catch { /* ignore */ }
@@ -739,7 +752,7 @@ export const VideoPlayer = ({
         if (bufferingKickTimerRef.current) clearTimeout(bufferingKickTimerRef.current);
         bufferingKickTimerRef.current = setTimeout(() => setIsBuffering(true), 400);
       };
-      const onPlayingAgain = () => {
+      onPlayingAgain = () => {
         if (bufferingKickTimerRef.current) {
           clearTimeout(bufferingKickTimerRef.current);
           bufferingKickTimerRef.current = null;
@@ -900,8 +913,20 @@ export const VideoPlayer = ({
     }
 
     return () => {
+      if (startupTimer) {
+        clearTimeout(startupTimer);
+        startupTimer = null;
+      }
+      if (prefetchInterval) {
+        clearInterval(prefetchInterval);
+        prefetchInterval = null;
+      }
       // Pause video to prevent audio playing after navigation
       if (video) {
+        video.removeEventListener('stalled', onStalledOrWaiting);
+        video.removeEventListener('waiting', onStalledOrWaiting);
+        video.removeEventListener('playing', onPlayingAgain);
+        video.removeEventListener('canplay', onPlayingAgain);
         if ((video as any)._cleanupDirect) {
           (video as any)._cleanupDirect();
           delete (video as any)._cleanupDirect;
@@ -1803,7 +1828,7 @@ export const VideoPlayer = ({
         preload="auto"
         playsInline
         onClick={isMobile() ? undefined : togglePlay}
-        crossOrigin={isM3U8 && !Hls.isSupported() ? undefined : "anonymous"}
+        crossOrigin={undefined}
         style={{ willChange: 'contents', transform: 'translateZ(0)' }}
       >
        {subtitles.map((sub, i) => (

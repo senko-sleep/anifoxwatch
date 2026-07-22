@@ -1,15 +1,23 @@
 let PoolClass: any = null;
 
-// Edge-safe dynamic loading of pg module
-if (typeof process !== 'undefined' && process.env && process.env.POSTGRES_URL) {
-  try {
-    const pgModuleName = 'pg';
-    const pgModule = await import(pgModuleName);
-    PoolClass = pgModule.default?.Pool || pgModule.Pool;
-  } catch (e) {
-    console.error('[DB] Failed to load pg dynamically:', e);
+// Dynamic loading of pg module without top-level await
+function loadPgModuleSync() {
+  if (PoolClass) return PoolClass;
+  if (typeof process !== 'undefined' && process.env && process.env.POSTGRES_URL) {
+    try {
+      const pgModuleName = 'pg';
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const pgModule = typeof require !== 'undefined' ? require(pgModuleName) : null;
+      if (pgModule) {
+        PoolClass = pgModule.default?.Pool || pgModule.Pool;
+      }
+    } catch (e) {
+      console.error('[DB] Failed to load pg dynamically:', e);
+    }
   }
+  return PoolClass;
 }
+loadPgModuleSync();
 
 let pool: any = null;
 

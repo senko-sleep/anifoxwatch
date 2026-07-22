@@ -99,13 +99,16 @@ beforeEach(() => {
 
 
 
-const queryClient = new QueryClient({
-    defaultOptions: {
-        queries: { retry: false },
-    },
-});
+let queryClient: QueryClient;
 
 function renderWatch(initialEntries: string[]) {
+    if (!queryClient) {
+        queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false, gcTime: 0, staleTime: 0 },
+            },
+        });
+    }
     console.log('[TEST] Render Watch with initialEntries:', initialEntries, 'API Config:', getApiConfig());
     return render(
         <MemoryRouter initialEntries={initialEntries}>
@@ -126,10 +129,12 @@ describe('Watch Page - Episode Loading Fix', () => {
     vi.setConfig({ testTimeout: localTimeout });
 
     beforeEach(() => {
-        queryClient.clear();
+        queryClient = new QueryClient({
+            defaultOptions: {
+                queries: { retry: false, gcTime: 0, staleTime: 0 },
+            },
+        });
     });
-
-
 
     it('should load episode 1 UI without hanging', async () => {
         renderWatch(['/watch?id=anilist-189046&ep=1']);
@@ -141,32 +146,19 @@ describe('Watch Page - Episode Loading Fix', () => {
         });
     });
 
-
-
-
     it('should load episode 4 UI without hanging', async () => {
         renderWatch(['/watch?id=anilist-189046&ep=4']);
         await screen.findAllByText(/Test Anime/i, {}, { timeout: 10000 });
     });
 
-
-
     it('should switch between episodes without infinite loading', async () => {
-        const { rerender } = renderWatch(['/watch?id=anilist-189046&ep=1']);
+        const { unmount } = renderWatch(['/watch?id=anilist-189046&ep=1']);
         await screen.findAllByText(/Test Anime/i, {}, { timeout: 10000 });
 
-        rerender(
-            <MemoryRouter initialEntries={['/watch?id=anilist-189046&ep=4']}>
-                <QueryClientProvider client={queryClient}>
-                    <Watch />
-                </QueryClientProvider>
-            </MemoryRouter>
-        );
-
+        unmount();
+        renderWatch(['/watch?id=anilist-189046&ep=4']);
         await screen.findAllByText(/Test Anime/i, {}, { timeout: 10000 });
     });
-
-
 
     it('should load different anime without crashing', async () => {
         renderWatch(['/watch?id=anilist-182205&ep=1']);
@@ -174,17 +166,14 @@ describe('Watch Page - Episode Loading Fix', () => {
         await screen.findAllByText(/Test Anime/i, {}, { timeout: 10000 });
     });
 
-
-
     it('should maintain anime/episode selection without infinite loading', async () => {
-        renderWatch(['/watch?id=anilist-189046&ep=1']);
+        const { unmount } = renderWatch(['/watch?id=anilist-189046&ep=1']);
         await screen.findAllByText(/Test Anime/i, {}, { timeout: 10000 });
 
+        unmount();
         renderWatch(['/watch?id=anilist-182205&ep=4']);
         await screen.findAllByText(/Test Anime/i, {}, { timeout: 10000 });
     });
-
-
 });
 
 /**

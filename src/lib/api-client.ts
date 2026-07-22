@@ -734,8 +734,10 @@ class AnimeApiClient {
             // Hard timeout so the UI never spins forever.
             // Fail fast at 12s — if the backend hasn't responded by then, try failover.
             // Use longer timeout for Render.com (slower cold starts) vs Vercel
-            const isRender = base.includes('onrender.com');
-            const streamTimeoutMs = isRender ? 25_000 : 12_000;
+            // Give every host 25 s — Puppeteer-based sources (Yomi, Aniwaves embed extractor)
+            // need up to 15-20 s on cold start. The old 12 s cap caused AbortError before
+            // any source could respond, producing "signal is aborted without reason".
+            const streamTimeoutMs = 25_000;
             const maxAttempts = 1;
             let lastErr: Error | null = null;
 

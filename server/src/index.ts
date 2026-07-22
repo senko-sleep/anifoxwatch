@@ -324,9 +324,9 @@ const startServer = async (port: number) => {
 ╚══════════════════════════════════════════════════════════════════╝
         `);
         console.log(`📡 Registered sources (same as SourceManager constructor): ${REGISTERED_SOURCE_NAMES.join(' → ')}`);
-        // Warm Puppeteer in the background so the first /api/stream/watch is not blocked on browser launch.
-        // TODO: Re-enable after fixing browser launch crash
-        // void streamExtractor.warmBrowser();
+        // Pre-warm Puppeteer (used by Aniwaves embed extractor) in the background so the
+        // first /api/stream/watch request does not block on browser launch (~10–15 s cold start).
+        void streamExtractor.warmBrowser();
     });
 
     // Connection timeout settings to prevent hanging connections
