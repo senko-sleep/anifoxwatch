@@ -826,6 +826,9 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     let lastError: string | null = null;
 
     try {
+        logger.info(`[STREAM] Calling sourceManager.getStreamingLinks with:`, {
+            episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle
+        });
         streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string);
     } catch (e: unknown) {
         lastError = e instanceof Error ? e.message : String(e);
