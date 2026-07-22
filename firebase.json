@@ -8,14 +8,6 @@
     ],
     "rewrites": [
       {
-        "source": "/api/v2/**",
-        "function": "api"
-      },
-      {
-        "source": "/health",
-        "function": "api"
-      },
-      {
         "source": "**",
         "destination": "/index.html"
       }
@@ -66,9 +58,5 @@
         ]
       }
     ]
-  },
-  "functions": {
-    "source": "functions",
-    "runtime": "nodejs18"
   }
 }
