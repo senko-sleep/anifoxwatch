@@ -395,9 +395,10 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 import { fileURLToPath } from 'url';
 
+// Export app for Vercel serverless function
+export default app;
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
     startServer(Number(PORT));
 }
-
-export default app;
 
