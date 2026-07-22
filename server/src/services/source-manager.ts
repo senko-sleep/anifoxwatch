@@ -154,11 +154,9 @@ export class SourceManager {
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
         console.log(`   Available sources: ${Array.from(this.sources.keys()).join(', ')}`);
         
-        // Start health monitoring and perform initial health check (non-worker environments only)
-        const isWorker = typeof (globalThis as any).WebSocketPair !== 'undefined' || (typeof process !== 'undefined' && process.env && (process.env.CF_PAGES || process.env.CF_WORKER || process.env.MINIFLARE));
-        if (!isWorker) {
-            this.startHealthMonitor();
-        }
+        // CRITICAL: Always start health monitor on Vercel to ensure sources are available
+        // Vercel serverless functions need health monitoring to work properly
+        this.startHealthMonitor();
 
         logger.info(`Initialized with ${this.sources.size} sources`, undefined, 'SourceManager');
     }
@@ -227,8 +225,8 @@ export class SourceManager {
         for (const [name, source] of sourcesToRecover) {
             try {
                 const isHealthy = await Promise.race([
-                    source.healthCheck({ timeout: 45000 }), // Increased from 12s to 45s for Vercel
-                    new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 45000))
+                    source.healthCheck({ timeout: 12000 }),
+                    new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 12000))
                 ]);
 
                 if (isHealthy !== false) {
@@ -336,9 +334,9 @@ export class SourceManager {
             try {
                 console.log(`   🔍 Verifying ${name}...`);
                 const isHealthy = await Promise.race([
-                    source.healthCheck({ timeout: 45000 }), // Increased from 12s to 45s for Vercel
+                    source.healthCheck({ timeout: 12000 }),
                     new Promise<boolean>((resolve) => 
-                        setTimeout(() => resolve(true), 45000) // Default to true on timeout for Vercel
+                        setTimeout(() => resolve(true), 12000) // Default to true on timeout
                     )
                 ]);
                 
@@ -501,7 +499,7 @@ export class SourceManager {
             this.globalActiveRequests = Math.max(0, this.maxGlobalConcurrent);
         }
 
-        const requestTimeout = request.options.timeout || 60000; // Increased from 30s to 60s for Vercel
+        const requestTimeout = request.options.timeout || 30000;
         // Safety timeout: if withTimeout itself hangs, force-complete after 2x the timeout
         const safetyTimer = setTimeout(() => {
             console.warn(`⚠️ [SourceManager] Safety timeout hit for: ${request.context}`);
