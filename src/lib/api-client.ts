@@ -731,12 +731,9 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            // Hard timeout so the UI never spins forever.
-            // Fail fast at 12s — if the backend hasn't responded by then, try failover.
-            // Use longer timeout for Render.com (slower cold starts) vs Vercel
-            // 8s timeout per host — if primary (e.g. Render) is slow/cold starting,
-            // failover fast to secondary host (e.g. Vercel) instead of hanging the client.
-            const streamTimeoutMs = 8_000;
+            // 45s timeout per host — Render free tier cold starts can take 20-40s.
+            // A short timeout causes premature client aborts while Render is waking up.
+            const streamTimeoutMs = 45_000;
             const maxAttempts = 1;
             let lastErr: Error | null = null;
 

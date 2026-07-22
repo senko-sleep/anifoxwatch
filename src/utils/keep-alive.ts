@@ -20,11 +20,15 @@ export async function ping() {
 
   const pingUrl = (url: string) => fetch(url, {
     method: 'GET', mode: 'cors', cache: 'no-cache',
-    referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000),
+    referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000),
   }).catch(() => {});
 
   try {
-    await pingUrl(apiUrl('/api/health'));
+    // Ping primary API (via apiUrl) and direct Render instance to keep container warm
+    await Promise.allSettled([
+      pingUrl(apiUrl('/api/health')),
+      pingUrl('https://anifoxwatch-dko2.onrender.com/api/health')
+    ]);
     consecutiveFailures = 0;
   } catch {
     consecutiveFailures++;
