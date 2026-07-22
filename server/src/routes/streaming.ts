@@ -835,7 +835,22 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         logger.info(`[STREAM] Calling sourceManager.getStreamingLinks with:`, {
             episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle
         });
+        
+        // Check if sourceManager exists and has sources
+        if (!sourceManager) {
+            logger.error(`[STREAM] sourceManager is not initialized!`);
+            throw new Error('sourceManager not initialized');
+        }
+        
+        const sourcesCount = (sourceManager as any).sources?.size || 0;
+        logger.info(`[STREAM] sourceManager has ${sourcesCount} sources registered`);
+        
         streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string);
+        logger.info(`[STREAM] getStreamingLinks returned:`, {
+            hasSources: streamData?.sources?.length > 0,
+            sourcesCount: streamData?.sources?.length,
+            subtitlesCount: streamData?.subtitles?.length
+        });
     } catch (e: unknown) {
         lastError = e instanceof Error ? e.message : String(e);
     }
