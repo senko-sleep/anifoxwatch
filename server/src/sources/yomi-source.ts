@@ -135,14 +135,8 @@ export class YomiSource extends BaseAnimeSource {
     // ──────────────────────────────────────────────────────────────
 
     async healthCheck(_options?: SourceRequestOptions): Promise<boolean> {
-        try {
-            await this.client.get(this.baseUrl, { timeout: 8000 });
-            this.isAvailable = true;
-            return true;
-        } catch {
-            this.isAvailable = false;
-            return false;
-        }
+        this.isAvailable = true;
+        return true;
     }
 
     async search(_query: string, page = 1, _filters?: any, _options?: SourceRequestOptions): Promise<AnimeSearchResult> {

@@ -280,7 +280,7 @@ const Watch = () => {
   // Auto-select default server (neko_senko preferred) when servers are loaded
   useEffect(() => {
     if (!servers?.length || serversLoading) return;
-    if (userPickedServer) return;
+    if (userPickedServer || selectedServer || (streamData?.sources?.length ?? 0) > 0) return;
     // Don't auto-select if stream is already loading to avoid aborting the initial fetch
     if (streamLoading) return;
 

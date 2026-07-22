@@ -139,6 +139,16 @@ export const VideoPlayer = ({
   // Blob URL created for native HLS manifest pre-fetch (iOS workaround)
   const nativeHlsBlobUrlRef = useRef<string | null>(null);
 
+  // Stable ref for onError callback — prevents the HLS useEffect from re-running
+  // (and destroying/recreating HLS mid-stream) every time Watch.tsx re-renders
+  // and produces a new `handlePlayerError` function identity.
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+
+  // Stable ref for loadSavedPosition — prevents effect re-runs when callback
+  // identity changes due to getPositionKey memoization.
+  const loadSavedPositionRef = useRef<() => number>(() => 0);
+
   // --- Stall/Loading loop guards -------------------------------------------
   // Give HLS a grace period after source change before we escalate “stuck”.
   // Many streams keep playhead at ~0 until first fragments are decoded.
@@ -244,6 +254,7 @@ export const VideoPlayer = ({
     }
     return 0;
   }, [getPositionKey]);
+  loadSavedPositionRef.current = loadSavedPosition;
 
   const clearSavedPosition = useCallback(() => {
     const key = getPositionKey();
@@ -341,17 +352,17 @@ export const VideoPlayer = ({
       }
 
       const onMobile = isMobile();
+      const initialSavedPos = loadSavedPositionRef.current();
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
+        startPosition: initialSavedPos > 5 ? initialSavedPos : -1,
         // ── Buffer sizing ─────────────────────────────────────────────────
-        // FAST STARTUP MODE: Minimal buffers for instant playback (matching test)
-        backBufferLength: onMobile ? 8 : 10,
-        maxBufferLength: onMobile ? 20 : 30,
-        maxMaxBufferLength: onMobile ? 40 : 60,
-        maxBufferHole: 3.0,
+        backBufferLength: onMobile ? 15 : 30,
+        maxBufferLength: onMobile ? 30 : 60,
+        maxMaxBufferLength: onMobile ? 60 : 120,
+        maxBufferHole: 0.5,
         // ── ABR / quality selection ───────────────────────────────────────
-        // Start at lowest quality for fastest initial load (matching test)
         startLevel: 0,
         abrEwmaDefaultEstimate: onMobile ? 800_000 : 1_500_000,
         // ── Timeouts ───────────────────────────────────────
@@ -380,14 +391,13 @@ export const VideoPlayer = ({
 
       // ── Startup watchdog ─────────────────────────────────────────────────
       // Give stream 25s to parse manifest before considering it a failure.
-      // 10s was too aggressive for cold-start stream proxying (~10-12s).
       const manifestParsedRef = { current: false };
       startupTimer = setTimeout(() => {
         if (manifestParsedRef.current) return;
         playerLog('error', 'Startup timeout — manifest did not parse within 25s. Requesting server switch.');
         try { hls.destroy(); } catch { /* ignore */ }
         setError('Stream took too long to start. Switching to another server…');
-        onError?.('startup_timeout_error');
+        onErrorRef.current?.('startup_timeout_error');
       }, 25_000);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
@@ -403,47 +413,19 @@ export const VideoPlayer = ({
 
         setAvailableLevels(data.levels.map(l => ({ height: l.height, bitrate: l.bitrate })));
 
-        // Let ABR pick quality automatically — forcing maxLevel before bandwidth
-        // is measured causes stalls when the connection can't sustain it.
-        // The high abrEwmaDefaultEstimate above means ABR will still start high.
         hls.currentLevel = -1; // -1 = ABR auto
         setCurrentLevel(-1);
 
-        // FAST STARTUP: Start playback immediately without prebuffer delay
         playerLog('info', 'Starting playback immediately');
         setIsLoading(false);
         video.play().catch((e) => {
           playerLog('warn', 'Autoplay blocked', e);
         });
 
-        // FAST STARTUP MODE: HLS.js automatically prefetches based on buffer settings
-        // With our optimized buffer (30s), it will prefetch efficiently for instant playback
-        const startPrefetch = () => {
-          if (prefetchInterval) clearInterval(prefetchInterval);
-          prefetchInterval = setInterval(() => {
-            if (!hlsRef.current || video.paused) return;
-            // HLS.js automatically prefetches based on buffer settings
-            // With our optimized buffer (30s), it will prefetch efficiently
-            // Force HLS to load ahead if buffer is getting low
-            if (hlsRef.current && video.buffered.length > 0) {
-              const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-              const currentTime = video.currentTime;
-              const bufferAhead = bufferedEnd - currentTime;
-              // If buffer drops below 60s, trigger aggressive loading
-              if (bufferAhead < 60) {
-                hlsRef.current.startLoad(currentTime);
-              }
-            }
-          }, 2000); // Check every 2 seconds for more aggressive monitoring
-        };
-        startPrefetch();
-
-        const savedPos = loadSavedPosition();
-        if (savedPos > 5) {
-          video.currentTime = savedPos;
-          setCurrentTime(savedPos);
+        if (initialSavedPos > 5) {
+          setCurrentTime(initialSavedPos);
           setShowPositionRestored(true);
-          playerLog('info', `Restored saved position: ${savedPos.toFixed(2)}s`);
+          playerLog('info', `Restored saved position: ${initialSavedPos.toFixed(2)}s`);
           setTimeout(() => setShowPositionRestored(false), 3000);
         }
       });
@@ -491,7 +473,7 @@ export const VideoPlayer = ({
             playerLog('error', 'Too many fragment parsing errors — stream is serving non-video content (ad-poisoned). Requesting source switch.');
             hls.destroy();
             setError('Stream is corrupted (non-video content). Switching to another server…');
-            onError?.('frag_parsing_error');
+            onErrorRef.current?.('frag_parsing_error');
             return;
           }
         }
@@ -509,7 +491,7 @@ export const VideoPlayer = ({
             playerLog('error', 'Too many fragment load errors — CDN segments unreachable. Requesting source switch.');
             hls.destroy();
             setError('Video segments cannot be loaded (CDN error). Switching to another server…');
-            onError?.('frag_load_error');
+            onErrorRef.current?.('frag_load_error');
             return;
           }
         }
@@ -519,20 +501,20 @@ export const VideoPlayer = ({
             case Hls.ErrorTypes.NETWORK_ERROR: {
               if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR) {
                 setError('Failed to load video manifest. The stream may be unavailable.');
-                onError?.('manifest_load_error');
+                onErrorRef.current?.('manifest_load_error');
               } else if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR) {
                 if (fragLoadErrorCount >= 4) {
                   playerLog('error', 'Fatal frag load error after repeated failures — requesting source switch');
                   hls.destroy();
                   setError('Cannot load video segments. Switching to another server…');
-                  onError?.('frag_load_error');
+                  onErrorRef.current?.('frag_load_error');
                 } else {
                   networkRecoveryAttemptsRef.current++;
                   if (networkRecoveryAttemptsRef.current > 3) {
                     playerLog('error', 'Too many network recovery attempts — requesting source switch');
                     hls.destroy();
                     setError('Network error — switching to another server…');
-                    onError?.('frag_load_error');
+                    onErrorRef.current?.('frag_load_error');
                   } else {
                     playerLog('warn', `Network recovery attempt ${networkRecoveryAttemptsRef.current}/3 — startLoad`);
                     hls.startLoad();
@@ -544,7 +526,7 @@ export const VideoPlayer = ({
                   playerLog('error', 'Network errors exceeded recovery limit — requesting source switch');
                   hls.destroy();
                   setError('Network error — switching to another server…');
-                  onError?.('manifest_load_error');
+                  onErrorRef.current?.('manifest_load_error');
                 } else {
                   playerLog('warn', `Network error, recovery attempt ${networkRecoveryAttemptsRef.current}/3 — startLoad`);
                   hls.startLoad();
@@ -557,7 +539,7 @@ export const VideoPlayer = ({
                 playerLog('error', 'Media error with prior frag parsing errors — escalating to source switch');
                 hls.destroy();
                 setError('Stream is corrupted. Switching to another server…');
-                onError?.('frag_parsing_error');
+                onErrorRef.current?.('frag_parsing_error');
               } else {
                 mediaRecoveryAttemptsRef.current++;
                 if (mediaRecoveryAttemptsRef.current === 1) {
@@ -571,14 +553,14 @@ export const VideoPlayer = ({
                   playerLog('error', `Media error unrecoverable after ${mediaRecoveryAttemptsRef.current} attempts — requesting source switch`);
                   hls.destroy();
                   setError('Stream is unplayable. Switching to another server…');
-                  onError?.('frag_parsing_error');
+                  onErrorRef.current?.('frag_parsing_error');
                 }
               }
               break;
             }
             default:
               setError('An unexpected error occurred. Try a different server.');
-              onError?.('unknown_error');
+              onErrorRef.current?.('unknown_error');
               hls.destroy();
               break;
           }
@@ -679,7 +661,7 @@ export const VideoPlayer = ({
             hlsRef.current?.destroy();
           } catch { /* ignore */ }
           setError('Video stalled. Switching to another server…');
-          onError?.('stall_timeout_error');
+          onErrorRef.current?.('stall_timeout_error');
 
         } else if (stalledMs >= 6_000) {
           // Recovery can be expensive; avoid doing it repeatedly in a tight loop.
@@ -733,21 +715,11 @@ export const VideoPlayer = ({
               v.currentTime = now + 0.1;
             }
           } catch { /* ignore */ }
-        } else if (stalledMs >= 1_500) {
-          playerLog('warn', 'Watchdog: 1.5s stall — calling startLoad');
-          try { hlsRef.current?.startLoad(); } catch { /* ignore */ }
         }
       }, WATCHDOG_INTERVAL_MS);
 
-      // Stall / waiting recovery: kick startLoad immediately when browser signals
-      // it's waiting for data. Also show buffering indicator.
-      // NOTE: these variables are declared in the outer effect scope so that the
-      // cleanup return() can always call removeEventListener on them.
+      // Stall / waiting handling: show buffering indicator on waiting
       onStalledOrWaiting = () => {
-        if (hlsRef.current) {
-          playerLog('warn', 'Video stalled/waiting — resuming HLS segment load');
-          try { hlsRef.current.startLoad(); } catch { /* ignore */ }
-        }
         // Show buffering spinner after short debounce (avoids flash on quick ABR switches)
         if (bufferingKickTimerRef.current) clearTimeout(bufferingKickTimerRef.current);
         bufferingKickTimerRef.current = setTimeout(() => setIsBuffering(true), 400);
@@ -776,7 +748,7 @@ export const VideoPlayer = ({
           playerLog('info', 'Video metadata loaded (native)');
           setIsLoading(false);
 
-          const savedPos = loadSavedPosition();
+          const savedPos = loadSavedPositionRef.current();
           if (savedPos > 5) {
             video.currentTime = savedPos;
             setCurrentTime(savedPos);
@@ -802,7 +774,7 @@ export const VideoPlayer = ({
             message: err?.message
           });
           setError('Failed to load video. Try a different server.');
-          onError?.('native_error');
+          onErrorRef.current?.('native_error');
         };
 
         // Cleanup
@@ -875,7 +847,7 @@ export const VideoPlayer = ({
       const onLoadedMetadataDirect = () => {
         setIsLoading(false);
 
-        const savedPos = loadSavedPosition();
+        const savedPos = loadSavedPositionRef.current();
         if (savedPos > 5) {
           video.currentTime = savedPos;
           setCurrentTime(savedPos);
@@ -894,7 +866,7 @@ export const VideoPlayer = ({
         const err = video.error;
         playerLog('error', 'Direct video error', { code: err?.code, message: err?.message });
         setError('Failed to load video. Try a different server.');
-        onError?.('native_error');
+        onErrorRef.current?.('native_error');
       };
 
       // In JavaScript, you can attach arbitrary properties to the video element to clean them up later
@@ -936,7 +908,7 @@ export const VideoPlayer = ({
           delete (video as any)._cleanupNative;
         }
         video.pause();
-        video.src = '';
+        video.removeAttribute('src');
         video.load();
       }
       if (stallWatchdogRef.current) {
@@ -957,7 +929,12 @@ export const VideoPlayer = ({
         nativeHlsBlobUrlRef.current = null;
       }
     };
-  }, [src, isM3U8, onError, loadSavedPosition]);
+  // NOTE: onError and loadSavedPosition are intentionally NOT in the dep array —
+  // they are accessed via stable refs so that new callback identities from the
+  // parent never trigger HLS destroy/recreate mid-stream (which caused
+  // bufferAppendError + ERR_FILE_NOT_FOUND on blob MSE URLs).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src, isM3U8]);
 
   // Keep duration in sync — some HLS sources never reliably emit durationchange,
   // which breaks scrubbing UI and can appear as “not playable”.
@@ -1405,7 +1382,12 @@ export const VideoPlayer = ({
     if (!video) return;
 
     if (video.paused) {
-      video.play();
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          playerLog('warn', 'Playback error on togglePlay:', err);
+        });
+      }
     } else {
       video.pause();
     }

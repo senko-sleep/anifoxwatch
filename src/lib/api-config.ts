@@ -11,6 +11,18 @@
 
 export type ApiDeployment = 'local' | 'vercel' | 'firebase' | 'custom' | 'hianimeRest';
 
+/**
+ * Returns true when the page is loaded inside a context where the Vite dev-server
+ * proxy is NOT available — e.g. VSCode Simple Browser (vscode-webview://...) or
+ * any non-http(s) origin.  In that case same-origin relative `/api/*` paths won't
+ * work and we must use the absolute localhost URL instead.
+ */
+function isProxyUnavailable(): boolean {
+    if (typeof window === 'undefined') return false;
+    const proto = window.location.protocol;
+    return proto !== 'http:' && proto !== 'https:';
+}
+
 export interface ApiConfig {
     deployment: ApiDeployment;
     baseUrl: string;
@@ -82,9 +94,13 @@ export function apiUrl(path: string): string {
  */
 export function resolveDevApiConfig(env: ImportMetaEnv): ApiConfig {
     if (env.VITE_USE_LOCAL_API === 'true') {
+        // When running inside VSCode Simple Browser (vscode-webview:// origin) the
+        // Vite dev-server proxy is not reachable via same-origin paths.  Use the
+        // absolute localhost URL so fetch() targets the real Express server.
+        const baseUrl = isProxyUnavailable() ? API_DEPLOYMENTS.local : '';
         return {
             deployment: 'local',
-            baseUrl: '',
+            baseUrl,
             timeout: 45000,
             retries: 3,
         };
@@ -167,7 +183,7 @@ export function getApiFallbackUrl(): string | null {
 
     const hostname = window.location.hostname;
     const isFirebaseHosting = hostname.includes('firebaseapp.com') || hostname.includes('web.app');
-    if (isFirebaseHosting) return null;
+    if (isFirebaseHosting) return 'https://anifoxwatch.vercel.app';
 
     const sameOrigin = (window.location?.origin || '').replace(/\/$/, '');
     const primary = (getApiConfig().baseUrl || '').replace(/\/$/, '');

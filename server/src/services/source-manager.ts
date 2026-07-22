@@ -3243,7 +3243,13 @@ export class SourceManager {
         // They require a title-based lookup via crossSourceStreamingFallback.
         // Skip the direct source list entirely so we don't incorrectly remove sources
         // that fail because of an incompatible ID format (not because they're broken).
-        // UNLESS an explicit server parameter is provided - in that case, honor it.
+        if (isAnilistId) {
+            const yomi = this.sources.get('Yomi') as StreamingSource;
+            if (yomi?.isAvailable && yomi.getStreamingLinks && !sourcesToTry.includes(yomi)) {
+                sourcesToTry.push(yomi);
+                console.log(`   🎯 Added Yomi for direct AniList ID resolution`);
+            }
+        }
 
         if (!isAnilistId || hasExplicitServer) {
             // If explicit server is provided, prioritize it
