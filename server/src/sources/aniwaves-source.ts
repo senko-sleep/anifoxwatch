@@ -55,11 +55,11 @@ export class AniwavesSource extends BaseAnimeSource {
         const keepAliveAgent = new https.Agent({
             keepAlive: true,
             maxSockets: 15,
-            timeout: 12000,
+            timeout: 30000, // Increased from 12000ms to 30000ms
         });
         this.client = axios.create({
             baseURL: this.baseUrl,
-            timeout: 7000,           // Fail fast — parallel race makes this safe
+            timeout: 15000,           // Increased from 7000ms to 15000ms for Render.com cold starts
             httpsAgent: keepAliveAgent,
             headers: {
                 'Accept': 'application/json, text/html',
