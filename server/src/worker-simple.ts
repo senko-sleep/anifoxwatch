@@ -1271,24 +1271,38 @@ app.get('/api/stream/proxy', async (c) => {
 
   try {
     const timeout = envNum(c.env.GLOBAL_TIMEOUT_MS, 15000);
+    const upstreamHeaders: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      Referer: new URL(url).origin,
+    };
+    // Forward Range header so the browser can seek in MP4 videos
+    const rangeHeader = c.req.header('range') || c.req.header('Range');
+    if (rangeHeader) upstreamHeaders['Range'] = rangeHeader;
+
     const response = await resilientFetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        Referer: new URL(url).origin,
-      },
+      headers: upstreamHeaders,
       timeoutMs: timeout,
       retries: 2,
       context: 'stream proxy',
     });
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 206) {
       return c.json({ error: 'Upstream error', status: response.status }, response.status as any);
     }
 
     const contentType = response.headers.get('content-type') || '';
     const newHeaders = new Headers(response.headers);
     newHeaders.set('Access-Control-Allow-Origin', '*');
-    newHeaders.set('Cache-Control', 'public, max-age=30');
+    newHeaders.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+    // For range responses (206) use short cache; for full responses cache longer
+    newHeaders.set('Cache-Control', response.status === 206 ? 'no-store' : 'public, max-age=30');
+    // Ensure Accept-Ranges is advertised so browser knows it can seek
+    if (!newHeaders.has('accept-ranges')) {
+      const ct = contentType.toLowerCase();
+      if (ct.includes('video') || ct.includes('octet-stream') || url.includes('.mp4') || url.includes('.ts')) {
+        newHeaders.set('Accept-Ranges', 'bytes');
+      }
+    }
 
     // Rewrite .m3u8 segment URLs so they also route through this proxy
     if (contentType.includes('mpegurl') || url.includes('.m3u8')) {

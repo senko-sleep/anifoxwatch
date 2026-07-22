@@ -811,19 +811,26 @@ export const VideoPlayer = ({
             }
             const baseDir = upstreamBase.substring(0, upstreamBase.lastIndexOf('/') + 1);
 
-            // Make relative URI lines and URI= attributes absolute so iOS can resolve them.
+            const proxyBase = apiUrl('/api/stream/proxy');
             const rewritten = manifestText
               .split('\n')
               .map(line => {
                 const t = line.trim();
                 if (!t || t.startsWith('#')) return line;
-                if (/^https?:\/\//.test(t)) return line;
-                try { return new URL(t, baseDir).href; } catch { return line; }
+                let absUrl = t;
+                if (!/^https?:\/\//i.test(t)) {
+                  try { absUrl = new URL(t, baseDir).href; } catch { return line; }
+                }
+                return absUrl.includes('/api/stream/proxy') ? absUrl : `${proxyBase}?url=${encodeURIComponent(absUrl)}`;
               })
               .join('\n')
               .replace(/URI="([^"]+)"/g, (match, uri) => {
-                if (/^https?:\/\//.test(uri)) return match;
-                try { return `URI="${new URL(uri, baseDir).href}"`; } catch { return match; }
+                let absUri = uri;
+                if (!/^https?:\/\//i.test(uri)) {
+                  try { absUri = new URL(uri, baseDir).href; } catch { return match; }
+                }
+                if (absUri.includes('/api/stream/proxy')) return match;
+                return `URI="${proxyBase}?url=${encodeURIComponent(absUri)}"`;
               });
 
             if (nativeHlsBlobUrlRef.current) {
@@ -936,127 +943,47 @@ export const VideoPlayer = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, isM3U8]);
 
-  // Keep duration in sync — some HLS sources never reliably emit durationchange,
-  // which breaks scrubbing UI and can appear as “not playable”.
+    // Keep duration in sync — use event-driven approach instead of RAF polling.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
 
-    let raf = 0;
-    const tick = () => {
+    const onDurationChange = () => {
       const d = v.duration;
-      if (Number.isFinite(d) && d > 0 && Math.abs(d - duration) > 0.25) {
-        setDuration(d);
-      }
-      raf = requestAnimationFrame(tick);
+      if (Number.isFinite(d) && d > 0) setDuration(d);
     };
-
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    const onLoadedMeta = () => {
+      const d = v.duration;
+      if (Number.isFinite(d) && d > 0) setDuration(d);
+    };
+    v.addEventListener('durationchange', onDurationChange);
+    v.addEventListener('loadedmetadata', onLoadedMeta);
+    return () => {
+      v.removeEventListener('durationchange', onDurationChange);
+      v.removeEventListener('loadedmetadata', onLoadedMeta);
+    };
   }, [src]);
 
-  // Background MP4 cache
+  // Background MP4 blob-cache intentionally removed:
+  // Downloading the entire MP4 to RAM prevents seeking and causes massive lag
+  // for hentai/WatchHentai MP4 content. The proxy already forwards Range headers
+  // so the browser can seek natively without pre-downloading.
+
+  // (Placeholder effect to keep ref cleanup wired without the download logic)
   useEffect(() => {
     if (isM3U8 || !src) return;
-
-    const resolvedSrc = (() => {
-      const s = String(src || '').trim();
-      if (!s) return s;
-      if (s.startsWith('blob:') || s.startsWith('data:')) return s;
-      if (s.includes('/api/stream/proxy?url=')) return s;
-      if (!/^https?:\/\//i.test(s)) return s;
-      if (typeof window !== 'undefined') {
-        try {
-          const u = new URL(s);
-          if (u.origin === window.location.origin) return s;
-        } catch {
-          // fall through
-        }
-      }
-      return `${apiUrl('/api/stream/proxy')}?url=${encodeURIComponent(s)}`;
-    })();
-
+    // Abort any lingering download from a previous mount
+    if (bgDownloadControllerRef.current) {
+      bgDownloadControllerRef.current.abort();
+      bgDownloadControllerRef.current = null;
+    }
     if (cachedBlobUrlRef.current) {
       URL.revokeObjectURL(cachedBlobUrlRef.current);
       cachedBlobUrlRef.current = null;
     }
-    if (bgDownloadControllerRef.current) {
-      bgDownloadControllerRef.current.abort();
-    }
-
-    const controller = new AbortController();
-    bgDownloadControllerRef.current = controller;
-    const video = videoRef.current;
-    if (!video) return;
-
-    const doBgDownload = async () => {
-      try {
-        const resp = await fetch(resolvedSrc, { signal: controller.signal });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-        const blob = await resp.blob();
-        if (controller.signal.aborted) return;
-
-        const blobUrl = URL.createObjectURL(blob);
-        cachedBlobUrlRef.current = blobUrl;
-
-        playerLog('info', `Background cache complete: ${(blob.size / 1024 / 1024).toFixed(1)}MB — switching to offline blob`);
-
-        const vid = videoRef.current;
-        if (!vid) return;
-
-        const pos = vid.currentTime;
-        const playing = !vid.paused;
-        const vol = vid.volume;
-        const muted = vid.muted;
-        const rate = vid.playbackRate;
-
-        const onReady = () => {
-          vid.currentTime = pos;
-          vid.volume = vol;
-          vid.muted = muted;
-          vid.playbackRate = rate;
-          if (playing) vid.play().catch(() => {});
-          vid.removeEventListener('loadeddata', onReady);
-          playerLog('info', `Swapped to offline blob at ${pos.toFixed(1)}s`);
-        };
-
-        vid.addEventListener('loadeddata', onReady);
-        vid.src = blobUrl;
-        
-        if (vid.readyState >= 2) {
-          onReady();
-        }
-      } catch (e: any) {
-        if (e.name !== 'AbortError') {
-          playerLog('warn', 'Background MP4 cache failed, continuing with stream', e.message);
-        }
-      }
-    };
-
-    let delayTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const startAfterDelay = () => {
-      playerLog('info', 'Video playing — will start background cache in 3s');
-      delayTimer = setTimeout(() => {
-        if (!controller.signal.aborted) doBgDownload();
-      }, 3000);
-    };
-
-    if (!video.paused && video.currentTime > 0) {
-      startAfterDelay();
-    } else {
-      video.addEventListener('playing', startAfterDelay, { once: true });
-    }
 
     return () => {
-      controller.abort();
-      if (delayTimer) clearTimeout(delayTimer);
-      video.removeEventListener('playing', startAfterDelay);
-      if (cachedBlobUrlRef.current) {
-        URL.revokeObjectURL(cachedBlobUrlRef.current);
-        cachedBlobUrlRef.current = null;
-      }
+      // nothing to clean up — no download was started
     };
   }, [src, isM3U8]);
 
