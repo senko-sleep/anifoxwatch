@@ -28,10 +28,10 @@ export class YomiSource extends BaseAnimeSource {
         const keepAliveAgent = new https.Agent({
             keepAlive: true,
             maxSockets: 15,
-            timeout: 12000,
+            timeout: 60000, // Increased from 12s to 60s for Vercel
         });
         this.client = axios.create({
-            timeout: 10000,
+            timeout: 45000, // Increased from 10s to 45s for Vercel cold starts
             httpsAgent: keepAliveAgent,
             headers: {
                 Accept: 'text/html,application/xhtml+xml,*/*',

@@ -56,11 +56,11 @@ export class AniwavesSource extends BaseAnimeSource {
         const keepAliveAgent = new https.Agent({
             keepAlive: true,
             maxSockets: 15,
-            timeout: 30000, // Increased from 12000ms to 30000ms
+            timeout: 60000, // Increased from 30s to 60s for Vercel
         });
         this.client = axios.create({
             baseURL: this.baseUrl,
-            timeout: 15000,           // Increased from 7000ms to 15000ms for Render.com cold starts
+            timeout: 45000,           // Increased from 15s to 45s for Vercel cold starts
             httpsAgent: keepAliveAgent,
             headers: {
                 'Accept': 'application/json, text/html',

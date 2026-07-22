@@ -501,7 +501,7 @@ export class SourceManager {
             this.globalActiveRequests = Math.max(0, this.maxGlobalConcurrent);
         }
 
-        const requestTimeout = request.options.timeout || 30000;
+        const requestTimeout = request.options.timeout || 60000; // Increased from 30s to 60s for Vercel
         // Safety timeout: if withTimeout itself hangs, force-complete after 2x the timeout
         const safetyTimer = setTimeout(() => {
             console.warn(`⚠️ [SourceManager] Safety timeout hit for: ${request.context}`);
