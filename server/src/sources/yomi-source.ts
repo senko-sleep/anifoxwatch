@@ -80,9 +80,16 @@ export class YomiSource extends BaseAnimeSource {
         ];
     }
 
+    // Proxy list for Vercel serverless - race direct vs proxy
+    private readonly PROXIES = [
+        (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+        (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    ];
+
     /**
      * Lightweight HTTP fetch + regex extraction — no Puppeteer, no cold-start.
      * Fetches embed page HTML, scans for M3U8 URLs, and follows one iframe level.
+     * Uses proxy racing for Vercel serverless compatibility.
      */
     private async extractM3u8FromUrl(embedUrl: string): Promise<string | null> {
         const origin = new URL(embedUrl).origin;
@@ -99,14 +106,31 @@ export class YomiSource extends BaseAnimeSource {
             return null;
         };
 
-        try {
-            const resp = await this.client.get(embedUrl, {
+        const fetchWithProxies = async (url: string): Promise<string | null> => {
+            const directFetch = this.client.get(url, {
                 headers: { Referer: origin, Origin: origin },
                 maxRedirects: 5,
-            });
-            const html: string =
-                typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data);
+            }).then(resp => ({ data: resp.data, source: 'direct' }))
+              .catch(() => null);
 
+            const proxyFetches = this.PROXIES.map(proxyUrl => 
+                this.client.get(proxyUrl(url), {
+                    headers: { Referer: origin },
+                    maxRedirects: 5,
+                }).then(resp => ({ data: resp.data, source: 'proxy' }))
+                  .catch(() => null)
+            );
+
+            const results = await Promise.race([
+                Promise.any([directFetch, ...proxyFetches].filter(Boolean)),
+                new Promise<never>((_, reject) => 
+                    setTimeout(() => reject(new Error('All fetches timed out')), 30000)
+                )
+            ]);
+
+            if (!results) return null;
+
+            const html: string = typeof results.data === 'string' ? results.data : JSON.stringify(results.data);
             const direct = scanForM3u8(html);
             if (direct) return direct;
 
@@ -124,6 +148,11 @@ export class YomiSource extends BaseAnimeSource {
                 const iframe = scanForM3u8(iHtml);
                 if (iframe) return iframe;
             }
+            return null;
+        };
+
+        try {
+            return await fetchWithProxies(embedUrl);
         } catch (e: any) {
             logger.warn(`[Yomi] HTTP extract failed for ${embedUrl}: ${e.message}`, undefined, 'Yomi');
         }
