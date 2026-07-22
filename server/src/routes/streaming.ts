@@ -625,7 +625,7 @@ async function forwardToRemoteProxy(
     const remoteProxy = process.env.REMOTE_PROXY_URL || DEFAULT_REMOTE_STREAM_PROXY;
     const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
     try {
-        const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 50_000, maxRedirects: 5 });
+        const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 5000, maxRedirects: 5 });
         const ct = remoteResp.headers['content-type'] || 'application/vnd.apple.mpegurl';
         res.setHeader('Content-Type', ct);
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -805,34 +805,15 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         episodeId, server: explicitServer ?? 'auto', category: categoryStr, episodeNum, shouldProxy, requestId,
     });
 
-    // Strip provider prefix for REST/AllAnime fallbacks
-    const episodeIdForRest = episodeId.replace(/^animekai-/i, '');
     const preferredSource = explicitServer || (req.query.preferred_source as string) || undefined;
 
     let streamData: any = { sources: [], subtitles: [] };
     let lastError: string | null = null;
 
-    const isAdultRoute = /^(hanime|watchhentai|akih)-/i.test(episodeId);
-    if (isAdultRoute && isHianimeStyleEpisodeId(episodeIdForRest)) {
-        try {
-            streamData = await tryFetchHianimeRestStreamingData({
-                episodeId: episodeIdForRest,
-                category: cat,
-                explicitServer: preferredSource,
-                perAttemptTimeoutMs: 15_000,
-                catalogEpisodeFallback: catalogEpisodeFallbackForRest(episodeId, episodeNum),
-            });
-        } catch (e: unknown) {
-            lastError = e instanceof Error ? e.message : String(e);
-        }
-    }
-
-    if (!streamData?.sources?.length) {
-        try {
-            streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string);
-        } catch (e: unknown) {
-            lastError = e instanceof Error ? e.message : String(e);
-        }
+    try {
+        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string);
+    } catch (e: unknown) {
+        lastError = e instanceof Error ? e.message : String(e);
     }
 
     // If no dub sources found, fall back to sub sequentially
@@ -1052,15 +1033,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         logger.warn(`[PROXY] Remote proxy failed for ISP-blocked ${domain} — falling back to local rotation`, { requestId });
     }
 
-    // Always forward segments to Vercel proxy - it has working network access to CDNs
-    // Local proxy fails on Render.com and other restricted environments
-    // Also forward manifests to ensure consistent behavior
-    if ((isSegment || isM3u8) && process.env.IS_REMOTE_PROXY !== 'true') {
-        logger.info(`[PROXY] ${isM3u8 ? 'Manifest' : 'Segment'} request — routing to Vercel proxy`, { domain, requestId });
-        const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'Media fast-path');
-        if (ok) return;
-        logger.warn(`[PROXY] Vercel proxy failed — falling back to local rotation`, { requestId });
-    }
+    // Process media requests locally with persistent keepAlive agent.
+    // Unresolvable or ISP-blocked domains are forwarded to remote proxy in the checks below.
 
     const isResolvable = await isDomainResolvable(domain);
     if (!isResolvable) {
@@ -1171,9 +1145,15 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     const makeProxyRequest = (targetUrl: string, combo: { referer: string; origin: string }, relaxedTls: boolean): Promise<AxiosResponse> => {
         const headers: Record<string, string> = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'cross-site',
             'Referer': combo.referer,
             'Origin': combo.origin || combo.referer.replace(/\/$/, ''),
             'Connection': 'keep-alive',

@@ -61,7 +61,7 @@ interface SourceMetadata {
  */
 export class SourceManager {
     private sources: Map<string, StreamingSource> = new Map();
-    private primarySource: string = 'Aniwaves'; // 2026-05-22: only working source
+    private primarySource: string = 'Yomi';
     private healthStatus: Map<string, SourceHealth> = new Map();
     private sourceMetadata: Map<string, SourceMetadata> = new Map();
     private episodeIdToParentAnimeId: Map<string, string> = new Map();
@@ -316,7 +316,7 @@ export class SourceManager {
         console.log('⏳ [SourceManager] Initializing sources (optimistic availability)...');
         
         // Priority sources that we actively verify
-        const prioritySources = ['AnimeKai'];
+        const prioritySources = ['Yomi', 'Aniwaves'];
         
         // Mark ALL sources as available by default - they'll be marked offline only if they fail during actual use
         for (const [name, source] of this.sources.entries()) {
@@ -3345,15 +3345,7 @@ export class SourceManager {
             }
         }
 
-        if (isHianimeStyleEpisodeId(episodeId)) {
-            const allow = new Set<string>([
-                'AnimeKai',
-                'Gogoanime',
-                'AnimePahe',
-                'AnimeFLV',
-            ]);
-            finalSources = finalSources.filter((s) => allow.has(s.name));
-        }
+        // Do not filter out registered sources for HiAnime-style episode IDs
 
         // AnimeKai compound ids (`animekai-slug$ep=N$token=...`) prefer:
         // - direct AnimeKai extraction
