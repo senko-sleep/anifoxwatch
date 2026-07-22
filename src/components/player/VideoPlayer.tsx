@@ -291,7 +291,12 @@ export const VideoPlayer = ({
       const s = String(src || '').trim();
       if (!s) return s;
       if (s.startsWith('blob:') || s.startsWith('data:')) return s;
-      if (s.includes('/api/stream/proxy?url=')) return s;
+      if (s.includes('/api/stream/proxy?url=')) {
+        if (s.startsWith('/')) {
+          return `${apiUrl('/api/stream/proxy')}?${s.split('?')[1] || ''}`;
+        }
+        return s;
+      }
       if (!/^https?:\/\//i.test(s)) return s; // already same-origin (or relative)
       if (typeof window !== 'undefined') {
         try {

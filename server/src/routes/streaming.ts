@@ -427,15 +427,16 @@ const getProxyBaseUrl = (req: Request): string => {
     }
 
     // Priority 4: Infer from incoming request (works for same-origin deployments like Vercel)
-    // Only use this when the API and frontend are co-hosted on the same origin.
-    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    // Always force https protocol on non-localhost hosts to prevent Mixed Content blocking on HTTPS sites (Firebase)
+    const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
     const host = req.headers['x-forwarded-host'] || req.headers['host'];
     if (host && !String(host).includes('localhost') && !String(host).includes('127.0.0.1')) {
+        const proto = (rawProto === 'http' && !String(host).includes('localhost')) ? 'https' : rawProto;
         return `${proto}://${host}/api/stream/proxy`;
     }
 
-    // Fallback: relative path (only works for same-origin setups)
-    return '/api/stream/proxy';
+    // Default for production API: target Render API explicitly if no host matches
+    return 'https://anifoxwatch-dko2.onrender.com/api/stream/proxy';
 };
 
 const proxyUrl = (url: string, proxyBase: string, referer?: string): string => {
