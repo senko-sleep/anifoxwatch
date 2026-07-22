@@ -21,11 +21,17 @@ const router = Router();
 
 // Debug endpoint to verify streaming routes are loaded
 router.get('/debug', (_req: Request, res: Response) => {
+    const sources = Array.from((req as any).app?._router?.stack || [])
+        .filter((layer: any) => layer.name === 'bound dispatch')
+        .map((layer: any) => layer.route?.path);
+    
     res.json({
         status: 'ok',
         message: 'Streaming routes are loaded',
         timestamp: new Date().toISOString(),
-        sources: ['Yomi', 'Aniwaves', 'Hanime', 'WatchHentai']
+        registeredSources: ['Yomi', 'Aniwaves', 'Hanime', 'WatchHentai'],
+        sourceManagerSources: sourceManager ? Array.from((sourceManager as any).sources?.keys() || []) : [],
+        sourcesAvailable: sourceManager ? (sourceManager as any).sources?.size : 0
     });
 });
 
