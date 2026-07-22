@@ -20,7 +20,7 @@ import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streami
 const router = Router();
 
 // Debug endpoint to verify streaming routes are loaded
-router.get('/debug', (_req: Request, res: Response) => {
+router.get('/debug', (req: Request, res: Response) => {
     const sources = Array.from((req as any).app?._router?.stack || [])
         .filter((layer: any) => layer.name === 'bound dispatch')
         .map((layer: any) => layer.route?.path);
