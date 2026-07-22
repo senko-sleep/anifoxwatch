@@ -272,7 +272,7 @@ class AnimeApiClient {
     private cache: Map<string, CacheEntry<unknown>> = new Map();
     private inflight: Map<string, Promise<unknown>> = new Map();
     private readonly MAX_RETRIES = 2;
-    private readonly TIMEOUT_MS = 30000;
+    private readonly TIMEOUT_MS = 12000; // 12s — surfaces failures fast so failover kicks in sooner
     private readonly FALLBACK_TTL = 2 * 60 * 1000; // 2 min before retrying primary
     private _online = true;
     private _lastOnlineCheck = 0;

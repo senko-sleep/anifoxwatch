@@ -130,21 +130,55 @@ export function useAnime(id: string, enabled: boolean = true, source?: string) {
     });
 }
 
+// localStorage key for cached resolve results (avoids extra round-trip on repeat visits)
+const RESOLVE_CACHE_KEY = 'ani_resolve_cache';
+function getCachedResolve(anilistId: string): string | null {
+    try {
+        const cache = JSON.parse(localStorage.getItem(RESOLVE_CACHE_KEY) || '{}');
+        const entry = cache[anilistId];
+        if (entry && entry.streamingId && entry.expires > Date.now()) return entry.streamingId;
+    } catch { /* ignore */ }
+    return null;
+}
+function setCachedResolve(anilistId: string, streamingId: string) {
+    try {
+        const cache = JSON.parse(localStorage.getItem(RESOLVE_CACHE_KEY) || '{}');
+        cache[anilistId] = { streamingId, expires: Date.now() + 24 * 60 * 60 * 1000 }; // 24h
+        localStorage.setItem(RESOLVE_CACHE_KEY, JSON.stringify(cache));
+    } catch { /* ignore */ }
+}
+
 export function useEpisodes(animeId: string, enabled: boolean = true, source?: string) {
     return useQuery<Episode[], Error>({
         queryKey: [...queryKeys.episodes(animeId), source],
         queryFn: async () => {
-            // For AniList IDs, resolve to the direct streaming ID first.
-            // The /api/anime/resolve endpoint is reliably cached (in-memory + DB)
-            // and avoids hitting AniList under rate-limit conditions on the server.
             let fetchId = animeId;
             if (animeId.startsWith('anilist-')) {
-                const resolved = await apiClient.resolveAniListToStreamingId(animeId);
-                if (resolved?.streamingId) fetchId = resolved.streamingId;
+                // 1. Check localStorage cache first — instant, no network call
+                const cached = getCachedResolve(animeId);
+                if (cached) {
+                    fetchId = cached;
+                    console.log('[useEpisodes] Using cached resolve:', { animeId, fetchId });
+                } else {
+                    // 2. Try fetching episodes with the anilist ID directly (server resolves it)
+                    //    and resolve in parallel — use whichever returns data first.
+                    const directEpisodesPromise = apiClient.getEpisodes(animeId, source).catch(() => [] as Episode[]);
+                    const resolvePromise = apiClient.resolveAniListToStreamingId(animeId);
+                    // Start both in parallel
+                    const [directEps, resolved] = await Promise.all([directEpisodesPromise, resolvePromise]);
+                    if (resolved?.streamingId) {
+                        setCachedResolve(animeId, resolved.streamingId);
+                        fetchId = resolved.streamingId;
+                    }
+                    // If direct fetch already returned episodes, use them
+                    if (directEps.length > 0) {
+                        console.log('[useEpisodes] Got episodes via direct anilist ID:', { animeId, episodeCount: directEps.length });
+                        return directEps;
+                    }
+                }
             }
             const episodes = await apiClient.getEpisodes(fetchId, source);
-            console.log('[useEpisodes] Fetched episodes:', {
- animeId, fetchId, source, episodeCount: episodes.length });
+            console.log('[useEpisodes] Fetched episodes:', { animeId, fetchId, source, episodeCount: episodes.length });
             return episodes;
         },
         enabled: enabled && animeId.length > 0,
