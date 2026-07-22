@@ -19,6 +19,16 @@ import type { StreamingData, VideoSource, VideoSubtitle } from '../types/streami
 
 const router = Router();
 
+// Debug endpoint to verify streaming routes are loaded
+router.get('/debug', (_req: Request, res: Response) => {
+    res.json({
+        status: 'ok',
+        message: 'Streaming routes are loaded',
+        timestamp: new Date().toISOString(),
+        sources: ['Yomi', 'Aniwaves', 'Hanime', 'WatchHentai']
+    });
+});
+
 // ── Persistent HTTPS agent for proxy segment fetches ───────────────────────
 // POWERHOUSE MODE: Massive connection pool for zero-latency segment fetching
 // Reuses TCP connections across the ~350 segments in a 24-minute episode.
