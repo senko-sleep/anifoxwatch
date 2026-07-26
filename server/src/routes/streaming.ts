@@ -440,23 +440,32 @@ const getProxyBaseUrl = (req: Request): string => {
         return `${renderExternalUrl}/api/stream/proxy`;
     }
 
-    // Priority 3: Other known platform env vars
+    // Priority 3: Vercel deployments — VERCEL_URL is always set to the deployment hostname.
+    // Use HTTPS by default; Vercel terminates TLS at the edge and forwards via x-forwarded-proto.
+    const vercelUrl = process.env.VERCEL_URL?.replace(/\/$/, '');
+    if (vercelUrl) {
+        const proto = process.env.VERCEL_PROTO === 'http' ? 'http' : 'https';
+        return `${proto}://${vercelUrl}/api/stream/proxy`;
+    }
+
+    // Priority 4: Other known platform env vars
     const cleverUrl = process.env.CLEVER_APP_URL?.replace(/\/$/, '');
     if (cleverUrl) {
         return `${cleverUrl}/api/stream/proxy`;
     }
 
-    // Priority 4: Infer from incoming request (works for same-origin deployments like Vercel)
-    // Always force https protocol on non-localhost hosts to prevent Mixed Content blocking on HTTPS sites (Firebase)
+    // Priority 5: Infer from incoming request (works for same-origin deployments like Vercel,
+    // Cloudflare Workers, Firebase Functions, etc.)
     const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
     const host = req.headers['x-forwarded-host'] || req.headers['host'];
-    if (host && !String(host).includes('localhost') && !String(host).includes('127.0.0.1')) {
-        const proto = (rawProto === 'http' && !String(host).includes('localhost')) ? 'https' : rawProto;
+    if (host) {
+        const isLocal = String(host).includes('localhost') || String(host).includes('127.0.0.1');
+        const proto = isLocal ? 'http' : (rawProto === 'http' ? 'https' : rawProto);
         return `${proto}://${host}/api/stream/proxy`;
     }
 
-    // Default for production API: target Render API explicitly if no host matches
-    return 'https://anifoxwatch-dko2.onrender.com/api/stream/proxy';
+    // Default for local development when no host is detected
+    return 'http://localhost:3001/api/stream/proxy';
 };
 
 const proxyUrl = (url: string, proxyBase: string, referer?: string): string => {

@@ -56,11 +56,11 @@ export class AniwavesSource extends BaseAnimeSource {
         const keepAliveAgent = new https.Agent({
             keepAlive: true,
             maxSockets: 15,
-            timeout: 60000, // Increased from 30s to 60s for Vercel
+            timeout: 30000, // Increased from 12000ms to 30000ms
         });
         this.client = axios.create({
             baseURL: this.baseUrl,
-            timeout: 45000,           // Increased from 15s to 45s for Vercel cold starts
+            timeout: 15000,           // Increased from 7000ms to 15000ms for Render.com cold starts
             httpsAgent: keepAliveAgent,
             headers: {
                 'Accept': 'application/json, text/html',
@@ -324,7 +324,7 @@ export class AniwavesSource extends BaseAnimeSource {
                     if (resp.data?.status === 200 && resp.data?.result) {
                         const $ = cheerio.load(resp.data.result);
                         const episodes: Episode[] = [];
-                        $('.episodes.number li a').each((_, el) => {
+                        $('.episodes li a').each((_, el) => {
                             const $el = $(el);
                             const epId = $el.attr('data-ids') || '';
                             const num = parseInt($el.attr('data-num') || '0');
@@ -409,7 +409,7 @@ export class AniwavesSource extends BaseAnimeSource {
             const $ = cheerio.load(response.data.result);
             const episodes: Episode[] = [];
 
-            $('.episodes.number li a').each((_, el) => {
+            $('.episodes li a').each((_, el) => {
                 const $el = $(el);
                 const epId = $el.attr('data-ids') || '';
                 const num = parseInt($el.attr('data-num') || '0');

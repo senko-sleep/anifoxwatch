@@ -207,6 +207,10 @@ export const VideoPlayer = ({
   const [showSeekBackwardOverlay, setShowSeekBackwardOverlay] = useState(false);
   const lastTapRef = useRef<{ time: number; x: number; y: number } | null>(null);
 
+  // Track seeking state to prevent unnecessary server switches during seek
+  const isSeekingRef = useRef(false);
+  const seekStartTimeRef = useRef(0);
+
   // Swipe gesture states
   const [isControlsLocked, setIsControlsLocked] = useState(false);
   const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number } | null>(null);
@@ -363,31 +367,32 @@ export const VideoPlayer = ({
         lowLatencyMode: false,
         startPosition: initialSavedPos > 5 ? initialSavedPos : -1,
         // ── Buffer sizing ─────────────────────────────────────────────────
-        backBufferLength: onMobile ? 15 : 30,
-        maxBufferLength: onMobile ? 30 : 60,
-        maxMaxBufferLength: onMobile ? 60 : 120,
-        maxBufferHole: 0.5,
+        // Optimized for instant seeking: smaller buffers = faster seek response
+        backBufferLength: onMobile ? 10 : 20,
+        maxBufferLength: onMobile ? 20 : 40,
+        maxMaxBufferLength: onMobile ? 40 : 80,
+        maxBufferHole: 0.3, // Tighter hole detection for faster seeking
         // ── ABR / quality selection ───────────────────────────────────────
         startLevel: 0,
         abrEwmaDefaultEstimate: onMobile ? 800_000 : 1_500_000,
         // ── Timeouts ───────────────────────────────────────
-        fragLoadingTimeOut: 20000,
-        manifestLoadingTimeOut: 25000,
-        levelLoadingTimeOut: 20000,
+        fragLoadingTimeOut: 15000,
+        manifestLoadingTimeOut: 20000,
+        levelLoadingTimeOut: 15000,
         // ── Prefetch & retries ────────────────────────────────────────────
         startFragPrefetch: true,
-        fragLoadingMaxRetry: 4,
-        manifestLoadingMaxRetry: 3,
-        levelLoadingMaxRetry: 3,
-        fragLoadingRetryDelay: 200,
-        manifestLoadingRetryDelay: 300,
-        maxStarvationDelay: 4,
-        maxLoadingDelay: 4,
+        fragLoadingMaxRetry: 3,
+        manifestLoadingMaxRetry: 2,
+        levelLoadingMaxRetry: 2,
+        fragLoadingRetryDelay: 150,
+        manifestLoadingRetryDelay: 200,
+        maxStarvationDelay: 3,
+        maxLoadingDelay: 3,
         nudgeOffset: 0.05,
         nudgeMaxRetry: 6,
         loader: PostProxyLoader,
         xhrSetup: (xhr) => {
-          xhr.timeout = 25000;
+          xhr.timeout = 20000;
         }
       });
 
@@ -458,6 +463,20 @@ export const VideoPlayer = ({
         if (startupTimer) {
           clearTimeout(startupTimer);
           startupTimer = null;
+        }
+
+        // Ignore errors during seeking - they're temporary buffer flushes
+        if (isSeekingRef.current && (Date.now() - seekStartTimeRef.current) < 3000) {
+          playerLog('warn', 'Ignoring error during seek operation', {
+            type: data.type,
+            details: data.details,
+            fatal: data.fatal
+          });
+          // For non-fatal errors during seek, just try to recover
+          if (!data.fatal && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad();
+          }
+          return;
         }
 
         playerLog('error', 'HLS error', {
@@ -1345,10 +1364,27 @@ export const VideoPlayer = ({
 
   const handleSeek = useCallback((value: number[]) => {
     const video = videoRef.current;
+    const hls = hlsRef.current;
     if (!video) return;
 
-    video.currentTime = value[0];
-    setCurrentTime(value[0]);
+    const seekTime = value[0];
+    
+    // Mark as seeking to prevent server switches during seek
+    isSeekingRef.current = true;
+    seekStartTimeRef.current = Date.now();
+    
+    // For HLS, trigger immediate load at seek position for instant response
+    if (hls && hls.media === video) {
+      hls.startLoad(seekTime);
+    }
+    
+    video.currentTime = seekTime;
+    setCurrentTime(seekTime);
+    
+    // Clear seeking state after a short delay (seek should complete within 2s)
+    setTimeout(() => {
+      isSeekingRef.current = false;
+    }, 2000);
   }, []);
 
   const toggleFullscreen = useCallback(async () => {

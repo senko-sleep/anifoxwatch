@@ -154,9 +154,15 @@ export class SourceManager {
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
         console.log(`   Available sources: ${Array.from(this.sources.keys()).join(', ')}`);
         
-        // CRITICAL: Always start health monitor on Vercel to ensure sources are available
-        // Vercel serverless functions need health monitoring to work properly
-        this.startHealthMonitor();
+        // CRITICAL: Skip health monitoring on Vercel serverless to prevent sources being marked unhealthy
+        // Vercel's network environment may cause health checks to fail, marking sources as unavailable
+        // Health checks are useful for long-running servers but problematic for serverless functions
+        const isVercel = process.env.VERCEL === '1' || process.env.VERCEL_ENV !== undefined;
+        if (!isVercel) {
+            this.startHealthMonitor();
+        } else {
+            logger.info('Skipping health monitoring on Vercel - sources will always be considered available', undefined, 'SourceManager');
+        }
 
         logger.info(`Initialized with ${this.sources.size} sources`, undefined, 'SourceManager');
     }
