@@ -169,7 +169,10 @@ export class YomiSource extends BaseAnimeSource {
         category: 'sub' | 'dub' = 'sub',
         options?: SourceRequestOptions
     ): Promise<StreamingData> {
-        const anilistId = this.extractAnilistId(episodeId);
+        let anilistId = this.extractAnilistId(episodeId);
+        if (!anilistId && options?.anilistId) {
+            anilistId = options.anilistId;
+        }
         if (!anilistId) return { sources: [], subtitles: [] };
 
         const episodeNum = this.extractEpisodeNum(episodeId, options);
