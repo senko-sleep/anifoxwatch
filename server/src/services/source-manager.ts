@@ -1105,7 +1105,9 @@ export class SourceManager {
 
         if (source !== primarySource) {
             // Proprietary IDs like '80914&eps=5' cannot be safely rewritten for other sources.
-            if (/[\$&?]eps?=/i.test(rawId)) return null;
+            // Yomi is special-cased below because it ignores the episode ID and builds its own
+            // watch URLs from `anilistId` + `episodeNum` in the request options.
+            if (/[\$&?]eps?=/i.test(rawId) && !['Yomi'].includes(source.name)) return null;
             // Pure numeric IDs cannot be safely rewritten — except for sources that
             // natively handle AniList numeric IDs (e.g. Yomi builds its own watch URLs).
             if (/^\d+$/.test(rawId) && !['Yomi'].includes(source.name)) return null;

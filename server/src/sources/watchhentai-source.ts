@@ -355,14 +355,17 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
                         const embedUrl = ajaxRes.data?.embed_url;
                         if (embedUrl) {
-                            const isDirect = embedUrl.endsWith('.mp4') || embedUrl.endsWith('.m3u8');
+                            // Better MP4 detection - check for .mp4 anywhere in URL, not just at the end
+                            const isM3U8 = embedUrl.includes('.m3u8');
+                            const isMP4 = embedUrl.includes('.mp4');
+                            const isDirect = isMP4 || isM3U8;
                             sources.push({
                                 url: embedUrl,
                                 quality: 'auto',
-                                isM3U8: embedUrl.includes('.m3u8'),
+                                isM3U8: isM3U8,
                                 isDirect,
                             });
-                            logger.info(`[WatchHentai] Found stream URL: ${embedUrl}`);
+                            logger.info(`[WatchHentai] Found stream URL: ${embedUrl} (type: ${isM3U8 ? 'HLS' : isMP4 ? 'MP4' : 'unknown'})`);
                         }
                     } catch (e: any) {
                         logger.warn(`[WatchHentai] DooPlayer AJAX error: ${e.message}`);
@@ -372,16 +375,20 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
             // Fallback: Parse JWPlayer script or iframe regex if DooPlayer didn't yield links
             if (sources.length === 0) {
-                const mp4Matches = html.match(/https?:\/\/[^\s"'<>]+\.(mp4|m3u8)/gi);
+                // More robust regex to capture MP4/M3U8 URLs even with query parameters
+                const mp4Matches = html.match(/https?:\/\/[^\s"'<>]+?\.(mp4|m3u8)(?:\?[^\s"'<>]*)?/gi);
                 if (mp4Matches) {
                     const uniqueUrls = [...new Set(mp4Matches)] as string[];
                     for (const streamUrl of uniqueUrls) {
+                        const isM3U8 = streamUrl.includes('.m3u8');
+                        const isMP4 = streamUrl.includes('.mp4');
                         sources.push({
                             url: streamUrl,
                             quality: 'auto',
-                            isM3U8: streamUrl.includes('.m3u8'),
+                            isM3U8: isM3U8,
                             isDirect: true,
                         });
+                        logger.info(`[WatchHentai] Fallback found stream URL: ${streamUrl} (type: ${isM3U8 ? 'HLS' : isMP4 ? 'MP4' : 'unknown'})`);
                     }
                 }
             }

@@ -482,12 +482,38 @@ const Watch = () => {
       return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd') ||
              !EMBED_DOMAINS.some((d) => lower.includes(d));
     });
-    if (playable.length > 0) return playable[0];
+    
+    if (playable.length > 0) {
+      const selected = playable[0];
+      console.log('[Watch] Selected video source:', {
+        url: selected.url?.substring(0, 100),
+        isM3U8: selected.isM3U8,
+        isDirect: selected.isDirect,
+        quality: selected.quality
+      });
+      return selected;
+    }
 
     // No playable sources — fall back to first source (will trigger embed fallback)
+    console.log('[Watch] No playable sources, falling back to first source');
     return sources[0];
   }, [streamData, quality, sourceRetryIndex]);
 
+  // Get current video source (computed from stream data)
+  const videoSource = getVideoSource();
+
+  // Debug: log the video source details
+  useEffect(() => {
+    if (videoSource) {
+      console.log('[Watch] Video source details:', {
+        url: videoSource.url?.substring(0, 150),
+        isM3U8: videoSource.isM3U8,
+        isDirect: videoSource.isDirect,
+        quality: videoSource.quality,
+        source: streamData?.source
+      });
+    }
+  }, [videoSource, streamData?.source]);
 
   // Episode navigation with smooth transitions
   const handleEpisodeSelect = useCallback((episodeId: string, episodeNum: number) => {
@@ -862,8 +888,6 @@ const Watch = () => {
       </div>
     );
   }
-
-  const videoSource = getVideoSource();
 
   // If the best available source is an embed page (HTML), show an iframe instead of VideoPlayer
   const embedFallbackUrl = (() => {

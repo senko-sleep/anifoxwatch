@@ -875,6 +875,19 @@ export const VideoPlayer = ({
       }
     } else {
       playerLog('info', 'Using direct video source');
+      
+      // Check if the URL appears to be MP4 but isM3U8 is false
+      const isMp4Url = resolvedSrc.includes('.mp4');
+      const canPlayMp4 = video.canPlayType('video/mp4');
+      const canPlayWebm = video.canPlayType('video/webm');
+      
+      playerLog('info', 'Video format compatibility check', {
+        isMp4Url,
+        canPlayMp4,
+        canPlayWebm,
+        resolvedSrc: resolvedSrc.substring(0, 100)
+      });
+      
       const onLoadedMetadataDirect = () => {
         setIsLoading(false);
 
@@ -896,7 +909,16 @@ export const VideoPlayer = ({
         lastErrorTimeRef.current = now;
         const err = video.error;
         playerLog('error', 'Direct video error', { code: err?.code, message: err?.message });
-        setError('Failed to load video. Try a different server.');
+        
+        // Provide more specific error message based on error code
+        let errorMessage = 'Failed to load video. Try a different server.';
+        if (err?.code === 4) {
+          errorMessage = 'Video format not supported. The server may be returning incorrect content type.';
+        } else if (err?.code === 3) {
+          errorMessage = 'Video decoding error. The file may be corrupted.';
+        }
+        
+        setError(errorMessage);
         onErrorRef.current?.('native_error');
       };
 

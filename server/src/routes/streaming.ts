@@ -1032,7 +1032,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Echovideo CDN segments don't have extensions - they're just CDN URLs
     const isEchovideoSegment = /echovideo\.(to|ru)/.test(domain) && !url.includes('.m3u8');
     const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt) || isEchovideoSegment;
-    const isVideo = url.endsWith('.mp4');
+    // Better MP4 detection - check for .mp4 anywhere in URL, not just at the end (handles query parameters)
+    const isVideo = url.includes('.mp4');
 
     // Serve cached manifests without hitting upstream
     if (isM3u8 && !req.headers.range) {
@@ -1733,12 +1734,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         // Force video content type for all HLS segments & obfuscated images so HLS.js/Player accepts them without corruption errors
         res.set('Content-Type', 'video/MP2T');
     } else if (isOctetStream) {
+        // Better detection: isVideo already checks for .mp4 anywhere in URL
         res.set('Content-Type', isVideo ? 'video/mp4' : 'video/MP2T');
     } else if (upstreamCt) {
         res.set('Content-Type', upstreamCt);
     } else if (url.includes('.ts')) {
         res.set('Content-Type', 'video/MP2T');
-    } else if (url.endsWith('.mp4')) {
+    } else if (url.includes('.mp4')) {
+        // Match .mp4 anywhere in URL, not just at the end (handles query parameters)
         res.set('Content-Type', 'video/mp4');
     }
 
