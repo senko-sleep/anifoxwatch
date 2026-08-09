@@ -212,7 +212,6 @@ export const VideoPlayer = ({
   const seekStartTimeRef = useRef(0);
 
   // Swipe gesture states
-  const [isControlsLocked, setIsControlsLocked] = useState(false);
   const [touchStartPos, setTouchStartPos] = useState<{ x: number; y: number } | null>(null);
   const [touchCurrentPos, setTouchCurrentPos] = useState<{ x: number; y: number } | null>(null);
   const [isSwiping, setIsSwiping] = useState(false);
@@ -223,7 +222,6 @@ export const VideoPlayer = ({
 
   // Mobile settings panel state
   const [showMobileSettings, setShowMobileSettings] = useState(false);
-  const [mobileSettingsTab, setMobileSettingsTab] = useState<'quality' | 'speed' | 'subtitles'>('quality');
 
   // Landscape lock state
   const [isLandscapeLocked, setIsLandscapeLocked] = useState(false);

@@ -24,8 +24,6 @@ import {
   ChevronRight,
   Loader2,
   RefreshCw,
-  Maximize2,
-  MonitorPlay,
   RotateCw,
 } from 'lucide-react';
 
@@ -143,9 +141,6 @@ const Watch = () => {
   const playerRef = useRef<HTMLDivElement>(null);
   const lastPlayerErrorTimeRef = useRef<number>(0);
   const playerErrorDebounceMs = 2000; // Minimum time between retry attempts
-
-  // Cinema mode state for layout adaptation
-  const [isCinemaMode, setIsCinemaMode] = useState(false);
 
   // Mobile landscape mode
   const [isLandscapeLocked, setIsLandscapeLocked] = useState(false);
@@ -1201,54 +1196,24 @@ const Watch = () => {
 
   // Desktop: Regular layout
   return (
-    <div className="min-h-screen flex flex-col bg-background relative overflow-x-hidden">
-      {/* Cinematic Backdrop */}
-      {anime?.cover && (
-        <div className="absolute inset-0 z-0 opacity-20 pointer-events-none select-none overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-b from-background via-background/80 to-background" />
-          <img
-            src={anime.cover}
-            alt="Backdrop"
-            className="w-full h-full object-cover blur-3xl scale-110"
-            referrerPolicy="no-referrer"
-          />
-        </div>
-      )}
-
+    <div className="min-h-screen flex flex-col bg-background">
       <Navbar />
 
-      <main className={cn(
-        "flex-1 relative z-10 transition-all duration-500",
-        isCinemaMode && "pt-[calc(56.25vw+2rem)] md:pt-[calc(56.25vw+3rem)] lg:pt-[calc(56.25vw+4rem)]"
-      )}>
-        <div className={cn(
-          "max-w-[95vw] mx-auto px-4 pb-12 transition-all duration-500",
-          isCinemaMode ? "pt-6" : "pt-6"
-        )}>
+      <main className="flex-1 relative z-10">
+        <div className="max-w-[95vw] mx-auto px-4 pb-12 pt-6">
           <Button
             variant="ghost"
             size="sm"
             onClick={() => navigate(backUrl)}
-            className={cn(
-              "text-muted-foreground hover:text-foreground hover:bg-white/10 mb-6 transition-all duration-300",
-              isCinemaMode && "opacity-0 pointer-events-none h-0 mb-0 overflow-hidden"
-            )}
+            className="text-muted-foreground hover:text-foreground hover:bg-white/10 mb-6"
           >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Browse
           </Button>
 
-          <div className={cn(
-            "grid gap-6 lg:gap-8 transition-all duration-500",
-            isCinemaMode
-              ? "lg:grid-cols-1 max-w-7xl mx-auto"
-              : "lg:grid-cols-12"
-          )}>
+          <div className="grid gap-6 lg:gap-8 lg:grid-cols-12">
             {/* Main Player Area */}
-            <div className={cn(
-              "space-y-6 transition-all duration-500",
-              isCinemaMode ? "lg:col-span-1 w-full" : "lg:col-span-9"
-            )} ref={playerRef}>
+            <div className="space-y-6 lg:col-span-9" ref={playerRef}>
               {/* Video Player Container */}
               <div className="relative group">
                 <div className="relative aspect-[16/9] bg-black rounded-xl overflow-hidden shadow-2xl ring-1 ring-white/10">
@@ -1359,10 +1324,7 @@ const Watch = () => {
               </div>
 
               {/* Episode Navigation & Details */}
-              <div className={cn(
-                "grid grid-cols-[1fr_auto] gap-3 items-center bg-card/30 backdrop-blur-md border border-white/5 p-4 rounded-xl transition-all duration-500",
-                isCinemaMode && "max-w-4xl mx-auto"
-              )}>
+              <div className="grid grid-cols-[1fr_auto] gap-3 items-center bg-card/30 backdrop-blur-md border border-white/5 p-4 rounded-xl">
                 <div className="min-w-0">
                   <h2 className="text-lg md:text-xl font-bold truncate">
                     Episode {currentEpisode?.number || selectedEpisodeNum}
@@ -1393,22 +1355,7 @@ const Watch = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsCinemaMode(!isCinemaMode)}
-                    className={cn(
-                      "hidden lg:flex gap-2 border-white/10 hover:bg-white/5 h-10 px-4 transition-colors",
-                      isCinemaMode && "bg-fox-orange/20 border-fox-orange/50 text-fox-orange"
-                    )}
-                    title={isCinemaMode ? "Exit Cinema Mode" : "Enter Cinema Mode"}
-                  >
-                    {isCinemaMode ? <MonitorPlay className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                    <span>Cinema</span>
-                  </Button>
-
                   <div className="h-4 w-[1px] bg-white/10 hidden lg:block mx-1" />
-
                   <Button
                     variant="outline"
                     size="lg"
@@ -1434,10 +1381,7 @@ const Watch = () => {
               </div>
 
               {/* Streaming Controls */}
-              <div className={cn(
-                "transition-all duration-500",
-                isCinemaMode && "max-w-4xl mx-auto"
-              )}>
+              <div>
                 <StreamingControls
                   audioType={audioType}
                   onAudioTypeChange={(type) => {
@@ -1465,10 +1409,7 @@ const Watch = () => {
 
               {/* Download Manager */}
               {episodes && episodes.length > 0 && (
-                <div className={cn(
-                  "transition-all duration-500",
-                  isCinemaMode && "max-w-4xl mx-auto"
-                )}>
+                <div>
                   <DownloadManager
                     episodes={episodes}
                     animeTitle={anime.title || 'Anime'}
@@ -1479,10 +1420,7 @@ const Watch = () => {
               )}
 
               {/* Single about block below the player */}
-              <div className={cn(
-                'rounded-xl border border-white/5 bg-card/30 p-5 shadow-xl backdrop-blur-md transition-all duration-500 sm:p-6',
-                isCinemaMode && 'mx-auto max-w-4xl'
-              )}>
+              <div className='rounded-xl border border-white/5 bg-card/30 p-5 shadow-xl backdrop-blur-md sm:p-6'>
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">About</h2>
                 <div className="flex flex-col gap-4 sm:flex-row sm:gap-6">
                   <img
@@ -1556,11 +1494,8 @@ const Watch = () => {
               </div>
             </div>
 
-            {/* Episode List Sidebar - Hidden in cinema mode */}
-            <div className={cn(
-              "lg:col-span-3 transition-all duration-500",
-              isCinemaMode && "hidden lg:hidden"
-            )}>
+            {/* Episode List Sidebar */}
+            <div className="lg:col-span-3">
               <div className="bg-card/30 backdrop-blur-md border border-white/5 rounded-xl h-[calc(100vh-140px)] flex flex-col sticky top-24">
                 <div className="flex-1 overflow-hidden">
                   <EpisodeList
