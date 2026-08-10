@@ -29,11 +29,32 @@ export default defineConfig(async ({ mode }) => {
           target: apiProxyTarget,
           changeOrigin: true,
           secure: false,
+          timeout: 35_000,
+          proxyTimeout: 35_000,
+          configure: (proxy, _options) => {
+            proxy.on('proxyReq', (proxyReq, req, _res) => {
+              console.log('[Vite Proxy]', req.method, req.url, '→', apiProxyTarget);
+            });
+            proxy.on('error', (err, _req, _res) => {
+              console.log('[Vite Proxy] API Error - retrying:', err.message);
+              // Return error to let frontend handle retry
+            });
+            proxy.on('proxyRes', (proxyRes, req, _res) => {
+              console.log('[Vite Proxy] API Response:', proxyRes.statusCode, req.url);
+            });
+          },
         },
         "/health": {
           target: apiProxyTarget,
           changeOrigin: true,
           secure: false,
+          timeout: 10_000,
+          proxyTimeout: 10_000,
+          configure: (proxy, _options) => {
+            proxy.on('error', (err, _req, _res) => {
+              console.log('[Vite Proxy] Health Error - will retry:', err.message);
+            });
+          },
         },
       },
     },

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { ChevronLeft, ChevronRight, Star, Mic, Subtitles, Play, Clock, CalendarDays } from 'lucide-react';
-import { cn, normalizeRating, isValidAnimeYear, isValidEpisodeCount, ensureHttps } from '@/lib/utils';
+import { cn, normalizeRating, isValidAnimeYear, isValidEpisodeCount, ensureHttps, generateWatchUrl } from '@/lib/utils';
 import { apiUrl } from '@/lib/api-config';
 import { WatchHistory } from '@/lib/watch-history';
 
@@ -171,7 +171,7 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
           return (
             <Link
               key={item.id}
-              to={`/watch?id=${encodeURIComponent(item.id)}`}
+              to={generateWatchUrl({ title: item.title, id: item.id })}
               state={{ from: location.pathname + location.search }}
               className={cn('shrink-0 group/card touch-manipulation flex flex-col', cardWidths[cardSize])}
             >

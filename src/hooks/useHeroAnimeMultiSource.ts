@@ -45,7 +45,7 @@ export interface HeroAnime {
     id: string | null;
     site: string | null;
   } | null;
-  source: 'anilist' | 'bff' | 'jikan' | 'kitsu' | 'animeplanet';
+  source: 'anilist' | 'bff' | 'jikan' | 'kitsu' | 'animeplanet' | 'github' | 'tmdb';
 }
 
 interface CachedHeroData {
@@ -453,48 +453,133 @@ async function fetchFromBffTrending(): Promise<HeroAnime[]> {
   }
 }
 
+// ─── GITHUB STATIC DATASET FALLBACK ─────────────────────────────────────────────
+
+async function fetchFromGitHubDataset(): Promise<HeroAnime[]> {
+  try {
+    // Use a reliable GitHub-hosted anime dataset as ultimate fallback
+    const response = await fetch('https://raw.githubusercontent.com/manami-project/anime-offline-database/master/anime-offline-database.json');
+    if (!response.ok) return [];
+    
+    const json = await response.json();
+    const data = json.data || [];
+    
+    // Filter for currently popular/recent anime and convert to our format
+    const recentAnime = data
+      .filter((item: any) => {
+        const year = item?.season?.year || 0;
+        const currentYear = new Date().getFullYear();
+        // Prioritize recent anime (2023+)
+        return year >= currentYear - 2;
+      })
+      .slice(0, 20);
+    
+    return recentAnime.map((item: any) => ({
+      id: item?.sources?.[0]?.split('/').pop() || Math.random(),
+      idMal: item?.sources?.find((s: string) => s.includes('myanimelist'))?.split('/').pop() || null,
+      title: {
+        english: item?.title?.english || null,
+        romaji: item?.title?.romaji || item?.title?.english || '',
+        native: item?.title?.native || null,
+      },
+      bannerImage: item?.picture || null,
+      coverImage: {
+        extraLarge: item?.picture || '',
+        large: item?.picture || '',
+        color: null,
+      },
+      description: item?.synopsis || 'No description available.',
+      genres: item?.tags || [],
+      averageScore: item?.score ? Math.round(item.score * 10) : null,
+      popularity: 0,
+      episodes: item?.episodes || 0,
+      duration: null,
+      format: item?.type || 'TV',
+      status: item?.status === 'finished' ? 'FINISHED' : item?.status === 'airing' ? 'RELEASING' : 'Unknown',
+      season: item?.season?.season || null,
+      seasonYear: item?.season?.year || null,
+      studios: { nodes: [] },
+      nextAiringEpisode: null,
+      trailer: null,
+      source: 'github' as const,
+    }));
+  } catch (e) {
+    console.warn('[Hero] GitHub dataset fallback failed:', e);
+    return [];
+  }
+}
+
+// ─── TMDB API FALLBACK ─────────────────────────────────────────────────────────
+
+async function fetchFromTMDB(): Promise<HeroAnime[]> {
+  try {
+    // TMDB (The Movie Database) has anime data and is very reliable
+    const response = await fetch('https://api.themoviedb.org/3/discover/tv?api_key=2dca580c2a14b55200e784d157207b4d&with_genres=16&sort_by=popularity.desc&page=1');
+    if (!response.ok) return [];
+    
+    const json = await response.json() as { results?: Array<{
+      id: number;
+      name: string;
+      overview: string;
+      poster_path: string;
+      backdrop_path: string;
+      vote_average: number;
+      first_air_date: string;
+      genre_ids: number[];
+    }> };
+    
+    const results = json.results || [];
+    return results.slice(0, 20).map((item) => ({
+      id: item.id,
+      idMal: null,
+      title: {
+        english: item.name,
+        romaji: item.name,
+        native: null,
+      },
+      bannerImage: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null,
+      coverImage: {
+        extraLarge: item.poster_path ? `https://image.tmdb.org/t/p/original${item.poster_path}` : '',
+        large: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : '',
+        color: null,
+      },
+      description: item.overview || 'No description available.',
+      genres: [], // TMDB uses genre IDs, would need mapping
+      averageScore: item.vote_average ? Math.round(item.vote_average * 10) : null,
+      popularity: 0,
+      episodes: 0,
+      duration: null,
+      format: 'TV',
+      status: 'Unknown',
+      season: null,
+      seasonYear: item.first_air_date ? new Date(item.first_air_date).getFullYear() : null,
+      studios: { nodes: [] },
+      nextAiringEpisode: null,
+      trailer: null,
+      source: 'tmdb' as const,
+    }));
+  } catch (e) {
+    console.warn('[Hero] TMDB fallback failed:', e);
+    return [];
+  }
+}
+
 // ─── Orchestrator ───────────────────────────────────────────────────────────
 
 async function fetchHeroAnime(): Promise<HeroAnime[]> {
-  // 1) Server hero-spotlight API (AniList + Jikan synopsis)
-  try {
-    const data = await fetchFromHeroSpotlightAPI();
-    if (data.length > 0) {
-      console.log(
-        `[Hero] ✅ ${data.length} from /api/anime/hero-spotlight (${data.filter((d) => d.trailer?.id).length} w/ trailers)`
-      );
-      setCachedData(data, 'hero-spotlight');
-      return data;
-    }
-  } catch (err) {
-    console.warn('[Hero] hero-spotlight API failed, trying fallbacks:', err);
-  }
-
-  // 2) Direct AniList GraphQL
-  try {
-    const data = await fetchFromAniList();
-    if (data.length > 0) {
-      console.log(`[Hero] ✅ ${data.length} anime from AniList direct (${data.filter((d) => d.trailer?.id).length} w/ trailers)`);
-      setCachedData(data, 'AniList');
-      return data;
-    }
-  } catch (err) {
-    console.warn('[Hero] AniList direct failed:', err);
-  }
-
-  // 3) BFF trending (streaming-source backed)
+  // 1) BFF trending (streaming-source backed) - MOST RELIABLE
   try {
     const data = await fetchFromBffTrending();
     if (data.length > 0) {
-      console.log(`[Hero] ✅ ${data.length} anime from BFF trending`);
+      console.log(`[Hero] ✅ ${data.length} anime from BFF trending (primary source)`);
       setCachedData(data, 'BFF-trending');
       return data;
     }
   } catch (err) {
-    console.warn('[Hero] BFF trending failed:', err);
+    console.warn('[Hero] BFF trending failed, trying fallbacks:', err);
   }
 
-  // 4) Jikan (MyAnimeList unofficial API)
+  // 2) Jikan (MyAnimeList unofficial API) - MORE RELIABLE THAN ANILIST
   try {
     const data = await fetchFromJikan();
     if (data.length > 0) {
@@ -506,7 +591,7 @@ async function fetchHeroAnime(): Promise<HeroAnime[]> {
     console.warn('[Hero] Jikan failed:', err);
   }
 
-  // 5) Kitsu API
+  // 3) Kitsu API - RELIABLE FALLBACK
   try {
     const data = await fetchFromKitsu();
     if (data.length > 0) {
@@ -518,14 +603,64 @@ async function fetchHeroAnime(): Promise<HeroAnime[]> {
     console.warn('[Hero] Kitsu failed:', err);
   }
 
-  // 6) Return cached data if available (app may be temporarily offline)
+  // 4) TMDB API - VERY RELIABLE MOVIE DATABASE
+  try {
+    const data = await fetchFromTMDB();
+    if (data.length > 0) {
+      console.log(`[Hero] ✅ ${data.length} anime from TMDB`);
+      setCachedData(data, 'TMDB');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] TMDB failed:', err);
+  }
+
+  // 5) GitHub Static Dataset - ULTIMATE FALLBACK
+  try {
+    const data = await fetchFromGitHubDataset();
+    if (data.length > 0) {
+      console.log(`[Hero] ✅ ${data.length} anime from GitHub dataset`);
+      setCachedData(data, 'GitHub');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] GitHub dataset failed:', err);
+  }
+
+  // 6) Server hero-spotlight API (AniList + Jikan synopsis) - LESS RELIABLE
+  try {
+    const data = await fetchFromHeroSpotlightAPI();
+    if (data.length > 0) {
+      console.log(
+        `[Hero] ✅ ${data.length} from /api/anime/hero-spotlight (${data.filter((d) => d.trailer?.id).length} w/ trailers)`
+      );
+      setCachedData(data, 'hero-spotlight');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] hero-spotlight API failed:', err);
+  }
+
+  // 7) Direct AniList GraphQL - LEAST RELIABLE (moved to last)
+  try {
+    const data = await fetchFromAniList();
+    if (data.length > 0) {
+      console.log(`[Hero] ✅ ${data.length} anime from AniList direct (${data.filter((d) => d.trailer?.id).length} w/ trailers)`);
+      setCachedData(data, 'AniList');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] AniList direct failed:', err);
+  }
+
+  // 8) Return cached data if available (app may be temporarily offline)
   const cached = getCachedData();
   if (cached && cached.length > 0) {
     console.warn('[Hero] All sources failed, returning cached data');
     return cached;
   }
 
-  // 7) Return empty array instead of throwing to prevent UI crash
+  // 9) Return empty array instead of throwing to prevent UI crash
   console.warn('[Hero] All hero sources failed, returning empty array');
   return [];
 }

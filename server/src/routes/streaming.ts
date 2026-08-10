@@ -8,8 +8,6 @@ declare module 'express' {
     }
 }
 
-import { tryFetchHianimeRestStreamingData } from '../services/hianime-rest-fallback.js';
-import { isHianimeStyleEpisodeId } from '../utils/hianime-rest-servers.js';
 import { logger } from '../utils/logger.js';
 import axios, { type AxiosResponse } from 'axios';
 import https from 'node:https';
@@ -24,7 +22,7 @@ router.get('/debug', (req: Request, res: Response) => {
     const sources = Array.from((req as any).app?._router?.stack || [])
         .filter((layer: any) => layer.name === 'bound dispatch')
         .map((layer: any) => layer.route?.path);
-    
+
     res.json({
         status: 'ok',
         message: 'Streaming routes are loaded',
@@ -56,30 +54,14 @@ const DEFAULT_REMOTE_STREAM_PROXY =
     'https://api.allorigins.win/raw?url=';
 
 /** How long to wait for a dub result before accepting a sub fallback (ms). */
-const DUB_PATIENCE_MS = 25_000; // Increased to 25s to allow for deep fallbacks
+const DUB_PATIENCE_MS = 10_000; // Reduced to 10s for faster fallback
 
 /** Global per-request timeout safety net (ms). */
-const GLOBAL_TIMEOUT_MS = 60_000; // Increased to 60s to match SourceManager's time budget
+const GLOBAL_TIMEOUT_MS = 25_000; // 25s — allow stream extraction (browser pool) sufficient time
 
 // ---------------------------------------------------------------------------
 // Helpers — episode ID normalisation
 // ---------------------------------------------------------------------------
-
-/**
- * When `?ep=` is a non-numeric embed token, allow HiAnime REST to retry with
- * the numeric episode number from the query string.
- */
-function catalogEpisodeFallbackForRest(
-    episodeId: string,
-    episodeNum?: number,
-): number | undefined {
-    if (episodeNum == null || !Number.isFinite(episodeNum) || episodeNum < 1) return undefined;
-    if (!episodeId.includes('?ep=')) return undefined;
-    const epSeg = episodeId.split('?ep=')[1]?.split('&')[0]?.split('#')[0] ?? '';
-    // Only apply the fallback when the token is non-numeric
-    if (!epSeg || /^\d+$/.test(epSeg)) return undefined;
-    return episodeNum;
-}
 
 /**
  * AnimeKai (and peers) sometimes return a placeholder server named "default".
@@ -431,14 +413,6 @@ const getProxyBaseUrl = (req: Request): string => {
         return `${envBase}/api/stream/proxy`;
     }
 
-    // Priority 2: Render.com automatically injects RENDER_EXTERNAL_URL with the service's
-    // public HTTPS URL. Without this, proxy URLs are relative (/api/stream/proxy?...) which
-    // only work when the SPA and API share the same origin. Since the frontend is on Firebase
-    // (anifoxwatch.web.app) and the API is on Render, relative URLs break playback.
-    const renderExternalUrl = process.env.RENDER_EXTERNAL_URL?.replace(/\/$/, '');
-    if (renderExternalUrl) {
-        return `${renderExternalUrl}/api/stream/proxy`;
-    }
 
     // Priority 3: Vercel deployments — VERCEL_URL is always set to the deployment hostname.
     // Use HTTPS by default; Vercel terminates TLS at the edge and forwards via x-forwarded-proto.
@@ -499,8 +473,8 @@ const rewriteM3u8Content = (
         const t = line.trim();
         if (t.startsWith('#') && t.includes('URI="')) {
             return line.replace(/URI="([^"]+)"/g, (_match, uri) => {
-                const abs = uri.startsWith('http') ? uri : uri.startsWith('/') 
-                    ? `${origin}${uri}` 
+                const abs = uri.startsWith('http') ? uri : uri.startsWith('/')
+                    ? `${origin}${uri}`
                     : `${baseUrl}${uri}`;
                 return `URI="${proxyUrl(abs, proxyBase, referer)}"`;
             });
@@ -508,8 +482,8 @@ const rewriteM3u8Content = (
         if (!t || t.startsWith('#')) return line;
         // Handle absolute paths (starting with /) by using origin + path
         // For echovideo CDN, paths like /cdn/... need the full origin
-        const abs = t.startsWith('http') ? t : t.startsWith('/') 
-            ? `${origin}${t}` 
+        const abs = t.startsWith('http') ? t : t.startsWith('/')
+            ? `${origin}${t}`
             : `${baseUrl}${t}`;
         return proxyUrl(abs, proxyBase, referer);
     }).join('\n');
@@ -533,11 +507,11 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
     }
 
     if (segmentUrls.length === 0) return false;
-    
+
     // Exception: Megaup use .jpg/.png/.gif for real video segments to bypass blocks
     const isMegaupPattern = /(web|lab|code|net|pro|tech|hub|shop|burnt|zone|cdn|site|app|data|media|rrr|xm8|rrr\d+|dev\d*app)\d*(code|core|wave|lab|zone|hub|link|pro|burst|data|link|media|host|cdn|file|store|link|site)\.(site|store|click|buzz|online|top|xyz|shop|live|cc|nl)/i.test(originalUrl);
     if (isMegaupPattern) return false;
-    
+
     // Also check if segments themselves are from megaup CDN
     const hasMegaupSegments = segmentUrls.some(u => /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst|xm8|rrr\.|rrr\d+|dev\d*app/i.test(u));
     if (hasMegaupSegments) return false;
@@ -698,7 +672,7 @@ function reconstructEpisodeId(episodeId: string, query: Record<string, any>): st
     if (!query.ep || episodeId.includes('?ep=')) return episodeId;
     // Do not corrupt fully-formed AnimeKai IDs with a stray ?ep=
     if (episodeId.includes('$ep=') && episodeId.includes('$token=')) return episodeId;
-    
+
     return `${episodeId}?ep=${String(query.ep)}`;
 }
 
@@ -792,7 +766,7 @@ router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<v
  * @description Get streaming URLs for an episode. Races multiple sources in
  *   parallel and returns the best available result.
  */
-router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<void> => {
+router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<void> => {
     let episodeId = decodeURIComponent(req.params.episodeId as string);
     episodeId = reconstructEpisodeId(episodeId, req.query);
 
@@ -803,7 +777,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
 
     const { category, proxy: useProxy = 'true', ep: epToken, ep_num: epNumRaw, title: queryTitle } = req.query;
     const explicitServer = normalizeStreamServerQuery(req.query.server);
-    
+
     // Parse episode number - prioritize ep_num, fallback to ep if it's numeric
     let episodeNum: number | undefined;
     if (epNumRaw) {
@@ -844,17 +818,17 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
         logger.info(`[STREAM] Calling sourceManager.getStreamingLinks with:`, {
             episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle
         });
-        
+
         // Check if sourceManager exists and has sources
         if (!sourceManager) {
             logger.error(`[STREAM] sourceManager is not initialized!`);
             throw new Error('sourceManager not initialized');
         }
-        
+
         const sourcesCount = (sourceManager as any).sources?.size || 0;
         logger.info(`[STREAM] sourceManager has ${sourcesCount} sources registered`);
-        
-        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string);
+
+        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string, noCache);
         logger.info(`[STREAM] getStreamingLinks returned:`, {
             hasSources: streamData?.sources?.length > 0,
             sourcesCount: streamData?.sources?.length,
@@ -868,7 +842,7 @@ router.get('/watch/:episodeId', async (req: Request, res: Response): Promise<voi
     if (!streamData?.sources?.length && isDubRequested) {
         try {
             logger.info(`[STREAM] Sequential sub fallback for dub request ${episodeId}`, { requestId });
-            const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string);
+            const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string, noCache);
             if (subFallback?.sources?.length) {
                 streamData = { ...subFallback, category: 'sub', dubFallback: true };
                 logger.info(`[STREAM] Sequential sub fallback succeeded for ${episodeId}`, { requestId });
@@ -1309,7 +1283,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                     break;
                 } catch { /* proceed to normal rotation */ }
             }
-            
+
             lastProxyError = err;
             const errMsg = err instanceof Error ? err.message : String(err);
             const errCode = (err as NodeJS.ErrnoException).code;
@@ -1671,7 +1645,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const expectingVideoSegment = isSegment || (!isM3u8 && !isVideo && !url.includes('.vtt') && !url.includes('.srt'));
     if (expectingVideoSegment && upstreamCt) {
         const ctLower = upstreamCt.toLowerCase();
-        
+
         // Strict block for non-media types (HTML/JSON/JS)
         if (NON_VIDEO_CONTENT_TYPES.some(bad => ctLower.includes(bad))) {
             proxyResponse!.data?.resume?.();
@@ -1702,7 +1676,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                     return;
                 }
             }
-            
+
             // It's likely an obfuscated video segment - allow it
             logger.info(`[PROXY] Allowing obfuscated image segment (${upstreamCt}) from ${domain}`, { requestId });
             // Set normalized video content type for the Accept-Ranges check below
@@ -1833,7 +1807,7 @@ router.get('/debug/test-sources', async (req: Request, res: Response): Promise<v
     const results: any = {};
     const sm = sourceManager;
     const sourcesToTest = ['Gogoanime', 'AllAnime', '9Anime', 'Aniwaves'];
-    
+
     for (const name of sourcesToTest) {
         const src = sm['sources'].get(name);
         if (!src) {

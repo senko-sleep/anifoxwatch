@@ -10,6 +10,5 @@ export const REGISTERED_SOURCE_NAMES: readonly string[] = [
     'Aniwaves',           // ✅ Fallback: EchoVideo → burntburst45.store HLS
 
     // ── HENTAI SOURCES ─────────────────────────────────────────
-    'Hanime',             // ✅ hanime.tv - Hentai streaming with blob URL extraction
     'WatchHentai',        // ✅ watchhentai.net - Hentai streaming
 ];

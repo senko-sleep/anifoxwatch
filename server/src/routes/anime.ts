@@ -7,6 +7,81 @@ import { logger, createRequestContext, PerformanceTimer } from '../utils/logger.
 const router = Router();
 
 /**
+ * @route GET /api/anime/resolve-slug
+ * @query slug - Anime slug (e.g., "attack-on-titan")
+ * @query mode - Search mode: 'safe', 'mixed', or 'adult' (default: 'safe')
+ * @description Resolve anime slug to internal ID using our database systems
+ */
+router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> => {
+    try {
+        const { slug, mode = 'safe' } = req.query;
+        
+        if (!slug || typeof slug !== 'string') {
+            res.status(400).json({ error: 'Slug parameter is required' });
+            return;
+        }
+
+        // Determine search mode - allow mixed/adult for hentai content
+        let searchMode = (mode as 'safe' | 'mixed' | 'adult');
+        if (searchMode !== 'safe' && searchMode !== 'mixed' && searchMode !== 'adult') {
+            searchMode = 'safe';
+        }
+
+        // Try to find anime by searching for the slug
+        // First try with the full slug, then with just the first few words
+        const slugParts = slug.split('-');
+        const searchTerms = [
+            slug, // Full slug: "mushoku-tensei-jobless-reincarnation-season-3"
+            slugParts.slice(0, 2).join('-'), // First 2 words: "mushoku-tensei"
+            slugParts.slice(0, 3).join('-'), // First 3 words: "mushoku-tensei-jobless"
+            slugParts.slice(0, 2).join(' '), // First 2 words with space: "mushoku tensei"
+        ];
+        
+        let bestMatch = null;
+        let bestMatchSource = null;
+        
+        for (const searchTerm of searchTerms) {
+            const searchResults = await sourceManager.search(searchTerm, 1, undefined, { mode: searchMode });
+            
+            if (searchResults.results && searchResults.results.length > 0) {
+                // Find the best match based on title similarity
+                const slugLower = searchTerm.toLowerCase().replace(/-/g, ' ');
+                const currentBest = searchResults.results.find(anime => {
+                    const titleLower = (anime.title || '').toLowerCase().replace(/[^a-z0-9\s]/g, '');
+                    return titleLower.includes(slugLower) || slugLower.includes(titleLower);
+                }) || searchResults.results[0];
+                
+                // Prefer shorter search terms (more specific match)
+                if (!bestMatch || searchTerm.length < (bestMatchSource || '').length) {
+                    bestMatch = currentBest;
+                    bestMatchSource = searchTerm;
+                }
+            }
+        }
+        
+        if (bestMatch) {
+            res.json({
+                id: bestMatch.id,
+                title: bestMatch.title,
+                image: bestMatch.image,
+                source: bestMatch.source
+            });
+        } else {
+            // If not found in sources, try to create a searchable ID from the slug
+            res.json({
+                id: slug, // Use slug as ID fallback
+                title: slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                image: '',
+                source: 'slug-fallback'
+            });
+        }
+    } catch (error) {
+        logger.error('Slug resolution error', error as Error, {}, 'AnimeRoutes');
+        res.status(500).json({ error: 'Failed to resolve slug' });
+    }
+});
+
+/**
  * @route GET /api/anime/search
  * @query q - Search query string
  * @query page - Page number (default: 1)
@@ -841,7 +916,7 @@ router.get('/episodes', async (req: Request, res: Response): Promise<void> => {
 
         const result = await Promise.race([
             sourceManager.getEpisodes(id),
-            new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error('Get episodes timeout')), 25000))
+            new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error('Get episodes timeout')), 60000))
         ]);
         res.json({ episodes: result });
     } catch (error) {

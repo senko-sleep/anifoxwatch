@@ -72,7 +72,6 @@ anistream-hub/
     │   ├── services/       # Source manager
     │   ├── sources/        # Streaming providers
     │   └── types/          # Shared types
-    └── render.yaml         # Render.com deployment config
 ```
 
 ## 📡 API Endpoints
@@ -102,19 +101,18 @@ anistream-hub/
 
 ## 🌐 Deployment
 
-### Render.com (Backend)
+### Backend Server
 
-1. Create a new Web Service on Render
-2. Connect your repository
-3. Set build command: `cd server && npm install && npm run build`
-4. Set start command: `cd server && npm start`
-5. Add environment variables:
+1. Deploy the `server/` directory to any Node.js host (Fly.io, Railway, Koyeb, Cloud Run, etc.)
+2. Set build command: `npm install && npm run build`
+3. Set start command: `npm run start:prod`
+4. Add environment variables:
    - `PORT`: 3001
    - `CORS_ORIGIN`: Your frontend URL
 
-### Vercel/Netlify (Frontend)
+### Vercel (Full-stack)
 
-1. Connect your repository
+1. Connect your repository to Vercel
 2. Set build command: `npm run build`
 3. Set publish directory: `dist`
 4. Add environment variable:

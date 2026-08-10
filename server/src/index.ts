@@ -1,10 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
+import { fileURLToPath } from 'url';
 import animeRoutes from './routes/anime.js';
 import sourcesRoutes from './routes/sources.js';
 import streamingRoutes from './routes/streaming.js';
-import hianimeRestProxyRoutes from './routes/hianime-rest-proxy.js';
 import monitoringRoutes from './routes/monitoring.js';
 import { logger, createRequestContext, PerformanceTimer } from './utils/logger.js';
 import { reliabilityMiddleware, healthCheckMiddleware } from './middleware/reliability.js';
@@ -33,7 +33,6 @@ app.set('x-powered-by', false);
 const KNOWN_ORIGINS = [
     'https://anifoxwatch.web.app',
     'https://anifoxwatch.firebaseapp.com',
-    'https://anifox-frontend.onrender.com',
     'http://localhost:5173',
     'http://localhost:5174',
     'http://localhost:3000',
@@ -93,6 +92,18 @@ app.use(express.json({ limit: '1mb' }));
 
 // Reliability middleware with circuit breaker, timeouts, and retries
 app.use(reliabilityMiddleware);
+
+// Per-request timeout — must run before route handlers (middleware registered after routes never runs for matched paths).
+app.use((req: Request, res: Response, next: NextFunction) => {
+    const REQUEST_TIMEOUT_MS = 90_000;
+    res.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        console.error(`⚠️ Request timeout: ${req.method} ${req.path}`);
+        if (!res.headersSent) {
+            res.status(504).json({ error: 'Request timeout' });
+        }
+    });
+    next();
+});
 
 // Advanced request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -171,7 +182,6 @@ app.get('/api/image-proxy', async (req: Request, res: Response) => {
 app.use('/api/anime', animeRoutes);
 app.use('/api/sources', sourcesRoutes);
 app.use('/api/stream', streamingRoutes);
-app.use('/api/hianime-rest', hianimeRestProxyRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 
 // AniList GraphQL proxy — browsers can't call graphql.anilist.co directly due to CORS;
@@ -236,12 +246,6 @@ app.get('/api', (_req: Request, res: Response) => {
                 watch: 'GET /api/stream/watch/:episodeId?server={server}',
                 proxy: 'GET /api/stream/proxy?url={hlsUrl}'
             },
-            hianimeRest: {
-                episodeServers:
-                    'GET /api/hianime-rest/episode/servers?animeEpisodeId={slug?ep=id}',
-                episodeSources:
-                    'GET /api/hianime-rest/episode/sources?animeEpisodeId={slug?ep=id}&server=&category='
-            },
             sources: {
                 list: 'GET /api/sources',
                 health: 'GET /api/sources/health',
@@ -263,6 +267,7 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     const context = createRequestContext(req);
     logger.error('Unhandled error', err, context);
 
+    // Don't crash the server on errors, just log and respond
     res.status(500).json({
         error: 'Internal server error',
         message: process.env.NODE_ENV === 'development' ? err.message : undefined,
@@ -332,8 +337,8 @@ const startServer = async (port: number) => {
     // Connection timeout settings to prevent hanging connections
     server.keepAliveTimeout = 65000; // Slightly higher than typical LB timeout (60s)
     server.headersTimeout = 70000; // Must be higher than keepAliveTimeout
-    server.timeout = 120000; // 2 min max request time
-    server.maxConnections = 500;
+    server.timeout = 300000; // 5 min max request time (increased from 2 min)
+    server.maxConnections = 1000; // Increased from 500
 
     activeServer = server;
 
@@ -346,6 +351,7 @@ const startServer = async (port: number) => {
             process.exit(1);
         } else {
             console.error('SERVER ERROR:', err);
+            // Don't exit on other errors, keep server alive
         }
     });
 
@@ -369,10 +375,7 @@ const startServer = async (port: number) => {
     }
 };
 
-// ============================================
-// GRACEFUL SHUTDOWN
-// ============================================
-
+// Graceful shutdown
 const gracefulShutdown = (signal: string) => {
     console.log(`\n${signal} received. Shutting down gracefully...`);
     if (activeServer) {
@@ -393,11 +396,10 @@ const gracefulShutdown = (signal: string) => {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-import { fileURLToPath } from 'url';
-
 // Export app for Vercel serverless function
 export default app;
 
+// Start server for development (only when run directly)
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
     startServer(Number(PORT));
 }

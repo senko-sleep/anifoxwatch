@@ -1,8 +1,0 @@
-# Deployment configuration for AniStream Hub
-# 
-# Active production — Render.com:
-#   URL  : https://anifoxwatch-dko2.onrender.com
-#   CLI  : render deploy
-#
-# Legacy — Clever Cloud (no longer active):
-#   URL  : https://app-82ae23d3-5750-4b13-9cc6-9a9ad55a2b17.cleverapps.io

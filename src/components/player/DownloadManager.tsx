@@ -31,7 +31,7 @@ import {
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 
-// Tune these to protect Render.com uptime
+// Rate-limit settings to avoid hammering the API
 const RESOLVE_DELAY_MS = 2500; // ms between each episode resolve (2 API calls each)
 const MAX_BATCH_SIZE = 12; // max episodes to resolve in one batch (warn above this)
 const DOWNLOAD_DELAY_MS = 500; // ms between individual download triggers
@@ -223,7 +223,7 @@ export function DownloadManager({
         });
       }
 
-      // Rate-limit: generous delay between episodes to protect Render uptime
+      // Rate-limit: generous delay between episodes to protect API uptime
       // Each episode = 2 API calls (servers + stream), both potentially heavy
       if (!controller.signal.aborted) {
         await new Promise(r => setTimeout(r, RESOLVE_DELAY_MS));
@@ -236,7 +236,7 @@ export function DownloadManager({
   // Download a single episode
   // Opens in a new tab / triggers browser-native download to avoid:
   //   1. Streaming entire video through JS memory (crashes on large files)
-  //   2. Keeping a long-lived connection to Render proxy (kills uptime)
+  //   2. Keeping a long-lived connection to the API proxy (kills uptime)
   const downloadSingle = useCallback((epId: string) => {
     const state = downloadStates.get(epId);
     if (!state?.streamUrl) return;
@@ -276,7 +276,7 @@ export function DownloadManager({
   }, [downloadStates, animeTitle]);
 
   // Download all ready episodes sequentially
-  // Each triggers a browser-native download (no Render proxy streaming pressure)
+  // Each triggers a browser-native download (no API proxy streaming pressure)
   const downloadAll = useCallback(async () => {
     if (isDownloading) return;
     setIsDownloading(true);

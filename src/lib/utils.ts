@@ -67,6 +67,47 @@ export function stripSourcePrefix(id: string): string {
   return id;
 }
 
+/**
+ * Generate a clean URL-friendly slug from anime title
+ * Converts titles like "Attack on Titan" to "attack-on-titan"
+ * Handles special characters and removes anime source prefixes
+ */
+export function generateAnimeSlug(title: string | undefined | null, id?: string): string {
+  // Convert title to string if it's not already
+  const titleStr = title != null ? String(title) : '';
+  
+  if (!titleStr) {
+    // Fallback to ID if no title available
+    return id ? stripSourcePrefix(id) : 'unknown';
+  }
+  
+  // Clean the title: remove special characters, convert to lowercase, replace spaces with hyphens
+  const slug = titleStr
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '') // Remove special characters except word chars, spaces, hyphens
+    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .replace(/-+/g, '-') // Replace multiple hyphens with single
+    .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+  
+  // If slug is empty after cleaning, use ID fallback
+  if (!slug && id) {
+    return stripSourcePrefix(id);
+  }
+  
+  return slug || 'unknown';
+}
+
+/**
+ * Generate a watch URL using anime slug instead of numeric ID
+ * Creates clean URLs like /watch/attack-on-titan?ep=1 instead of /watch?id=-207141&ep=1
+ */
+export function generateWatchUrl(anime: { title?: string | null; id?: string; titleEnglish?: string | null; titleRomaji?: string | null }, episode?: number): string {
+  const title = anime.titleEnglish || anime.titleRomaji || anime.title || '';
+  const slug = generateAnimeSlug(title, anime.id);
+  const episodeParam = episode ? `?ep=${episode}` : '';
+  return `/watch/${slug}${episodeParam}`;
+}
+
 /** Skip API placeholders like "00", "0 min" */
 export function isValidDurationLabel(s: string | undefined | null): boolean {
   if (s == null || typeof s !== 'string') return false;

@@ -80,6 +80,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/watch" element={<Watch />} />
+          <Route path="/watch/:animeId" element={<Watch />} />
           <Route path="/search" element={<Search />} />
           <Route path="/docs" element={<Docs />} />
           <Route path="/health" element={<Health />} />

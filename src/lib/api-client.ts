@@ -1,144 +1,6 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { getApiConfig, getApiFallbackUrl } from './api-config';
 import { fetchAniListAnimeByNumericId } from './anilist-anime-by-id';
-import {
-    buildBffServersToTry,
-    fetchHianimeEpisodeServerIdsFromBff,
-} from './hianime-episode-discovery';
-import {
-    getCatalogEpisodeFromTokenCompound,
-    isHianimeStyleEpisodeId,
-    normalizeAnimeEpisodeIdForHianimeRest,
-} from './hianime-episode-id';
-
-/**
- * When the primary API returns no sources, fetch episode sources via the same API host's
- * `/api/hianime-rest/episode/sources` proxy (Worker or Express → `HIANIME_REST_URL` / Vercel).
- * The browser must not call Vercel directly — CORS often fails on errors. Playback URLs are
- * rewritten through `/api/stream/proxy` on this host.
- */
-async function fetchStreamingFromAniwatchRest(params: {
-    workerProxyBase: string;
-    episodeId: string;
-    /** Original list id (e.g. `slug$ep=1$token=...`) before `normalizeAnimeEpisodeIdForHianimeRest`. */
-    rawEpisodeId?: string;
-    server?: string;
-    category?: string;
-    /** Hard cap for the whole HiAnime REST discovery loop (multiple servers). */
-    totalBudgetMs?: number;
-}): Promise<StreamingData | null> {
-    const { workerProxyBase, episodeId, server, category } = params;
-    const apiBase = workerProxyBase.replace(/\/$/, '');
-    const cat = category === 'dub' ? 'dub' : 'sub';
-    const totalBudgetMs = Math.max(2500, params.totalBudgetMs ?? 12_000);
-    const startedAt = Date.now();
-    const restId = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
-
-    const discoveryBudget = Math.min(6000, Math.max(1500, Math.floor(totalBudgetMs * 0.35)));
-    const discovered = await fetchHianimeEpisodeServerIdsFromBff(apiBase, restId, cat, discoveryBudget);
-    const serversToTry = buildBffServersToTry({
-        explicitServer: server,
-        discoveredIds: discovered,
-    });
-
-    const refererFromHeaders = (headers: unknown): string => {
-        if (headers && typeof headers === 'object' && 'Referer' in headers) {
-            const r = (headers as { Referer?: string }).Referer;
-            if (typeof r === 'string' && r) return r;
-        }
-        return 'https://hianime.to/';
-    };
-
-    const toProxied = (mediaUrl: string, referer: string) =>
-        `${apiBase}/api/stream/proxy?url=${encodeURIComponent(mediaUrl)}&referer=${encodeURIComponent(referer)}`;
-
-    let attempt = 0;
-    for (const srv of serversToTry) {
-        const elapsed = Date.now() - startedAt;
-        if (elapsed >= totalBudgetMs) break;
-
-        // Keep each attempt short; the outer loop may try multiple servers.
-        const remaining = Math.max(1500, totalBudgetMs - elapsed);
-        const perAttemptMs = Math.min(10_000, Math.max(2500, Math.floor(remaining / 2)));
-
-        const qs = new URLSearchParams({
-            animeEpisodeId: restId,
-            server: srv,
-            category: cat,
-        });
-        const url = `${apiBase}/api/hianime-rest/episode/sources?${qs}`;
-        const controller = new AbortController();
-        const tid = setTimeout(() => controller.abort(), perAttemptMs);
-        try {
-            attempt += 1;
-            console.info(`[API] 🧪 HiAnime REST attempt ${attempt}/${serversToTry.length}: ${srv}`, { restId, cat });
-            const resp = await fetch(url, {
-                signal: controller.signal,
-                headers: { Accept: 'application/json' },
-                mode: 'cors',
-            });
-            clearTimeout(tid);
-            const body = (await resp.json()) as {
-                status?: number;
-                message?: string;
-                data?: {
-                    sources?: Array<{
-                        url: string;
-                        isM3U8?: boolean;
-                        quality?: string;
-                        type?: string;
-                    }>;
-                    subtitles?: Array<{ url: string; lang: string }>;
-                    headers?: { Referer?: string };
-                };
-            };
-            if (body?.status !== undefined && body.status !== 200) continue;
-            const data = body?.data;
-            if (!data?.sources?.length) continue;
-
-            const referer = refererFromHeaders(data.headers);
-            const sources: VideoSource[] = data.sources.map((s) => ({
-                url: toProxied(s.url, referer),
-                quality: (s.quality || s.type || 'default') as VideoSource['quality'],
-                isM3U8: Boolean(s.isM3U8),
-            }));
-            const subtitles: VideoSubtitle[] = (data.subtitles || []).map((t) => ({
-                url: toProxied(t.url, referer),
-                lang: t.lang,
-            }));
-
-            return {
-                sources,
-                subtitles,
-                headers: { Referer: referer },
-                source: 'hianime',
-            };
-        } catch {
-            clearTimeout(tid);
-            continue;
-        }
-    }
-
-    const epSeg = restId.includes('?ep=') ? restId.split('?ep=')[1]?.split('&')[0] ?? '' : '';
-    const catalog = getCatalogEpisodeFromTokenCompound(params.rawEpisodeId ?? '');
-    if (catalog != null && epSeg && !/^\d+$/.test(epSeg)) {
-        const slug = restId.split('?')[0];
-        const altId = `${slug}?ep=${catalog}`;
-        if (altId !== restId) {
-            const spent = Date.now() - startedAt;
-            const remain = Math.max(1500, totalBudgetMs - spent);
-            if (remain >= 1500) {
-                return fetchStreamingFromAniwatchRest({
-                    ...params,
-                    episodeId: altId,
-                    rawEpisodeId: undefined,
-                    totalBudgetMs: remain,
-                });
-            }
-        }
-    }
-    return null;
-}
 
 interface BrowseFilters {
     type?: string;
@@ -271,9 +133,9 @@ export interface SeasonalResponse {
 class AnimeApiClient {
     private cache: Map<string, CacheEntry<unknown>> = new Map();
     private inflight: Map<string, Promise<unknown>> = new Map();
-    private readonly MAX_RETRIES = 2;
-    private readonly TIMEOUT_MS = 12000; // 12s — surfaces failures fast so failover kicks in sooner
-    private readonly FALLBACK_TTL = 2 * 60 * 1000; // 2 min before retrying primary
+    private readonly MAX_RETRIES = 1; // Further reduced to prevent UI struggling
+    private readonly TIMEOUT_MS = 25000; // 25s — allow sufficient time for stream extraction and AniList resolution
+    private readonly FALLBACK_TTL = 30 * 1000; // 30s before retrying primary (reduced from 2 min)
     private _online = true;
     private _lastOnlineCheck = 0;
     /** Non-null when we've switched to a fallback URL after primary failed. */
@@ -309,10 +171,12 @@ class AnimeApiClient {
         options?: RequestInit,
         retries: number = this.MAX_RETRIES
     ): Promise<T> {
+
         const isGet = !options?.method || options.method === 'GET';
 
         // Check cache first for GET requests
         if (isGet) {
+            // Generate cache key with query parameters for better caching
             const cacheKey = endpoint;
             const cached = this.cache.get(cacheKey);
             if (cached && cached.expires > Date.now()) {
@@ -491,15 +355,17 @@ class AnimeApiClient {
      * Get cache TTL based on endpoint type
      */
     private getCacheTTL(endpoint: string): number {
-        if (endpoint.includes('/stream/')) return 3 * 60 * 1000; // 3 min for streams
+        // Streaming links should NOT be cached - they need to be fresh for each episode
+        if (endpoint.includes('/stream/watch') || endpoint.includes('/stream/proxy')) return 0; // No caching for actual streaming
+        if (endpoint.includes('/stream/servers')) return 2 * 60 * 1000; // 2 min for server lists
         // Search must stay fresh — long TTL made browse/search grids feel stale vs. header autocomplete
-        if (endpoint.includes('/anime/search?')) return 20 * 1000; // 20s
-        if (endpoint.includes('/trending') || endpoint.includes('/latest')) return 5 * 60 * 1000; // 5 min
-        if (endpoint.includes('/top-rated') || endpoint.includes('/seasonal')) return 15 * 60 * 1000; // 15 min
-        if (endpoint.includes('/schedule')) return 5 * 60 * 1000; // 5 min
-        if (endpoint.includes('/sources')) return 30 * 1000; // 30s for health
-        if (endpoint.includes('/anime?id=') || endpoint.includes('/episodes')) return 10 * 60 * 1000; // 10 min
-        return 2 * 60 * 1000; // default 2 min
+        if (endpoint.includes('/anime/search?')) return 10 * 1000; // 10s (reduced from 20s)
+        if (endpoint.includes('/trending') || endpoint.includes('/latest')) return 2 * 60 * 1000; // 2 min (reduced from 5 min)
+        if (endpoint.includes('/top-rated') || endpoint.includes('/seasonal')) return 5 * 60 * 1000; // 5 min (reduced from 15 min)
+        if (endpoint.includes('/schedule')) return 2 * 60 * 1000; // 2 min (reduced from 5 min)
+        if (endpoint.includes('/sources')) return 15 * 1000; // 15s for health (reduced from 30s)
+        if (endpoint.includes('/anime?id=') || endpoint.includes('/episodes')) return 10 * 60 * 1000; // 10 min (increased for faster episode switching)
+        return 30 * 1000; // default 30s (reduced from 2 min)
     }
 
     private async fetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -510,6 +376,26 @@ class AnimeApiClient {
     clearCache(): void {
         this.cache.clear();
         this.inflight.clear();
+    }
+
+    // Clear cache for specific pattern
+    clearCacheForPattern(pattern: string): void {
+        const keysToDelete: string[] = [];
+        for (const key of this.cache.keys()) {
+            if (key.includes(pattern)) {
+                keysToDelete.push(key);
+            }
+        }
+        keysToDelete.forEach(key => this.cache.delete(key));
+
+        // Also clear inflight requests
+        const inflightKeysToDelete: string[] = [];
+        for (const key of this.inflight.keys()) {
+            if (key.includes(pattern)) {
+                inflightKeysToDelete.push(key);
+            }
+        }
+        inflightKeysToDelete.forEach(key => this.inflight.delete(key));
     }
 
     // ============ ANIME ENDPOINTS ============
@@ -570,7 +456,7 @@ class AnimeApiClient {
 
     async filterAnime(filters: Partial<BrowseFilters>, page: number = 1): Promise<AnimeSearchResult> {
         const params = new URLSearchParams({ page: String(page) });
-        
+
         if (filters.type) params.append('type', filters.type);
         if (filters.genre) params.append('genre', filters.genre);
         if (filters.status) params.append('status', filters.status);
@@ -671,15 +557,15 @@ class AnimeApiClient {
     // ============ STREAMING ENDPOINTS ============
 
     async getEpisodeServers(episodeId: string): Promise<EpisodeServer[]> {
-        const normalized = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
-        let slugPart = normalized;
+        // Simple ID normalization - just handle basic episode ID formats
+        let slugPart = episodeId;
         let query = '';
-        if (normalized.includes('?ep=')) {
-            const parts = normalized.split('?ep=');
+        if (episodeId.includes('?ep=')) {
+            const parts = episodeId.split('?ep=');
             slugPart = parts[0];
             query = `?ep=${parts[1]}`;
-        } else if (normalized.includes('&eps=')) {
-            const parts = normalized.split('&eps=');
+        } else if (episodeId.includes('&eps=')) {
+            const parts = episodeId.split('&eps=');
             slugPart = parts[0];
             query = `?eps=${parts[1]}`;
         }
@@ -689,20 +575,18 @@ class AnimeApiClient {
         return response.servers || [];
     }
 
-    async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number, animeTitle?: string): Promise<StreamingData> {
-        // Split hianime-style "slug?ep=12345" — put `ep` as a real query param so
-        // the path never contains %3F (Vercel returns 404 for encoded ? in paths).
-        const normalized = normalizeAnimeEpisodeIdForHianimeRest(episodeId);
-        let slugPart = normalized;
+    async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean): Promise<StreamingData> {
+        // Simple ID normalization - just handle basic episode ID formats
+        let slugPart = episodeId;
         let epPart = '';
         let epsPart = '';
-        
-        if (normalized.includes('?ep=')) {
-            const parts = normalized.split('?ep=');
+
+        if (episodeId.includes('?ep=')) {
+            const parts = episodeId.split('?ep=');
             slugPart = parts[0];
             epPart = parts[1];
-        } else if (normalized.includes('&eps=')) {
-            const parts = normalized.split('&eps=');
+        } else if (episodeId.includes('&eps=')) {
+            const parts = episodeId.split('&eps=');
             slugPart = parts[0];
             epsPart = parts[1];
         }
@@ -712,18 +596,16 @@ class AnimeApiClient {
         if (epsPart) params.append('eps', epsPart);
         if (server) params.append('server', server);
         if (category) params.append('category', category);
-        // `ep_num`: catalog episode for cross-source + server HiAnime REST fallback when `?ep=` is a
+        // `ep_num`: catalog episode for cross-source fallback when `?ep=` is a
         // non-numeric embed token (from `slug$ep=N$token=...` we still know N).
         const epKey = epPart || epsPart || '';
         const looksLikeNumericAniwatchEp = /^\d+$/.test(epKey);
-        const compoundCatalog = getCatalogEpisodeFromTokenCompound(episodeId);
-        if (compoundCatalog != null) {
-            params.append('ep_num', String(compoundCatalog));
-        } else if (episodeNum != null) {
+        if (episodeNum != null) {
             params.append('ep_num', String(episodeNum));
         }
         if (anilistId != null) params.append('anilist_id', String(anilistId));
         if (animeTitle) params.append('title', animeTitle);
+        if (bypassCache) params.append('nocache', 'true');
 
         const queryString = params.toString() ? `?${params.toString()}` : '';
         const streamPath = `/api/stream/watch/${encodeURIComponent(slugPart)}${queryString}`;
@@ -731,9 +613,9 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            // 45s timeout per host — Render free tier cold starts can take 20-40s.
-            // A short timeout causes premature client aborts while Render is waking up.
-            const streamTimeoutMs = 45_000;
+            // 25s timeout per host — cross-source fallback for anilist- IDs
+            // requires AniList API + search + episodes + streaming (20-30s total).
+            const streamTimeoutMs = 25_000;
             const maxAttempts = 1;
             let lastErr: Error | null = null;
 
@@ -839,33 +721,6 @@ const primaryBase = this.apiBase();
                     } catch (fallbackErr) {
                         console.error(`[API] ❌ Fallback stream also failed:`, fallbackErr);
                     }
-                }
-
-                // HiAnime: primary may 404 while upstream aniwatch-api (HIANIME_REST_URL) still returns sources.
-                // Aniwaves IDs should NOT trigger HiAnime REST fallback - the server handles Aniwaves directly.
-                // AnimeKai compound IDs (slug$ep=N$token=...) normalize to slug?ep=TOKEN which
-                // matches the HiAnime style regex but are NOT HiAnime IDs — skip REST for them.
-                const isAnimeKaiCompound = episodeId.includes('$ep=') || episodeId.includes('$token=');
-                const isAniwavesId = /^(aniwaves|aniwave)-/i.test(episodeId);
-                if (!isAniwavesId && !isAnimeKaiCompound && isHianimeStyleEpisodeId(episodeId)) {
-                    const proxyBase = primaryBase;
-                    console.warn(`[API] Stream primary failed; trying HiAnime REST proxy (${proxyBase}/api/hianime-rest/...)`);
-                    const fromRest = await fetchStreamingFromAniwatchRest({
-                        workerProxyBase: proxyBase,
-                        episodeId: normalized,
-                        rawEpisodeId: episodeId,
-                        server,
-                        category,
-                        totalBudgetMs: 12_000,
-                    });
-                    if (fromRest?.sources?.length) {
-                        console.log(`[API] ✅ Stream received via HiAnime REST proxy`, {
-                            sources: fromRest.sources.length,
-                            source: fromRest.source,
-                        });
-                        return fromRest;
-                    }
-                    console.warn(`[API] HiAnime REST proxy returned no sources (upstream services may be unavailable)`);
                 }
 
             const isAbort = primaryErr instanceof Error && (primaryErr.name === 'AbortError' || primaryErr.message.toLowerCase().includes('aborted'));

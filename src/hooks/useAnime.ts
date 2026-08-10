@@ -154,26 +154,26 @@ export function useEpisodes(animeId: string, enabled: boolean = true, source?: s
         queryFn: async () => {
             let fetchId = animeId;
             if (animeId.startsWith('anilist-')) {
-                // 1. Check localStorage cache first — instant, no network call
+                // Backend now handles anilist- IDs directly via Yomi + cross-source fallback.
+                // Try direct fetch first — it returns episodes without needing a source-native ID.
+                // Only fall back to the cached resolve if direct fetch returns nothing.
+                const directEps = await apiClient.getEpisodes(animeId, source).catch(() => [] as Episode[]);
+                if (directEps.length > 0) {
+                    console.log('[useEpisodes] Got episodes via direct anilist ID:', { animeId, episodeCount: directEps.length });
+                    return directEps;
+                }
+
+                // Direct fetch returned nothing — check localStorage cache as fallback
                 const cached = getCachedResolve(animeId);
                 if (cached) {
                     fetchId = cached;
-                    console.log('[useEpisodes] Using cached resolve:', { animeId, fetchId });
+                    console.log('[useEpisodes] Using cached resolve (direct fetch empty):', { animeId, fetchId });
                 } else {
-                    // 2. Try fetching episodes with the anilist ID directly (server resolves it)
-                    //    and resolve in parallel — use whichever returns data first.
-                    const directEpisodesPromise = apiClient.getEpisodes(animeId, source).catch(() => [] as Episode[]);
-                    const resolvePromise = apiClient.resolveAniListToStreamingId(animeId);
-                    // Start both in parallel
-                    const [directEps, resolved] = await Promise.all([directEpisodesPromise, resolvePromise]);
+                    // Resolve to a source-native ID and cache it
+                    const resolved = await apiClient.resolveAniListToStreamingId(animeId);
                     if (resolved?.streamingId) {
                         setCachedResolve(animeId, resolved.streamingId);
                         fetchId = resolved.streamingId;
-                    }
-                    // If direct fetch already returned episodes, use them
-                    if (directEps.length > 0) {
-                        console.log('[useEpisodes] Got episodes via direct anilist ID:', { animeId, episodeCount: directEps.length });
-                        return directEps;
                     }
                 }
             }
@@ -289,12 +289,12 @@ export function useEpisodeServers(episodeId: string, enabled: boolean = true) {
     });
 }
 
-export function useStreamingLinks(episodeId: string, server?: string, category?: string, enabled: boolean = true, episodeNum?: number, anilistId?: number, animeTitle?: string) {
+export function useStreamingLinks(episodeId: string, server?: string, category?: string, enabled: boolean = true, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean) {
     return useQuery<StreamingData, Error>({
         queryKey: queryKeys.stream(episodeId, server, category),
         queryFn: async () => {
-            console.log('[useStreamingLinks] Fetching stream:', { episodeId, server, category, episodeNum, anilistId, animeTitle });
-            const result = await apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle);
+            console.log('[useStreamingLinks] Fetching stream:', { episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache });
+            const result = await apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache);
             console.log('[useStreamingLinks] Stream result:', {
                 sourceCount: result.sources?.length || 0,
                 source: result.source,
@@ -303,8 +303,8 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
             return result;
         },
         enabled: enabled && episodeId.length > 0,
-        staleTime: 15 * 60 * 1000,  // 15 min — stream URLs don't rotate fast; avoid re-fetching on remount
-        gcTime: 25 * 60 * 1000,     // Keep in memory for 25 min so episode switches feel instant
+        staleTime: 5 * 60 * 1000,  // Cache for 5 min to reduce UI struggling on episode switch
+        gcTime: 10 * 60 * 1000,     // Keep in memory for 10 min
         // FAST STARTUP: Reduced retries to avoid abort signal conflicts
         retry: (failureCount, error) => {
             console.log('[useStreamingLinks] Retry attempt:', failureCount, 'Error:', error);

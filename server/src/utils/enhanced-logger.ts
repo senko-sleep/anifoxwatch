@@ -2,7 +2,7 @@ import chalk from 'chalk';
 
 /**
  * Enhanced Logger with Metrics, Tracing, and Actionable Insights
- * Designed for production debugging on Render.com
+ * Designed for production debugging
  */
 
 export enum LogLevel {

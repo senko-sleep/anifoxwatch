@@ -74,48 +74,19 @@ deploy_firebase() {
     print_status "Firebase deployment completed!"
 }
 
-# Deploy to Render.com
-deploy_render() {
-    print_info "Deploying to Render.com..."
-
-    # Check if Render CLI is installed
-    if ! command -v render &> /dev/null; then
-        print_warning "Render CLI not found. Make sure to connect your GitHub repo to Render.com dashboard"
-        print_info "For manual deployment:"
-        print_info "1. Push this code to GitHub"
-        print_info "2. Connect your GitHub repo to Render.com"
-        print_info "3. Use the render.yaml configuration file"
-        return
-    fi
-
-    # Deploy using render.yaml
-    render deploy
-
-    print_status "Render.com deployment initiated!"
-}
-
 # Main deployment logic
 main() {
-    local target="${1:-all}"
+    local target="${1:-firebase}"
 
     check_dependencies
 
     case "$target" in
-        "firebase")
+        "firebase"|"all")
             deploy_firebase
-            ;;
-        "render")
-            deploy_render
-            ;;
-        "all")
-            print_info "Deploying to all platforms..."
-            deploy_firebase
-            echo ""
-            deploy_render
             ;;
         *)
             print_error "Invalid target: $target"
-            echo "Usage: $0 [firebase|render|all]"
+            echo "Usage: $0 [firebase]"
             exit 1
             ;;
     esac

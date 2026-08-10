@@ -8,6 +8,8 @@ export const ANILIST_GRAPHQL_URL = apiUrl('/api/anilist/graphql');
 
 const MIN_SPACING_MS = 850;
 const MAX_429_RETRIES = 5;
+/** Hard cap so one stuck BFF/proxy response cannot block the global AniList queue forever. */
+const ANILIST_FETCH_TIMEOUT_MS = 18_000;
 
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -25,10 +27,17 @@ function retryAfterMs(res: Response): number | null {
   return null;
 }
 
+function withFetchTimeout(init: RequestInit): RequestInit {
+  return {
+    ...init,
+    signal: AbortSignal.timeout(ANILIST_FETCH_TIMEOUT_MS),
+  };
+}
+
 async function fetchWith429Retry(init: RequestInit): Promise<Response> {
   let attempt = 0;
   while (true) {
-    const res = await fetch(ANILIST_GRAPHQL_URL, init);
+    const res = await fetch(ANILIST_GRAPHQL_URL, withFetchTimeout(init));
     if (res.status !== 429) return res;
     if (attempt >= MAX_429_RETRIES) return res;
 

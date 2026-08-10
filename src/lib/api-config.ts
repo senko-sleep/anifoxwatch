@@ -9,7 +9,7 @@
  * - Production: Configured in .env.production
  */
 
-export type ApiDeployment = 'local' | 'vercel' | 'firebase' | 'custom' | 'hianimeRest';
+export type ApiDeployment = 'local' | 'vercel' | 'custom';
 
 /**
  * Returns true when the page is loaded inside a context where the Vite dev-server
@@ -41,10 +41,7 @@ export const API_DEPLOYMENTS = {
      * `window.location.origin` (your current deployment domain) instead of a hardcoded app.
      */
     vercel: '',
-    firebase: 'https://anifoxwatch-dko2.onrender.com',
     custom: '',
-    /** Optional HiAnime REST host for status checks (same shape as VITE_ANIWATCH_API_URL). */
-    hianimeRest: (import.meta.env.VITE_ANIWATCH_API_URL as string | undefined)?.trim() || '',
 } as const;
 
 function configFromUrl(envApiUrl: string): ApiConfig {
@@ -52,10 +49,8 @@ function configFromUrl(envApiUrl: string): ApiConfig {
 
     if (envApiUrl.includes('localhost') || envApiUrl.includes('127.0.0.1')) {
         deployment = 'local';
-    } else if (envApiUrl.includes('vercel.app')) {
+    } else if (envApiUrl.includes('vercel.app') || envApiUrl === '/api') {
         deployment = 'vercel';
-    } else if (envApiUrl === '/api') {
-        deployment = 'firebase';
     }
 
     return {
@@ -101,8 +96,8 @@ export function resolveDevApiConfig(env: ImportMetaEnv): ApiConfig {
         return {
             deployment: 'local',
             baseUrl,
-            timeout: 45000,
-            retries: 3,
+            timeout: 10000, // Reduced timeout for faster feedback
+            retries: 5, // Increased retries for connection issues
         };
     }
 
@@ -116,11 +111,12 @@ export function resolveDevApiConfig(env: ImportMetaEnv): ApiConfig {
         return configFromUrl(String(remote).trim());
     }
 
+    // Default to Vite proxy (empty baseUrl) instead of direct localhost
     return {
         deployment: 'local',
-        baseUrl: API_DEPLOYMENTS.local,
-        timeout: 30000,
-        retries: 3,
+        baseUrl: '', // Use Vite proxy by default
+        timeout: 10000,
+        retries: 5,
     };
 }
 
@@ -142,11 +138,11 @@ export function getApiConfig(): ApiConfig {
     // This fixes deployments on arbitrary Vercel domains (preview URLs, forks, custom domains).
     const sameOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
-    // Force Render API for Firebase hosting
+    // Firebase hosting: use same-origin (Vercel functions served from the same domain).
     if (isFirebaseHosting) {
         return {
-            deployment: 'firebase',
-            baseUrl: 'https://anifoxwatch-dko2.onrender.com',
+            deployment: 'vercel',
+            baseUrl: sameOrigin.replace(/\/$/, ''),
             timeout: 30000,
             retries: 3
         };
@@ -244,50 +240,19 @@ export async function getApiStatus(baseUrl: string): Promise<{
     }
 }
 
-/** HiAnime REST /health may be plain text (e.g. daijoubu). */
-async function getHianimeRestStatus(baseUrl: string): Promise<{
-    online: boolean;
-    deployment: string;
-    latency: number;
-    version: string;
-}> {
-    const start = Date.now();
-    try {
-        const response = await fetch(`${baseUrl.replace(/\/$/, '')}/health`, {
-            method: 'GET',
-            signal: AbortSignal.timeout(5000),
-        });
-        const latency = Date.now() - start;
-        const text = (await response.text()).trim().slice(0, 80);
-        return {
-            online: response.ok,
-            deployment: 'hianime-rest',
-            latency,
-            version: text || (response.ok ? 'ok' : 'unknown'),
-        };
-    } catch {
-        return { online: false, deployment: 'offline', latency: -1, version: 'unknown' };
-    }
-}
-
 /**
- * Test configured deployments (local + Vercel API + firebase + optional HiAnime REST).
+ * Test configured deployments (local + Vercel API).
  */
 export async function testAllDeployments(): Promise<Record<ApiDeployment, { online: boolean; deployment: string; latency: number; version: string; error?: boolean }>> {
-    const hianimeBase = API_DEPLOYMENTS.hianimeRest;
     const results = await Promise.allSettled([
         getApiStatus(API_DEPLOYMENTS.local),
         getApiStatus(API_DEPLOYMENTS.vercel),
-        getApiStatus(API_DEPLOYMENTS.firebase),
-        hianimeBase ? getHianimeRestStatus(hianimeBase) : Promise.resolve({ online: false, deployment: 'skipped', latency: -1, version: 'not-configured' }),
     ]);
 
     const offline = { online: false, deployment: 'offline', latency: -1, version: 'unknown', error: true };
     return {
         local: results[0].status === 'fulfilled' ? results[0].value : offline,
         vercel: results[1].status === 'fulfilled' ? results[1].value : offline,
-        firebase: results[2].status === 'fulfilled' ? results[2].value : offline,
-        hianimeRest: results[3].status === 'fulfilled' ? results[3].value : offline,
         custom: offline,
     };
 }

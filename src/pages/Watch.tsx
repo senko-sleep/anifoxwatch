@@ -11,7 +11,8 @@ import { ping } from '@/utils/keep-alive';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { cn, formatRating } from '@/lib/utils';
+import { cn, formatRating, generateAnimeSlug } from '@/lib/utils';
+import { apiUrl } from '@/lib/api-config';
 import {
   ArrowLeft,
   Play,
@@ -62,8 +63,51 @@ function plainDescription(raw: string | undefined): string {
 const Watch = () => {
   const { animeId } = useParams<{ animeId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  // Get anime ID from search param (use route param as fallback for backwards compatibility)
-  const cleanAnimeId = searchParams.get('id') || animeId || '';
+  const [resolvedId, setResolvedId] = useState<string>('');
+  const [isResolving, setIsResolving] = useState(false);
+  
+  // Handle new slug-based URLs (/watch/attack-on-titan?ep=1) 
+  // and legacy numeric ID URLs (/watch?id=-207141&ep=1)
+  let rawAnimeId = searchParams.get('id') || animeId || '';
+  
+  // Check if this is a slug-based URL (looks like a slug, not a numeric ID)
+  const isSlugBased = animeId && !searchParams.get('id') && !/^\d+$/.test(animeId) && !animeId.startsWith('anilist-');
+  
+  // Resolve slug to actual anime ID if needed
+  useEffect(() => {
+    const resolveSlug = async () => {
+      if (isSlugBased && animeId) {
+        setIsResolving(true);
+        try {
+          // Determine if we should use adult mode based on source param or URL
+          const mode = sourceParam && ['watchhentai', 'hanime', 'akih'].includes(sourceParam.toLowerCase()) 
+            ? 'adult' 
+            : 'safe';
+          const response = await fetch(apiUrl(`/api/anime/resolve-slug?slug=${encodeURIComponent(animeId)}&mode=${mode}`));
+          if (response.ok) {
+            const data = await response.json();
+            setResolvedId(data.id || animeId);
+          } else {
+            // Fallback to using the slug as ID
+            setResolvedId(animeId);
+          }
+        } catch (error) {
+          console.error('Failed to resolve slug:', error);
+          setResolvedId(animeId);
+        } finally {
+          setIsResolving(false);
+        }
+      } else {
+        setResolvedId(rawAnimeId);
+      }
+    };
+    
+    resolveSlug();
+  }, [animeId, rawAnimeId, isSlugBased, sourceParam]);
+  
+  // Use the resolved ID for API calls
+  const cleanAnimeId = isSlugBased ? resolvedId : rawAnimeId;
+  
   // Source from history (e.g. 'hanime', 'aki-h') so the API knows where to look
   const sourceParam = searchParams.get('source') || undefined;
   const navigate = useNavigate();
@@ -113,7 +157,10 @@ const Watch = () => {
   // State
   const [selectedAnimeId, setSelectedAnimeId] = useState<string>(cleanAnimeId);
   const [selectedEpisode, setSelectedEpisode] = useState<string | null>(null);
-  const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(1);
+  // Initialize episode number from URL or default to 1
+  const urlEpParam = searchParams.get('ep');
+  const initialEpisodeNum = urlEpParam ? parseInt(urlEpParam, 10) : 1;
+  const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(initialEpisodeNum);
   const [audioType, setAudioType] = useState<AudioType>(() => {
     // Restore stored preference; default to dub — auto-falls back to sub if dub has no sources
     try {
@@ -135,7 +182,7 @@ const Watch = () => {
 
   // Track the previously-seen animeId so the reset effect only fires on actual *navigation*
   // (cleanAnimeId changing), not on the initial mount where selectedAnimeId is already correct.
-  const prevCleanAnimeIdRef = useRef<string>(cleanAnimeId);
+  const prevCleanAnimeIdRef = useRef<string>(rawAnimeId);
 
   // Refs
   const playerRef = useRef<HTMLDivElement>(null);
@@ -183,6 +230,34 @@ const Watch = () => {
     () => servers?.some((s) => s.type === 'dub') ?? false,
     [servers]
   );
+  
+  // For AniList IDs, construct episode ID directly when episodes are not available yet
+  // This allows streaming to start immediately without waiting for episode list to load
+  const getEpisodeIdForStreaming = useCallback(() => {
+    // If we have a selected episode for the current anime, use it
+    if (selectedEpisodeForCurrentAnime) {
+      return selectedEpisodeForCurrentAnime;
+    }
+    // For AniList IDs, construct the episode ID from the AniList ID and episode number
+    if (cleanAnimeId.startsWith('anilist-') && selectedEpisodeNum > 0) {
+      const constructedId = `${cleanAnimeId}?ep=${selectedEpisodeNum}`;
+      console.log(`[Watch] Using constructed episode ID: ${constructedId}`);
+      return constructedId;
+    }
+    // Fallback to empty string to disable streaming
+    return '';
+  }, [cleanAnimeId, selectedEpisodeForCurrentAnime, selectedEpisodeNum]);
+  
+  // Enable streaming if we have an episode ID (either from episodes or constructed)
+  const isStreamEnabled = useMemo(() => {
+    const episodeId = getEpisodeIdForStreaming();
+    const enabled = episodeId.length > 0;
+    if (enabled && cleanAnimeId.startsWith('anilist-')) {
+      console.log(`[Watch] Streaming enabled with episode ID: ${episodeId}`);
+    }
+    return enabled;
+  }, [getEpisodeIdForStreaming, cleanAnimeId]);
+  
   // Fire stream fetch immediately — don't wait for server list to load.
   // The backend defaults to 'auto' when no server is specified.
   // Only pass a server param when the user has explicitly chosen one.
@@ -191,13 +266,14 @@ const Watch = () => {
   const streamServer = userPickedServer && selectedServer && selectedServer.toLowerCase() !== 'default'
     ? selectedServer
     : undefined;
+  const [bypassCache, setBypassCache] = useState(false);
   const {
     data: streamData,
     isLoading: streamLoading,
     error: streamError,
     refetch: refetchStream
-  } = useStreamingLinks(selectedEpisodeForCurrentAnime || '', streamServer, audioType, !!selectedEpisodeForCurrentAnime, selectedEpisodeNum,
-    cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined, anime?.title);
+  } = useStreamingLinks(getEpisodeIdForStreaming(), streamServer, audioType, isStreamEnabled, selectedEpisodeNum,
+    cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined, anime?.title, bypassCache);
 
   /** Dub is available if: server list has dub, metadata says dub, active dub playback returned sources, or dub probe (while on SUB) succeeded. */
   const metadataIndicatesDub = useMemo(
@@ -234,7 +310,7 @@ const Watch = () => {
   useEffect(() => {
     // Only reset when the user navigates to a *different* anime — skip on initial mount
     // where prevCleanAnimeIdRef.current already equals cleanAnimeId (both set to the same value).
-    if (prevCleanAnimeIdRef.current === cleanAnimeId) return;
+    if (prevCleanAnimeIdRef.current === cleanAnimeId && !isResolving) return;
     prevCleanAnimeIdRef.current = cleanAnimeId;
     setSelectedAnimeId('');
     setSelectedEpisode(null);
@@ -419,6 +495,7 @@ const Watch = () => {
   // Reset retry count when episode or audio changes (new stream fetch)
   useEffect(() => {
     setServerRetryCount(0);
+    setBypassCache(false);
   }, [selectedEpisode, audioType]);
 
   // Reset server selection when audioType changes to allow auto-selecting the best server for the new audio type
@@ -432,7 +509,8 @@ const Watch = () => {
     setSourceRetryIndex(0);
   }, [streamData, selectedServer, audioType, quality]);
 
-  // Show "server warming up" hint after 8s of loading — lets users know the server is working
+  // Show slow-load warning after 8s — different message for anilist- IDs
+  // since they require cross-source resolution (AniList API + search + episodes).
   useEffect(() => {
     if (!streamLoading) { setStreamSlowWarning(false); return; }
     const t = setTimeout(() => setStreamSlowWarning(true), 8000);
@@ -457,8 +535,18 @@ const Watch = () => {
   }, [audioType, streamLoading, streamData, audioManuallySet]);
 
   // Get best quality source - skip sources that previously failed
-  const getVideoSource = useCallback(() => {
-    if (!streamData?.sources?.length) return null;
+  // IMPORTANT: implemented as useMemo (not useCallback + call-in-render) so that Watch re-renders
+  // caused by unrelated state (hover, layout, etc.) don't produce new object references that would
+  // make VideoPlayer think the src changed and destroy+reinit HLS mid-stream.
+  const lastVideoSourceUrlRef = useRef<string | null>(null);
+  const lastVideoSourceObjRef = useRef<typeof streamData extends { sources?: Array<infer S> } ? S | null : never>(null as any);
+
+  const videoSource = useMemo(() => {
+    if (!streamData?.sources?.length) {
+      lastVideoSourceUrlRef.current = null;
+      lastVideoSourceObjRef.current = null;
+      return null;
+    }
 
     // Filter out sources that previously had errors (simple retry tracking)
     // Also skip IP-locked sources (Streamtape /get_video) — cannot be proxied through serverless
@@ -466,7 +554,11 @@ const Watch = () => {
       .filter((_, idx) => idx >= sourceRetryIndex)
       .filter((s) => !s.ipLocked);
 
-    if (!sources.length) return null;
+    if (!sources.length) {
+      lastVideoSourceUrlRef.current = null;
+      lastVideoSourceObjRef.current = null;
+      return null;
+    }
 
     // Prefer sources that are actually playable (M3U8 / direct MP4)
     const playable = sources.filter((s) => {
@@ -477,25 +569,33 @@ const Watch = () => {
       return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd') ||
              !EMBED_DOMAINS.some((d) => lower.includes(d));
     });
-    
-    if (playable.length > 0) {
-      const selected = playable[0];
-      console.log('[Watch] Selected video source:', {
-        url: selected.url?.substring(0, 100),
-        isM3U8: selected.isM3U8,
-        isDirect: selected.isDirect,
-        quality: selected.quality
-      });
-      return selected;
+
+    const candidate = playable.length > 0 ? playable[0] : sources[0];
+    if (!candidate) {
+      lastVideoSourceUrlRef.current = null;
+      lastVideoSourceObjRef.current = null;
+      return null;
     }
 
-    // No playable sources — fall back to first source (will trigger embed fallback)
-    console.log('[Watch] No playable sources, falling back to first source');
-    return sources[0];
-  }, [streamData, quality, sourceRetryIndex]);
+    // ── Stable reference guard ────────────────────────────────────────────────
+    // If the resolved URL string hasn't changed, return the SAME object reference
+    // so VideoPlayer's [src, isM3U8] effect does NOT re-run and HLS is NOT restarted.
+    const candidateUrl = candidate.url || '';
+    if (candidateUrl && candidateUrl === lastVideoSourceUrlRef.current && lastVideoSourceObjRef.current) {
+      return lastVideoSourceObjRef.current;
+    }
 
-  // Get current video source (computed from stream data)
-  const videoSource = getVideoSource();
+    console.log('[Watch] Selected video source:', {
+      url: candidate.url?.substring(0, 100),
+      isM3U8: candidate.isM3U8,
+      isDirect: candidate.isDirect,
+      quality: candidate.quality
+    });
+
+    lastVideoSourceUrlRef.current = candidateUrl;
+    lastVideoSourceObjRef.current = candidate;
+    return candidate;
+  }, [streamData, sourceRetryIndex]);
 
   // Debug: log the video source details
   useEffect(() => {
@@ -510,10 +610,19 @@ const Watch = () => {
     }
   }, [videoSource, streamData?.source]);
 
+
   // Episode navigation with smooth transitions
   const handleEpisodeSelect = useCallback((episodeId: string, episodeNum: number) => {
     // Prevent unnecessary re-renders if same episode
-    if (episodeId === selectedEpisode) return;
+    // For AniList IDs with constructed episode IDs, compare the episode number
+    if (cleanAnimeId.startsWith('anilist-')) {
+      const currentEpNum = selectedEpisodeNum;
+      const currentEpId = getEpisodeIdForStreaming();
+      // If we're already on this episode, don't re-trigger
+      if (episodeNum === currentEpNum && episodeId === currentEpId) return;
+    } else if (episodeId === selectedEpisode) {
+      return;
+    }
 
     // Set switching state to prevent URL conflicts
     setIsSwitchingEpisode(true);
@@ -541,30 +650,46 @@ const Watch = () => {
     setTimeout(() => {
       setIsSwitchingEpisode(false);
     }, 500);
-  }, [selectedEpisode, searchParams, setSearchParams]);
+  }, [selectedEpisode, selectedEpisodeNum, cleanAnimeId, searchParams, setSearchParams, getEpisodeIdForStreaming]);
 
   const handlePrevEpisode = useCallback(() => {
+    // For AniList IDs, we can navigate by episode number even without episodes list
+    if (cleanAnimeId.startsWith('anilist-') && selectedEpisodeNum > 1) {
+      // Construct a new episode ID for the previous episode
+      const prevEpisodeId = `${cleanAnimeId}?ep=${selectedEpisodeNum - 1}`;
+      handleEpisodeSelect(prevEpisodeId, selectedEpisodeNum - 1);
+      return;
+    }
     if (!episodes?.length) return;
     const currentIndex = episodes.findIndex(e => e.id === selectedEpisode);
     if (currentIndex > 0) {
       const prev = episodes[currentIndex - 1];
       handleEpisodeSelect(prev.id, prev.number);
     }
-  }, [episodes, selectedEpisode, handleEpisodeSelect]);
+  }, [episodes, selectedEpisode, selectedEpisodeNum, cleanAnimeId, handleEpisodeSelect]);
 
   const handleNextEpisode = useCallback(() => {
+    // For AniList IDs, we can navigate by episode number even without episodes list
+    // We'll just increment the episode number (the backend will handle if it doesn't exist)
+    if (cleanAnimeId.startsWith('anilist-')) {
+      const nextEpisodeId = `${cleanAnimeId}?ep=${selectedEpisodeNum + 1}`;
+      handleEpisodeSelect(nextEpisodeId, selectedEpisodeNum + 1);
+      return;
+    }
     if (!episodes?.length) return;
     const currentIndex = episodes.findIndex(e => e.id === selectedEpisode);
     if (currentIndex < episodes.length - 1) {
       const next = episodes[currentIndex + 1];
       handleEpisodeSelect(next.id, next.number);
     }
-  }, [episodes, selectedEpisode, handleEpisodeSelect]);
+  }, [episodes, selectedEpisode, selectedEpisodeNum, cleanAnimeId, handleEpisodeSelect]);
 
   // Current episode info
   const currentEpisode = episodes?.find(e => e.id === selectedEpisode);
-  const hasPrev = episodes?.findIndex(e => e.id === selectedEpisode) > 0;
-  const hasNext = episodes ? episodes.findIndex(e => e.id === selectedEpisode) < episodes.length - 1 : false;
+  // For AniList IDs, always allow navigation (backend will handle if episode doesn't exist)
+  // For other IDs, check if there are previous/next episodes in the list
+  const hasPrev = cleanAnimeId.startsWith('anilist-') ? selectedEpisodeNum > 1 : (episodes?.findIndex(e => e.id === selectedEpisode) ?? -1) > 0;
+  const hasNext = cleanAnimeId.startsWith('anilist-') ? true : episodes ? (episodes.findIndex(e => e.id === selectedEpisode) ?? 0) < episodes.length - 1 : false;
 
   // Prefetch next episode's stream so switching episodes feels instant
   const prefetchNext = usePrefetchNextEpisode();
@@ -733,6 +858,26 @@ const Watch = () => {
               <Skeleton className="h-64 w-full rounded-xl" />
               <Skeleton className="h-96 w-full rounded-xl" />
             </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // Show loading state while resolving slug or loading anime
+  if (isResolving || animeLoading) {
+    return (
+      <div className="min-h-screen flex flex-col bg-background">
+        <Navbar />
+        <main className="flex-1 container py-8">
+          <div className="flex flex-col items-center justify-center py-20">
+            <Loader2 className="w-16 h-16 text-fox-orange animate-spin mb-4" />
+            <h2 className="text-2xl font-bold mb-2">
+              {isResolving ? 'Resolving anime...' : 'Loading anime...'}
+            </h2>
+            <p className="text-muted-foreground">
+              {isResolving ? 'Finding the right source for this anime...' : 'Please wait while we load the anime details.'}
+            </p>
           </div>
         </main>
       </div>
@@ -923,7 +1068,11 @@ const Watch = () => {
                   </div>
                   <p className="text-white/70 text-xs font-medium">Loading stream…</p>
                   {streamSlowWarning && (
-                    <p className="text-white/40 text-[10px] text-center max-w-[180px]">Server warming up — may take ~30 s</p>
+                    <p className="text-white/40 text-[10px] text-center max-w-[180px]">
+                      {cleanAnimeId.startsWith('anilist-')
+                        ? 'Resolving stream — may take up to 30 s'
+                        : 'Server warming up — may take ~30 s'}
+                    </p>
                   )}
                 </div>
               </div>
@@ -962,6 +1111,7 @@ const Watch = () => {
                    <Button size="sm" className="mt-3 bg-fox-orange" onClick={() => { 
                      setServerRetryCount(0); 
                      setSourceRetryIndex(0);
+                     setBypassCache(true);
                      refetchStream(); 
                    }}>
                      <RefreshCw className="w-4 h-4 mr-2" />Retry
@@ -1285,6 +1435,7 @@ const Watch = () => {
                                setServerRetryCount(0);
                                setSourceRetryIndex(0);
                                setSelectedServer('');
+                               setBypassCache(true);
                                refetchStream();
                              }}
                            >

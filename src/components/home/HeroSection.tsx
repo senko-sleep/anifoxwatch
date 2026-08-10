@@ -3,7 +3,7 @@ import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { Play, Star, Clock, Captions, Sparkles, BookmarkPlus, ChevronRight, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn, normalizeAnimeGenresForDisplay, isPlaceholderAnimeDescription } from '@/lib/utils';
+import { cn, normalizeAnimeGenresForDisplay, isPlaceholderAnimeDescription, generateWatchUrl } from '@/lib/utils';
 import { apiUrl } from '@/lib/api-config';
 import {
   HeroAnime,
@@ -116,10 +116,12 @@ const slides = useMemo(
   const studio = getStudioName(anime);
   const rating = formatHeroRating(anime.averageScore);
   const seasonLabel = getSeasonLabel(anime.season, anime.seasonYear);
-  const watchPath =
-    anime.source === 'anilist'
-      ? `/watch?id=${encodeURIComponent(`anilist-${anime.id}`)}`
-      : `/watch?id=${encodeURIComponent(String(anime.id))}`;
+  const watchPath = generateWatchUrl({
+    title: title,
+    titleEnglish: anime.title.english,
+    titleRomaji: anime.title.romaji,
+    id: String(anime.id)
+  }, 1); // Start from episode 1
 
   const formatLabel = (anime.format || 'TV').replace(/_/g, ' ');
   const runtimeLabel =

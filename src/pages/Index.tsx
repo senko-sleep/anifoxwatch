@@ -86,24 +86,18 @@ const Index = () => {
     return () => { window.removeEventListener('scroll', handler); clearTimeout(t); };
   }, []);
 
-  // De-duplicate & filter
-  const { dedupTrending, dedupSeasonal, dedupUpcoming, dedupLatest, dedupMovies, dedupAction } = useMemo(() => {
-    const used = new Set<string>();
-    const unique = <T extends { id: string }>(list: T[]): T[] =>
-      list.filter((x) => { if (used.has(x.id)) return false; used.add(x.id); return true; });
+  // Filter out hentai per-section; do NOT deduplicate across sections.
+  // Users expect to see popular anime in multiple rows (e.g. a hit show
+  // can be both "Trending Now" and "Latest Episodes").
+  const safe = <T extends { title?: string | null; id?: string | null; genres?: (string | null)[] | null }>(list: T[]) =>
+    list.filter((x) => !isHentai(x));
 
-    const safe = <T extends { title?: string | null; id?: string | null; genres?: (string | null)[] | null }>(list: T[]) =>
-      list.filter((x) => !isHentai(x));
-
-    return {
-      dedupTrending: unique(safe(trendingAnime?.filter((a) => a.status !== 'Upcoming') ?? [])),
-      dedupSeasonal: unique(safe(seasonalData?.results ?? [])),
-      dedupUpcoming: unique(safe(upcomingData?.results ?? [])),
-      dedupLatest:   unique(safe(latestAnime ?? [])),
-      dedupMovies:   unique(safe(moviesData?.results ?? [])),
-      dedupAction:   unique(safe(actionData?.results ?? [])),
-    };
-  }, [trendingAnime, seasonalData?.results, upcomingData?.results, latestAnime, moviesData?.results, actionData?.results]);
+  const dedupTrending = safe(trendingAnime?.filter((a) => a.status !== 'Upcoming') ?? []);
+  const dedupSeasonal = safe(seasonalData?.results ?? []);
+  const dedupUpcoming = safe(upcomingData?.results ?? []);
+  const dedupLatest   = safe(latestAnime ?? []);
+  const dedupMovies   = safe(moviesData?.results ?? []);
+  const dedupAction   = safe(actionData?.results ?? []);
 
   const isLoading      = trendingLoading || heroLoading;
   const handleRefresh  = () => { refetchTrending(); };

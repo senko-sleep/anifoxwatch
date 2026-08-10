@@ -60,7 +60,7 @@ export class AniwavesSource extends BaseAnimeSource {
         });
         this.client = axios.create({
             baseURL: this.baseUrl,
-            timeout: 15000,           // Increased from 7000ms to 15000ms for Render.com cold starts
+            timeout: 15000,           // 15s timeout for upstream response
             httpsAgent: keepAliveAgent,
             headers: {
                 'Accept': 'application/json, text/html',
@@ -262,7 +262,8 @@ export class AniwavesSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const response = await this.fetchWithProxyFallback('/', {
+            // Try a more reliable endpoint for health check
+            const response = await this.fetchWithProxyFallback('/ajax/home', {
                 timeout: 25000,
                 signal: options?.signal
             });

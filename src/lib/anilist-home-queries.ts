@@ -86,19 +86,19 @@ async function fetchMediaPage(query: string): Promise<{
   pageInfo: { hasNextPage: boolean; currentPage: number; total: number };
 }> {
   const res = await fetchAniListGraphQL({ query });
-  // Handle HTTP errors (403, etc.) - return empty to allow fallback
   if (!res.ok) {
-    console.warn(`[AniList] HTTP ${res.status} - API may be temporarily unavailable`);
-    return { media: [], pageInfo: { hasNextPage: false, currentPage: 1, total: 0 } };
+    const msg = `[AniList] HTTP ${res.status}`;
+    console.warn(msg);
+    throw new Error(msg);
   }
   const json = (await res.json()) as {
     errors?: { message: string }[];
     data?: { Page?: { media?: AniListHomeMedia[]; pageInfo?: { hasNextPage: boolean; currentPage: number; total: number } } };
   };
   if (json.errors?.length) {
-    // Log error but return empty instead of throwing to allow fallback
-    console.warn('[AniList] Query error:', json.errors[0]?.message);
-    return { media: [], pageInfo: { hasNextPage: false, currentPage: 1, total: 0 } };
+    const msg = `[AniList] Query error: ${json.errors[0]?.message}`;
+    console.warn(msg);
+    throw new Error(msg);
   }
   const page = json.data?.Page;
   return {

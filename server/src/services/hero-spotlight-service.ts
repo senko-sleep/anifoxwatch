@@ -1,6 +1,6 @@
 /**
  * Hero spotlight: Multi-source racing metadata with fallbacks
- * Races AniList, Jikan (MAL), Kitsu, and Anime-Planet for fastest reliable response
+ * Prioritizes reliable sources (Jikan, Kitsu, TMDB, GitHub) over AniList
  * Enriches with MAL banner_image/synopsis when MAL_CLIENT_ID is set
  */
 
@@ -10,6 +10,8 @@ import { raceAnimeMetadata } from './anime-metadata-racer.js';
 const ANILIST_URL = 'https://graphql.anilist.co';
 const JIKAN_BASE = 'https://api.jikan.moe/v4/anime';
 const MAL_ANIME_BASE = 'https://api.myanimelist.net/v2/anime';
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+const GITHUB_DATASET = 'https://raw.githubusercontent.com/manami-project/anime-offline-database/master/anime-offline-database-minified.json';
 
 const MAL_FIELDS =
   'id,title,main_picture,banner_image,synopsis,mean,num_list_users,media_type,status,start_season';
@@ -229,6 +231,118 @@ async function fetchJikanSynopsis(malId: number): Promise<string | null> {
   return null;
 }
 
+// ─── TMDB FALLBACK ─────────────────────────────────────────────────────────
+
+async function fetchFromTMDB(): Promise<Record<string, unknown>[]> {
+  try {
+    const apiKey = process.env.TMDB_API_KEY || '2dca580c2a14b55200e784d157207b4d'; // Default fallback key
+    const url = `${TMDB_BASE}/discover/tv?api_key=${apiKey}&with_genres=16&sort_by=popularity.desc&page=1`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`TMDB HTTP ${res.status}`);
+    
+    const json = await res.json() as { results?: Array<{
+      id: number;
+      name: string;
+      overview: string;
+      poster_path: string;
+      backdrop_path: string;
+      vote_average: number;
+      first_air_date: string;
+    }> };
+    
+    const results = json.results || [];
+    return results.slice(0, 50).map((item) => ({
+      id: item.id,
+      title: { english: item.name, romaji: item.name, native: null },
+      bannerImage: item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null,
+      coverImage: { 
+        extraLarge: item.poster_path ? `https://image.tmdb.org/t/p/original${item.poster_path}` : '',
+        large: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : '',
+        color: null 
+      },
+      description: item.overview || 'No description available.',
+      genres: [],
+      averageScore: item.vote_average ? Math.round(item.vote_average * 10) : null,
+      popularity: 0,
+      episodes: 0,
+      duration: null,
+      format: 'TV',
+      status: 'Unknown',
+      season: null,
+      seasonYear: item.first_air_date ? new Date(item.first_air_date).getFullYear() : null,
+      studios: { nodes: [] },
+      nextAiringEpisode: null,
+      trailer: null,
+    }));
+  } catch (e) {
+    logger.warn('[HeroSpotlight] TMDB fallback failed', { err: String(e) }, 'HeroSpotlight');
+    return [];
+  }
+}
+
+// ─── GITHUB DATASET FALLBACK ───────────────────────────────────────────────
+
+async function fetchFromGitHubDataset(): Promise<Record<string, unknown>[]> {
+  try {
+    const res = await fetch(GITHUB_DATASET);
+    if (!res.ok) throw new Error(`GitHub dataset HTTP ${res.status}`);
+    
+    const json = await res.json() as { data?: Array<{
+      sources: string[];
+      title: { english: string; romaji: string; native: string };
+      picture: string;
+      synopsis: string;
+      tags: string[];
+      score: number;
+      episodes: number;
+      type: string;
+      status: string;
+      season: { season: string; year: number };
+    }> };
+    
+    const data = json.data || [];
+    const currentYear = new Date().getFullYear();
+    
+    // Filter for recent anime and convert to our format
+    return data
+      .filter((item) => {
+        const year = item?.season?.year || 0;
+        return year >= currentYear - 2;
+      })
+      .slice(0, 50)
+      .map((item) => ({
+        id: item?.sources?.[0]?.split('/').pop() || Math.random(),
+        title: {
+          english: item?.title?.english || null,
+          romaji: item?.title?.romaji || item?.title?.english || '',
+          native: item?.title?.native || null,
+        },
+        bannerImage: item?.picture || null,
+        coverImage: {
+          extraLarge: item?.picture || '',
+          large: item?.picture || '',
+          color: null,
+        },
+        description: item?.synopsis || 'No description available.',
+        genres: item?.tags || [],
+        averageScore: item?.score ? Math.round(item.score * 10) : null,
+        popularity: 0,
+        episodes: item?.episodes || 0,
+        duration: null,
+        format: item?.type || 'TV',
+        status: item?.status === 'finished' ? 'FINISHED' : item?.status === 'airing' ? 'RELEASING' : 'Unknown',
+        season: item?.season?.season || null,
+        seasonYear: item?.season?.year || null,
+        studios: { nodes: [] },
+        nextAiringEpisode: null,
+        trailer: null,
+      }));
+  } catch (e) {
+    logger.warn('[HeroSpotlight] GitHub dataset fallback failed', { err: String(e) }, 'HeroSpotlight');
+    return [];
+  }
+}
+
 function mapToHero(
   m: Record<string, unknown>,
   description: string,
@@ -259,44 +373,72 @@ function recencyScore(m: Record<string, unknown>): number {
 }
 
 /**
- * Pulls current-season + recent anime from racing sources, merges MAL banner_image + synopsis when
+ * Pulls current-season + recent anime from racing sources, prioritizes reliable sources
+ * (TMDB, GitHub dataset) over AniList, merges MAL banner_image + synopsis when
  * MAL_CLIENT_ID is set, requires a final banner URL, enriches synopsis via Jikan if still thin.
  */
 export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
   const currentYear = new Date().getFullYear();
   const recentYear = currentYear - 1;
 
-  // Use the racer to get anime data from multiple sources in parallel
+  // Try reliable sources first
   let raw: Record<string, unknown>[] = [];
 
+  // 1) Try TMDB first (most reliable)
   try {
-    const result = await raceAnimeMetadata(1, 100, {
-      status: 'RELEASING',
-      startDate_greater: recentYear * 10000,
-      format_in: ['TV', 'MOVIE', 'ONA']
-    });
-    
-    // Convert to the expected format
-    raw = result.data as unknown as Record<string, unknown>[];
-    logger.info(`[HeroSpotlight] Racer returned ${raw.length} anime from ${result.source}`, { source: result.source }, 'HeroSpotlight');
+    const tmdbData = await fetchFromTMDB();
+    if (tmdbData.length > 0) {
+      raw = tmdbData;
+      logger.info(`[HeroSpotlight] Got ${raw.length} anime from TMDB`, {}, 'HeroSpotlight');
+    }
   } catch (e) {
-    logger.error('[HeroSpotlight] All sources failed, falling back to AniList sequential', e as Error, undefined, 'HeroSpotlight');
-    
-    // Fallback to sequential AniList if racer fails
-    const formats = ['TV', 'MOVIE', 'ONA'];
-    const queries: Array<[number, number, string, AniListPageFilters]> = [
-      [1, 50, 'TRENDING_DESC', { status: 'RELEASING', format_in: formats }],
-      [1, 50, 'TRENDING_DESC', { startDate_greater: recentYear * 10000, format_in: formats }],
-      [1, 50, 'TRENDING_DESC', {}], // global fallback
-    ];
+    logger.warn('[HeroSpotlight] TMDB failed, trying next source', { err: String(e) }, 'HeroSpotlight');
+  }
 
-    for (const [page, perPage, sort, filters] of queries) {
-      try {
-        const chunk = await anilistPage(page, perPage, sort, filters);
-        raw.push(...chunk);
-        await new Promise((r) => setTimeout(r, 120));
-      } catch (e) {
-        logger.warn('[HeroSpotlight] AniList page failed', { page, sort, filters, err: String(e) }, 'HeroSpotlight');
+  // 2) Try GitHub dataset if TMDB failed
+  if (raw.length === 0) {
+    try {
+      const githubData = await fetchFromGitHubDataset();
+      if (githubData.length > 0) {
+        raw = githubData;
+        logger.info(`[HeroSpotlight] Got ${raw.length} anime from GitHub dataset`, {}, 'HeroSpotlight');
+      }
+    } catch (e) {
+      logger.warn('[HeroSpotlight] GitHub dataset failed, trying next source', { err: String(e) }, 'HeroSpotlight');
+    }
+  }
+
+  // 3) Use the racer if reliable sources failed
+  if (raw.length === 0) {
+    try {
+      const result = await raceAnimeMetadata(1, 100, {
+        status: 'RELEASING',
+        startDate_greater: recentYear * 10000,
+        format_in: ['TV', 'MOVIE', 'ONA']
+      });
+      
+      // Convert to the expected format
+      raw = result.data as unknown as Record<string, unknown>[];
+      logger.info(`[HeroSpotlight] Racer returned ${raw.length} anime from ${result.source}`, { source: result.source }, 'HeroSpotlight');
+    } catch (e) {
+      logger.error('[HeroSpotlight] All sources failed, falling back to AniList sequential', e as Error, undefined, 'HeroSpotlight');
+      
+      // Fallback to sequential AniList if racer fails
+      const formats = ['TV', 'MOVIE', 'ONA'];
+      const queries: Array<[number, number, string, AniListPageFilters]> = [
+        [1, 50, 'TRENDING_DESC', { status: 'RELEASING', format_in: formats }],
+        [1, 50, 'TRENDING_DESC', { startDate_greater: recentYear * 10000, format_in: formats }],
+        [1, 50, 'TRENDING_DESC', {}], // global fallback
+      ];
+
+      for (const [page, perPage, sort, filters] of queries) {
+        try {
+          const chunk = await anilistPage(page, perPage, sort, filters);
+          raw.push(...chunk);
+          await new Promise((r) => setTimeout(r, 120));
+        } catch (e) {
+          logger.warn('[HeroSpotlight] AniList page failed', { page, sort, filters, err: String(e) }, 'HeroSpotlight');
+        }
       }
     }
   }
@@ -312,7 +454,9 @@ export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
   const useMal = Boolean(malClientId());
   // Only include anime from 2025+ OR currently releasing — no legacy shows in spotlight
   const pool = sorted.filter((m) => {
-    if (!anilistBannerUrl(m)) return false;
+    // Accept banner from AniList format or generic bannerImage field
+    const banner = anilistBannerUrl(m) || (typeof m.bannerImage === 'string' && m.bannerImage);
+    if (!banner) return false;
     const year = (m.seasonYear as number) || 0;
     const status = (m.status as string) || '';
     // Always spotlight currently airing regardless of year

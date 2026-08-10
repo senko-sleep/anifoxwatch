@@ -150,7 +150,7 @@ export const VideoPlayer = ({
   const loadSavedPositionRef = useRef<() => number>(() => 0);
 
   // --- Stall/Loading loop guards -------------------------------------------
-  // Give HLS a grace period after source change before we escalate “stuck”.
+  // Give HLS a grace period after source change before we escalate "stuck".
   // Many streams keep playhead at ~0 until first fragments are decoded.
   const initialLoadUntilMsRef = useRef<number>(0);
 
@@ -159,6 +159,34 @@ export const VideoPlayer = ({
 
   // Ensure we only escalate the stall watchdog once per source.
   const watchdogEscalatedRef = useRef<boolean>(false);
+
+  // ── Performance: DOM ref for progress bar — eliminates React re-renders on timeupdate ──
+  // Instead of calling setCurrentTime (which re-renders the whole component 25×/sec),
+  // we mutate the DOM elements directly and only update React state for the time label
+  // (throttled to 1Hz) and intro/outro detection (already throttled by floor()).
+  const progressPlayedRef = useRef<HTMLDivElement>(null);
+  const progressScrubDotRef = useRef<HTMLDivElement>(null);
+  const currentTimeRef = useRef<number>(0); // mirrors currentTime without triggering render
+  const durationRef = useRef<number>(0);    // mirrors duration without triggering render
+  const lastReactTimeUpdateRef = useRef<number>(0); // timestamp of last setCurrentTime call
+  const REACT_TIME_UPDATE_INTERVAL = 1000; // ms — update React state for label at most 1×/sec
+
+  // ── Performance: canvas thumbnail throttle ─────────────────────────────────
+  // drawImage() + toDataURL() is a GPU→CPU readback costing ~2ms/call.
+  // Throttle to 1× every 4 seconds to avoid main-thread frame drops.
+  const lastThumbnailCaptureRef = useRef<number>(0);
+  const THUMBNAIL_CAPTURE_INTERVAL = 4000; // ms
+
+  // ── Performance: isBuffering change guard ──────────────────────────────────
+  // setIsBuffering in the 500ms watchdog causes React re-renders; guard behind
+  // a ref so we only call the setter when the value actually changes.
+  const isBufferingRef = useRef<boolean>(false);
+  const safeSetIsBuffering = useCallback((value: boolean) => {
+    if (isBufferingRef.current !== value) {
+      isBufferingRef.current = value;
+      setIsBuffering(value);
+    }
+  }, []);
 
 
   const [isPlaying, setIsPlaying] = useState(false);
@@ -364,16 +392,17 @@ export const VideoPlayer = ({
         enableWorker: true,
         lowLatencyMode: false,
         startPosition: initialSavedPos > 5 ? initialSavedPos : -1,
-        // ── Buffer sizing ─────────────────────────────────────────────────
-        // Optimized for instant seeking: smaller buffers = faster seek response
-        backBufferLength: onMobile ? 10 : 20,
-        maxBufferLength: onMobile ? 20 : 40,
-        maxMaxBufferLength: onMobile ? 40 : 80,
+        // ── Buffer sizing ──────────────────────────────────────────────────
+        // Smaller buffers = less bandwidth competition, faster seek response,
+        // and quicker startup. 12s is enough for smooth ABR on most CDNs.
+        backBufferLength: onMobile ? 8 : 15,
+        maxBufferLength: onMobile ? 10 : 12,
+        maxMaxBufferLength: onMobile ? 20 : 30,
         maxBufferHole: 0.3, // Tighter hole detection for faster seeking
         // ── ABR / quality selection ───────────────────────────────────────
         startLevel: 0,
         abrEwmaDefaultEstimate: onMobile ? 800_000 : 1_500_000,
-        // ── Timeouts ───────────────────────────────────────
+        // ── Timeouts ─────────────────────────────────────────────────────
         fragLoadingTimeOut: 15000,
         manifestLoadingTimeOut: 20000,
         levelLoadingTimeOut: 15000,
@@ -643,8 +672,8 @@ export const VideoPlayer = ({
           // Reset stall counter whenever we're legitimately not playing
           stallDurationRef.current = 0;
           lastPlayheadRef.current = v.currentTime;
-          // Clear buffering indicator when not playing
-          setIsBuffering(false);
+          // Clear buffering indicator when not playing (guarded — avoids React churn)
+          safeSetIsBuffering(false);
           return;
         }
 
@@ -653,7 +682,7 @@ export const VideoPlayer = ({
           // Playhead is advancing — reset stall counter, clear buffering indicator
           stallDurationRef.current = 0;
           lastPlayheadRef.current = now;
-          setIsBuffering(false);
+          safeSetIsBuffering(false);
           return;
         }
 
@@ -662,8 +691,8 @@ export const VideoPlayer = ({
         const stalledMs = stallDurationRef.current;
         playerLog('warn', `Watchdog: playhead stuck for ${(stalledMs / 1000).toFixed(1)}s at ${now.toFixed(2)}s`);
 
-        // Show buffering indicator after 800ms of stall
-        if (stalledMs >= 800) setIsBuffering(true);
+        // Show buffering indicator after 800ms of stall (guarded against re-render churn)
+        if (stalledMs >= 800) safeSetIsBuffering(true);
 
         // During initial startup, avoid escalating into fatal/reload loops.
         // If playhead is still at ~0, HLS may just be decoding/initializing.
@@ -678,7 +707,7 @@ export const VideoPlayer = ({
           playerLog('error', 'Watchdog: stall timeout (8s) — requesting server switch');
           clearInterval(stallWatchdogRef.current!);
           stallWatchdogRef.current = null;
-          setIsBuffering(false);
+          safeSetIsBuffering(false);
           try {
             hlsRef.current?.destroy();
           } catch { /* ignore */ }
@@ -744,14 +773,14 @@ export const VideoPlayer = ({
       onStalledOrWaiting = () => {
         // Show buffering spinner after short debounce (avoids flash on quick ABR switches)
         if (bufferingKickTimerRef.current) clearTimeout(bufferingKickTimerRef.current);
-        bufferingKickTimerRef.current = setTimeout(() => setIsBuffering(true), 400);
+        bufferingKickTimerRef.current = setTimeout(() => safeSetIsBuffering(true), 400);
       };
       onPlayingAgain = () => {
         if (bufferingKickTimerRef.current) {
           clearTimeout(bufferingKickTimerRef.current);
           bufferingKickTimerRef.current = null;
         }
-        setIsBuffering(false);
+        safeSetIsBuffering(false);
       };
       video.addEventListener('stalled', onStalledOrWaiting);
       video.addEventListener('waiting', onStalledOrWaiting);
@@ -1083,27 +1112,58 @@ export const VideoPlayer = ({
 
     const handleTimeUpdate = () => {
       const time = video.currentTime;
-      setCurrentTime(time);
+      const dur = durationRef.current || video.duration || 0;
 
-      // Capture a frame snapshot for the hover preview
-      videoPreviewRef.current?.captureFrame(video, time);
+      // ── DOM ref progress bar update (zero React re-render cost) ──────────
+      // Update the played-bar width and scrub dot directly on the DOM node.
+      // This eliminates 25+ React re-renders per second during normal playback.
+      currentTimeRef.current = time;
+      if (dur > 0) {
+        const pct = (time / dur) * 100;
+        const pctStr = `${pct}%`;
+        if (progressPlayedRef.current) {
+          progressPlayedRef.current.style.width = pctStr;
+        }
+        if (progressScrubDotRef.current) {
+          progressScrubDotRef.current.style.left = pctStr;
+        }
+      }
 
+      // ── React state update for time label — throttled to 1×/sec ──────────
+      const nowMs = performance.now();
+      if (nowMs - lastReactTimeUpdateRef.current >= REACT_TIME_UPDATE_INTERVAL) {
+        lastReactTimeUpdateRef.current = nowMs;
+        setCurrentTime(time);
+      }
+
+      // ── Video preview frame capture — throttled to 1×/4s ─────────────────
+      // captureFrame does a GPU readback (drawImage); throttle heavily.
+      if (nowMs - lastThumbnailCaptureRef.current >= THUMBNAIL_CAPTURE_INTERVAL) {
+        lastThumbnailCaptureRef.current = nowMs;
+        videoPreviewRef.current?.captureFrame(video, time);
+      }
+
+      // ── Position save & watch-history — fires at most every 2s ───────────
       if (Math.floor(time) % 2 === 0 && time > 5 && video.duration - time > 10) {
         savePosition(time);
 
         if (animeId && animeTitle && animeImage && selectedEpisodeNum) {
+          // Only capture a thumbnail frame if enough time has passed (re-use throttle window)
+          const canCapture = nowMs - lastThumbnailCaptureRef.current < THUMBNAIL_CAPTURE_INTERVAL * 2;
           let frameThumbnail: string | undefined;
-          try {
-            const canvas = document.createElement('canvas');
-            canvas.width = 320;
-            canvas.height = 180;
-            const ctx = canvas.getContext('2d');
-            if (ctx && video.videoWidth > 0) {
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              frameThumbnail = canvas.toDataURL('image/jpeg', 0.7);
+          if (canCapture) {
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = 320;
+              canvas.height = 180;
+              const ctx = canvas.getContext('2d');
+              if (ctx && video.videoWidth > 0) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                frameThumbnail = canvas.toDataURL('image/jpeg', 0.7);
+              }
+            } catch {
+              // Frame capture may fail due to CORS, ignore
             }
-          } catch (e) {
-            // Frame capture may fail due to CORS, ignore
           }
 
           import('@/lib/watch-history').then(({ WatchHistory }) => {
@@ -1119,7 +1179,7 @@ export const VideoPlayer = ({
         }
       }
 
-      if (intro && video.currentTime >= intro.start && video.currentTime < intro.end) {
+      if (intro && time >= intro.start && time < intro.end) {
         setShowSkipIntro(true);
       } else {
         setShowSkipIntro(false);
@@ -1141,7 +1201,8 @@ export const VideoPlayer = ({
     };
     const handleProgress = () => {
       if (video.buffered.length > 0) {
-        setBuffered(video.buffered.end(video.buffered.length - 1));
+        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+        setBuffered(bufferedEnd);
       }
     };
     const handleEnded = () => {
@@ -1171,7 +1232,7 @@ export const VideoPlayer = ({
         waitingTimerRef.current = null;
       }
       setIsLoading(false);
-      setIsBuffering(false);
+      safeSetIsBuffering(false);
     };
 
     // Some code paths rely on duration being present to update scrubbing UI.
@@ -1179,6 +1240,7 @@ export const VideoPlayer = ({
     const handleDurationChange = () => {
       const d = video.duration;
       if (Number.isFinite(d) && d > 0) {
+        durationRef.current = d;
         setDuration(d);
       }
     };
@@ -2040,7 +2102,8 @@ export const VideoPlayer = ({
                 if (rect) {
                   const x = e.clientX - rect.left;
                   const percentage = x / rect.width;
-                  const time = percentage * (duration || 0);
+                  const dur = durationRef.current || duration || 0;
+                  const time = percentage * dur;
                   handleSeek([time]);
                 }
               }}
@@ -2076,8 +2139,9 @@ export const VideoPlayer = ({
                   className="absolute inset-y-0 left-0 bg-white/30 transition-[width] duration-300"
                   style={{ width: `${duration > 0 ? (buffered / duration) * 100 : 0}%` }}
                 />
-                {/* Played — with glow on hover */}
+                {/* Played — with glow on hover. ref is updated directly in handleTimeUpdate (no React state churn) */}
                 <div
+                  ref={progressPlayedRef}
                   className={cn(
                     "absolute inset-y-0 left-0 bg-fox-orange transition-shadow duration-200",
                     (isProgressHovering || isProgressTouching) && "shadow-[0_0_8px_rgba(255,120,30,0.6)]"
@@ -2098,8 +2162,9 @@ export const VideoPlayer = ({
                 })()}
               </div>
 
-              {/* Scrub dot — appears on hover at playback position */}
+              {/* Scrub dot — ref is updated directly in handleTimeUpdate for zero-render-cost positioning */}
               <div
+                ref={progressScrubDotRef}
                 className={cn(
                   "absolute top-1/2 -translate-y-1/2 rounded-full bg-fox-orange border-2 border-white transition-all duration-200 pointer-events-none z-20",
                   (isProgressHovering || isProgressTouching)

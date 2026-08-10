@@ -55,9 +55,8 @@ function recordFailure(sourceName: string) {
     circuit.lastFailureTime = Date.now();
     circuit.lastAttemptTime = Date.now();
 
-    // Only trip circuit if we've hit max failures AND at least 5 seconds have passed since first failure
-    // This prevents rapid-fire parallel requests from tripping the circuit
-    if (circuit.failureCount >= circuit.maxFailures && (Date.now() - circuit.lastFailureTime) > 5000) {
+    // Only trip after repeated failures (avoid comparing to lastFailureTime set in this same call).
+    if (circuit.failureCount >= circuit.maxFailures) {
         circuit.state = 'open';
         logger.circuitBreakerTripped(
             sourceName,

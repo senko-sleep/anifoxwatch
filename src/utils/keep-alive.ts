@@ -5,7 +5,7 @@
 
 import { apiUrl } from '@/lib/api-config';
 
-const PING_INTERVAL = 4 * 60 * 1000; // 4 minutes — Vercel goes cold after ~5 min
+const PING_INTERVAL = 4 * 60 * 1000; // 4 minutes — keeps Vercel functions warm
 const MAX_BACKOFF = 20 * 60 * 1000; // 20 minutes max between pings on failure
 
 let pingInterval: NodeJS.Timeout | null = null;
@@ -24,11 +24,7 @@ export async function ping() {
   }).catch(() => {});
 
   try {
-    // Ping primary API (via apiUrl) and direct Render instance to keep container warm
-    await Promise.allSettled([
-      pingUrl(apiUrl('/api/health')),
-      pingUrl('https://anifoxwatch-dko2.onrender.com/api/health')
-    ]);
+    await pingUrl(apiUrl('/api/health'));
     consecutiveFailures = 0;
   } catch {
     consecutiveFailures++;

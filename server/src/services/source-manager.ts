@@ -1,9 +1,7 @@
 import {
     AnimeSource,
     AniwavesSource,
-    AkiHSource,
     WatchHentaiSource,
-    HanimeSource,
     YomiSource,
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
@@ -15,8 +13,6 @@ import { animeCache, episodesCache, searchCache, trendingCache } from '../lib/me
 import { anilistService } from './anilist-service.js';
 import { reliableRequest, retry, withTimeout } from '../middleware/reliability.js';
 import { REGISTERED_SOURCE_NAMES } from '../registered-sources.js';
-import { isHianimeStyleEpisodeId } from '../utils/hianime-rest-servers.js';
-import { reconstructAnimeKaiCompoundFromWatchUrl } from '../utils/animekai-compound-from-watch.js';
 
 export { REGISTERED_SOURCE_NAMES };
 
@@ -73,26 +69,8 @@ export class SourceManager {
     // Source capabilities mapping
     private sourceCapabilities: Map<string, SourceCapabilities> = new Map([
         ['Yomi', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['AnimeHeaven', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['GogoOrAt', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['9Anime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
-        ['Gogoanime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['AllAnime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['GogoanimeBy', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['Anikai', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['CrazyAnimeTV', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['Animenana', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
-        ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
-        ['Consumet', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['Kaido', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['Zoro', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['Miruro', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['Aniwave', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
-        ['Anix', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }],
-        ['DirectDownload', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['Aniwaves', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'high' }],
-        ['Wcofun', { supportsDub: true, supportsSub: false, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
+        ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -146,8 +124,7 @@ export class SourceManager {
         // ✅ FALLBACK
         this.registerSource(new AniwavesSource());
 
-        // ✅ HENTAI SOURCES (for adult anime)
-        this.registerSource(new HanimeSource());
+        // ✅ HENTAI SOURCES (for adult anime) - WatchHentai only (Hanime removed due to Puppeteer timeout issues)
         this.registerSource(new WatchHentaiSource());
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
@@ -920,8 +897,7 @@ export class SourceManager {
     }
 
     /**
-     * Maps public API query values (`source=hianime`, `aniwatch`) to registered {@link #sources} keys.
-     * Without this, `hianime` is unknown and {@link #getAvailableSource} falls through to AnimeKai priority.
+     * Maps public API query values to registered {@link #sources} keys.
      */
     private resolveSearchSourceAlias(raw?: string): string | undefined {
         if (!raw || typeof raw !== 'string') return undefined;
@@ -929,17 +905,6 @@ export class SourceManager {
         if (this.sources.has(t)) return t;
 
         const lower = t.toLowerCase();
-        const aliases: Record<string, string> = {
-            hianime: 'Miruro',
-            'hi-anime': 'Miruro',
-            hianimez: 'Miruro',
-            aniwatch: 'Miruro',
-            aniwatchtv: 'Miruro',
-            miruro: 'Miruro',
-        };
-        const mapped = aliases[lower];
-        if (mapped) return mapped;
-
         for (const name of this.sourceOrder) {
             if (name.toLowerCase() === lower) return name;
         }
@@ -3150,16 +3115,16 @@ export class SourceManager {
      * Uses PARALLEL multi-source querying for maximum reliability
      * Queries multiple sources simultaneously and returns the first successful result
      */
-    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', episodeNum?: number, anilistId?: number, forcedTitle?: string): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', episodeNum?: number, anilistId?: number, forcedTitle?: string, bypassCache: boolean = false): Promise<StreamingData> {
         const timer = new PerformanceTimer(`Get streaming links: ${episodeId}`, { episodeId, server, category });
         const startTime = Date.now();
         
-        console.log(`🎬 [SourceManager] getStreamingLinks called: ${episodeId} (server: ${server}, category: ${category})`);
+        console.log(`🎬 [SourceManager] getStreamingLinks called: ${episodeId} (server: ${server}, category: ${category}, bypassCache: ${bypassCache})`);
         
         // Cache check
         const cacheKey = `${episodeId}:${server || 'default'}:${category || 'sub'}:${anilistId || ''}`;
         const cached = this.streamingLinksCache.get(cacheKey);
-        if (cached && cached.timestamp > Date.now() - this.STREAMING_LINKS_CACHE_TTL && cached.data.sources.length > 0) {
+        if (cached && cached.timestamp > Date.now() - this.STREAMING_LINKS_CACHE_TTL && cached.data.sources.length > 0 && !bypassCache) {
             console.log(`   ✅ Using cached streaming links for ${episodeId}`);
             timer.end();
             return cached.data;
@@ -3167,7 +3132,7 @@ export class SourceManager {
 
         // Negative cache: prevent anti-spam loops if the source genuinely has no content
         const negativeCached = this.negativeStreamingCache.get(cacheKey);
-        if (negativeCached && (Date.now() - negativeCached.timestamp < 45 * 1000)) {
+        if (negativeCached && (Date.now() - negativeCached.timestamp < 10 * 1000) && !bypassCache) {
             console.log(`   🚫 Negative cache hit (recent failure): ${cacheKey}`);
             return { sources: [], subtitles: [] };
         }
@@ -3420,10 +3385,10 @@ export class SourceManager {
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
         const GRACE_PERIOD = 500;
-        // Raised from 8 s → 20 s: title-search chain (AniList API + search + episodes + streams) needs ~15 s
-        const CROSS_SOURCE_FALLBACK_MAX_MS = 20_000;
-        // Raised from 12 s → 23 s: must outlast the 25 s client abort minus network RTT.
-        const STREAM_GLOBAL_MAX_MS = 23_000;
+        // 15s for cross-source fallback — needs AniList API + search + episodes + streaming
+        const CROSS_SOURCE_FALLBACK_MAX_MS = 15_000;
+        // 20s global safety net — allows cross-source fallback to complete before resolving empty
+        const STREAM_GLOBAL_MAX_MS = 20_000;
         const ONLY_IP_LOCKED_WAIT_MS = 2_000;
 
         // Use existing priority from above

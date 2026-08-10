@@ -20,7 +20,7 @@ if (import.meta.env.DEV) {
   };
 }
 
-// Start keep-alive service to prevent backend cold starts
+// Start keep-alive service to prevent API cold starts
 startKeepAlive();
 
 createRoot(document.getElementById("root")!).render(<App />);

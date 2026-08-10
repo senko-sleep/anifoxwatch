@@ -4,7 +4,7 @@
     "type": "module",
     "main": "dist/index.js",
     "scripts": {
-        "predev": "kill-port 3001",
+        "predev": "node scripts/kill-port.mjs",
         "dev": "tsx src/index.ts",
         "dev:watch": "tsx watch src/index.ts",
         "dev:optimized": "tsx watch src/index-optimized.ts",
@@ -12,7 +12,6 @@
         "start": "tsx src/index.ts",
         "start:prod": "node dist/index.js",
         "start:prod:optimized": "node --max-old-space-size=256 --expose-gc dist/index.js",
-        "start:render": "node --max-old-space-size=256 --expose-gc --disable-warnings dist/index.js",
         "start:optimized": "node dist/index-optimized.js",
         "start:api": "tsx src/index.ts",
         "deploy:cloudrun": "powershell -NoProfile -ExecutionPolicy Bypass -File ./cloud-run/deploy.ps1",

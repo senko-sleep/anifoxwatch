@@ -4,7 +4,7 @@ import { Play, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { WatchHistoryItem } from '@/lib/watch-history';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ensureHttps } from '@/lib/utils';
+import { ensureHttps, generateWatchUrl } from '@/lib/utils';
 
 interface ContinueWatchingProps {
     items: WatchHistoryItem[];
@@ -107,7 +107,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                     return (
                     <Link
                         key={item.animeId}
-                        to={`/watch?id=${encodeURIComponent(item.animeId)}&ep=${item.episodeNumber}${item.source ? `&source=${encodeURIComponent(item.source)}` : ''}`}
+                        to={generateWatchUrl({ title: item.animeTitle, id: item.animeId }, item.episodeNumber)}
                         state={{ from: location.pathname + location.search }}
                         className="shrink-0 w-48 sm:w-56 group/card touch-manipulation"
                     >
