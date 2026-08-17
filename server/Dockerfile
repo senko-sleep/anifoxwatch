@@ -50,7 +50,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
-ENV NODE_OPTIONS="--max-old-space-size=256"
+ENV NODE_OPTIONS="--max-old-space-size=320"
 
 WORKDIR /app
 

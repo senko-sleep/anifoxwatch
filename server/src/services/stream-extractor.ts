@@ -61,12 +61,10 @@ class StreamExtractor {
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
                     '--disable-gpu',
-                    '--window-size=1280,720',
+                    '--window-size=1920,1080',
                     '--disable-web-security',
-                    '--disable-features=IsolateOrigins,site-per-process',
-                    '--js-flags="--max-old-space-size=128"',
-                    '--no-zygote',
-                    '--single-process'
+                    '--js-flags="--max-old-space-size=256"',
+                    '--no-zygote'
                 ]
             });
 
@@ -86,7 +84,7 @@ class StreamExtractor {
     }
 
     private activePages = 0;
-    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 1 : 3;
+    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 2 : 4;
 
     /**
      * Create a new page with proper settings
@@ -190,16 +188,16 @@ class StreamExtractor {
             try {
                 await page.goto(url, {
                     waitUntil: isAniwatchFamily ? 'domcontentloaded' : 'networkidle2',
-                    timeout: isAniwatchFamily ? 60_000 : 60_000,
+                    timeout: isAniwatchFamily ? 90_000 : 60_000, // Increased for adult content
                 });
             } catch (navError: any) {
                 logger.warn(`[StreamExtractor] 9Anime page navigation timeout, proceeding: ${navError.message}`);
             }
 
-            await page.waitForSelector('iframe', { timeout: 20_000 }).catch(() => {});
+            await page.waitForSelector('iframe', { timeout: 30_000 }).catch(() => {});
 
-            // Reduced soak time from 14s to 8s for faster resolution
-            await this.delay(isAniwatchFamily ? 8_000 : 5000);
+            // Increased soak time for adult content compatibility
+            await this.delay(isAniwatchFamily ? 10_000 : 6000);
 
             // Try clicking play button if video is paused
             try {
@@ -310,6 +308,7 @@ class StreamExtractor {
     /**
      * Extract stream from embed URL directly (rapid-cloud, megacloud, etc.)
      * Uses in-flight deduplication: concurrent calls for the same URL share one Puppeteer session.
+     * Enhanced for adult content compatibility.
      */
     async extractFromEmbed(embedUrl: string): Promise<ExtractionResult> {
         const cached = this.resultCache.get(embedUrl);
@@ -373,12 +372,12 @@ class StreamExtractor {
             try {
                 await page.goto(embedUrl, {
                     waitUntil: 'domcontentloaded',
-                    timeout: 10000  // Reduced from 25s to 10s
+                    timeout: 15000  // Increased for adult content compatibility
                 });
 
                 // Wait for video to load or m3u8 to be captured (dynamic polling)
                 let m3u8WaitTime = 0;
-                while (capturedM3u8s.size === 0 && m3u8WaitTime < 4000) {
+                while (capturedM3u8s.size === 0 && m3u8WaitTime < 6000) {
                     await this.delay(200);
                     m3u8WaitTime += 200;
                 }
@@ -388,7 +387,7 @@ class StreamExtractor {
                     try {
                         await page.click('.play-btn, [class*="play"], .jw-icon-display').catch(() => { });
                         let playWaitTime = 0;
-                        while (capturedM3u8s.size === 0 && playWaitTime < 5000) {
+                        while (capturedM3u8s.size === 0 && playWaitTime < 8000) {
                             await this.delay(200);
                             playWaitTime += 200;
                         }

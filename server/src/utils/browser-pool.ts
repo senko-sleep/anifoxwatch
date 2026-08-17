@@ -25,9 +25,8 @@ class BrowserPool {
                     '--disable-accelerated-2d-canvas',
                     '--no-first-run',
                     '--no-zygote',
-                    '--single-process',
                     '--disable-gpu',
-                    '--window-size=1280,720'
+                    '--window-size=1920,1080'
                 ],
             } as any,
         });
