@@ -1,6 +1,7 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { getApiConfig, getApiFallbackUrl } from './api-config';
 import { fetchAniListAnimeByNumericId } from './anilist-anime-by-id';
+import { ping } from '@/utils/keep-alive';
 
 interface BrowseFilters {
     type?: string;
@@ -723,6 +724,33 @@ const primaryBase = this.apiBase();
                         console.error(`[API] ❌ Fallback stream also failed:`, fallbackErr);
                     }
                 }
+
+            const isColdStart = primaryErr instanceof TypeError &&
+                (primaryErr.message.toLowerCase().includes('failed to fetch') ||
+                 primaryErr.message.toLowerCase().includes('network request failed') ||
+                 primaryErr.message.toLowerCase().includes('load failed'));
+
+            // Cold-start: server was sleeping. Wait for it to wake then retry once.
+            if (isColdStart) {
+                console.warn('[API] ⏳ Cold-start detected — waiting for server to wake...');
+                let woke = false;
+                const deadline = Date.now() + 75_000; // wait up to 75 s
+                while (Date.now() < deadline) {
+                    await new Promise(r => setTimeout(r, 4000));
+                    woke = await ping();
+                    if (woke) break;
+                }
+                if (woke) {
+                    console.log('[API] 🟢 Server woke — retrying stream fetch...');
+                    try {
+                        return await tryFetch(primaryBase);
+                    } catch (retryErr) {
+                        console.error('[API] ❌ Retry after wake also failed:', retryErr);
+                        throw retryErr;
+                    }
+                }
+                throw new Error('Server did not wake in time. Please try again.');
+            }
 
             const isAbort = primaryErr instanceof Error && (primaryErr.name === 'AbortError' || primaryErr.message.toLowerCase().includes('aborted'));
             if (!isAbort) {

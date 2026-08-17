@@ -5,8 +5,11 @@
 
 import { apiUrl } from '@/lib/api-config';
 
-const PING_INTERVAL = 4 * 60 * 1000; // 4 minutes — keeps Vercel functions warm
-const MAX_BACKOFF = 20 * 60 * 1000; // 20 minutes max between pings on failure
+// Render free tier sleeps after 15 min of inactivity — ping every 8 min to prevent that.
+// Do NOT use exponential backoff: if the server is sleeping on first ping, backing off
+// means it stays asleep and the next real request still cold-starts.
+const PING_INTERVAL = 8 * 60 * 1000; // 8 minutes — well under Render's 15-min sleep
+const RETRY_WHEN_DOWN_MS = 20_000;   // 20 s retry when server is unreachable (waking up)
 
 let pingInterval: NodeJS.Timeout | null = null;
 let consecutiveFailures = 0;
@@ -15,37 +18,30 @@ let isTabVisible = true;
 /**
  * Ping the backend health endpoint — exported so pages can trigger an immediate warm-up.
  */
-export async function ping() {
-  if (!isTabVisible) return;
-
-  const pingUrl = (url: string) => fetch(url, {
-    method: 'GET', mode: 'cors', cache: 'no-cache',
-    referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(30000),
-  }).catch(() => {});
+export async function ping(): Promise<boolean> {
+  if (!isTabVisible) return false;
 
   try {
-    await pingUrl(apiUrl('/api/health'));
+    const resp = await fetch(apiUrl('/api/health'), {
+      method: 'GET', mode: 'cors', cache: 'no-cache',
+      referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000),
+    });
     consecutiveFailures = 0;
+    return resp.ok;
   } catch {
     consecutiveFailures++;
+    return false;
   }
 }
 
 /**
- * Get the next ping interval based on failure count
- */
-function getNextInterval(): number {
-  if (consecutiveFailures === 0) return PING_INTERVAL;
-  // Exponential backoff: 8m, 16m, 30m (capped)
-  return Math.min(PING_INTERVAL * Math.pow(2, consecutiveFailures - 1), MAX_BACKOFF);
-}
-
-/**
- * Schedule the next ping with adaptive interval
+ * Schedule the next ping. When the server is down/waking, retry quickly so
+ * we detect when it comes back online. Once online, use the normal long interval.
  */
 function scheduleNextPing() {
   if (pingInterval) clearTimeout(pingInterval);
-  const interval = getNextInterval();
+  // If the server was recently unreachable, retry sooner (it may be waking up).
+  const interval = consecutiveFailures > 0 ? RETRY_WHEN_DOWN_MS : PING_INTERVAL;
   pingInterval = setTimeout(async () => {
     await ping();
     scheduleNextPing();
@@ -70,8 +66,12 @@ function handleVisibilityChange() {
 export function startKeepAlive() {
   if (pingInterval) return;
 
-  // Ping immediately on startup
-  ping();
+  // Ping immediately on startup — wakes the server before the user navigates to watch page.
+  ping().then(ok => {
+    if (!ok) {
+      console.log('[KeepAlive] Initial ping failed — server may be cold-starting. Retrying...');
+    }
+  });
   scheduleNextPing();
 
   if (typeof document !== 'undefined') {
