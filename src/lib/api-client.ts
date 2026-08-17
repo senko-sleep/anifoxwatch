@@ -615,9 +615,8 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            // 25s timeout per host — cross-source fallback for anilist- IDs
-            // requires AniList API + search + episodes + streaming (20-30s total).
-            const streamTimeoutMs = 25_000;
+            // 45s timeout per host — cross-source fallback & cold-start containers (e.g. Render)
+            const streamTimeoutMs = 45_000;
             const maxAttempts = 1;
             let lastErr: Error | null = null;
 

@@ -71,7 +71,7 @@ class StreamExtractor {
 
             this.browserLaunchPromise = Promise.race([
                 launchPromise,
-                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 8000))
+                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 20000))
             ]);
 
             this.browser = await this.browserLaunchPromise;
@@ -85,7 +85,7 @@ class StreamExtractor {
     }
 
     private activePages = 0;
-    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 8 : 12;
+    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 3 : 8;
 
     /**
      * Create a new page with proper settings
