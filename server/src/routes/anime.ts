@@ -1030,12 +1030,37 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const result = await Promise.race([
+        let result = await Promise.race([
             sourceManager.getAnime(id),
-            new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Get anime timeout')), 25000))
-        ]);
+            new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Get anime timeout')), 40000))
+        ]).catch(() => null);
 
+        // ── Last-resort: for anilist- IDs that couldn't be resolved through the
+        // streaming source pipeline (e.g. due to Render cold-start / IP blocking),
+        // query AniList GraphQL directly and return metadata so the player page
+        // can still render with episode data fetched separately.
         if (!result) {
+            const anilistMatch = /^anilist-(\d+)$/i.exec(id.trim());
+            if (anilistMatch) {
+                const numericId = parseInt(anilistMatch[1], 10);
+                try {
+                    const anilistDirect = await Promise.race([
+                        anilistService.getAnimeById(numericId),
+                        new Promise<null>((_, r) => setTimeout(() => r(null), 12000))
+                    ]).catch(() => null);
+
+                    if (anilistDirect) {
+                        res.json({
+                            ...anilistDirect,
+                            id: `anilist-${numericId}`,
+                            source: 'AniList',
+                        });
+                        return;
+                    }
+                } catch {
+                    // fall through to 404
+                }
+            }
             res.status(404).json({ error: 'Anime not found' });
             return;
         }

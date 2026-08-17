@@ -794,9 +794,62 @@ export class AniListService {
         const response = await this.query<MediaResponse>(query, { id });
         const media = response?.data?.Media;
 
-        if (!media) return null;
+        if (media) {
+            return this.mapToAnimeBase(media);
+        }
 
-        return this.mapToAnimeBase(media);
+        // ── Fallback to Jikan (MAL) when AniList GraphQL is down or rate-limited ──
+        try {
+            console.log(`[AniListService] AniList query returned empty for ID ${id}, trying Jikan fallback...`);
+            const jikanRes = await fetch(`https://api.jikan.moe/v4/anime/${id}`, {
+                headers: { 'User-Agent': 'AniFoxWatch/1.0 (+https://anifoxwatch.web.app)' },
+                signal: AbortSignal.timeout(6000),
+            });
+            if (jikanRes.ok) {
+                const jikanData = (await jikanRes.json()) as {
+                    data?: {
+                        mal_id: number;
+                        title: string;
+                        title_english?: string;
+                        title_japanese?: string;
+                        synopsis?: string;
+                        type?: string;
+                        episodes?: number;
+                        score?: number;
+                        year?: number;
+                        season?: string;
+                        genres?: Array<{ name: string }>;
+                        images?: { jpg?: { large_image_url?: string; image_url?: string } };
+                    };
+                };
+                const item = jikanData?.data;
+                if (item?.title) {
+                    const fallbackResult: AnimeBase = {
+                        id: `anilist-${id}`,
+                        title: item.title_english || item.title,
+                        titleEnglish: item.title_english,
+                        titleRomaji: item.title,
+                        titleJapanese: item.title_japanese,
+                        type: (item.type?.toUpperCase() as any) || 'TV',
+                        status: 'Ongoing',
+                        episodes: item.episodes || 0,
+                        rating: item.score || undefined,
+                        genres: (item.genres || []).map((g) => g.name),
+                        description: item.synopsis || '',
+                        image: item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
+                        cover: item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
+                        year: item.year,
+                        season: item.season,
+                        source: 'AniList',
+                    };
+                    return fallbackResult;
+                }
+            }
+        } catch (jikanErr) {
+            console.warn(`[AniListService] Jikan fallback failed for ID ${id}:`, jikanErr);
+        }
+
+        return null;
     }
 
     /**
