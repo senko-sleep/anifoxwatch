@@ -17,6 +17,7 @@ import { anilistService } from './anilist-service.js';
 import { reliableRequest, retry, withTimeout } from '../middleware/reliability.js';
 import { REGISTERED_SOURCE_NAMES } from '../registered-sources.js';
 import { reconstructAnimeKaiCompoundFromWatchUrl } from '../utils/animekai-compound-from-watch.js';
+import { isLikelyHentai } from './hentai-resolver-service.js';
 
 export { REGISTERED_SOURCE_NAMES };
 
@@ -3244,15 +3245,21 @@ export class SourceManager {
         const isAdultContent = resolvedEpisodeId.toLowerCase().startsWith('hh-') || 
                               resolvedEpisodeId.toLowerCase().startsWith('hanime-') ||
                               resolvedEpisodeId.toLowerCase().startsWith('watchhentai-') ||
-                              resolvedEpisodeId.toLowerCase().startsWith('akih-');
+                              resolvedEpisodeId.toLowerCase().startsWith('akih-') ||
+                              (forcedTitle != null && isLikelyHentai(forcedTitle)) ||
+                              (anilistId != null && anilistId === 1639);
 
         const sourcesToTry: StreamingSource[] = [];
 
-        // AniList IDs (anilist-XXXXX) cannot be handled by any source directly.
-        // They require a title-based lookup via crossSourceStreamingFallback.
-        // Skip the direct source list entirely so we don't incorrectly remove sources
-        // that fail because of an incompatible ID format (not because they're broken).
+        // AniList IDs (anilist-XXXXX) require AniList or title-based lookup
         if (isAnilistId) {
+            if (isAdultContent) {
+                const watchHentai = this.sources.get('WatchHentai') as StreamingSource;
+                if (watchHentai?.isAvailable && watchHentai.getStreamingLinks && !sourcesToTry.includes(watchHentai)) {
+                    sourcesToTry.push(watchHentai);
+                    console.log(`   🎯 Added WatchHentai for adult AniList ID resolution`);
+                }
+            }
             const yomi = this.sources.get('Yomi') as StreamingSource;
             if (yomi?.isAvailable && yomi.getStreamingLinks && !sourcesToTry.includes(yomi)) {
                 sourcesToTry.push(yomi);
@@ -3383,7 +3390,7 @@ export class SourceManager {
                 return [...preferred.filter(p => sources.includes(p)), ...others, 'cross-source'];
             }
             
-            return isAdultContent ? sources : [...sources, 'cross-source'];
+            return [...sources, 'cross-source'];
         };
 
         // If we successfully resolved the episode ID via search, don't treat it as Anilist ID
@@ -3801,10 +3808,19 @@ export class SourceManager {
 
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
+        // Check if title or episodeId or anilistId indicates adult/hentai content
+        const isHentaiQuery =
+            (category as string) === 'hentai' ||
+            (title && isLikelyHentai(title)) ||
+            (episodeId && (episodeId.includes('watchhentai') || episodeId.includes('hanime') || episodeId.includes('akih'))) ||
+            (anilistId != null && anilistId === 1639);
+
         // Registered, currently enabled sources to try for cross-source fallback.
-        const dubSources = ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'];
-        const subSources = ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'];
-        const sourceNames = category === 'dub' ? dubSources : subSources;
+        const normalSources = ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'];
+        const hentaiSources = ['WatchHentai'];
+        const sourceNames = isHentaiQuery
+            ? hentaiSources
+            : (category === 'dub' ? ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'] : normalSources);
         
         const consumetSources = sourceNames
             .map(n => ({ name: n, src: this.sources.get(n) as StreamingSource }))

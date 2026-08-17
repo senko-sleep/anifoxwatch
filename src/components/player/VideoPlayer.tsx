@@ -918,18 +918,35 @@ export const VideoPlayer = ({
         resolvedSrc: resolvedSrc.substring(0, 100)
       });
       
+      const onCanPlayDirect = () => {
+        setIsLoading(false);
+        safeSetIsBuffering(false);
+      };
+
       const onLoadedMetadataDirect = () => {
         setIsLoading(false);
 
         const savedPos = loadSavedPositionRef.current();
         if (savedPos > 5) {
-          video.currentTime = savedPos;
+          try {
+            video.currentTime = savedPos;
+          } catch { /* ignore */ }
           setCurrentTime(savedPos);
           setShowPositionRestored(true);
           setTimeout(() => setShowPositionRestored(false), 3000);
         }
 
-        video.play().catch(() => { });
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            setIsPlaying(true);
+            setIsLoading(false);
+          }).catch((err) => {
+            playerLog('info', 'Direct playback waiting for user gesture (autoplay prevented)', err);
+            setIsPlaying(false);
+            setIsLoading(false);
+          });
+        }
       };
       
       const onErrorDirect = () => {
@@ -940,7 +957,6 @@ export const VideoPlayer = ({
         const err = video.error;
         playerLog('error', 'Direct video error', { code: err?.code, message: err?.message });
         
-        // Provide more specific error message based on error code
         let errorMessage = 'Failed to load video. Try a different server.';
         if (err?.code === 4) {
           errorMessage = 'Video format not supported. The server may be returning incorrect content type.';
@@ -952,15 +968,17 @@ export const VideoPlayer = ({
         onErrorRef.current?.('native_error');
       };
 
-      // In JavaScript, you can attach arbitrary properties to the video element to clean them up later
       (video as any)._cleanupDirect = () => {
         video.removeEventListener('loadedmetadata', onLoadedMetadataDirect);
+        video.removeEventListener('canplay', onCanPlayDirect);
         video.removeEventListener('error', onErrorDirect);
       };
 
       video.addEventListener('loadedmetadata', onLoadedMetadataDirect);
+      video.addEventListener('canplay', onCanPlayDirect);
       video.addEventListener('error', onErrorDirect);
       video.src = resolvedSrc;
+      video.load();
 
       if (video.readyState >= 1) {
         onLoadedMetadataDirect();
@@ -1219,13 +1237,16 @@ export const VideoPlayer = ({
       }
     };
     const handleWaiting = () => {
+      if (video.paused) return;
       if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
       // 800ms debounce — avoids spinner flash during brief ABR quality switches
       waitingTimerRef.current = setTimeout(() => {
-        setIsLoading(true);
-        // Also ensure HLS is actively loading segments
-        if (hlsRef.current) {
-          try { hlsRef.current.startLoad(); } catch { /* ignore */ }
+        if (video && !video.paused) {
+          setIsLoading(true);
+          // Also ensure HLS is actively loading segments
+          if (hlsRef.current) {
+            try { hlsRef.current.startLoad(); } catch { /* ignore */ }
+          }
         }
       }, 800);
     };
@@ -1417,15 +1438,21 @@ export const VideoPlayer = ({
     const video = videoRef.current;
     if (!video) return;
 
+    setIsLoading(false);
+    safeSetIsBuffering(false);
+
     if (video.paused) {
       const playPromise = video.play();
       if (playPromise !== undefined) {
-        playPromise.catch((err) => {
+        playPromise.then(() => {
+          setIsPlaying(true);
+        }).catch((err) => {
           playerLog('warn', 'Playback error on togglePlay:', err);
         });
       }
     } else {
       video.pause();
+      setIsPlaying(false);
     }
   }, []);
 
@@ -1888,10 +1915,19 @@ export const VideoPlayer = ({
         </div>
       )}
 
-      {/* Initial loading spinner */}
+      {/* Initial loading spinner — dismissible on click so user is never locked out */}
       {isLoading && !error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity duration-200">
-          <div className="flex flex-col items-center gap-4">
+        <div
+          onClick={() => {
+            const v = videoRef.current;
+            if (v) {
+              setIsLoading(false);
+              v.play().catch(() => {});
+            }
+          }}
+          className="absolute inset-0 flex items-center justify-center bg-black/40 transition-opacity duration-200 cursor-pointer"
+        >
+          <div className="flex flex-col items-center gap-4 pointer-events-none">
             <div className="w-12 h-12 border-4 border-fox-orange/30 border-t-fox-orange rounded-full animate-spin"></div>
             <p className="text-white/80 text-sm">Loading stream...</p>
             {hlsStats && (

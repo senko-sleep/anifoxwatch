@@ -409,7 +409,29 @@ export function isLikelyHentai(searchTerm: string): boolean {
     'sono hanabira',
     'sono-hanabira',
     'kiss hug',
-    'kiss-hug'
+    'kiss-hug',
+    'overflow',
+    'itadaki seieki',
+    'mankitsu',
+    'resort boin',
+    'oni chichi',
+    'bible black',
+    'discipline',
+    'kuroinu',
+    'euphoria',
+    'shoujo ramune',
+    'falken',
+    'rance',
+    'tsunpuri',
+    'tsu ba sa',
+    'harem camp',
+    'show time',
+    'dokidoki little ooyasan',
+    'futabu',
+    'dropex',
+    'seikatsu shuukan',
+    'succubus stayed',
+    'katainaka'
   ];
   
   // Check for exact or partial match with known hentai titles
@@ -422,7 +444,9 @@ export function isLikelyHentai(searchTerm: string): boolean {
     'hentai',
     'ecchi',
     '18+',
-    'nsfw'
+    'nsfw',
+    'eroge',
+    'uncensored'
   ];
   
   return hentaiIndicators.some(indicator => lowerTerm.includes(indicator));

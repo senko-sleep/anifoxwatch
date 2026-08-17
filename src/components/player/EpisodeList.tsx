@@ -100,20 +100,68 @@ export function EpisodeList({
     }
   }, [selectedEpisodeId]);
 
-  // Group episodes by season (every 12-26 episodes typically)
+  // Group episodes by season or batches (adaptive chunking)
   const seasons = useMemo(() => {
-    if (!episodes.length) return [];
+    if (!episodes.length || episodes.length <= 16) return [];
 
-    const episodesPerSeason = 12;
+    // Sensible season/batch sizing based on total episode count:
+    // 17 - 36 episodes: 12-13 eps per season
+    // 37 - 150 episodes: 24-25 eps per season
+    // > 150 episodes: 50 eps per batch
+    const episodesPerSeason =
+      episodes.length <= 36 ? 12 :
+      episodes.length <= 150 ? 25 : 50;
+
     const seasonCount = Math.ceil(episodes.length / episodesPerSeason);
 
     return Array.from({ length: seasonCount }, (_, i) => ({
       id: `season-${i + 1}`,
-      name: `Season ${i + 1}`,
+      name: episodes.length > 75
+        ? `Batch ${i + 1} (Ep ${i * episodesPerSeason + 1}-${Math.min((i + 1) * episodesPerSeason, episodes.length)})`
+        : `Season ${i + 1} (Ep ${i * episodesPerSeason + 1}-${Math.min((i + 1) * episodesPerSeason, episodes.length)})`,
+      shortName: `Season ${i + 1}`,
       startEp: i * episodesPerSeason + 1,
       endEp: Math.min((i + 1) * episodesPerSeason, episodes.length)
     }));
   }, [episodes]);
+
+  // Handle season selection: update filter AND switch to first episode of that season
+  const handleSeasonChange = (newSeasonId: string) => {
+    setSelectedSeason(newSeasonId);
+    if (newSeasonId !== 'all') {
+      const season = seasons.find(s => s.id === newSeasonId);
+      if (season) {
+        // Check if currently active episode is already in this season
+        const currentEp = episodes.find(e => e.id === selectedEpisodeId);
+        const isCurrentInSeason = currentEp && currentEp.number >= season.startEp && currentEp.number <= season.endEp;
+        
+        // If current episode is not in the newly selected season, switch to the first episode of that season!
+        if (!isCurrentInSeason) {
+          const firstEpInSeason = episodes.find(e => e.number >= season.startEp && e.number <= season.endEp);
+          if (firstEpInSeason) {
+            onEpisodeSelect(firstEpInSeason.id, firstEpInSeason.number);
+          }
+        }
+      }
+    }
+  };
+
+  // Auto-sync season selection when active episode changes if current season doesn't contain it
+  useEffect(() => {
+    if (!selectedEpisodeId || !episodes.length || !seasons.length) return;
+    if (selectedSeason === 'all') return;
+    
+    const currentEp = episodes.find(e => e.id === selectedEpisodeId);
+    if (!currentEp) return;
+    
+    const currentSeasonObj = seasons.find(s => s.id === selectedSeason);
+    if (!currentSeasonObj || currentEp.number < currentSeasonObj.startEp || currentEp.number > currentSeasonObj.endEp) {
+      const matchingSeason = seasons.find(s => currentEp.number >= s.startEp && currentEp.number <= s.endEp);
+      if (matchingSeason) {
+        setSelectedSeason(matchingSeason.id);
+      }
+    }
+  }, [selectedEpisodeId, episodes, seasons, selectedSeason]);
 
   // Filter and sort episodes
   const filteredEpisodes = useMemo(() => {
@@ -190,7 +238,7 @@ export function EpisodeList({
         {/* Filters */}
         <div className="flex gap-1.5">
           {seasons.length > 1 && (
-            <Select value={selectedSeason} onValueChange={setSelectedSeason}>
+            <Select value={selectedSeason} onValueChange={handleSeasonChange}>
               <SelectTrigger className="flex-1 bg-background/50 h-8 text-sm">
                 <SelectValue placeholder="All Seasons" />
               </SelectTrigger>

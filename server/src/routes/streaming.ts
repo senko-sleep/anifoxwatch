@@ -1166,6 +1166,69 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         addCombo(cfg.referer, cfg.origin);
     }
 
+    // ── Fast-path: native Node.js HTTPS pipe for direct MP4/video files ────────
+    // For large direct video files (e.g. hstorage.xyz MP4), bypass the axios
+    // referer combo loop entirely and use Node's native https.request which pipes
+    // directly without holding the full response in memory. This avoids the 20s
+    // axios timeout that fires before the large file starts streaming.
+    if (isVideo && !isM3u8 && !isSegment) {
+        const bestReferer = refererCombos[0]?.referer || 'https://watchhentai.net/';
+        const requestHeaders: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': '*/*',
+            'Referer': bestReferer,
+        };
+        if (req.headers.range) requestHeaders['Range'] = req.headers.range as string;
+
+        const mp4Result = await new Promise<boolean>((resolve) => {
+            const urlObj2 = new URL(url);
+            const options = {
+                hostname: urlObj2.hostname,
+                port: urlObj2.port || 443,
+                path: urlObj2.pathname + urlObj2.search,
+                method: 'GET',
+                headers: requestHeaders,
+                agent: proxyKeepAliveAgent,
+                timeout: 60000,
+            };
+            const upstreamReq = https.request(options, (upstreamRes) => {
+                if (!upstreamRes.statusCode || upstreamRes.statusCode >= 400) {
+                    upstreamRes.resume();
+                    logger.warn(`[PROXY] MP4 fast-path upstream error ${upstreamRes.statusCode} for ${domain}`, { requestId });
+                    resolve(false);
+                    return;
+                }
+                res.set('Access-Control-Allow-Origin', '*');
+                res.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+                res.set('Content-Type', upstreamRes.headers['content-type'] || 'video/mp4');
+                if (upstreamRes.headers['content-length']) res.set('Content-Length', upstreamRes.headers['content-length']);
+                if (upstreamRes.headers['content-range']) res.set('Content-Range', upstreamRes.headers['content-range']);
+                if (upstreamRes.headers['accept-ranges']) res.set('Accept-Ranges', upstreamRes.headers['accept-ranges']);
+                res.status(upstreamRes.statusCode);
+                upstreamRes.on('error', (e) => {
+                    logger.error(`[PROXY] MP4 fast-path pipe error for ${domain}`, e as Error, { requestId });
+                    if (!res.writableEnded) res.end();
+                });
+                upstreamRes.pipe(res);
+                logger.info(`[PROXY] MP4 fast-path success for ${domain} (${upstreamRes.statusCode})`, { requestId });
+                resolve(true);
+            });
+            upstreamReq.on('error', (e) => {
+                logger.warn(`[PROXY] MP4 fast-path request error for ${domain}: ${e.message}`, { requestId });
+                resolve(false);
+            });
+            upstreamReq.on('timeout', () => {
+                upstreamReq.destroy();
+                logger.warn(`[PROXY] MP4 fast-path timeout for ${domain}`, { requestId });
+                resolve(false);
+            });
+            upstreamReq.end();
+        });
+
+        if (mp4Result) return;
+        logger.warn(`[PROXY] MP4 fast-path failed for ${domain}, falling back to axios loop`, { requestId });
+    }
+
     // Try each referer combo
     let proxyResponse: AxiosResponse | null = null;
     let lastProxyError: unknown = null;
@@ -1194,7 +1257,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         // Segments must be fast — 15s timeout to match client-side for zero lag
         // Matches client-side fragLoadingTimeOut (15s) to prevent server timeout before client
         // Manifests are infrequent so stay at 20s.
-        const timeoutMs = (isSegment && !isM3u8) ? 15_000 : 20_000;
+        // Direct MP4 files (large) need a longer timeout for the first byte.
+        const timeoutMs = isVideo ? 60_000 : (isSegment && !isM3u8) ? 15_000 : 20_000;
 
         return axios({
             method: 'get',

@@ -235,6 +235,27 @@ const Watch = () => {
   // Data fetching
   const { data: anime, isLoading: animeLoading, error: animeError } = useAnime(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
   const { data: episodes, isLoading: episodesLoading, isFetching: episodesFetching, error: episodesError, refetch: refetchEpisodes } = useEpisodes(cleanAnimeId || '', !!cleanAnimeId, sourceParam);
+
+  // Group episodes by season/batches for mobile selector
+  const mobileSeasons = useMemo(() => {
+    if (!episodes || episodes.length <= 16) return [];
+    const episodesPerSeason =
+      episodes.length <= 36 ? 12 :
+      episodes.length <= 150 ? 25 : 50;
+    const seasonCount = Math.ceil(episodes.length / episodesPerSeason);
+    return Array.from({ length: seasonCount }, (_, i) => ({
+      id: `season-${i + 1}`,
+      name: `Season ${i + 1}`,
+      shortName: episodes.length > 75
+        ? `Ep ${i * episodesPerSeason + 1}-${Math.min((i + 1) * episodesPerSeason, episodes.length)}`
+        : `Season ${i + 1}`,
+      startEp: i * episodesPerSeason + 1,
+      endEp: Math.min((i + 1) * episodesPerSeason, episodes.length)
+    }));
+  }, [episodes]);
+
+  const [mobileSeason, setMobileSeason] = useState<string>('all');
+
   const selectedEpisodeForCurrentAnime = selectedAnimeId === cleanAnimeId ? selectedEpisode : null;
   const { data: servers, isLoading: serversLoading } = useEpisodeServers(selectedEpisodeForCurrentAnime || '', !!selectedEpisodeForCurrentAnime);
   const serversHaveDub = useMemo(
@@ -1232,17 +1253,68 @@ const Watch = () => {
               })()}
             </div>
 
+            {/* Mobile Season Selector / Tabs */}
+            {mobileSeasons.length > 1 && (
+              <div className="flex items-center gap-1.5 mb-3 overflow-x-auto scrollbar-none pb-1">
+                <button
+                  onClick={() => setMobileSeason('all')}
+                  className={cn(
+                    "px-3 py-1 rounded-full text-[10px] font-semibold touch-manipulation whitespace-nowrap transition-all",
+                    mobileSeason === 'all'
+                      ? "bg-fox-orange text-white shadow-sm shadow-fox-orange/30"
+                      : "bg-white/[0.06] text-white/60 active:bg-white/[0.12] border border-white/[0.06]"
+                  )}
+                >
+                  All ({episodes?.length || 0})
+                </button>
+                {mobileSeasons.map((s) => {
+                  const isSeasonActive = mobileSeason === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => {
+                        setMobileSeason(s.id);
+                        const isCurrentInSeason = selectedEpisodeNum >= s.startEp && selectedEpisodeNum <= s.endEp;
+                        if (!isCurrentInSeason && episodes) {
+                          const firstEpInSeason = episodes.find(e => e.number >= s.startEp && e.number <= s.endEp);
+                          if (firstEpInSeason) {
+                            handleEpisodeSelect(firstEpInSeason.id, firstEpInSeason.number);
+                          }
+                        }
+                      }}
+                      className={cn(
+                        "px-3 py-1 rounded-full text-[10px] font-semibold touch-manipulation whitespace-nowrap transition-all",
+                        isSeasonActive
+                          ? "bg-fox-orange text-white shadow-sm shadow-fox-orange/30"
+                          : "bg-white/[0.06] text-white/60 active:bg-white/[0.12] border border-white/[0.06]"
+                      )}
+                    >
+                      {s.shortName}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* 2-column card grid */}
             <div className="grid grid-cols-2 gap-2">
-              {episodes?.map((ep) => {
-                const progress = getEpisodeProgress(ep.number);
-                const isActive = selectedEpisode === ep.id;
-                const isWatched = progress >= 0.9;
-                const isInProgress = progress > 0.02 && progress < 0.9;
-                return (
-                  <button
-                    key={ep.id}
-                    onClick={() => handleEpisodeSelect(ep.id, ep.number)}
+              {(() => {
+                let displayEps = episodes || [];
+                if (mobileSeason !== 'all' && mobileSeasons.length > 0) {
+                  const sObj = mobileSeasons.find(s => s.id === mobileSeason);
+                  if (sObj) {
+                    displayEps = displayEps.filter(e => e.number >= sObj.startEp && e.number <= sObj.endEp);
+                  }
+                }
+                return displayEps.map((ep) => {
+                  const progress = getEpisodeProgress(ep.number);
+                  const isActive = selectedEpisode === ep.id;
+                  const isWatched = progress >= 0.9;
+                  const isInProgress = progress > 0.02 && progress < 0.9;
+                  return (
+                    <button
+                      key={ep.id}
+                      onClick={() => handleEpisodeSelect(ep.id, ep.number)}
                     className={cn(
                       "relative rounded-xl text-left overflow-hidden touch-manipulation active:scale-[0.97] transition-all duration-150 flex flex-col",
                       isActive
@@ -1319,8 +1391,9 @@ const Watch = () => {
                     )}
                   </button>
                 );
-              })}
-            </div>
+              });
+            })()}
+          </div>
           </div>
 
           {/* About — compact card at the bottom */}
