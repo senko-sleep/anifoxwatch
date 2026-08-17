@@ -57,15 +57,20 @@ export interface AniListHomeMedia {
   seasonYear: number | null;
   season: string | null;
   studios: { nodes: { name: string }[] };
+  isAdult?: boolean;
 }
 
 export function mapAniListMediaToAnime(m: AniListHomeMedia, yearFallback?: number): Anime {
   const year = yearFallback ?? m.seasonYear ?? undefined;
   const title = m.title.english || m.title.romaji || 'Unknown';
-  const slug = generateAnimeSlug(title, String(m.id));
+  // Use anilist-XXXXX as the canonical ID so Watch.tsx can resolve it directly
+  // without fuzzy slug matching. The URL will still look clean (see generateWatchUrl).
+  const anilistId = `anilist-${m.id}`;
   return {
-    id: slug,
+    id: anilistId,
     title,
+    titleEnglish: m.title.english || undefined,
+    titleRomaji: m.title.romaji || undefined,
     titleJapanese: m.title.romaji || undefined,
     image: m.coverImage.extraLarge || m.coverImage.large || '',
     cover: m.coverImage.extraLarge || m.coverImage.large || '',
@@ -79,7 +84,7 @@ export function mapAniListMediaToAnime(m: AniListHomeMedia, yearFallback?: numbe
     studios: m.studios?.nodes?.map((s) => s.name) ?? [],
     year,
     season: m.season || undefined,
-    isMature: false,
+    isMature: m.isAdult ?? false,
     source: 'anilist',
   };
 }

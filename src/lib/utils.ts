@@ -108,22 +108,35 @@ export function generateAnimeSlug(title: string | undefined | null, id?: string)
 /**
  * Generate a watch URL using anime slug instead of numeric ID
  * Creates clean URLs like /watch/anime/attack-on-titan?ep=1 or /watch/hentai/title?ep=1
+ * For AniList-sourced anime, embeds the numeric ID in the slug (e.g. chainsaw-man-127230)
+ * so the Watch page can resolve it directly without fuzzy search.
  */
-export function generateWatchUrl(anime: { title?: string | null; id?: string; titleEnglish?: string | null; titleRomaji?: string | null; genres?: string[]; source?: string }, episode?: number): string {
+export function generateWatchUrl(anime: { title?: string | null; id?: string; titleEnglish?: string | null; titleRomaji?: string | null; genres?: string[]; source?: string; isMature?: boolean }, episode?: number): string {
   const title = anime.titleEnglish || anime.titleRomaji || anime.title || '';
-  const slug = generateAnimeSlug(title, anime.id);
   const episodeParam = episode ? `?ep=${episode}` : '';
-  
+
   // Determine if this is hentai content
-  // Check: genres, source name, and ID prefixes (most reliable since genres may not be passed)
-  const hentaiSourcePrefixes = ['watchhentai-', 'hanime-', 'akih-', 'aniwaves-', 'yomi-', 'hentai-'];
-  const isHentai = 
+  const hentaiSourcePrefixes = ['watchhentai-', 'hanime-', 'akih-', 'hentai-'];
+  const isHentai =
+    anime.isMature ||
     anime.genres?.some(g => ['Hentai', 'Ecchi', 'Yaoi', 'Yuri'].includes(g)) ||
     anime.source?.toLowerCase().includes('hentai') ||
     anime.source?.toLowerCase().includes('hanime') ||
     hentaiSourcePrefixes.some(prefix => anime.id?.toLowerCase().startsWith(prefix));
-  
+
   const typePrefix = isHentai ? 'hentai' : 'anime';
+
+  // For AniList IDs (anilist-XXXXX), embed the numeric ID in the slug so the
+  // Watch page can resolve it instantly: /watch/anime/chainsaw-man-127230
+  if (anime.id?.startsWith('anilist-')) {
+    const numericId = anime.id.replace('anilist-', '');
+    const titleSlug = generateAnimeSlug(title);
+    const slug = titleSlug ? `${titleSlug}-${numericId}` : numericId;
+    return `/watch/${typePrefix}/${slug}${episodeParam}`;
+  }
+
+  // For source-specific IDs (aniwaves-xxx, watchhentai-xxx, etc.)
+  const slug = generateAnimeSlug(title, anime.id);
   return `/watch/${typePrefix}/${slug}${episodeParam}`;
 }
 

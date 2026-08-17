@@ -81,11 +81,23 @@ const Watch = () => {
   useEffect(() => {
     const resolveSlug = async () => {
       if (isSlugBased && animeId) {
+        // Fast path: if the slug ends in a numeric ID (e.g. "chainsaw-man-127230"),
+        // it's an AniList slug — resolve directly without hitting the search API.
+        const trailingNumMatch = animeId.match(/-(\d{4,9})$/);
+        if (trailingNumMatch) {
+          const anilistId = `anilist-${trailingNumMatch[1]}`;
+          console.log(`[Watch] Extracted AniList ID from slug: ${animeId} → ${anilistId}`);
+          setResolvedId(anilistId);
+          return;
+        }
+
         setIsResolving(true);
         try {
-          // Determine if we should use adult mode based on source param or URL
-          const mode = sourceParam && ['watchhentai', 'hanime', 'akih'].includes(sourceParam.toLowerCase()) 
-            ? 'adult' 
+          // Determine if we should use adult mode based on URL path or source param
+          const pathType = window.location.pathname.split('/')[2] || '';
+          const mode = (pathType === 'hentai' ||
+            (sourceParam && ['watchhentai', 'hanime', 'akih'].includes(sourceParam.toLowerCase())))
+            ? 'adult'
             : 'safe';
           const response = await fetch(apiUrl(`/api/anime/resolve-slug?slug=${encodeURIComponent(animeId)}&mode=${mode}`));
           if (response.ok) {
