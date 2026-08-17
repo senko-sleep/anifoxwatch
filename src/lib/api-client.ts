@@ -527,6 +527,8 @@ class AnimeApiClient {
     async getEpisodes(animeId: string, source?: string): Promise<Episode[]> {
         const params = new URLSearchParams({ id: animeId });
         if (source) params.append('source', source);
+        // Add cache-busting timestamp to force fresh fetch
+        params.append('_t', String(Date.now()));
         const response = await this.fetch<{ episodes: Episode[] }>(
             `/api/anime/episodes?${params}`
         );

@@ -3,9 +3,12 @@ import {
     AniwavesSource,
     WatchHentaiSource,
     YomiSource,
+    ReAnimeSource,
+    AnichiSource,
+    // HanimeSource, // 🔧 Placeholder - requires JS rendering, not currently functional
 } from '../sources/index.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime, SourceHealth, BrowseFilters } from '../types/anime.js';
-import { GenreAwareSource, SourceRequestOptions } from '../sources/base-source.js';
+import { GenreAwareSource, SourceRequestOptions, isValidAnimeTitle } from '../sources/base-source.js';
 import { StreamingData, EpisodeServer, VideoSource } from '../types/streaming.js';
 import { logger, PerformanceTimer, createRequestContext } from '../utils/logger.js';
 import { AnimeCache } from '../lib/anime-cache.js';
@@ -13,6 +16,7 @@ import { animeCache, episodesCache, searchCache, trendingCache } from '../lib/me
 import { anilistService } from './anilist-service.js';
 import { reliableRequest, retry, withTimeout } from '../middleware/reliability.js';
 import { REGISTERED_SOURCE_NAMES } from '../registered-sources.js';
+import { reconstructAnimeKaiCompoundFromWatchUrl } from '../utils/animekai-compound-from-watch.js';
 
 export { REGISTERED_SOURCE_NAMES };
 
@@ -70,7 +74,10 @@ export class SourceManager {
     private sourceCapabilities: Map<string, SourceCapabilities> = new Map([
         ['Yomi', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['Aniwaves', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'high' }],
+        ['ReAnime', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'high' }],
+        ['Anichi', { supportsDub: true, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'high' }],
         ['WatchHentai', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: true, quality: 'medium' }],
+        // ['Hanime', { supportsDub: false, supportsSub: true, hasScheduleData: false, hasGenreFiltering: false, quality: 'medium' }], // Placeholder
     ]);
 
     // Concurrency control for API requests with better reliability
@@ -117,15 +124,42 @@ export class SourceManager {
         'DEFAULT': 20 * 1000       // 20 seconds default
     } as const;
 
+    private readonly BLOCKED_STREAM_DOMAINS = [
+        'rabbitstream.net',
+    ];
+
+    private getStreamUrl(source: VideoSource): string {
+        return source.originalUrl || source.url || '';
+    }
+
+    private isBlockedStreamUrl(url: string): boolean {
+        if (!url) return true;
+        const lower = url.toLowerCase();
+        return this.BLOCKED_STREAM_DOMAINS.some(domain => lower.includes(domain));
+    }
+
+    private isProxyablePlayableSource(source: VideoSource): boolean {
+        if (source.ipLocked) return false;
+        const url = this.getStreamUrl(source);
+        const lower = url.toLowerCase();
+        if (this.isBlockedStreamUrl(url)) return false;
+        if ((lower.includes('streamtape') || lower.includes('tapecontent')) && lower.includes('get_video')) return false;
+        return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd');
+    }
+
     constructor() {
         // ✅ PRIMARY (verified working)
         this.registerSource(new YomiSource());
 
-        // ✅ FALLBACK
+        // ✅ FALLBACK / NEW SOURCES
         this.registerSource(new AniwavesSource());
+        this.registerSource(new ReAnimeSource());
+        this.registerSource(new AnichiSource());
 
-        // ✅ HENTAI SOURCES (for adult anime) - WatchHentai only (Hanime removed due to Puppeteer timeout issues)
+        // ✅ HENTAI SOURCES (for adult anime)
         this.registerSource(new WatchHentaiSource());
+
+        // Hanime source is placeholder - requires JS rendering, not currently functional
 
         logger.info(`Registered ${this.sources.size} sources`, undefined, 'SourceManager');
         console.log(`\n📡 [SourceManager] Registered ${this.sources.size} streaming sources`);
@@ -244,19 +278,23 @@ export class SourceManager {
      */
     private cleanupMemory(): void {
         // Cap latency samples
-        for (const [name, latencies] of this.recentLatencies.entries()) {
-            if (latencies.length > this.LATENCY_SAMPLE_SIZE) {
-                this.recentLatencies.set(name, latencies.slice(-this.LATENCY_SAMPLE_SIZE));
+        if (this.recentLatencies) {
+            for (const [name, latencies] of this.recentLatencies.entries()) {
+                if (latencies.length > this.LATENCY_SAMPLE_SIZE) {
+                    this.recentLatencies.set(name, latencies.slice(-this.LATENCY_SAMPLE_SIZE));
+                }
             }
         }
 
         // Cap success rate counters
-        for (const [name, rate] of this.sourceSuccessRates.entries()) {
-            if (rate.total > this.SUCCESS_RATE_WINDOW * 2) {
-                const ratio = rate.success / rate.total;
-                rate.total = this.SUCCESS_RATE_WINDOW;
-                rate.success = Math.round(ratio * this.SUCCESS_RATE_WINDOW);
-                this.sourceSuccessRates.set(name, rate);
+        if (this.sourceSuccessRates) {
+            for (const [name, rate] of this.sourceSuccessRates.entries()) {
+                if (rate.total > this.SUCCESS_RATE_WINDOW * 2) {
+                    const ratio = rate.success / rate.total;
+                    rate.total = this.SUCCESS_RATE_WINDOW;
+                    rate.success = Math.round(ratio * this.SUCCESS_RATE_WINDOW);
+                    this.sourceSuccessRates.set(name, rate);
+                }
             }
         }
 
@@ -921,7 +959,7 @@ export class SourceManager {
         'aniwave-', 'aniwaves-', 'aniwatch-', 'allanime-', 'miruro-',
         'gogoorat-', 'wcofun-', 'animeheaven-', 'kaido-'
     ];
-    private readonly adultSourceNames = new Set(['AkiH', 'WatchHentai', 'Hanime']);
+    private readonly adultSourceNames = new Set(['AkiH', 'WatchHentai']);
 
     /**
      * Consumet AnimeKai episode IDs (fetchAnimeInfo): "show-slug-suffix$ep=N$token=..."
@@ -1037,7 +1075,7 @@ export class SourceManager {
             'AnimeFreak': 'animefreak-',
             'AkiH': 'akih-',
             'WatchHentai': 'watchhentai-',
-            'Hanime': 'hanime-',
+            // 'Hanime': 'hanime-', // Placeholder - not currently functional
             'Miruro': 'miruro-'
         };
         
@@ -1148,7 +1186,7 @@ export class SourceManager {
             if (miruro?.isAvailable) return miruro;
         }
 
-        // "{animeSlug}?ep={key}" — HiAnime / aniwatch watch URLs (display episode number OR internal embed token).
+        // "{animeSlug}?ep={key}" — watch URLs (display episode number OR internal embed token).
         // Compound AnimeKai list ids (`slug$ep=N$token=KEY`) normalize to `slug?ep=KEY` on the API; those must
         // resolve through Miruro, not Consumet AnimeKai (which expects `$episode$` / `$ep=` shapes).
         if (/^[^/?#]+\?ep=[^&?#]+$/i.test(id)) {
@@ -1177,14 +1215,14 @@ export class SourceManager {
         console.log(`🔍 [SourceManager] Search request: "${query}" (page: ${page}, mode: ${mode}, source: ${resolvedSource || 'auto'})`);
 
         if (mode === 'adult') {
-            const adultSources = ['WatchHentai', 'Hanime', 'AkiH']
+            const adultSources = ['WatchHentai', 'AkiH'] // Hanime placeholder removed
                 .map(name => this.getAvailableSource(name))
                 .filter(source => source && source.isAvailable) as StreamingSource[];
 
             if (adultSources.length === 0) {
                 // Try to force get them if getAvailableSource failed due to strict checks but we want to try?
                 // getAvailableSource uses isAvailable check.
-                throw new Error('Adult sources (WatchHentai/Hanime) are not available');
+                throw new Error('Adult sources (WatchHentai) are not available');
             }
 
             try {
@@ -1232,7 +1270,7 @@ export class SourceManager {
                 .filter(source => source && source.isAvailable)
                 .slice(0, 2) as StreamingSource[];
 
-            const adultSources = ['WatchHentai', 'Hanime', 'AkiH']
+            const adultSources = ['WatchHentai', 'AkiH'] // Hanime placeholder removed
                 .map(name => this.getAvailableSource(name))
                 .filter(source => source && source.isAvailable) as StreamingSource[];
 
@@ -1794,7 +1832,7 @@ export class SourceManager {
         if (source) {
             try {
                 const result = await this.executeReliably(source.name, 'getAnime', (signal) => source.getAnime(id, { signal }));
-                if (result && result.title && result.title !== 'Unknown') {
+                if (result && isValidAnimeTitle(result.title)) {
                     const enriched = await this.enrichStreamingAnimeWithAniList(result);
                     // Cache the result in memory (instant access)
                     animeCache.set(id, enriched);
@@ -2586,7 +2624,7 @@ export class SourceManager {
 
         if (mode === 'adult') {
             // Use only WatchHentai for adult content - simpler and more consistent
-            effectiveSource = filters.source && ['WatchHentai', 'Hanime', 'AkiH'].includes(filters.source) 
+            effectiveSource = filters.source && ['WatchHentai', 'AkiH'].includes(filters.source) // Hanime placeholder removed
                 ? filters.source 
                 : 'WatchHentai';
         } else if (mode === 'mixed') {
@@ -3303,11 +3341,9 @@ export class SourceManager {
         const ordered = [...sourcesToTry].sort((a, b) => scoreSource(b.name) - scoreSource(a.name));
         let finalSources = ordered;
 
-        // For standard (non-adult) anime, use Yomi first, then Aniwaves as fallback
+        // For standard (non-adult) anime, filter out adult sources and keep all active sources
         if (!isAdultContent) {
-            const yomi = finalSources.find(s => s.name === 'Yomi');
-            const aniwaves = finalSources.find(s => s.name === 'Aniwaves');
-            finalSources = [yomi, aniwaves].filter(Boolean) as any[];
+            finalSources = finalSources.filter(s => !this.adultSourceNames.has(s.name));
         } else if (primarySource) {
             const primaryIdx = finalSources.findIndex(s => s.name === primarySource.name);
             if (primaryIdx > -1) {
@@ -3316,7 +3352,7 @@ export class SourceManager {
             }
         }
 
-        // Do not filter out registered sources for HiAnime-style episode IDs
+        // Do not filter out registered sources for watch-style episode IDs
 
         // AnimeKai compound ids (`animekai-slug$ep=N$token=...`) prefer:
         // - direct AnimeKai extraction
@@ -3342,9 +3378,9 @@ export class SourceManager {
             const sources = finalSources.map(s => s.name);
             
             if (category === 'dub') {
-                const preferred = ['Yomi', 'Aniwaves', 'Wcofun', 'AllAnime', 'Gogoanime', 'AnimeKai'];
+                const preferred = ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'];
                 const others = sources.filter(s => !preferred.includes(s));
-                return [...preferred, ...others, 'cross-source'];
+                return [...preferred.filter(p => sources.includes(p)), ...others, 'cross-source'];
             }
             
             return isAdultContent ? sources : [...sources, 'cross-source'];
@@ -3371,14 +3407,15 @@ export class SourceManager {
         type RaceResult = { source: string; data: StreamingData; success: boolean };
 
         const pickOrder = buildStreamingPickOrder(resolvedEpisodeId);
-        // Episode already has a source-native ID (e.g. aniwaves-82570&eps=1) — cross-source
-        // only duplicates embed extraction and adds latency.
-        const skipCrossSourceFallback = hasSourcePrefix && !isAnilistId && finalSources.length > 0;
+        // Only skip cross-source for AnimeKai compound IDs with tokens — those have source-native
+        // tokens that cross-source can't replicate. For all other source-prefixed IDs (aniwaves-,
+        // reanime-, anichi-), keep cross-source as a fallback safety net in case the primary fails.
+        const skipCrossSourceFallback = isAnimeKaiCompound && hasSourcePrefix && !isAnilistId && finalSources.length > 0;
         const effectivePickOrder = skipCrossSourceFallback
             ? pickOrder.filter((name) => name !== 'cross-source')
             : pickOrder;
         if (skipCrossSourceFallback && pickOrder.includes('cross-source')) {
-            console.log(`   ⏭️ Skipping cross-source fallback (native ${primarySource?.name ?? 'source'} episode ID)`);
+            console.log(`   ⏭️ Skipping cross-source fallback (native ${primarySource?.name ?? 'source'} episode ID with token)`);
         }
 
         const allResults: RaceResult[] = [];
@@ -3403,16 +3440,14 @@ export class SourceManager {
                 if (ok.length === 0) return false;
                 const hasRealStream = (r: RaceResult) =>
                     r.data.sources.some((s) => {
-                        const u = (s as { originalUrl?: string }).originalUrl || s.url || '';
+                        const u = this.getStreamUrl(s);
+                        if (this.isBlockedStreamUrl(u)) return false;
                         return u.includes('.m3u8') || u.includes('.mp4') || u.includes('.mpd');
                     });
                 const hasProxyableStream = (r: RaceResult) =>
-                    r.data.sources.some((s) => {
-                        if ((s as { ipLocked?: boolean }).ipLocked) return false;
-                        const u = (s as { originalUrl?: string }).originalUrl || s.url || '';
-                        if ((u.includes('streamtape') || u.includes('tapecontent')) && u.includes('get_video')) return false;
-                        return u.includes('.m3u8') || u.includes('.mp4') || u.includes('.mpd');
-                    });
+                    r.data.sources.some((s) => this.isProxyablePlayableSource(s));
+                const hasNonBlockedSource = (r: RaceResult) =>
+                    r.data.sources.some((s) => !this.isBlockedStreamUrl(this.getStreamUrl(s)));
                 const proxyableOk = ok.filter(hasProxyableStream);
 
                 if (!force && proxyableOk.length === 0 && pending > 0) {
@@ -3424,14 +3459,22 @@ export class SourceManager {
                 }
 
                 const realOk = proxyableOk.length > 0 ? proxyableOk : ok.filter(hasRealStream);
-                const candidates = realOk.length > 0 ? realOk : ok;
-                let best: RaceResult | null = null;
-                for (const name of effectivePickOrder) {
-                    const match = candidates.find(r => r.source === name);
-                    if (match) { best = match; break; }
-                }
-                if (!best) best = candidates[0];
+                const candidates = realOk.length > 0 ? realOk : ok.filter(hasNonBlockedSource);
+                if (candidates.length === 0) return false;
+
+                // Sort candidates by total stream count and sub/dub stream count
+                candidates.sort((a, b) => {
+                    const countA = a.data?.sources?.length || 0;
+                    const countB = b.data?.sources?.length || 0;
+                    if (countB !== countA) return countB - countA;
+                    const aSubDub = (a.data?.sources || []).filter(s => s.category === 'sub' || s.category === 'dub').length;
+                    const bSubDub = (b.data?.sources || []).filter(s => s.category === 'sub' || s.category === 'dub').length;
+                    return bSubDub - aSubDub;
+                });
+
+                let best: RaceResult | null = candidates[0] || null;
                 resolved = true;
+
                 if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
                 const duration = Date.now() - startTime;
                 logger.streamingSuccess('unknown', episodeId, best.source,
@@ -3625,7 +3668,7 @@ export class SourceManager {
 
     /**
      * Cross-source streaming fallback: when primary source streaming fails,
-     * look up the anime on AnimePahe/AnimeKai by title and match the episode by number.
+     * look up the anime on ReAnime/Anichi/Yomi/Aniwaves by title and match the episode by number.
      */
     async crossSourceStreamingFallback(
         episodeId: string,
@@ -3637,8 +3680,11 @@ export class SourceManager {
     ): Promise<StreamingData | null> {
         let title = forcedTitle || this.episodeIdToFallbackSearchTitle(episodeId);
         
+        // Strip &eps=N suffix that bleeds into the title from aniwaves-style IDs
+        title = title.replace(/\s*&eps?=\d+\s*/i, '').trim();
+        
         // Try DB lookup if the title is still a numeric/proprietary ID format
-        if (/^\d+(\&|$)/.test(title.replace(/\s+/g, ''))) {
+        if (/^[\d&=]+(\s|$)/.test(title) || /^\d+$/.test(title)) {
             try {
                 if (process.env.POSTGRES_URL) {
                     const dbParentId = await AnimeCache.getSourcePreference(`ep-parent:${episodeId}`);
@@ -3649,6 +3695,26 @@ export class SourceManager {
                     }
                 }
             } catch { /* ignore */ }
+        }
+
+        // If the title is still a numeric/garbage string (e.g. "82684 eps 2"), try resolving
+        // via the primary source by looking up what anime this episode belongs to.
+        if (!forcedTitle && (!title || /^\d/.test(title))) {
+            const primarySrc = this.getStreamingSource(episodeId) as StreamingSource | null;
+            if (primarySrc?.getAnimeInfo) {
+                try {
+                    // Extract the anime ID without the episode part
+                    const animeOnlyId = episodeId.split('&eps')[0].split('?ep')[0];
+                    const info = await Promise.race([
+                        primarySrc.getAnimeInfo(animeOnlyId),
+                        new Promise<any>((_, r) => setTimeout(() => r(new Error('timeout')), 5000))
+                    ]);
+                    if (info?.title) {
+                        title = info.title;
+                        console.log(`   📖 Resolved anime title from primary source: "${title}"`);
+                    }
+                } catch { /* ignore */ }
+            }
         }
         
         // Extract anilistId from episode ID if not provided
@@ -3736,8 +3802,8 @@ export class SourceManager {
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
         // Registered, currently enabled sources to try for cross-source fallback.
-        const dubSources = ['Yomi', 'Aniwaves'];
-        const subSources = ['Yomi', 'Aniwaves'];
+        const dubSources = ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'];
+        const subSources = ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'];
         const sourceNames = category === 'dub' ? dubSources : subSources;
         
         const consumetSources = sourceNames
@@ -3809,8 +3875,25 @@ export class SourceManager {
                         if (!targetEp || resolved) throw new Error(`ep ${targetEpNum} not in ${episodes.length} episodes`);
 
                         console.log(`   ⏳ ${srcName}: streaming ep ${targetEpNum} (ID: ${targetEp.id}, hasDub=${targetEp.hasDub})`);
+
+                        // Try to derive anilistId from the matched anime's ID for sources that need it
+                        let resolvedAnilistId = anilistId;
+                        if (!resolvedAnilistId && bestMatch.id) {
+                            // Some sources embed a numeric anilist_id directly in the ID (e.g. reanime-207141)
+                            const numericIdMatch = /[^0-9](\d{5,})[^0-9]?$/.exec(bestMatch.id);
+                            if (numericIdMatch) resolvedAnilistId = parseInt(numericIdMatch[1], 10);
+                            // For ReAnime, also try slug->anilistId map
+                            if (!resolvedAnilistId && srcName === 'ReAnime') {
+                                const reanimeSrc = src as any;
+                                if (reanimeSrc.slugToAnilistId instanceof Map) {
+                                    const slug = bestMatch.id.replace(/^reanime-/, '').split('$')[0];
+                                    resolvedAnilistId = reanimeSrc.slugToAnilistId.get(slug);
+                                }
+                            }
+                        }
+
                         const streamData = await Promise.race([
-                            src.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 15000 }),
+                            src.getStreamingLinks!(targetEp.id, undefined, category, { timeout: 15000, episodeNum: targetEpNum, anilistId: resolvedAnilistId }),
                             new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 15000))
                         ]);
 
@@ -4716,7 +4799,7 @@ export class SourceManager {
             }
 
             const sourceNamesToTry = includeAdultSources
-                ? ['AkiH', 'WatchHentai', 'Hanime']
+                ? ['AkiH', 'WatchHentai'] // Hanime placeholder removed
                 : ['Aniwaves'];
             const sourcesToTry = sourceNamesToTry
                 .map((name) => this.sources.get(name))

@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Captions, Mic, Play } from 'lucide-react';
 import { TopAnime } from '@/types/anime';
-import { cn, stripSourcePrefix, pickAnimePoster } from '@/lib/utils';
+import { cn, stripSourcePrefix, pickAnimePoster, generateWatchUrl } from '@/lib/utils';
 
 interface TopAnimeCardProps {
   item: TopAnime;
@@ -24,7 +24,7 @@ export const TopAnimeCard = ({ item, className, style }: TopAnimeCardProps) => {
 
   return (
     <Link
-      to={`/watch?id=${encodeURIComponent(anime.id)}`}
+      to={generateWatchUrl({ title: anime.title, id: anime.id, genres: anime.genres, source: anime.source })}
       style={style}
       state={{ from: location.pathname + location.search }}
       className={cn(

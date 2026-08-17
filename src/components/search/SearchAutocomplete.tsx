@@ -199,7 +199,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
             setQuery(e.target.value);
             setSelectedIndex(-1);
           }}
-          onFocus={() => query.length > 0 && setShowDropdown(true)}
+          onFocus={() => setShowDropdown(true)}
           onKeyDown={handleKeyDown}
           className="h-11 w-full min-w-0 rounded-xl border-white/10 bg-[#0c1018] pl-10 pr-16 text-[15px] shadow-none focus-visible:border-fox-orange/50 focus-visible:ring-2 focus-visible:ring-fox-orange/15"
           autoFocus

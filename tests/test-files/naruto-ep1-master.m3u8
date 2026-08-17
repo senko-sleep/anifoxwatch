@@ -1,0 +1,4 @@
+#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-STREAM-INF:BANDWIDTH=573467,RESOLUTION=1280x720
+http://127.0.0.1:3001/api/stream/proxy?url=https%3A%2F%2Fru-ri-cdn3.echovideo.to%2Fcdn%2F092e3d2d14736a0ad53867907b07a81bd786f2cdcc74d063d41fbd823181db82f63f6b3ca21bebf797d94238b1fd4b62d586fb8d&referer=https%3A%2F%2Fplay.echovideo.ru

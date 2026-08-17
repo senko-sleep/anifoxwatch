@@ -55,9 +55,33 @@ interface CachedHeroData {
   version: number;
 }
 
-const CACHE_KEY = 'anistream_hero_v10';
+const CACHE_KEY = 'anistream_hero_v11';
 const CACHE_TTL = 20 * 60 * 1000;
-const CACHE_VERSION = 10;
+const CACHE_VERSION = 11;
+
+// User-Agent for external APIs (Jikan v4 requires this)
+const USER_AGENT = 'AniStreamHub/1.0 (+https://github.com/anistream-hub)';
+
+// Fetch with timeout to prevent hanging
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeout = 10000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (e) {
+    clearTimeout(timeoutId);
+    throw e;
+  }
+}
 
 // Clear legacy cache keys on load
 try {
@@ -68,6 +92,7 @@ try {
   localStorage.removeItem('anistream_hero_v7');
   localStorage.removeItem('anistream_hero_v8');
   localStorage.removeItem('anistream_hero_v9');
+  localStorage.removeItem('anistream_hero_v10');
 } catch { /* ignore */ }
 
 function getCurrentSeason(): { season: string; year: number } {
@@ -165,7 +190,11 @@ function hasHttpBanner(m: Record<string, unknown>): boolean {
 
 async function fetchJikanSynopsis(malId: number): Promise<string | null> {
   try {
-    const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/full`);
+    const res = await fetchWithTimeout(
+      `https://api.jikan.moe/v4/anime/${malId}/full`,
+      { headers: { 'User-Agent': USER_AGENT } },
+      10000
+    );
     if (!res.ok) return null;
     const json = (await res.json()) as { data?: { synopsis?: string | null } };
     const s = json.data?.synopsis;
@@ -199,7 +228,6 @@ async function fetchAniListPage(query: string): Promise<Record<string, unknown>[
 
 async function fetchFromAniList(): Promise<HeroAnime[]> {
   const currentYear = new Date().getFullYear();
-  const recentYear = currentYear - 1;
   const formats = '[TV,MOVIE,ONA]';
   const { season, year: seasonYear } = getCurrentSeason();
 
@@ -211,8 +239,8 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
     buildAniListQuery('SCORE_DESC', `,season:${season},seasonYear:${seasonYear},status:RELEASING,format_in:${formats}`),
     // Recent airing — catch multi-cour shows that started last season
     buildAniListQuery('TRENDING_DESC', `,status:RELEASING,format_in:${formats}`),
-    // Recent years only — exclude legacy titles (pre-2024)
-    buildAniListQuery('TRENDING_DESC', `,startDate_greater:${currentYear - 1}0000,format_in:${formats}`),
+    // Recent years only — exclude legacy titles (pre-2023)
+    buildAniListQuery('TRENDING_DESC', `,startDate_greater:${currentYear - 3}0000,format_in:${formats}`),
   ];
 
   for (const q of queries) {
@@ -233,15 +261,15 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
     return true;
   });
 
-  // Filter: must have banner AND be from 2025 or newer (no legacy shows in spotlight)
+  // Filter: must have banner AND be from 2023 or newer (no legacy shows in spotlight)
   const candidates = deduped.filter((m) => {
     if (!hasHttpBanner(m)) return false;
     const year = (m.seasonYear as number) || 0;
     const status = (m.status as string) || '';
     // Always include currently releasing, even if year is unknown
     if (status === 'RELEASING') return true;
-    // For finished shows, only accept 2024+
-    return year >= currentYear - 1;
+    // For finished shows, only accept 2023+ (more reasonable range)
+    return year >= currentYear - 3;
   });
   candidates.sort((a, b) => clientRecencyScore(b) - clientRecencyScore(a));
 
@@ -295,7 +323,11 @@ async function fetchFromHeroSpotlightAPI(): Promise<HeroAnime[]> {
 
 async function fetchFromJikan(): Promise<HeroAnime[]> {
   try {
-    const response = await fetch('https://api.jikan.moe/v4/top/anime?page=1&limit=20&filter=airing');
+    const response = await fetchWithTimeout(
+      'https://api.jikan.moe/v4/top/anime?page=1&limit=20&filter=airing',
+      { headers: { 'User-Agent': USER_AGENT } },
+      10000
+    );
     if (!response.ok) return [];
     const json = (await response.json()) as { data?: Array<{
       mal_id: number;
@@ -346,9 +378,16 @@ async function fetchFromJikan(): Promise<HeroAnime[]> {
 
 async function fetchFromKitsu(): Promise<HeroAnime[]> {
   try {
-    const response = await fetch('https://kitsu.io/api/edge/anime?page[limit]=20&page[offset]=0&sort=-popularityRank&filter[status]=current', {
-      headers: { Accept: 'application/vnd.api+json' },
-    });
+    const response = await fetchWithTimeout(
+      'https://kitsu.io/api/edge/anime?page[limit]=20&page[offset]=0&sort=-popularityRank&filter[status]=current',
+      {
+        headers: {
+          Accept: 'application/vnd.api+json',
+          'User-Agent': USER_AGENT
+        }
+      },
+      10000
+    );
     if (!response.ok) return [];
     const json = (await response.json()) as {
       data?: Array<{
@@ -422,7 +461,7 @@ async function fetchFromAnimePlanet(): Promise<HeroAnime[]> {
 
 async function fetchFromBffTrending(): Promise<HeroAnime[]> {
   try {
-    const response = await fetch(apiUrl('/api/anime/trending?page=1&limit=20'));
+    const response = await fetchWithTimeout(apiUrl('/api/anime/trending?page=1&limit=20'), {}, 10000);
     if (!response.ok) return [];
     const json = (await response.json()) as { results?: Anime[] };
     const results = json.results || [];
@@ -514,7 +553,12 @@ async function fetchFromGitHubDataset(): Promise<HeroAnime[]> {
 async function fetchFromTMDB(): Promise<HeroAnime[]> {
   try {
     // TMDB (The Movie Database) has anime data and is very reliable
-    const response = await fetch('https://api.themoviedb.org/3/discover/tv?api_key=2dca580c2a14b55200e784d157207b4d&with_genres=16&sort_by=popularity.desc&page=1');
+    const apiKey = import.meta.env.VITE_TMDB_API_KEY || '2dca580c2a14b55200e784d157207b4d';
+    const response = await fetchWithTimeout(
+      `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&with_genres=16&sort_by=popularity.desc&page=1`,
+      { headers: { 'User-Agent': USER_AGENT } },
+      10000
+    );
     if (!response.ok) return [];
     
     const json = await response.json() as { results?: Array<{

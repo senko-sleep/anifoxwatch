@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Play, Star, Clock, Film, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { cn, formatRating, ensureHttps } from '@/lib/utils';
+import { cn, formatRating, ensureHttps, generateWatchUrl } from '@/lib/utils';
 import { apiUrl } from '@/lib/api-config';
 
 interface SpotlightAnime {
@@ -16,6 +16,7 @@ interface SpotlightAnime {
   status?: string;
   episodes?: number;
   genres?: string[];
+  source?: string;
 }
 
 interface FeaturedSpotlightProps {
@@ -176,7 +177,7 @@ export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
 
               {/* Actions */}
               <div className="flex items-center gap-4 pt-4">
-                <Link to={`/watch?id=${encodeURIComponent(current.id)}`} state={{ from: location.pathname }}>
+                <Link to={generateWatchUrl({ ...current, title: current.title, id: current.id })} state={{ from: location.pathname }}>
                   <Button size="lg" className="bg-fox-orange hover:bg-fox-orange/90 text-white gap-2 h-14 px-8 rounded-xl text-lg shadow-xl shadow-fox-orange/30">
                     <Play className="w-6 h-6 fill-white" />
                     Watch Now
@@ -187,8 +188,8 @@ export const FeaturedSpotlight = ({ anime }: FeaturedSpotlightProps) => {
 
             {/* Poster Side */}
             <div className="hidden lg:flex justify-center">
-              <Link 
-                to={`/watch?id=${encodeURIComponent(current.id)}`}
+              <Link
+                to={generateWatchUrl({ ...current, title: current.title, id: current.id })}
                 state={{ from: location.pathname }}
                 className={cn(
                   "relative transition-all duration-500",

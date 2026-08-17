@@ -5,6 +5,7 @@
 
 import type { Anime } from '@/types/anime';
 import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
+import { generateAnimeSlug } from '@/lib/utils';
 
 const FORMAT_MAP: Record<string, Anime['type']> = {
   TV: 'TV',
@@ -81,9 +82,10 @@ export async function fetchAniListAnimeByNumericId(numericId: number): Promise<A
 
   const title = m.title.english || m.title.romaji || m.title.native || 'Unknown';
   const desc = m.description?.replace(/<[^>]*>/g, '').trim() || 'No description available.';
+  const slug = generateAnimeSlug(title, String(m.id));
 
   return {
-    id: `anilist-${m.id}`,
+    id: slug,
     title,
     titleJapanese: m.title.native,
     image: m.coverImage?.large || m.coverImage?.medium || '',

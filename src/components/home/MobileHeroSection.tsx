@@ -87,7 +87,7 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
   const anime       = slides[idx];
   const title       = getHeroTitle(anime);
   const rating      = formatHeroRating(anime.averageScore);
-  const watchPath   = anime.source === 'anilist' ? `/watch?id=anilist-${anime.id}` : `/watch?id=${anime.id}`;
+  const watchPath   = generateWatchUrl({ title: title, id: String(anime.id), genres: anime.genres });
   const formatLabel = (anime.format || 'TV').replace(/_/g, ' ');
   const seasonLabel = [anime.season, anime.seasonYear].filter(Boolean).join(' ');
   const epCount     = anime.episodes != null && anime.episodes > 0 ? `${anime.episodes} eps` : null;

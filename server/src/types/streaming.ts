@@ -16,6 +16,7 @@ export interface VideoSource {
     size?: number;
     /** Server/CDN name (e.g. 'Streamtape', 'Megaup', 'VidCloud') */
     server?: string;
+    category?: 'sub' | 'dub' | 'raw';
 }
 
 export interface VideoSubtitle {

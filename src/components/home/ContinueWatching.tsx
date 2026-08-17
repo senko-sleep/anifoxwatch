@@ -107,7 +107,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                     return (
                     <Link
                         key={item.animeId}
-                        to={generateWatchUrl({ title: item.animeTitle, id: item.animeId }, item.episodeNumber)}
+                        to={generateWatchUrl({ title: item.animeTitle, id: item.animeId, source: item.source }, item.episodeNumber)}
                         state={{ from: location.pathname + location.search }}
                         className="shrink-0 w-48 sm:w-56 group/card touch-manipulation"
                     >

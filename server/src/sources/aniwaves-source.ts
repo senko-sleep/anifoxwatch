@@ -1,7 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import * as cheerio from 'cheerio';
 import https from 'https';
-import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
+import { BaseAnimeSource, SourceRequestOptions, isValidAnimeTitle } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
@@ -229,6 +229,7 @@ export class AniwavesSource extends BaseAnimeSource {
             const href = $el.attr('href') || '';
             const id = href.split('/watch/')[1]?.split('?')[0] || '';
             const title = $el.find('.name').text().trim();
+            if (!id || !isValidAnimeTitle(title)) return;
             const image = $el.find('img').attr('src') || '';
             const meta = $el.find('.meta').text().trim();
             
@@ -358,6 +359,10 @@ export class AniwavesSource extends BaseAnimeSource {
 
             const $ = cheerio.load(response.data);
             const title = $('h1, .name').first().text().trim() || slug;
+            if (!isValidAnimeTitle(title)) {
+                logger.warn(`[Aniwaves] Rejecting invalid anime title: "${title}" for ID ${id}`);
+                return null;
+            }
             const image = $('meta[property="og:image"]').attr('content') || '';
             const description = $('meta[property="og:description"]').attr('content') || '';
             const genres: string[] = [];

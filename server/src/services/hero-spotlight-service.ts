@@ -379,7 +379,7 @@ function recencyScore(m: Record<string, unknown>): number {
  */
 export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
   const currentYear = new Date().getFullYear();
-  const recentYear = currentYear - 1;
+  const recentYear = currentYear - 3;
 
   // Try reliable sources first
   let raw: Record<string, unknown>[] = [];
@@ -452,7 +452,7 @@ export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
   sorted.sort((a, b) => recencyScore(b) - recencyScore(a));
 
   const useMal = Boolean(malClientId());
-  // Only include anime from 2025+ OR currently releasing — no legacy shows in spotlight
+  // Only include anime from 2023+ OR currently releasing — no legacy shows in spotlight
   const pool = sorted.filter((m) => {
     // Accept banner from AniList format or generic bannerImage field
     const banner = anilistBannerUrl(m) || (typeof m.bannerImage === 'string' && m.bannerImage);
@@ -461,8 +461,8 @@ export async function fetchHeroSpotlightAnime(): Promise<HeroSpotlightAnime[]> {
     const status = (m.status as string) || '';
     // Always spotlight currently airing regardless of year
     if (status === 'RELEASING') return true;
-    // For finished shows, only 2025 or newer
-    return year >= currentYear - 1;
+    // For finished shows, only accept 2023 or newer (more reasonable range)
+    return year >= currentYear - 3;
   });
   const out: HeroSpotlightAnime[] = [];
   let jikanCalls = 0;

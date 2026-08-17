@@ -2,6 +2,14 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { Anime } from '@/types/anime';
 
+/**
+ * Legacy function for backward compatibility - redirects to new generateWatchUrl
+ */
+export function generateWatchLink(animeId: string, episode?: number): string {
+  // This is a fallback for components that haven't been updated yet
+  return `/watch?id=${encodeURIComponent(animeId)}${episode ? `&ep=${episode}` : ''}`;
+}
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -99,13 +107,24 @@ export function generateAnimeSlug(title: string | undefined | null, id?: string)
 
 /**
  * Generate a watch URL using anime slug instead of numeric ID
- * Creates clean URLs like /watch/attack-on-titan?ep=1 instead of /watch?id=-207141&ep=1
+ * Creates clean URLs like /watch/anime/attack-on-titan?ep=1 or /watch/hentai/title?ep=1
  */
-export function generateWatchUrl(anime: { title?: string | null; id?: string; titleEnglish?: string | null; titleRomaji?: string | null }, episode?: number): string {
+export function generateWatchUrl(anime: { title?: string | null; id?: string; titleEnglish?: string | null; titleRomaji?: string | null; genres?: string[]; source?: string }, episode?: number): string {
   const title = anime.titleEnglish || anime.titleRomaji || anime.title || '';
   const slug = generateAnimeSlug(title, anime.id);
   const episodeParam = episode ? `?ep=${episode}` : '';
-  return `/watch/${slug}${episodeParam}`;
+  
+  // Determine if this is hentai content
+  // Check: genres, source name, and ID prefixes (most reliable since genres may not be passed)
+  const hentaiSourcePrefixes = ['watchhentai-', 'hanime-', 'akih-', 'aniwaves-', 'yomi-', 'hentai-'];
+  const isHentai = 
+    anime.genres?.some(g => ['Hentai', 'Ecchi', 'Yaoi', 'Yuri'].includes(g)) ||
+    anime.source?.toLowerCase().includes('hentai') ||
+    anime.source?.toLowerCase().includes('hanime') ||
+    hentaiSourcePrefixes.some(prefix => anime.id?.toLowerCase().startsWith(prefix));
+  
+  const typePrefix = isHentai ? 'hentai' : 'anime';
+  return `/watch/${typePrefix}/${slug}${episodeParam}`;
 }
 
 /** Skip API placeholders like "00", "0 min" */

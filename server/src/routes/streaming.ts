@@ -169,6 +169,7 @@ const ISP_BLOCKED_DOMAINS = new Set([
     'px.roburnt10.store',
     'dpopdrop',
     'px.dpopdrop',
+    'rabbitstream.net',
 ]);
 
 function isDeadDomain(url: string): boolean {
@@ -1002,6 +1003,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const isM3u8 = url.includes('.m3u8');
     // Megaup CDN uses obfuscated extensions (.gif, .jpg, .png) for real video segments
     const isMegaupDomain = /megaup\.(cc|nl|live|to)|tech20hub|lab27core|code29wave|net22lab|pro25zone|hub26link|hub27link|shop21pro|burntburst45|rrr\.|xm8\.|dev\d*app/i.test(domain);
+    const isFlixcloudDomain = /flixcloud\.cc|rabbitstream\.net/i.test(domain);
     const hasObfuscatedExt = /\.(gif|jpg|jpeg|png|webp)$/i.test(urlObj.pathname);
     // Echovideo CDN segments don't have extensions - they're just CDN URLs
     const isEchovideoSegment = /echovideo\.(to|ru)/.test(domain) && !url.includes('.m3u8');
@@ -1224,6 +1226,21 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const MIRROR_TRY_MAX = 8; // Max rotation candidates to try per URL
 
     const buildCdnRotationUrls = (failedUrl: string): string[] => {
+        if (isFlixcloudDomain) {
+            try {
+                const flixAlternatives = ['s1.rabbitstream.net', 's2.rabbitstream.net', 'stream.rabbitstream.net', 'cdn.rabbitstream.net', 'cloud.rabbitstream.net'];
+                const alternatives: string[] = [];
+                for (const altHostname of flixAlternatives) {
+                    const newUrl = new URL(failedUrl);
+                    newUrl.hostname = altHostname;
+                    newUrl.protocol = 'https:';
+                    if (newUrl.hostname !== domain && (mirrorBlacklist.get(altHostname) || 0) <= Date.now()) {
+                        alternatives.push(newUrl.toString());
+                    }
+                }
+                return alternatives;
+            } catch { return []; }
+        }
         if (!isMegaupDomain) return [];
         try {
             const u = new URL(failedUrl);
@@ -1296,16 +1313,18 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
             let rotationTried = false;
 
-            // CDN subdomain rotation for 403/502/503 or connection errors on megaup
+            // CDN subdomain rotation for 403/502/503, EPROTO, or connection errors on megaup & flixcloud
             // Works for BOTH segments and manifests — tries each rotation candidate
             // through the FULL referer combo cycle, then falls back to the original URL.
-            if (isMegaupDomain && !rotationTried && (
+            if ((isMegaupDomain || isFlixcloudDomain) && !rotationTried && (
                 (isSegment && !isM3u8) || isM3u8
             ) && (
                 status === 403 || status === 502 || status === 503 || status === 504 ||
                 errCode === 'ECONNREFUSED' || errCode === 'ECONNRESET' ||
                 errCode === 'ECONNABORTED' || errCode === 'ETIMEDOUT' ||
-                errCode === 'ENOTFOUND' || errMsg.includes('timeout') || errMsg.includes('502')
+                errCode === 'ENOTFOUND' || errCode === 'EPROTO' ||
+                errMsg.includes('timeout') || errMsg.includes('502') ||
+                errMsg.includes('EPROTO') || errMsg.includes('wrong version number')
             )) {
                 rotationTried = true;
                 const altUrls = buildCdnRotationUrls(url);

@@ -4,6 +4,7 @@
  */
 
 import { fetchAniListGraphQL } from '@/lib/anilist-graphql';
+import { generateAnimeSlug } from '@/lib/utils';
 import type { SeasonalResponse } from '@/lib/api-client';
 import type { Anime, AnimeSearchResult } from '@/types/anime';
 
@@ -60,9 +61,11 @@ export interface AniListHomeMedia {
 
 export function mapAniListMediaToAnime(m: AniListHomeMedia, yearFallback?: number): Anime {
   const year = yearFallback ?? m.seasonYear ?? undefined;
+  const title = m.title.english || m.title.romaji || 'Unknown';
+  const slug = generateAnimeSlug(title, String(m.id));
   return {
-    id: `anilist-${m.id}`,
-    title: m.title.english || m.title.romaji || 'Unknown',
+    id: slug,
+    title,
     titleJapanese: m.title.romaji || undefined,
     image: m.coverImage.extraLarge || m.coverImage.large || '',
     cover: m.coverImage.extraLarge || m.coverImage.large || '',
@@ -234,7 +237,7 @@ async function fetchFromJikanTop(page: number, perPage: number, filter: string =
       banner: undefined,
       description: (item.synopsis || '').replace(/<[^>]+>/g, '').trim(),
       type: 'TV' as const,
-      status: item.status === 'Airing' ? 'Ongoing' : item.status === 'Complete' ? 'Completed' : 'Unknown',
+      status: item.status === 'Airing' ? 'Ongoing' : item.status === 'Complete' ? 'Completed' : 'Upcoming',
       rating: item.score,
       episodes: item.episodes || 0,
       genres: item.genres?.map((g) => g.name) || [],
@@ -280,7 +283,7 @@ async function fetchFromKitsuPopular(page: number, perPage: number): Promise<Ani
       banner: undefined,
       description: (item.attributes?.synopsis || '').replace(/<[^>]+>/g, '').trim(),
       type: 'TV' as const,
-      status: item.attributes?.status === 'current' ? 'Ongoing' : 'Unknown',
+      status: item.attributes?.status === 'current' ? 'Ongoing' : 'Upcoming',
       rating: item.attributes?.averageRating ? parseFloat(item.attributes.averageRating) : undefined,
       episodes: item.attributes?.episodeCount || 0,
       genres: [],

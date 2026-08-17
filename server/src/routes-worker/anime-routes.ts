@@ -1,40 +1,8 @@
 import { Hono } from 'hono';
-import { HiAnime } from 'aniwatch';
-import { getHianimeRestBase, fetchHianimeRestData } from './hianime-rest.js';
 import { anilistService } from '../services/anilist-service.js';
 import { getHeroSpotlightCached } from '../services/hero-spotlight-service.js';
-import { loadHianimeAnimeDetails, loadHianimeEpisodeList } from '../services/hianime-anime-details.js';
 import { AnimeBase, AnimeSearchResult, Episode, BrowseFilters, TopAnime } from '../types/anime.js';
 import { StreamingData, EpisodeServer } from '../types/streaming.js';
-
-const hianime = new HiAnime.Scraper();
-
-async function loadHianimeHome(env: unknown): Promise<any | null> {
-    const b = getHianimeRestBase(env);
-    if (b) {
-        const d = await fetchHianimeRestData<any>(b, '/api/v2/hianime/home');
-        if (d) return d;
-    }
-    try {
-        return await hianime.getHomePage() as any;
-    } catch {
-        return null;
-    }
-}
-
-async function loadHianimeSearch(env: unknown, q: string, page: number): Promise<any | null> {
-    const b = getHianimeRestBase(env);
-    if (b) {
-        const qs = new URLSearchParams({ q, page: String(page) });
-        const d = await fetchHianimeRestData<any>(b, `/api/v2/hianime/search?${qs}`);
-        if (d) return d;
-    }
-    try {
-        return await hianime.search(q, page) as any;
-    } catch {
-        return null;
-    }
-}
 
 /** IDs that need a Node/Puppeteer backend — not available on this Worker when no proxy URL is configured. */
 const RENDER_PREFIXES = ['allanime-', 'animekai-', '9anime-', 'kaido-', 'akih-', 'miruro-', 'aniwave-', 'anix-', 'zoro-', 'animefox-', 'gogoanime-', 'animepahe-', 'animeflv-'];
@@ -102,27 +70,25 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             return c.json({ results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'none' });
         }
 
-        // Safe/mixed: HiAnime via optional REST (Vercel) or in-worker scraper
+        // Use source manager for search
         try {
-            const searchResults = (await loadHianimeSearch(c.env, q, page)) as any;
-            const animes = searchResults?.animes || searchResults?.results || [];
+            const searchResults = await sourceManager.search(q, page);
+            const animes = searchResults?.results || [];
             // Transform data to match expected frontend structure
             const transformed = animes.map((item: any) => ({
                 id: item.id,
                 title: item.title,
-                image: item.poster || item.image,
+                image: item.image,
                 description: item.description || '',
                 genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
                 type: item.type || 'TV',
                 status: item.status || 'Ongoing',
-                releaseDate: item.releaseDate || '',
                 rating: item.rating || 0,
                 episodes: item.episodes || 0,
-                duration: item.duration || 24,
-                otherInfo: item.otherInfo || {}
+                duration: item.duration || 24
             }));
             if (transformed.length > 0) {
-                return c.json({ results: transformed, source: 'hianime' });
+                return c.json({ results: transformed, source: 'source-manager' });
             }
         } catch { /* fall through */ }
 
@@ -165,27 +131,24 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const page = Number(c.req.query('page')) || 1;
         const source = c.req.query('source');
 
-        // HiAnime via optional REST (Vercel) or in-worker scraper
+        // Use source manager for trending
         try {
-            const homeData = await loadHianimeHome(c.env);
-            const trending = homeData?.trendingAnimes || [];
+            const trending = await sourceManager.getTrending(page, source);
             // Transform data to match expected frontend structure
             const transformed = trending.map((item: any) => ({
                 id: item.id,
                 title: item.title,
-                image: item.poster || item.image,
+                image: item.image,
                 description: item.description || '',
                 genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
                 type: item.type || 'TV',
                 status: item.status || 'Ongoing',
-                releaseDate: item.releaseDate || '',
                 rating: item.rating || 0,
                 episodes: item.episodes || 0,
-                duration: item.duration || 24,
-                otherInfo: item.otherInfo || {}
+                duration: item.duration || 24
             }));
             if (transformed.length > 0) {
-                return c.json({ results: transformed, source: 'hianime' });
+                return c.json({ results: transformed, source: 'source-manager' });
             }
         } catch { /* fall through */ }
 
@@ -197,27 +160,24 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const page = Number(c.req.query('page')) || 1;
         const source = c.req.query('source');
 
-        // HiAnime via optional REST (Vercel) or in-worker scraper
+        // Use source manager for latest
         try {
-            const homeData = await loadHianimeHome(c.env);
-            const latest = homeData?.latestEpisodeAnimes || [];
+            const latest = await sourceManager.getLatest(page, source);
             // Transform data to match expected frontend structure
             const transformed = latest.map((item: any) => ({
                 id: item.id,
                 title: item.title,
-                image: item.poster || item.image,
+                image: item.image,
                 description: item.description || '',
                 genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
                 type: item.type || 'TV',
                 status: item.status || 'Ongoing',
-                releaseDate: item.releaseDate || '',
                 rating: item.rating || 0,
                 episodes: item.episodes || 0,
-                duration: item.duration || 24,
-                otherInfo: item.otherInfo || {}
+                duration: item.duration || 24
             }));
             if (transformed.length > 0) {
-                return c.json({ results: transformed, source: 'hianime' });
+                return c.json({ results: transformed, source: 'source-manager' });
             }
         } catch { /* fall through */ }
 
@@ -230,35 +190,24 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         const limit = Number(c.req.query('limit')) || 10;
         const source = c.req.query('source');
 
-        // HiAnime via optional REST (Vercel) or in-worker scraper
+        // Use source manager for top rated
         try {
-            const homeData = await loadHianimeHome(c.env);
-            const top10 = homeData?.top10Animes;
-            let results: unknown[] = [];
-            if (top10) {
-                if (Array.isArray(top10)) {
-                    results = top10;
-                } else if (typeof top10 === 'object') {
-                    results = top10.today || top10.week || top10.month || [];
-                }
-            }
+            const topRated = await sourceManager.getTopRated(page, limit, source);
             // Transform data to match expected frontend structure
-            const transformed = results.map((item: any) => ({
+            const transformed = topRated.map((item: any) => ({
                 id: item.id,
                 title: item.title,
-                image: item.poster || item.image,
+                image: item.image,
                 description: item.description || '',
                 genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
                 type: item.type || 'TV',
                 status: item.status || 'Ongoing',
-                releaseDate: item.releaseDate || '',
                 rating: item.rating || 0,
                 episodes: item.episodes || 0,
-                duration: item.duration || 24,
-                otherInfo: item.otherInfo || {}
+                duration: item.duration || 24
             }));
             if (transformed.length > 0) {
-                return c.json({ results: transformed, source: 'hianime' });
+                return c.json({ results: transformed, source: 'source-manager' });
             }
         } catch { /* fall through */ }
 
@@ -519,26 +468,23 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
             return c.json({ results: [], currentPage: page, totalPages: 0, hasNextPage: false, totalResults: 0, source: 'none' });
         }
 
-        // Safe/mixed: HiAnime via optional REST (Vercel) or in-worker scraper
+        // Safe/mixed: use source manager for trending
         try {
-            const homeData = await loadHianimeHome(c.env);
-            const trending = homeData?.trendingAnimes || [];
+            const trending = await sourceManager.getTrending(page);
             // Transform data to match expected frontend structure
             const transformed = trending.map((item: any) => ({
                 id: item.id,
                 title: item.title,
-                image: item.poster || item.image,
+                image: item.image,
                 description: item.description || '',
                 genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
                 type: item.type || 'TV',
                 status: item.status || 'Ongoing',
-                releaseDate: item.releaseDate || '',
                 rating: item.rating || 0,
                 episodes: item.episodes || 0,
-                duration: item.duration || 24,
-                otherInfo: item.otherInfo || {}
+                duration: item.duration || 24
             }));
-            return c.json({ results: transformed, currentPage: page, totalPages: 1, hasNextPage: false, totalResults: transformed.length, source: 'hianime' });
+            return c.json({ results: transformed, currentPage: page, totalPages: 1, hasNextPage: false, totalResults: transformed.length, source: 'source-manager' });
         } catch { /* fall through */ }
 
         return c.json({ results: [], currentPage: page, totalPages: 0, hasNextPage: false, totalResults: 0, source: 'none' });
@@ -548,10 +494,9 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
     app.get('/random', async (c) => {
         const source = c.req.query('source');
 
-        // HiAnime via optional REST (Vercel) or in-worker scraper
+        // Use source manager for random
         try {
-            const homeData = await loadHianimeHome(c.env);
-            const trending = homeData?.trendingAnimes || [];
+            const trending = await sourceManager.getTrending(1, source);
             if (trending.length > 0) {
                 const randomIndex = Math.floor(Math.random() * trending.length);
                 const item = trending[randomIndex];
@@ -559,16 +504,14 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
                 const transformed = {
                     id: item.id,
                     title: item.title,
-                    image: item.poster || item.image,
+                    image: item.image,
                     description: item.description || '',
                     genres: Array.isArray(item.genres) ? item.genres.filter((g: any) => g && typeof g === 'string').map((g: string) => g.toLowerCase()) : [],
                     type: item.type || 'TV',
                     status: item.status || 'Ongoing',
-                    releaseDate: item.releaseDate || '',
                     rating: item.rating || 0,
                     episodes: item.episodes || 0,
-                    duration: item.duration || 24,
-                    otherInfo: item.otherInfo || {}
+                    duration: item.duration || 24
                 };
                 return c.json(transformed);
             }
@@ -588,10 +531,7 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         }
 
         try {
-            let result = await sourceManager.getAnime(id);
-            if (!result) {
-                result = await loadHianimeAnimeDetails(c.env, id);
-            }
+            const result = await sourceManager.getAnime(id);
             if (!result) {
                 return c.json({ error: 'Anime not found' }, 404);
             }
@@ -613,11 +553,7 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         }
 
         try {
-            let result = await sourceManager.getEpisodes(id);
-            if (!result?.length) {
-                const hi = await loadHianimeEpisodeList(c.env, id);
-                if (hi.length > 0) result = hi;
-            }
+            const result = await sourceManager.getEpisodes(id);
             return c.json({ episodes: result || [] });
         } catch (e: unknown) {
             const errorMessage = e instanceof Error ? e.message : String(e);
@@ -686,10 +622,7 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         }
 
         try {
-            let data = await sourceManager.getAnime(id);
-            if (!data) {
-                data = await loadHianimeAnimeDetails(c.env, id);
-            }
+            const data = await sourceManager.getAnime(id);
             if (!data) {
                 return c.json({ error: 'Anime not found' }, 404);
             }
@@ -709,11 +642,7 @@ export function createAnimeRoutes(sourceManager: SourceManagerLike) {
         }
 
         try {
-            let data = await sourceManager.getEpisodes(id);
-            if (!data?.length) {
-                const hi = await loadHianimeEpisodeList(c.env, id);
-                if (hi.length > 0) data = hi;
-            }
+            const data = await sourceManager.getEpisodes(id);
             return c.json({ episodes: data || [] });
         } catch (e: unknown) {
             const errorMessage = e instanceof Error ? e.message : String(e);

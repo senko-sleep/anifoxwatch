@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Clock, Play, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ScheduleItem } from '@/lib/api-client';
+import { generateWatchUrl } from '@/lib/utils';
 
 interface AiringScheduleProps {
     schedule: ScheduleItem[];

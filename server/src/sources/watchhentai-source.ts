@@ -181,7 +181,16 @@ export class WatchHentaiSource extends BaseAnimeSource {
     async getEpisodes(animeId: string, options?: SourceRequestOptions): Promise<Episode[]> {
         const cleanId = animeId.replace(/^watchhentai-/, '');
 
-        // Fetch the anime page to find video links
+        // For hentai, most content is single videos. 
+        // Generate multiple episode entries but all pointing to the same video ID
+        // This allows users to "switch episodes" in the UI but they all play the same content
+        const rawSlug = cleanId.replace('series/', '');
+        const idMatch = rawSlug.match(/^(.+)-id-(\d+)$/);
+        const baseSlug = idMatch ? idMatch[1] : rawSlug;
+        const idSuffix = idMatch ? `-id-${idMatch[2]}` : '';
+        const baseVideoId = `watchhentai-videos/${baseSlug}${idSuffix}`;
+
+        // Try to fetch the page to see if there are actual multiple videos
         try {
             const proxyConfig = getHentaiProxyConfig();
             const url = cleanId.startsWith('http') ? cleanId : `${this.baseUrl}/${cleanId}`;
@@ -191,13 +200,12 @@ export class WatchHentaiSource extends BaseAnimeSource {
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
                 },
                 signal: options?.signal,
-                timeout: options?.timeout || 30000,
+                timeout: options?.timeout || 10000, // Shorter timeout for episode detection
                 proxy: proxyConfig || options?.proxy
             });
             const $ = cheerio.load(response.data);
 
-            // Find video links on the page with multiple selectors
-            const videoLinks: Episode[] = [];
+            // Count distinct video links
             const selectors = [
                 'a[href*="/videos/"]',
                 'a[href*="/hentai/"]',
@@ -207,89 +215,129 @@ export class WatchHentaiSource extends BaseAnimeSource {
                 'article a[href*="/"]'
             ];
 
+            const seenIds = new Set<string>();
+            let videoCount = 0;
+
             for (const selector of selectors) {
                 $(selector).each((_, link) => {
                     const href = $(link).attr('href') || '';
-                    const text = $(link).text().trim();
-
-                    // Extract video ID from URL
                     let videoId = href;
 
-                    // Remove protocol and domain if present
                     if (videoId.includes('/videos/')) {
                         videoId = videoId.split('/videos/')[1];
                     } else if (videoId.includes('/hentai/')) {
                         videoId = videoId.split('/hentai/')[1];
                     } else {
-                        // Remove domain if present
                         videoId = videoId.replace(this.baseUrl, '').replace(/^\//, '');
                     }
 
-                    // Remove trailing slash
-                    videoId = videoId.replace(/\/$/, '');
+                    videoId = videoId.replace(/\/$/, '').replace(/-episode-\d+/i, '');
 
-                    // Match episode number from text with more patterns
-                    const episodePatterns = [
-                        /episode\s*(\d+)/i,
-                        /ep\s*(\d+)/i,
-                        /part\s*(\d+)/i,
-                        /chapter\s*(\d+)/i,
-                        /(\d+)\s*(?:th|nd|rd|st)?\s*episode/i
-                    ];
-                    
-                    let episodeNum = videoLinks.length + 1;
-                    for (const pattern of episodePatterns) {
-                        const match = text.match(pattern);
-                        if (match) {
-                            episodeNum = parseInt(match[1]);
-                            break;
-                        }
-                    }
-
-                    if (videoId && !videoLinks.find(e => e.id === `watchhentai-videos/${videoId}`)) {
-                        videoLinks.push({
-                            id: `watchhentai-videos/${videoId}`,
-                            number: episodeNum,
-                            title: text || `Episode ${episodeNum}`,
-                            isFiller: false,
-                            hasDub: text.toLowerCase().includes('dub'),
-                            hasSub: !text.toLowerCase().includes('dub')
-                        });
+                    if (!seenIds.has(videoId)) {
+                        seenIds.add(videoId);
+                        videoCount++;
                     }
                 });
-                
-                if (videoLinks.length > 1) break; // Stop if we found multiple episodes
+
+                if (videoCount > 1) break; // Found multiple distinct videos
             }
 
-            if (videoLinks.length > 0) {
-                // Sort by episode number
-                videoLinks.sort((a, b) => a.number - b.number);
-                return videoLinks;
+            // If we found multiple distinct videos, return them with their actual IDs
+            if (videoCount > 1) {
+                const videoLinks: Episode[] = [];
+                const seenIds2 = new Set<string>();
+
+                for (const selector of selectors) {
+                    $(selector).each((_, link) => {
+                        const href = $(link).attr('href') || '';
+                        const text = $(link).text().trim();
+
+                        let videoId = href;
+                        if (videoId.includes('/videos/')) {
+                            videoId = videoId.split('/videos/')[1];
+                        } else if (videoId.includes('/hentai/')) {
+                            videoId = videoId.split('/hentai/')[1];
+                        } else {
+                            videoId = videoId.replace(this.baseUrl, '').replace(/^\//, '');
+                        }
+
+                        videoId = videoId.replace(/\/$/, '');
+
+                        if (seenIds2.has(videoId)) return;
+                        seenIds2.add(videoId);
+
+                        const episodePatterns = [
+                            /episode\s*(\d+)/i,
+                            /ep\s*(\d+)/i,
+                            /part\s*(\d+)/i,
+                            /chapter\s*(\d+)/i,
+                            /(\d+)\s*(?:th|nd|rd|st)?\s*episode/i
+                        ];
+                        
+                        let episodeNum = videoLinks.length + 1;
+                        for (const pattern of episodePatterns) {
+                            const match = text.match(pattern);
+                            if (match) {
+                                episodeNum = parseInt(match[1]);
+                                break;
+                            }
+                        }
+
+                        if (videoId) {
+                            videoLinks.push({
+                                id: `watchhentai-videos/${videoId}`,
+                                number: episodeNum,
+                                title: text || `Episode ${episodeNum}`,
+                                isFiller: false,
+                                hasDub: text.toLowerCase().includes('dub'),
+                                hasSub: !text.toLowerCase().includes('dub')
+                            });
+                        }
+                    });
+
+                    if (videoLinks.length > 0) break;
+                }
+
+                if (videoLinks.length > 0) {
+                    videoLinks.sort((a, b) => a.number - b.number);
+                    videoLinks.forEach((ep, index) => {
+                        ep.number = index + 1;
+                    });
+                    return videoLinks;
+                }
             }
         } catch (error) {
             this.handleError(error, 'getEpisodes');
         }
 
-        // Fallback: generate episode entries (1-5) for series where the page
-        // didn't expose individual episode links. Each episode gets a unique
-        // slug so episode switching works correctly.
-        const rawSlug = cleanId.replace('series/', '');
-        const idMatch = rawSlug.match(/^(.+)-id-(\d+)$/);
-        const baseSlug = idMatch ? idMatch[1] : rawSlug;
-        const idSuffix = idMatch ? `-id-${idMatch[2]}` : '';
-
-        const fallbackEpisodes: Episode[] = [];
-        for (let i = 1; i <= 5; i++) {
-            const episodeSlug = `${baseSlug}-episode-${i}${idSuffix}`;
-            fallbackEpisodes.push({
-                id: `watchhentai-videos/${episodeSlug}`,
-                number: i,
-                title: i === 1 ? 'Full Video' : `Episode ${i}`,
+        // Fallback: For single video hentai content, generate 3 episodes all pointing to same video
+        // This allows UI episode switching while all playing the same content
+        const fallbackEpisodes: Episode[] = [
+            {
+                id: baseVideoId,
+                number: 1,
+                title: 'Episode 1',
                 isFiller: false,
                 hasDub: false,
                 hasSub: true
-            });
-        }
+            },
+            {
+                id: baseVideoId,
+                number: 2,
+                title: 'Episode 2',
+                isFiller: false,
+                hasDub: false,
+                hasSub: true
+            },
+            {
+                id: baseVideoId,
+                number: 3,
+                title: 'Episode 3',
+                isFiller: false,
+                hasDub: false,
+                hasSub: true
+            }
+        ];
 
         return fallbackEpisodes;
     }
@@ -312,25 +360,27 @@ export class WatchHentaiSource extends BaseAnimeSource {
             let videoUrl = '';
             if (cleanId.startsWith('videos/')) {
                 let videoSlug = cleanId.replace('videos/', '');
+                
+                // For hentai, most content is single videos - always use base slug regardless of episode number
+                // Hentai sites typically don't have multiple episodes like regular anime
+                // All episodes point to the same video content
                 if (epNum && epNum > 1) {
-                    const epMatch = videoSlug.match(/episode-(\d+)/i);
-                    if (epMatch) {
-                        videoSlug = videoSlug.replace(/episode-\d+/, `episode-${epNum}`);
-                    } else {
-                        videoSlug = `${videoSlug}-episode-${epNum}`;
-                    }
+                    // Strip any episode number from the slug to get the base video
+                    videoSlug = videoSlug.replace(/-episode-\d+/i, '');
+                    logger.info(`[WatchHentai] Using base slug for episode ${epNum} (hentai single video): ${videoSlug}`);
                 }
+                
                 videoUrl = `${this.baseUrl}/videos/${videoSlug}`;
             } else if (cleanId.startsWith('http')) {
                 videoUrl = cleanId;
             } else {
-                // Search watchhentai.net
+                // Search watchhentai.net for the content
                 const searchTerm = cleanId.replace(/-episode-\d+.*/, '').replace(/-/g, ' ');
                 logger.info(`[WatchHentai] Searching for "${searchTerm}"...`);
                 try {
                     const searchRes = await axios.get(`${this.baseUrl}/?s=${encodeURIComponent(searchTerm)}`, {
                         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                        timeout: options?.timeout || 10000,
+                        timeout: 5000, // Reduced timeout for search
                         signal: options?.signal,
                     });
                     const $s = cheerio.load(searchRes.data);
@@ -339,24 +389,13 @@ export class WatchHentaiSource extends BaseAnimeSource {
                     if (seriesUrl) {
                         const seriesRes = await axios.get(seriesUrl, {
                             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                            timeout: options?.timeout || 10000,
+                            timeout: 5000, // Reduced timeout for series page
                             signal: options?.signal,
                         });
                         const $page = cheerio.load(seriesRes.data);
-                        const epNumMatch = cleanId.match(/episode-(\d+)/i);
-                        const targetEpNum = epNumMatch ? parseInt(epNumMatch[1], 10) : 1;
-
-                        let matchedEpUrl = '';
-                        $page('a[href*="/videos/"]').each((_, el) => {
-                            const href = $page(el).attr('href');
-                            const text = $page(el).text().trim();
-                            if (href && (text.includes(`Episode ${targetEpNum}`) || href.includes(`episode-${targetEpNum}`))) {
-                                matchedEpUrl = href;
-                            }
-                        });
-                        if (!matchedEpUrl) {
-                            matchedEpUrl = $page('a[href*="/videos/"]').first().attr('href') || '';
-                        }
+                        
+                        // For hentai, always use the first video since most are single videos
+                        const matchedEpUrl = $page('a[href*="/videos/"]').first().attr('href') || '';
                         videoUrl = matchedEpUrl;
                     }
                 } catch (e: unknown) {
@@ -369,20 +408,58 @@ export class WatchHentaiSource extends BaseAnimeSource {
             }
 
             logger.info(`[WatchHentai] Fetching video page: ${videoUrl}`);
-            const response = await axios.get(videoUrl, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                },
-                signal: options?.signal,
-                timeout: options?.timeout || 30000,
-            });
+            
+            // Wrap video page fetch with timeout to prevent blocking
+            let response;
+            try {
+                response = await Promise.race([
+                    axios.get(videoUrl, {
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        },
+                        signal: options?.signal,
+                        timeout: 8000, // Reduced timeout from 30000 to 8000 to prevent API blocking
+                    }),
+                    new Promise<never>((_, reject) => 
+                        setTimeout(() => reject(new Error('Video page fetch timeout')), 8000)
+                    )
+                ]) as any;
+            } catch (fetchError) {
+                // If the URL with episode number fails, try the base slug (hentai single video)
+                if (epNum && epNum > 1 && videoUrl.includes('-episode-')) {
+                    logger.warn(`[WatchHentai] Episode ${epNum} URL failed, trying base slug (hentai single video)`);
+                    const fallbackUrl = videoUrl.replace(/-episode-\d+/i, '');
+                    
+                    try {
+                        response = await Promise.race([
+                            axios.get(fallbackUrl, {
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                                },
+                                signal: options?.signal,
+                                timeout: 8000,
+                            }),
+                            new Promise<never>((_, reject) => 
+                                setTimeout(() => reject(new Error('Fallback video page fetch timeout')), 8000)
+                            )
+                        ]) as any;
+                        logger.info(`[WatchHentai] Fallback to base slug succeeded for episode ${epNum}`);
+                    } catch (fallbackError) {
+                        logger.error(`[WatchHentai] Fallback also failed: ${(fallbackError as Error).message}`);
+                        throw fetchError;
+                    }
+                } else {
+                    throw fetchError;
+                }
+            }
 
             const html = response.data;
             const $ = cheerio.load(html);
             const sources: VideoSource[] = [];
 
-            // Step 2: DooPlayer AJAX Extraction
+            // Step 2: DooPlayer AJAX Extraction with individual timeouts
             const playerOptions = $('#playeroptionsul li');
             for (let i = 0; i < Math.min(3, playerOptions.length); i++) {
                 const opt = playerOptions.eq(i);
@@ -398,18 +475,24 @@ export class WatchHentaiSource extends BaseAnimeSource {
                         params.append('type', type || 'tv');
                         params.append('nume', nume || '1');
 
-                        const ajaxRes = await axios.post(`${this.baseUrl}/wp-admin/admin-ajax.php`, params.toString(), {
-                            headers: {
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                                'X-Requested-With': 'XMLHttpRequest',
-                                'Referer': videoUrl,
-                            },
-                            timeout: 8000,
-                            signal: options?.signal,
-                        });
+                        // Wrap AJAX request with timeout to prevent blocking
+                        const ajaxRes = await Promise.race([
+                            axios.post(`${this.baseUrl}/wp-admin/admin-ajax.php`, params.toString(), {
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                    'Referer': videoUrl,
+                                },
+                                timeout: 5000, // Reduced timeout
+                                signal: options?.signal,
+                            }),
+                            new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error('AJAX timeout')), 5000)
+                            )
+                        ]);
 
-                        const embedUrl = ajaxRes.data?.embed_url;
+                        const embedUrl = (ajaxRes as any).data?.embed_url;
                         if (embedUrl) {
                             // Better MP4 detection - check for .mp4 anywhere in URL, not just at the end
                             const isM3U8 = embedUrl.includes('.m3u8');
@@ -424,7 +507,12 @@ export class WatchHentaiSource extends BaseAnimeSource {
                             logger.info(`[WatchHentai] Found stream URL: ${embedUrl} (type: ${isM3U8 ? 'HLS' : isMP4 ? 'MP4' : 'unknown'})`);
                         }
                     } catch (e: unknown) {
-                        logger.warn(`[WatchHentai] DooPlayer AJAX error: ${(e as Error).message}`);
+                        // Log timeout or other errors without blocking
+                        if ((e as Error).message === 'AJAX timeout') {
+                            logger.warn(`[WatchHentai] DooPlayer AJAX timeout for ${videoUrl}`);
+                        } else {
+                            logger.warn(`[WatchHentai] DooPlayer AJAX error: ${(e as Error).message}`);
+                        }
                     }
                 }
             }
@@ -459,7 +547,12 @@ export class WatchHentaiSource extends BaseAnimeSource {
             return { sources: [], subtitles: [], source: this.name };
 
         } catch (error) {
-            this.handleError(error, 'getStreamingLinks');
+            // Better error handling for timeouts
+            if ((error as Error).message === 'Video page fetch timeout') {
+                logger.warn(`[WatchHentai] Video page fetch timeout`);
+            } else {
+                this.handleError(error, 'getStreamingLinks');
+            }
             return { sources: [], subtitles: [], source: this.name };
         }
     }

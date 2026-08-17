@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import fs from "fs";
 
 // https://vitejs.dev/config/
 export default defineConfig(async ({ mode }) => {
@@ -13,6 +14,64 @@ export default defineConfig(async ({ mode }) => {
   if (mode === "development") {
     plugins.push((await import("lovable-tagger")).componentTagger());
   }
+
+  const serveLocalVideosPlugin = {
+    name: "serve-local-videos",
+    configureServer(server: any) {
+      server.middlewares.use((req: any, res: any, next: any) => {
+        const url = req.url || "";
+        if (url.startsWith("/local/")) {
+          const relativePath = decodeURIComponent(url.slice("/local/".length));
+          const filePath = path.resolve("tests", relativePath);
+          const testsDir = path.resolve("tests");
+
+          if (!filePath.startsWith(testsDir + path.sep) && filePath !== testsDir) {
+            res.statusCode = 403;
+            res.end("Forbidden");
+            return;
+          }
+
+          try {
+            const stat = fs.statSync(filePath);
+            if (!stat.isFile()) {
+              res.statusCode = 404;
+              res.end("Not Found");
+              return;
+            }
+
+            const ext = path.extname(filePath).toLowerCase();
+            const contentType =
+              ext === ".mp4"
+                ? "video/mp4"
+                : ext === ".m3u8"
+                  ? "application/vnd.apple.mpegurl"
+                  : ext === ".ts"
+                    ? "video/mp2t"
+                    : "application/octet-stream";
+
+            res.setHeader("Content-Type", contentType);
+            res.setHeader("Content-Length", stat.size.toString());
+            res.setHeader("Accept-Ranges", "bytes");
+            res.setHeader("Cache-Control", "no-cache");
+
+            const stream = fs.createReadStream(filePath);
+            stream.pipe(res);
+            stream.on("error", () => {
+              if (!res.headersSent) {
+                res.statusCode = 500;
+                res.end("Error reading file");
+              }
+            });
+          } catch {
+            res.statusCode = 404;
+            res.end("Not Found");
+          }
+          return;
+        }
+        next();
+      });
+    },
+  };
 
   return {
     publicDir: 'public',
@@ -58,7 +117,7 @@ export default defineConfig(async ({ mode }) => {
         },
       },
     },
-    plugins,
+    plugins: [...plugins, serveLocalVideosPlugin],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

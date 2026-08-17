@@ -171,7 +171,7 @@ export const AnimeSlider = ({ anime, cardSize = 'md' }: AnimeSliderProps) => {
           return (
             <Link
               key={item.id}
-              to={generateWatchUrl({ title: item.title, id: item.id })}
+              to={generateWatchUrl({ title: item.title, id: item.id, genres: item.genres })}
               state={{ from: location.pathname + location.search }}
               className={cn('shrink-0 group/card touch-manipulation flex flex-col', cardWidths[cardSize])}
             >

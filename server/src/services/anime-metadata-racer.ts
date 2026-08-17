@@ -329,7 +329,7 @@ export async function raceAnimeMetadata(
  */
 export async function getHeroSpotlightWithRace(): Promise<AnimeMetadata[]> {
   const currentYear = new Date().getFullYear();
-  const recentYear = currentYear - 1;
+  const recentYear = currentYear - 3;
   
   // Try to get current season anime
   try {

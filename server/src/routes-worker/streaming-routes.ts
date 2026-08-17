@@ -1,25 +1,5 @@
 import { Hono, type Context } from 'hono';
 import { retryWithBackoff, reliableRequest } from '../utils/workers-reliability.js';
-import {
-    buildHianimeRestServersToTry,
-    fetchHianimeRestEpisodeServerIds,
-} from '../utils/hianime-rest-episode-discovery.js';
-import { getHianimeRestBase, fetchHianimeRestData } from './hianime-rest.js';
-
-interface HiAnimeScraper {
-    getEpisodeServers(episodeId: string): Promise<{
-        sub: Array<{ serverId: number | null; serverName: string }>;
-        dub: Array<{ serverId: number | null; serverName: string }>;
-        raw?: Array<{ serverId: number | null; serverName: string }>;
-        [k: string]: unknown;
-    }>;
-    getEpisodeSources(episodeId: string, server?: string, category?: 'sub' | 'dub' | 'raw'): Promise<{
-        sources: Array<{ url: string; isM3U8?: boolean; type?: string; quality?: string; [k: string]: unknown }>;
-        subtitles?: Array<{ url: string; lang: string }>;
-        headers?: { [k: string]: string };
-        [k: string]: unknown;
-    }>;
-}
 
 // Flexible interface for both SourceManager and CloudflareSourceManager
 interface StreamingSourceManager {
@@ -158,7 +138,7 @@ async function proxyToHeavyStreamBackend(env: unknown, path: string, timeoutMs =
     );
 }
 
-export function createStreamingRoutes(sourceManager: StreamingSourceManager, hianime?: HiAnimeScraper) {
+export function createStreamingRoutes(sourceManager: StreamingSourceManager) {
     const app = new Hono();
 
     interface StreamSource { url: string; originalUrl?: string; [k: string]: unknown }
@@ -202,33 +182,6 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
             episodeId = `${episodeId}?ep=${epQueryParam}`;
         }
 
-        // HiAnime aniwatch-style IDs handled directly on CF Worker
-        if (hianime && /^[^?]+\?ep=\d+$/.test(episodeId)) {
-            try {
-                const restBase = getHianimeRestBase(c.env);
-                const data = restBase
-                    ? await fetchHianimeRestData<Awaited<ReturnType<HiAnimeScraper['getEpisodeServers']>>>(
-                        restBase,
-                        `/api/v2/hianime/episode/servers?${new URLSearchParams({ animeEpisodeId: episodeId })}`
-                    )
-                    : null;
-                const resolved =
-                    data ??
-                    (await reliableRequest('HiAnime', 'getEpisodeServers', () => hianime!.getEpisodeServers(episodeId), {
-                        maxAttempts: 2,
-                        timeout: 10000,
-                        retryDelay: 1000,
-                    }));
-                const servers = [
-                    ...(resolved.sub || []).map(s => ({ name: s.serverName, url: '', type: 'sub' })),
-                    ...(resolved.dub || []).map(s => ({ name: s.serverName, url: '', type: 'dub' })),
-                ];
-                return c.json({ servers });
-            } catch (e: unknown) {
-                return c.json({ servers: [], error: `HiAnime servers failed: ${e instanceof Error ? e.message : String(e)}` }, 503);
-            }
-        }
-
         if (typeof sourceManager.getEpisodeServers === 'function') {
             try {
                 const servers = await sourceManager.getEpisodeServers(episodeId);
@@ -261,96 +214,6 @@ export function createStreamingRoutes(sourceManager: StreamingSourceManager, hia
 
         let streamData: StreamPayload = { sources: [], subtitles: [] };
         let lastError: string | null = null;
-
-        // HiAnime aniwatch-style IDs (slug?ep=NNNNN) — try REST + scraper first, then fall through to
-        // CloudflareConsumet / cross-source title search (Vercel upstream often 404s on sources).
-        if (hianime && /^[^?]+\?ep=\d+$/.test(episodeId)) {
-            const cat = (category || 'sub') as 'sub' | 'dub' | 'raw';
-            const discoveryCat: 'sub' | 'dub' = cat === 'dub' ? 'dub' : 'sub';
-
-            const restBaseWatch = getHianimeRestBase(c.env);
-            let discovered: string[] | null = null;
-            if (restBaseWatch) {
-                discovered = await fetchHianimeRestEpisodeServerIds(
-                    restBaseWatch,
-                    episodeId,
-                    discoveryCat,
-                    12_000
-                );
-            }
-            const serversToTry = buildHianimeRestServersToTry({
-                explicitServer: explicitServerRaw,
-                discoveredIds: discovered,
-            });
-            for (const server of serversToTry.slice(0, 12)) {
-                try {
-                    let data: Awaited<ReturnType<HiAnimeScraper['getEpisodeSources']>> | null = null;
-                    if (restBaseWatch) {
-                        const qs = new URLSearchParams({
-                            animeEpisodeId: episodeId,
-                            server,
-                            category: cat,
-                        });
-                        data = await fetchHianimeRestData<Awaited<ReturnType<HiAnimeScraper['getEpisodeSources']>>>(
-                            restBaseWatch,
-                            `/api/v2/hianime/episode/sources?${qs}`
-                        );
-                    }
-                    if (!data?.sources?.length) {
-                        data = await reliableRequest('HiAnime', `getEpisodeSources-${server}`,
-                            () => hianime!.getEpisodeSources(episodeId, server, cat),
-                            { maxAttempts: 1, timeout: 15000, retryDelay: 0 }
-                        );
-                    }
-                     if (data.sources && data.sources.length > 0) {
-                         const referer = data.headers?.Referer || 'https://hianime.to/';
-                         let sources: StreamSource[] = data.sources.map(s => ({
-                             url: s.url,
-                             quality: (s.quality || s.type || 'default') as string,
-                             isM3U8: s.isM3U8 ?? false,
-                         }));
-                         const subtitles: StreamSubtitle[] = (data.subtitles || [])
-                             .map(t => ({ url: t.url, lang: t.lang }));
-
-                         // Filter out IP-locked sources (Streamtape /get_video URLs) — their
-                         // CDN tokens are bound to the Render server IP and cannot be proxied
-                         // through CF Worker (range requests from a different IP → playback error).
-                         const isIpLocked = (s: StreamSource) => {
-                             if ((s as Record<string, unknown>).ipLocked) return true;
-                             const rawUrl = s.url.toLowerCase();
-                             return (rawUrl.includes('streamtape') || rawUrl.includes('tapecontent')) && rawUrl.includes('get_video');
-                         };
-                         const proxyableSources = sources.filter(s => !isIpLocked(s));
-                         if (proxyableSources.length === 0) {
-                             // All sources were IP-locked, try next server
-                             continue;
-                         }
-                         sources = proxyableSources;
-
-                         if (useProxy) {
-                             sources = sources.map(s => ({
-                                 ...s,
-                                 url: proxyUrl(s.url, proxyBase, referer),
-                                 originalUrl: s.url,
-                             }));
-                         }
-
-                         c.header('Cache-Control', 'private, max-age=300');
-                         return c.json({
-                             sources,
-                             subtitles: useProxy
-                                 ? subtitles.map(sub => ({ ...sub, url: proxyUrl(sub.url, proxyBase, referer) }))
-                                 : subtitles,
-                             headers: { Referer: referer },
-                             server,
-                             source: 'hianime',
-                             triedServers: [server],
-                         });
-                     }
-                } catch { /* try next server */ }
-            }
-            // Do not return 404 — fall through to Consumet + title-based fallback below.
-        }
 
         // IDs that require the full Node SourceManager (AnimeKai, etc.)
         // The CF Worker's CloudflareSourceManager only handles gogoanime/consumet/adult IDs.

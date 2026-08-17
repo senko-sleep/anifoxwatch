@@ -120,7 +120,8 @@ const slides = useMemo(
     title: title,
     titleEnglish: anime.title.english,
     titleRomaji: anime.title.romaji,
-    id: String(anime.id)
+    id: String(anime.id),
+    genres: anime.genres
   }, 1); // Start from episode 1
 
   const formatLabel = (anime.format || 'TV').replace(/_/g, ' ');

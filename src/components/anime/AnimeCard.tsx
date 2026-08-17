@@ -59,6 +59,17 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter: onCardMouseEn
   // valid descriptions but no audio availability metadata until we hit the streaming API.
   const missingAudioInfo = (anime.subCount ?? 0) === 0 && (anime.dubCount ?? 0) === 0;
 
+  // Determine if this is hentai content
+  const isHentai = anime.genres?.some(g => 
+    ['Hentai', 'Ecchi', 'Yaoi', 'Yuri'].includes(g)
+  ) || anime.source?.toLowerCase().includes('hentai') || anime.source?.toLowerCase().includes('hanime');
+  
+  // Generate slug and type prefix for routing
+  const slug = anime.id.replace(/^(watchhentai-|hanime-|akih-|aniwaves-|yomi-)/, '').replace(/\//g, '-');
+  const typePrefix = isHentai ? 'hentai' : 'anime';
+  const historyEp = historyItem ? `&ep=${historyItem.episodeNumber}` : '';
+  const watchHref = `/watch/${typePrefix}/${encodeURIComponent(slug)}${historyEp}`;
+
   const { data: detailAnime } = useQuery({
     queryKey: queryKeys.anime(navigateId),
     queryFn: () => apiClient.getAnime(navigateId),
@@ -90,8 +101,7 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter: onCardMouseEn
 
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    const ep = historyItem ? `&ep=${historyItem.episodeNumber}` : '';
-    navigate(`/watch?id=${encodeURIComponent(navigateId)}${ep}`, {
+    navigate(watchHref, {
       state: { from: location.pathname + location.search },
     });
   };
@@ -125,7 +135,7 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter: onCardMouseEn
 
   return (
     <a
-      href={`/watch?id=${encodeURIComponent(navigateId)}`}
+      href={watchHref}
       style={style}
       onMouseEnter={(e) => {
         setHovered(true);

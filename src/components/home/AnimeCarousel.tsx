@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Play, Star, Info } from 'lucide-react';
-import { cn, formatRating, ensureHttps } from '@/lib/utils';
+import { cn, formatRating, ensureHttps, generateWatchUrl } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { apiUrl } from '@/lib/api-config';
 
@@ -16,6 +16,7 @@ interface CarouselAnime {
   status?: string;
   episodes?: number;
   genres?: string[];
+  source?: string;
 }
 
 interface AnimeCarouselProps {
@@ -48,6 +49,16 @@ export const AnimeCarousel = ({ anime, title, autoPlay = false, showDetails = tr
   const goToSlide = (index: number) => {
     setCurrentIndex(index);
   };
+
+  const goToPrev = () => {
+    setCurrentIndex((prev) => (prev - 1 + anime.length) % anime.length);
+  };
+
+  const goToNext = () => {
+    setCurrentIndex((prev) => (prev + 1) % anime.length);
+  };
+
+  const currentAnime = anime[currentIndex] || anime[0];
 
   // Build proxied background candidates (direct + proxy fallback)
   const bgCandidates = useMemo(() => {
@@ -147,13 +158,13 @@ export const AnimeCarousel = ({ anime, title, autoPlay = false, showDetails = tr
                 )}
 
                 <div className="flex items-center gap-3 pt-2">
-                  <Link to={`/watch?id=${encodeURIComponent(currentAnime.id)}`} state={{ from: location.pathname }}>
+                  <Link to={generateWatchUrl(currentAnime)} state={{ from: location.pathname }}>
                     <Button className="bg-fox-orange hover:bg-fox-orange/90 text-white gap-2 h-11 px-6 rounded-xl shadow-lg shadow-fox-orange/25">
                       <Play className="w-5 h-5 fill-white" />
                       Watch Now
                     </Button>
                   </Link>
-                  <Link to={`/watch?id=${encodeURIComponent(currentAnime.id)}`} state={{ from: location.pathname }}>
+                  <Link to={generateWatchUrl({ ...currentAnime, title: currentAnime.title, id: currentAnime.id })} state={{ from: location.pathname }}>
                     <Button variant="outline" className="border-white/20 text-white hover:bg-white/10 gap-2 h-11 px-6 rounded-xl">
                       <Info className="w-5 h-5" />
                       Details

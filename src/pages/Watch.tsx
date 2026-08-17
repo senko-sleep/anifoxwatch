@@ -33,7 +33,7 @@ import { toast } from 'sonner';
 
 type AudioType = 'sub' | 'dub';
 
-const EMBED_DOMAINS = ['streamwish', 'mega.nz', 'hqq.tv', 'streamtape', 'doodstream', 'mp4upload', 'sendvid', 'ok.ru'];
+const EMBED_DOMAINS = ['streamwish', 'mega.nz', 'hqq.tv', 'streamtape', 'doodstream', 'mp4upload', 'sendvid', 'ok.ru', 'flixcloud', 'megacloud', 'rabbitstream', 'dokicloud'];
 // Aniwaves / EchoVideo embeds are domain-locked — loading them in our iframe yields
 // "Embedding blocked on this site". Treat them as non-embeddable so the player never
 // tries to render them (and instead fails over to a real stream source).
@@ -63,6 +63,10 @@ function plainDescription(raw: string | undefined): string {
 const Watch = () => {
   const { animeId } = useParams<{ animeId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const sourceParam = searchParams.get('source') || undefined;
+
   const [resolvedId, setResolvedId] = useState<string>('');
   const [isResolving, setIsResolving] = useState(false);
   
@@ -107,11 +111,6 @@ const Watch = () => {
   
   // Use the resolved ID for API calls
   const cleanAnimeId = isSlugBased ? resolvedId : rawAnimeId;
-  
-  // Source from history (e.g. 'hanime', 'aki-h') so the API knows where to look
-  const sourceParam = searchParams.get('source') || undefined;
-  const navigate = useNavigate();
-  const location = useLocation();
 
   // Store the referrer URL (browse URL with params) for going back
   const [backUrl, setBackUrl] = useState<string>('/browse');
@@ -274,6 +273,82 @@ const Watch = () => {
     refetch: refetchStream
   } = useStreamingLinks(getEpisodeIdForStreaming(), streamServer, audioType, isStreamEnabled, selectedEpisodeNum,
     cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined, anime?.title, bypassCache);
+
+  // Get best quality source - skip sources that previously failed
+  // IMPORTANT: implemented as useMemo (not useCallback + call-in-render) so that Watch re-renders
+  // caused by unrelated state (hover, layout, etc.) don't produce new object references that would
+  // make VideoPlayer think the src changed and destroy+reinit HLS mid-stream.
+  const lastVideoSourceUrlRef = useRef<string | null>(null);
+  const lastVideoSourceObjRef = useRef<typeof streamData extends { sources?: Array<infer S> } ? S | null : never>(null as any);
+
+  const videoSource = useMemo(() => {
+    if (!streamData?.sources?.length) {
+      lastVideoSourceUrlRef.current = null;
+      lastVideoSourceObjRef.current = null;
+      return null;
+    }
+
+    // Filter out sources that previously had errors (simple retry tracking)
+    // Also skip IP-locked sources (Streamtape /get_video) — cannot be proxied through serverless
+    const sources = streamData.sources
+      .filter((_, idx) => idx >= sourceRetryIndex)
+      .filter((s) => !s.ipLocked);
+
+    if (!sources.length) {
+      lastVideoSourceUrlRef.current = null;
+      lastVideoSourceObjRef.current = null;
+      return null;
+    }
+
+    // Prefer sources that are actually playable (M3U8 / direct MP4)
+    const playable = sources.filter((s) => {
+      const raw = (s as { originalUrl?: string }).originalUrl || s.url || '';
+      const lower = raw.toLowerCase();
+      // Streamtape /get_video URLs are IP-locked — skip them even without the flag
+      if ((lower.includes('streamtape') || lower.includes('tapecontent')) && lower.includes('get_video')) return false;
+      return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd') ||
+             !EMBED_DOMAINS.some((d) => lower.includes(d));
+    });
+
+    const candidate = playable.length > 0 ? playable[0] : sources[0];
+    if (!candidate) {
+      lastVideoSourceUrlRef.current = null;
+      lastVideoSourceObjRef.current = null;
+      return null;
+    }
+
+    // ── Stable reference guard ────────────────────────────────────────────────
+    // If the resolved URL string hasn't changed, return the SAME object reference
+    // so VideoPlayer's [src, isM3U8] effect does NOT re-run and HLS is NOT restarted.
+    const candidateUrl = candidate.url || '';
+    if (candidateUrl && candidateUrl === lastVideoSourceUrlRef.current && lastVideoSourceObjRef.current) {
+      return lastVideoSourceObjRef.current;
+    }
+
+    console.log('[Watch] Selected video source:', {
+      url: candidate.url?.substring(0, 100),
+      isM3U8: candidate.isM3U8,
+      isDirect: candidate.isDirect,
+      quality: candidate.quality
+    });
+
+    lastVideoSourceUrlRef.current = candidateUrl;
+    lastVideoSourceObjRef.current = candidate;
+    return candidate;
+  }, [streamData, sourceRetryIndex]);
+
+  // Debug: log the video source details
+  useEffect(() => {
+    if (videoSource) {
+      console.log('[Watch] Video source details:', {
+        url: videoSource.url?.substring(0, 150),
+        isM3U8: videoSource.isM3U8,
+        isDirect: videoSource.isDirect,
+        quality: videoSource.quality,
+        source: streamData?.source
+      });
+    }
+  }, [videoSource, streamData?.source]);
 
   /** Dub is available if: server list has dub, metadata says dub, active dub playback returned sources, or dub probe (while on SUB) succeeded. */
   const metadataIndicatesDub = useMemo(
@@ -533,83 +608,6 @@ const Watch = () => {
       setAudioType('sub');
     }
   }, [audioType, streamLoading, streamData, audioManuallySet]);
-
-  // Get best quality source - skip sources that previously failed
-  // IMPORTANT: implemented as useMemo (not useCallback + call-in-render) so that Watch re-renders
-  // caused by unrelated state (hover, layout, etc.) don't produce new object references that would
-  // make VideoPlayer think the src changed and destroy+reinit HLS mid-stream.
-  const lastVideoSourceUrlRef = useRef<string | null>(null);
-  const lastVideoSourceObjRef = useRef<typeof streamData extends { sources?: Array<infer S> } ? S | null : never>(null as any);
-
-  const videoSource = useMemo(() => {
-    if (!streamData?.sources?.length) {
-      lastVideoSourceUrlRef.current = null;
-      lastVideoSourceObjRef.current = null;
-      return null;
-    }
-
-    // Filter out sources that previously had errors (simple retry tracking)
-    // Also skip IP-locked sources (Streamtape /get_video) — cannot be proxied through serverless
-    const sources = streamData.sources
-      .filter((_, idx) => idx >= sourceRetryIndex)
-      .filter((s) => !s.ipLocked);
-
-    if (!sources.length) {
-      lastVideoSourceUrlRef.current = null;
-      lastVideoSourceObjRef.current = null;
-      return null;
-    }
-
-    // Prefer sources that are actually playable (M3U8 / direct MP4)
-    const playable = sources.filter((s) => {
-      const raw = (s as { originalUrl?: string }).originalUrl || s.url || '';
-      const lower = raw.toLowerCase();
-      // Streamtape /get_video URLs are IP-locked — skip them even without the flag
-      if ((lower.includes('streamtape') || lower.includes('tapecontent')) && lower.includes('get_video')) return false;
-      return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd') ||
-             !EMBED_DOMAINS.some((d) => lower.includes(d));
-    });
-
-    const candidate = playable.length > 0 ? playable[0] : sources[0];
-    if (!candidate) {
-      lastVideoSourceUrlRef.current = null;
-      lastVideoSourceObjRef.current = null;
-      return null;
-    }
-
-    // ── Stable reference guard ────────────────────────────────────────────────
-    // If the resolved URL string hasn't changed, return the SAME object reference
-    // so VideoPlayer's [src, isM3U8] effect does NOT re-run and HLS is NOT restarted.
-    const candidateUrl = candidate.url || '';
-    if (candidateUrl && candidateUrl === lastVideoSourceUrlRef.current && lastVideoSourceObjRef.current) {
-      return lastVideoSourceObjRef.current;
-    }
-
-    console.log('[Watch] Selected video source:', {
-      url: candidate.url?.substring(0, 100),
-      isM3U8: candidate.isM3U8,
-      isDirect: candidate.isDirect,
-      quality: candidate.quality
-    });
-
-    lastVideoSourceUrlRef.current = candidateUrl;
-    lastVideoSourceObjRef.current = candidate;
-    return candidate;
-  }, [streamData, sourceRetryIndex]);
-
-  // Debug: log the video source details
-  useEffect(() => {
-    if (videoSource) {
-      console.log('[Watch] Video source details:', {
-        url: videoSource.url?.substring(0, 150),
-        isM3U8: videoSource.isM3U8,
-        isDirect: videoSource.isDirect,
-        quality: videoSource.quality,
-        source: streamData?.source
-      });
-    }
-  }, [videoSource, streamData?.source]);
-
 
   // Episode navigation with smooth transitions
   const handleEpisodeSelect = useCallback((episodeId: string, episodeNum: number) => {
@@ -1086,7 +1084,7 @@ const Watch = () => {
               />
             ) : videoSource ? (
               <VideoPlayer
-                key={`${cleanAnimeId}:${selectedEpisodeForCurrentAnime || 'none'}:${audioType}`}
+                key={`${cleanAnimeId}-${selectedEpisodeNum}-${audioType}`}
                 src={videoSource?.url || ''}
                 isM3U8={videoSource?.isM3U8}
                 subtitles={streamData?.subtitles}
@@ -1397,7 +1395,7 @@ const Watch = () => {
                     />
                   ) : videoSource ? (
                     <VideoPlayer
-                      key={`${cleanAnimeId}:${selectedEpisodeForCurrentAnime || 'none'}:${audioType}`}
+                      key={`${cleanAnimeId}-${selectedEpisodeNum}-${audioType}`}
                       src={videoSource?.url || ''}
                       isM3U8={videoSource?.isM3U8}
                       subtitles={streamData?.subtitles}

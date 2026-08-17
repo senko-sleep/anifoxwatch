@@ -3,6 +3,8 @@ import { sourceManager } from '../services/source-manager.js';
 import { anilistService } from '../services/anilist-service.js';
 import { getHeroSpotlightCached, invalidateHeroSpotlightCache } from '../services/hero-spotlight-service.js';
 import { logger, createRequestContext, PerformanceTimer } from '../utils/logger.js';
+import { resolveHentaiSlug, isLikelyHentai } from '../services/hentai-resolver-service.js';
+import { searchCache } from '../lib/memory-cache.js';
 
 const router = Router();
 
@@ -21,60 +23,192 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
             return;
         }
 
-        // Determine search mode - allow mixed/adult for hentai content
+        // Check cache first for instant response
+        const cacheKey = `resolve-slug:${slug}:${mode}`;
+        const cached = searchCache.get(cacheKey);
+        if (cached) {
+            logger.debug(`[AnimeRoutes] Cache hit for slug resolution: ${slug}`);
+            res.json(cached);
+            return;
+        }
+
+        // Fast, non-blocking hentai detection using local string matching only
+        // This avoids API calls that cause blocking while still routing hentai correctly
+        const slugLower = slug.toLowerCase();
+        const likelyHentai = isLikelyHentai(slugLower);
+        
+        // Auto-detect hentai and set mode to adult if needed
+        const effectiveMode = (likelyHentai || mode === 'adult') ? 'adult' : mode;
+        
+        // Use hentai resolver for likely hentai content (with timeout protection)
+        if (effectiveMode === 'adult' && likelyHentai) {
+            try {
+                const hentaiResult = await Promise.race([
+                    resolveHentaiSlug(slug),
+                    new Promise<{ id: string; title: string; source: string } | null>((_, reject) => 
+                        setTimeout(() => reject(new Error('Hentai resolver timeout')), 2000)
+                    )
+                ]);
+                
+                if (hentaiResult) {
+                    const result = {
+                        id: hentaiResult.id,
+                        title: hentaiResult.title,
+                        source: hentaiResult.source
+                    };
+                    
+                    // Cache the hentai result
+                    searchCache.set(cacheKey, result, 15 * 60 * 1000); // 15 minutes
+                    
+                    res.json(result);
+                    return;
+                }
+            } catch (error) {
+                logger.warn('Hentai resolver failed or timed out, falling back to regular search', undefined, 'AnimeRoutes');
+            }
+        }
+
+        // Fallback to regular search for non-hentai or if hentai resolution fails
         let searchMode = (mode as 'safe' | 'mixed' | 'adult');
         if (searchMode !== 'safe' && searchMode !== 'mixed' && searchMode !== 'adult') {
             searchMode = 'safe';
         }
 
         // Try to find anime by searching for the slug
-        // First try with the full slug, then with just the first few words
         const slugParts = slug.split('-');
         const searchTerms = [
-            slug, // Full slug: "mushoku-tensei-jobless-reincarnation-season-3"
-            slugParts.slice(0, 2).join('-'), // First 2 words: "mushoku-tensei"
-            slugParts.slice(0, 3).join('-'), // First 3 words: "mushoku-tensei-jobless"
-            slugParts.slice(0, 2).join(' '), // First 2 words with space: "mushoku tensei"
+            slug, // Full slug
+            slugParts.slice(0, 3).join('-'), // First 3 words
+            slugParts.slice(0, 2).join('-'), // First 2 words
+            slugParts.slice(0, 4).join('-'), // First 4 words for better specificity
+            slugParts.slice(0, 2).join(' '), // First 2 words with space
         ];
         
-        let bestMatch = null;
-        let bestMatchSource = null;
+        let allCandidates: any[] = [];
         
+        // Search in the specified mode
         for (const searchTerm of searchTerms) {
             const searchResults = await sourceManager.search(searchTerm, 1, undefined, { mode: searchMode });
             
             if (searchResults.results && searchResults.results.length > 0) {
-                // Find the best match based on title similarity
-                const slugLower = searchTerm.toLowerCase().replace(/-/g, ' ');
-                const currentBest = searchResults.results.find(anime => {
-                    const titleLower = (anime.title || '').toLowerCase().replace(/[^a-z0-9\s]/g, '');
-                    return titleLower.includes(slugLower) || slugLower.includes(titleLower);
-                }) || searchResults.results[0];
+                const slugLowerClean = searchTerm.toLowerCase().replace(/-/g, ' ');
                 
-                // Prefer shorter search terms (more specific match)
-                if (!bestMatch || searchTerm.length < (bestMatchSource || '').length) {
-                    bestMatch = currentBest;
-                    bestMatchSource = searchTerm;
-                }
+                // Score each result based on multiple factors
+                const scoredResults = searchResults.results.map(anime => {
+                    // Collect all title variants for better matching
+                    const titleVariants = [
+                        anime.title,
+                        anime.titleEnglish,
+                        anime.titleRomaji,
+                        anime.titleJapanese
+                    ].filter(Boolean);
+                    
+                    // Calculate best score across all title variants
+                    let bestScore = 0;
+                    let bestTitle = '';
+                    
+                    for (const title of titleVariants) {
+                        if (!title) continue; // Skip undefined titles
+                        const titleLower = title.toLowerCase().replace(/[^a-z0-9\s]/g, '');
+                        const slugWords = slugLowerClean.split(' ').filter(w => w.length > 2);
+                        const titleWords = titleLower.split(' ').filter(w => w.length > 2);
+                        
+                        // Word overlap score
+                        const matchCount = slugWords.filter(w => titleWords.includes(w)).length;
+                        const wordScore = matchCount / Math.max(slugWords.length, 1);
+                        
+                        // Length similarity (prefer titles of similar length)
+                        const lengthDiff = Math.abs(slugLowerClean.length - titleLower.length);
+                        const lengthScore = 1 - (lengthDiff / Math.max(slugLowerClean.length, titleLower.length));
+                        
+                        // Sequence matching (bonus for words in similar order)
+                        let sequenceScore = 0;
+                        let positionBonus = 0;
+                        
+                        if (matchCount >= 2) {
+                            let matchedSequences = 0;
+                            for (let i = 0; i < slugWords.length - 1; i++) {
+                                const currentIdx = titleWords.indexOf(slugWords[i]);
+                                const nextIdx = titleWords.indexOf(slugWords[i + 1]);
+                                if (currentIdx !== -1 && nextIdx !== -1 && nextIdx > currentIdx) {
+                                    matchedSequences++;
+                                }
+                            }
+                            sequenceScore = matchedSequences / Math.max(slugWords.length - 1, 1);
+                        }
+                        
+                        // Position bonus for words in similar positions
+                        for (let i = 0; i < slugWords.length; i++) {
+                            const titleIndex = titleWords.indexOf(slugWords[i]);
+                            if (titleIndex !== -1 && Math.abs(i - titleIndex) <= 1) {
+                                positionBonus += 0.1;
+                            }
+                        }
+                        
+                        // Combined score with improved weighting:
+                        // - 40% word overlap (reduced from 50%)
+                        // - 30% sequence matching (increased from 20%)
+                        // - 20% length similarity
+                        // - 10% position bonus
+                        let combinedScore = (wordScore * 0.4) + (sequenceScore * 0.3) + (lengthScore * 0.2) + (Math.min(positionBonus, 0.5) * 0.1);
+                        
+                        // Penalty for very short titles that match partially
+                        if (titleWords.length < 3 && slugWords.length >= 4) {
+                            combinedScore *= 0.7;
+                        }
+                        
+                        // Bonus for longer, more comprehensive matches
+                        if (matchCount >= 3 && titleWords.length >= 4) {
+                            combinedScore *= 1.1;
+                        }
+                        
+                        if (combinedScore > bestScore) {
+                            bestScore = combinedScore;
+                            bestTitle = title || '';
+                        }
+                    }
+                    
+                    return { anime, score: bestScore, matchedTitle: bestTitle, mode: searchMode };
+                });
+                
+                allCandidates.push(...scoredResults);
             }
         }
         
-        if (bestMatch) {
-            res.json({
-                id: bestMatch.id,
-                title: bestMatch.title,
-                image: bestMatch.image,
-                source: bestMatch.source
-            });
-        } else {
-            // If not found in sources, try to create a searchable ID from the slug
-            res.json({
-                id: slug, // Use slug as ID fallback
-                title: slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-                image: '',
-                source: 'slug-fallback'
-            });
+        // Pick the best match from all candidates
+        const sortedCandidates = allCandidates.sort((a, b) => b.score - a.score);
+        
+        if (sortedCandidates.length > 0) {
+            const bestMatch = sortedCandidates[0].anime;
+            if (sortedCandidates[0].score > 0.3) { // Adjusted threshold for new scoring
+                const result = {
+                    id: bestMatch.id,
+                    title: bestMatch.title,
+                    image: bestMatch.image || bestMatch.poster,
+                    source: bestMatch.source,
+                    genres: bestMatch.genres || []
+                };
+                
+                // Cache the result for future requests
+                searchCache.set(cacheKey, result, 15 * 60 * 1000); // 15 minutes
+                
+                res.json(result);
+                return;
+            }
         }
+        
+        // If not found in sources, try to create a searchable ID from the slug
+        const fallbackResult = {
+            id: slug, // Use slug as ID fallback
+            title: slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            image: '',
+            source: 'slug-fallback'
+        };
+        
+        // Cache even fallback results (shorter TTL)
+        searchCache.set(cacheKey, fallbackResult, 5 * 60 * 1000); // 5 minutes
+        
+        res.json(fallbackResult);
     } catch (error) {
         logger.error('Slug resolution error', error as Error, {}, 'AnimeRoutes');
         res.status(500).json({ error: 'Failed to resolve slug' });
@@ -914,10 +1048,19 @@ router.get('/episodes', async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
+        // Disable caching for episodes to ensure fresh data
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+
         const result = await Promise.race([
             sourceManager.getEpisodes(id),
             new Promise<any[]>((_, reject) => setTimeout(() => reject(new Error('Get episodes timeout')), 60000))
         ]);
+        
+        // Log episode IDs for debugging
+        console.log(`[Episodes API] Returning ${result.length} episodes for ${id}:`, result.map((e: any) => ({ id: e.id, number: e.number })));
+        
         res.json({ episodes: result });
     } catch (error) {
         console.error('Get episodes error:', error);

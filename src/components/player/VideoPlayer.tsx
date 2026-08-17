@@ -700,11 +700,11 @@ export const VideoPlayer = ({
           return;
         }
 
-        if (stalledMs >= 8_000) {
+        if (stalledMs >= 15_000) {
           // Escalate to fatal — trigger source failover
           if (watchdogEscalatedRef.current) return;
           watchdogEscalatedRef.current = true;
-          playerLog('error', 'Watchdog: stall timeout (8s) — requesting server switch');
+          playerLog('error', 'Watchdog: stall timeout (15s) — requesting server switch');
           clearInterval(stallWatchdogRef.current!);
           stallWatchdogRef.current = null;
           safeSetIsBuffering(false);
@@ -771,9 +771,12 @@ export const VideoPlayer = ({
 
       // Stall / waiting handling: show buffering indicator on waiting
       onStalledOrWaiting = () => {
+        if (video.paused) return;
         // Show buffering spinner after short debounce (avoids flash on quick ABR switches)
         if (bufferingKickTimerRef.current) clearTimeout(bufferingKickTimerRef.current);
-        bufferingKickTimerRef.current = setTimeout(() => safeSetIsBuffering(true), 400);
+        bufferingKickTimerRef.current = setTimeout(() => {
+          if (video && !video.paused) safeSetIsBuffering(true);
+        }, 400);
       };
       onPlayingAgain = () => {
         if (bufferingKickTimerRef.current) {

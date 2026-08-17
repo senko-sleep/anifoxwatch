@@ -4,6 +4,23 @@ import { StreamingData, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
 
 /**
+ * Helper to validate anime titles and filter out HTTP error / Cloudflare error page titles
+ */
+export function isValidAnimeTitle(title: string | undefined | null): boolean {
+    if (!title || typeof title !== 'string') return false;
+    const t = title.toLowerCase().trim();
+    if (t === '' || t === 'unknown' || t === 'undefined' || t === 'null') return false;
+    if (t.includes('bad gateway') || t.includes('error code') || t.includes('502 bad gateway') ||
+        t.includes('503 service') || t.includes('504 gateway') || t.includes('500 internal') ||
+        t.includes('cloudflare') || t.includes('access denied') || t.includes('just a moment') ||
+        t.includes('attention required') || t.includes('web server is down') || t.includes('host error') ||
+        t.includes('server error') || t.includes('page not found') || t.includes('404 not found')) {
+        return false;
+    }
+    return true;
+}
+
+/**
  * Common options for all source requests
  */
 export interface SourceRequestOptions {

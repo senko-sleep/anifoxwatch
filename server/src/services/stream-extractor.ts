@@ -181,15 +181,15 @@ class StreamExtractor {
                 }
             });
 
-            const isHiAnimeFamily = 
-                /aniwatch|hianime|zoro\.to|9anime|aniwave/i.test(watchBaseUrl) ||
-                /aniwatch|hianime|aniwave/i.test(url);
+            const isAniwatchFamily = 
+                /aniwatch|zoro\.to|9anime|aniwave/i.test(watchBaseUrl) ||
+                /aniwatch|aniwave/i.test(url);
 
-            // HiAnime pages keep long-polling; networkidle2 often never resolves. Use DOM + extra soak time.
+            // Aniwatch pages keep long-polling; networkidle2 often never resolves. Use DOM + extra soak time.
             try {
                 await page.goto(url, {
-                    waitUntil: isHiAnimeFamily ? 'domcontentloaded' : 'networkidle2',
-                    timeout: isHiAnimeFamily ? 60_000 : 60_000,
+                    waitUntil: isAniwatchFamily ? 'domcontentloaded' : 'networkidle2',
+                    timeout: isAniwatchFamily ? 60_000 : 60_000,
                 });
             } catch (navError: any) {
                 logger.warn(`[StreamExtractor] 9Anime page navigation timeout, proceeding: ${navError.message}`);
@@ -198,7 +198,7 @@ class StreamExtractor {
             await page.waitForSelector('iframe', { timeout: 20_000 }).catch(() => {});
 
             // Reduced soak time from 14s to 8s for faster resolution
-            await this.delay(isHiAnimeFamily ? 8_000 : 5000);
+            await this.delay(isAniwatchFamily ? 8_000 : 5000);
 
             // Try clicking play button if video is paused
             try {
@@ -231,13 +231,13 @@ class StreamExtractor {
 
                 try {
                     await embedPage.goto(iframeSrc, {
-                        waitUntil: isHiAnimeFamily ? 'domcontentloaded' : 'networkidle0',
-                        timeout: isHiAnimeFamily ? 45_000 : 30_000,
+                        waitUntil: isAniwatchFamily ? 'domcontentloaded' : 'networkidle0',
+                        timeout: isAniwatchFamily ? 45_000 : 30_000,
                     });
 
                     // Dynamic polling to avoid unnecessary delay when stream is already captured
                     let m3u8WaitTime = 0;
-                    const maxWait = isHiAnimeFamily ? 10_000 : 8000;
+                    const maxWait = isAniwatchFamily ? 10_000 : 8000;
                     while (capturedM3u8s.size === 0 && m3u8WaitTime < maxWait) {
                         await this.delay(200);
                         m3u8WaitTime += 200;

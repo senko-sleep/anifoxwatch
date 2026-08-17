@@ -155,6 +155,7 @@ export class SourceManager {
         const prefixes = [
             { prefix: 'animekai-', source: 'AnimeKai' },
             { prefix: '9anime-', source: '9Anime' },
+            { prefix: 'aniwaves-', source: 'Aniwave' },
             { prefix: 'aniwave-', source: 'Aniwave' },
             { prefix: 'aniwatch-', source: 'Aniwatch' },
             { prefix: 'gogoanime-', source: 'Gogoanime' },

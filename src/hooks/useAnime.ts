@@ -182,7 +182,7 @@ export function useEpisodes(animeId: string, enabled: boolean = true, source?: s
             return episodes;
         },
         enabled: enabled && animeId.length > 0,
-        staleTime: 10 * 60 * 1000,
+        staleTime: 0, // Always refetch to get latest episode data
         retry: 2,
         retryDelay: 1000,
     });
