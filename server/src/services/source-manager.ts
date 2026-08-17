@@ -127,6 +127,9 @@ export class SourceManager {
 
     private readonly BLOCKED_STREAM_DOMAINS = [
         'rabbitstream.net',
+        'flixcloud.cc',
+        'megacloud.tv',
+        'megacloud.blog',
     ];
 
     private getStreamUrl(source: VideoSource): string {
@@ -140,7 +143,7 @@ export class SourceManager {
     }
 
     private isProxyablePlayableSource(source: VideoSource): boolean {
-        if (source.ipLocked) return false;
+        if (source.ipLocked || source.isEmbed) return false;
         const url = this.getStreamUrl(source);
         const lower = url.toLowerCase();
         if (this.isBlockedStreamUrl(url)) return false;
@@ -3385,7 +3388,7 @@ export class SourceManager {
             const sources = finalSources.map(s => s.name);
             
             if (category === 'dub') {
-                const preferred = ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'];
+                const preferred = ['Aniwaves', 'cross-source', 'ReAnime', 'Anichi', 'Yomi'];
                 const others = sources.filter(s => !preferred.includes(s));
                 return [...preferred.filter(p => sources.includes(p)), ...others, 'cross-source'];
             }
@@ -3433,7 +3436,7 @@ export class SourceManager {
         const CROSS_SOURCE_FALLBACK_MAX_MS = 15_000;
         // 20s global safety net — allows cross-source fallback to complete before resolving empty
         const STREAM_GLOBAL_MAX_MS = 20_000;
-        const ONLY_IP_LOCKED_WAIT_MS = 2_000;
+        const ONLY_IP_LOCKED_WAIT_MS = category === 'dub' ? 12_000 : 2_000;
 
         // Use existing priority from above
         const localPriority = STREAM_PRIORITY;
@@ -3469,8 +3472,26 @@ export class SourceManager {
                 const candidates = realOk.length > 0 ? realOk : ok.filter(hasNonBlockedSource);
                 if (candidates.length === 0) return false;
 
-                // Sort candidates by total stream count and sub/dub stream count
+                // Sort candidates:
+                // 1. Prefer sources with real playable proxyable streams over embeds
+                // 2. For dub category, prefer sources with actual dub streams
+                // 3. Prefer non-embed sources
+                // 4. Stream count tiebreaker
                 candidates.sort((a, b) => {
+                    const aPlayable = a.data?.sources?.filter(s => this.isProxyablePlayableSource(s)).length || 0;
+                    const bPlayable = b.data?.sources?.filter(s => this.isProxyablePlayableSource(s)).length || 0;
+                    if (bPlayable !== aPlayable) return bPlayable - aPlayable;
+
+                    if (category === 'dub') {
+                        const aHasDub = (a.data?.sources || []).some(s => s.category === 'dub' || (s as any).type === 'dub');
+                        const bHasDub = (b.data?.sources || []).some(s => s.category === 'dub' || (s as any).type === 'dub');
+                        if (aHasDub !== bHasDub) return aHasDub ? -1 : 1;
+                    }
+
+                    const aEmbeds = (a.data?.sources || []).filter(s => s.isEmbed).length;
+                    const bEmbeds = (b.data?.sources || []).filter(s => s.isEmbed).length;
+                    if (aEmbeds !== bEmbeds) return aEmbeds - bEmbeds;
+
                     const countA = a.data?.sources?.length || 0;
                     const countB = b.data?.sources?.length || 0;
                     if (countB !== countA) return countB - countA;
@@ -3499,7 +3520,7 @@ export class SourceManager {
                 if (ok.length === 0) return;
 
                 const topPriority = effectivePickOrder[0];
-                const topResult = allResults.find(r => r.source === topPriority);
+                const topResult = allResults.find(r => r.source === topPriority && r.data?.sources?.some(s => this.isProxyablePlayableSource(s)));
                 if (topResult) {
                     pickBestAndResolve();
                     return;
@@ -3507,17 +3528,21 @@ export class SourceManager {
 
                 if (!graceTimer) {
                     const firstSuccess = ok[0].source;
-                    const isHighPriorityDub = category === 'dub' && (firstSuccess === 'Aniwaves' || firstSuccess === 'Wcofun' || firstSuccess === 'AllAnime' || firstSuccess === 'Gogoanime' || firstSuccess === 'AnimeKai' || firstSuccess === 'GogoOrAt' || firstSuccess === 'cross-source');
+                    const hasPlayable = ok.some(r => r.data?.sources?.some(s => this.isProxyablePlayableSource(s)));
+
+                    const isHighPriorityDub = category === 'dub' && hasPlayable && (firstSuccess === 'Aniwaves' || firstSuccess === 'cross-source' || firstSuccess === 'ReAnime');
                     if (isHighPriorityDub) {
-                        console.log(`   ⚡ High-priority source (${firstSuccess}) available, resolving instantly!`);
+                        console.log(`   ⚡ High-priority playable source (${firstSuccess}) available, resolving instantly!`);
                         pickBestAndResolve();
                         return;
                     }
-                    console.log(`   ⏱️ First stream available (${firstSuccess}), waiting ${GRACE_PERIOD}ms for higher-priority source...`);
+
+                    const waitMs = hasPlayable ? GRACE_PERIOD : 2500;
+                    console.log(`   ⏱️ Stream candidate available (${firstSuccess}, playable=${hasPlayable}), waiting ${waitMs}ms for better source...`);
                     graceTimer = setTimeout(() => {
                         graceTimer = null;
                         pickBestAndResolve();
-                    }, GRACE_PERIOD);
+                    }, waitMs);
                 }
             };
 
@@ -3571,9 +3596,10 @@ export class SourceManager {
                 }
 
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
-                // Raised from 5 s → 11 s for all sources: HTTP-based Yomi/Aniwaves
-                // no longer need 15 s Puppeteer cold-start but still need ~5-10 s for fetches.
-                const streamReliabilityOpts = { timeout: 11_000, maxAttempts: 1 };
+                // Aniwaves uses a headless browser and needs more time to extract real HLS
+                const isSlowSource = source.name === 'Aniwaves' || source.name === 'Anichi';
+                const sourceTimeout = isSlowSource ? 14_000 : 11_000;
+                const streamReliabilityOpts = { timeout: sourceTimeout, maxAttempts: 1 };
                 const sourceStart = Date.now();
                 this.executeReliablyStream(source.name, 'getStreamingLinks',
                     (signal) => source.getStreamingLinks!(idToUse, server, category, { signal, episodeNum, anilistId }),
@@ -3816,11 +3842,11 @@ export class SourceManager {
             (anilistId != null && anilistId === 1639);
 
         // Registered, currently enabled sources to try for cross-source fallback.
-        const normalSources = ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'];
+        const normalSources = ['Aniwaves', 'Yomi', 'ReAnime', 'Anichi'];
         const hentaiSources = ['WatchHentai'];
         const sourceNames = isHentaiQuery
             ? hentaiSources
-            : (category === 'dub' ? ['ReAnime', 'Anichi', 'Yomi', 'Aniwaves'] : normalSources);
+            : (category === 'dub' ? ['Aniwaves', 'Yomi', 'ReAnime', 'Anichi'] : normalSources);
         
         const consumetSources = sourceNames
             .map(n => ({ name: n, src: this.sources.get(n) as StreamingSource }))
@@ -3830,6 +3856,7 @@ export class SourceManager {
         const result = await new Promise<StreamingData | null>((resolve) => {
             let pending = consumetSources.length;
             let resolved = false;
+            let fallbackResult: StreamingData | null = null;
 
             if (pending === 0) {
                 resolve(null);
@@ -3866,7 +3893,7 @@ export class SourceManager {
                                     } else {
                                         const dubResults = category === 'dub'
                                             ? res.results.filter(r => /\b(dub|dubbed)\b/i.test(r.title))
-                                            : res.results;
+                                             : res.results;
                                         bestMatch = this.findBestMatch(searchTitle, dubResults.length > 0 ? dubResults : res.results)
                                             ?? (dubResults.length > 0 ? dubResults[0] : res.results[0]);
                                     }
@@ -3914,18 +3941,26 @@ export class SourceManager {
                         ]);
 
                         if (streamData?.sources?.length > 0 && !resolved) {
-                            console.log(`   ✅ ${srcName}: ${streamData.sources.length} streaming sources (${category})`);
-                            resolved = true;
-                            // Mark the winning source in the response
-                            streamData.source = srcName;
-                            resolve(streamData);
+                            const hasPlayable = streamData.sources.some(s => this.isProxyablePlayableSource(s));
+                            if (hasPlayable) {
+                                console.log(`   ✅ ${srcName}: ${streamData.sources.length} playable streaming sources (${category})`);
+                                resolved = true;
+                                streamData.source = srcName;
+                                resolve(streamData);
+                            } else {
+                                console.log(`   ⚠️ ${srcName}: returned non-playable/embed sources, keeping as fallback`);
+                                if (!fallbackResult) {
+                                    streamData.source = srcName;
+                                    fallbackResult = streamData;
+                                }
+                            }
                         }
                     } catch (err) {
                         // Silence errors for individual sources in cross-source
                     } finally {
                         pending--;
                         if (pending === 0 && !resolved) {
-                            resolve(null);
+                            resolve(fallbackResult);
                         }
                     }
                 })();

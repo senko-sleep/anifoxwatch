@@ -228,20 +228,6 @@ export class ReAnimeSource extends BaseAnimeSource {
 
             for (const s of matchedServers) {
                 if (s.dataLink) {
-                    const isEncryptedEmbedHost = /flixcloud|megacloud|rabbitstream|dokicloud/i.test(s.dataLink);
-                    if (isEncryptedEmbedHost) {
-                        sources.push({
-                            url: s.dataLink,
-                            quality: '1080p',
-                            isM3U8: false,
-                            isEmbed: true,
-                            isDirect: true,
-                            category: s.dataType || category,
-                            server: s.serverName || 'HD-1',
-                            originalUrl: s.dataLink
-                        });
-                        continue;
-                    }
 
                     try {
                         const extracted = await streamExtractor.extractFromEmbed(s.dataLink);

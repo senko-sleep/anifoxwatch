@@ -311,11 +311,13 @@ const Watch = () => {
   // IMPORTANT: implemented as useMemo (not useCallback + call-in-render) so that Watch re-renders
   // caused by unrelated state (hover, layout, etc.) don't produce new object references that would
   // make VideoPlayer think the src changed and destroy+reinit HLS mid-stream.
+  const lastVideoSourceAudioRef = useRef<string | null>(null);
   const lastVideoSourceUrlRef = useRef<string | null>(null);
   const lastVideoSourceObjRef = useRef<typeof streamData extends { sources?: Array<infer S> } ? S | null : never>(null as any);
 
   const videoSource = useMemo(() => {
     if (!streamData?.sources?.length) {
+      lastVideoSourceAudioRef.current = null;
       lastVideoSourceUrlRef.current = null;
       lastVideoSourceObjRef.current = null;
       return null;
@@ -328,33 +330,49 @@ const Watch = () => {
       .filter((s) => !s.ipLocked);
 
     if (!sources.length) {
+      lastVideoSourceAudioRef.current = null;
       lastVideoSourceUrlRef.current = null;
       lastVideoSourceObjRef.current = null;
       return null;
     }
 
-    // Prefer sources that are actually playable (M3U8 / direct MP4)
-    const playable = sources.filter((s) => {
+    // Helper: is this source actually playable (not an embed page)?
+    const isPlayable = (s: typeof sources[0]) => {
       const raw = (s as { originalUrl?: string }).originalUrl || s.url || '';
       const lower = raw.toLowerCase();
-      // Streamtape /get_video URLs are IP-locked — skip them even without the flag
       if ((lower.includes('streamtape') || lower.includes('tapecontent')) && lower.includes('get_video')) return false;
       return lower.includes('.m3u8') || lower.includes('.mp4') || lower.includes('.mpd') ||
              !EMBED_DOMAINS.some((d) => lower.includes(d));
-    });
+    };
 
-    const candidate = playable.length > 0 ? playable[0] : sources[0];
+    // First: try playable sources that match the requested audio category (dub/sub)
+    const categoryMatched = sources.filter(
+      (s) => s.category === audioType && isPlayable(s)
+    );
+
+    // Second fallback: any playable source (ignore category tag)
+    const anyPlayable = sources.filter(isPlayable);
+
+    // Third fallback: whatever is available
+    const candidate = categoryMatched[0] ?? anyPlayable[0] ?? sources[0];
+
     if (!candidate) {
+      lastVideoSourceAudioRef.current = null;
       lastVideoSourceUrlRef.current = null;
       lastVideoSourceObjRef.current = null;
       return null;
     }
 
     // ── Stable reference guard ────────────────────────────────────────────────
-    // If the resolved URL string hasn't changed, return the SAME object reference
+    // If the resolved URL string AND audioType haven't changed, return the SAME object reference
     // so VideoPlayer's [src, isM3U8] effect does NOT re-run and HLS is NOT restarted.
     const candidateUrl = candidate.url || '';
-    if (candidateUrl && candidateUrl === lastVideoSourceUrlRef.current && lastVideoSourceObjRef.current) {
+    if (
+      candidateUrl &&
+      candidateUrl === lastVideoSourceUrlRef.current &&
+      audioType === lastVideoSourceAudioRef.current &&
+      lastVideoSourceObjRef.current
+    ) {
       return lastVideoSourceObjRef.current;
     }
 
@@ -362,13 +380,16 @@ const Watch = () => {
       url: candidate.url?.substring(0, 100),
       isM3U8: candidate.isM3U8,
       isDirect: candidate.isDirect,
-      quality: candidate.quality
+      quality: candidate.quality,
+      category: candidate.category,
+      audioType,
     });
 
+    lastVideoSourceAudioRef.current = audioType;
     lastVideoSourceUrlRef.current = candidateUrl;
     lastVideoSourceObjRef.current = candidate;
     return candidate;
-  }, [streamData, sourceRetryIndex]);
+  }, [streamData, sourceRetryIndex, audioType]);
 
   // Debug: log the video source details
   useEffect(() => {
