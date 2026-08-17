@@ -21,7 +21,7 @@ import {
   useAnilistHomeAction,
   useAnilistHomeUpcoming,
 } from '@/hooks/useAnilistHomeSections';
-import { useHeroAnime } from '@/hooks/useHeroAnimeMultiSource';
+import { useHeroAnime, convertAnimeListToHeroAnime, getStaticFallbackHeroAnime } from '@/hooks/useHeroAnimeMultiSource';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 
 // ─── Category chips ────────────────────────────────────────────────────────────
@@ -290,7 +290,7 @@ export const MobileHome = () => {
   const [isLoadingRandom, setIsLoadingRandom] = useState(false);
 
   // ── Data ──────────────────────────────────────────────────────────────────
-  const { heroAnime } = useHeroAnime();
+  const { heroAnime: rawHeroAnime } = useHeroAnime();
   const { history, removeFromHistory } = useWatchHistory();
   const { data: trendingAnime, isLoading: trendingLoading, refetch: refetchTrending } = useAnilistHomeTrending(20);
 
@@ -308,6 +308,17 @@ export const MobileHome = () => {
   const { data: moviesData,   isLoading: moviesLoading,   refetch: refetchMovies }   = useAnilistHomeMovies(16);
   const { data: actionData,   isLoading: actionLoading }                              = useAnilistHomeAction(16);
   const { data: upcomingData }                                                        = useAnilistHomeUpcoming(16);
+
+  const effectiveHeroAnime = useMemo(() => {
+    if (rawHeroAnime && rawHeroAnime.length > 0) return rawHeroAnime;
+    if (trendingAnime && trendingAnime.length > 0) {
+      return convertAnimeListToHeroAnime(trendingAnime);
+    }
+    if (seasonalData?.results && seasonalData.results.length > 0) {
+      return convertAnimeListToHeroAnime(seasonalData.results);
+    }
+    return getStaticFallbackHeroAnime();
+  }, [rawHeroAnime, trendingAnime, seasonalData?.results]);
 
   const { dedupTrending, dedupSeasonal, dedupLatest, dedupMovies, dedupAction, dedupUpcoming } = useMemo(() => {
     const used = new Set<string>();
@@ -354,7 +365,7 @@ export const MobileHome = () => {
       />
 
       {/* Hero (banner-only, swipeable, auto-advancing) */}
-      <MobileHero heroAnime={heroAnime} />
+      <MobileHero heroAnime={effectiveHeroAnime} />
 
       {/* Main feed */}
       <main

@@ -5,14 +5,14 @@ import { isPlaceholderAnimeDescription } from '@/lib/utils';
 import type { Anime } from '@/types/anime';
 
 /**
- * Hero anime: Multi-source fallback system supporting AniList, Jikan (MAL), Kitsu, 
- * Anime-Planet, and BFF trending. Works even when AniList is down.
+ * Hero anime: Multi-source fallback system supporting AniList, BFF trending,
+ * Jikan (MAL), Kitsu, and TMDB. Works seamlessly even when primary sources are down.
  * 
- * Cached for 20 minutes in localStorage.
+ * Cached in localStorage with stale-while-revalidate protection.
  */
 
 export interface HeroAnime {
-  id: number;
+  id: number | string;
   idMal: number | null;
   title: {
     english: string | null;
@@ -45,7 +45,7 @@ export interface HeroAnime {
     id: string | null;
     site: string | null;
   } | null;
-  source: 'anilist' | 'bff' | 'jikan' | 'kitsu' | 'animeplanet' | 'github' | 'tmdb';
+  source: 'anilist' | 'bff' | 'jikan' | 'kitsu' | 'animeplanet' | 'github' | 'tmdb' | 'fallback';
 }
 
 interface CachedHeroData {
@@ -55,19 +55,251 @@ interface CachedHeroData {
   version: number;
 }
 
-const CACHE_KEY = 'anistream_hero_v11';
+const CACHE_KEY = 'anistream_hero_v12';
 const CACHE_TTL = 20 * 60 * 1000;
-const CACHE_VERSION = 11;
+const CACHE_VERSION = 12;
 
 // User-Agent for external APIs (Jikan v4 requires this)
 const USER_AGENT = 'AniStreamHub/1.0 (+https://github.com/anistream-hub)';
+
+export const STATIC_FALLBACK_HERO_ANIME: HeroAnime[] = [
+  {
+    id: 151807,
+    idMal: 52299,
+    title: {
+      english: 'Solo Leveling',
+      romaji: 'Ore dake Level Up na Ken',
+      native: '俺だけレベルアップな件',
+    },
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/151807-3528b1e4fa8e9f8daea8d655ad1bf2c8.jpg',
+    coverImage: {
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-3528b1e4fa8e9f8daea8d655ad1bf2c8.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx151807-3528b1e4fa8e9f8daea8d655ad1bf2c8.jpg',
+      color: '#3582d8',
+    },
+    description: 'In a world where hunters must battle deadly monsters to protect humanity, Sung Jinwoo, notoriously known as the weakest hunter of all mankind, finds himself in a struggle for survival.',
+    genres: ['Action', 'Adventure', 'Fantasy'],
+    averageScore: 84,
+    popularity: 165000,
+    episodes: 12,
+    duration: 24,
+    format: 'TV',
+    status: 'RELEASING',
+    season: 'WINTER',
+    seasonYear: 2024,
+    studios: { nodes: [{ name: 'A-1 Pictures', isAnimationStudio: true }] },
+    nextAiringEpisode: null,
+    trailer: { id: 'mS_68L_yY_A', site: 'youtube' },
+    source: 'fallback',
+  },
+  {
+    id: 154587,
+    idMal: 52991,
+    title: {
+      english: "Frieren: Beyond Journey's End",
+      romaji: 'Sousou no Frieren',
+      native: '葬送のフリーレン',
+    },
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/154587-ivXNJ23SM1xB.jpg',
+    coverImage: {
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-gviZjMmQEptO.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx154587-gviZjMmQEptO.jpg',
+      color: '#43a5d8',
+    },
+    description: 'The demon king has been defeated, and the victorious hero party returns home before disbanding. The four—mage Frieren, hero Himmel, priest Heiter, and warrior Eisen—reminisce over their decade-long journey.',
+    genres: ['Adventure', 'Drama', 'Fantasy'],
+    averageScore: 91,
+    popularity: 140000,
+    episodes: 28,
+    duration: 24,
+    format: 'TV',
+    status: 'FINISHED',
+    season: 'FALL',
+    seasonYear: 2023,
+    studios: { nodes: [{ name: 'Madhouse', isAnimationStudio: true }] },
+    nextAiringEpisode: null,
+    trailer: { id: 'b0R1T1z-e_c', site: 'youtube' },
+    source: 'fallback',
+  },
+  {
+    id: 113415,
+    idMal: 40748,
+    title: {
+      english: 'JUJUTSU KAISEN',
+      romaji: 'Jujutsu Kaisen',
+      native: '呪術廻戦',
+    },
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/113415-jQBSkxWAAk83.jpg',
+    coverImage: {
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-bbBWj4pAcpfD.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx113415-bbBWj4pAcpfD.jpg',
+      color: '#e44141',
+    },
+    description: 'A boy swallowed a cursed talisman - the finger of a demon - and became the curse himself. He enters a shaman school to be able to locate the demon other body parts and thus exorcise himself.',
+    genres: ['Action', 'Fantasy', 'Supernatural'],
+    averageScore: 86,
+    popularity: 290000,
+    episodes: 24,
+    duration: 24,
+    format: 'TV',
+    status: 'FINISHED',
+    season: 'FALL',
+    seasonYear: 2020,
+    studios: { nodes: [{ name: 'MAPPA', isAnimationStudio: true }] },
+    nextAiringEpisode: null,
+    trailer: { id: 'V_mU3W_2s8Y', site: 'youtube' },
+    source: 'fallback',
+  },
+  {
+    id: 101922,
+    idMal: 38000,
+    title: {
+      english: 'Demon Slayer: Kimetsu no Yaiba',
+      romaji: 'Kimetsu no Yaiba',
+      native: '鬼滅の刃',
+    },
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-YfZhKBUDDS6L.jpg',
+    coverImage: {
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-PEn1CTbeUgqm.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx101922-PEn1CTbeUgqm.jpg',
+      color: '#f16543',
+    },
+    description: 'It is the Taisho Period in Japan. Tanjiro, a kindhearted boy who sells charcoal for a living, finds his family slaughtered by a demon. To make matters worse, his younger sister Nezuko has transformed into a demon.',
+    genres: ['Action', 'Fantasy', 'Supernatural'],
+    averageScore: 85,
+    popularity: 310000,
+    episodes: 26,
+    duration: 24,
+    format: 'TV',
+    status: 'FINISHED',
+    season: 'SPRING',
+    seasonYear: 2019,
+    studios: { nodes: [{ name: 'ufotable', isAnimationStudio: true }] },
+    nextAiringEpisode: null,
+    trailer: { id: '6vMuWuWlW4I', site: 'youtube' },
+    source: 'fallback',
+  },
+  {
+    id: 127230,
+    idMal: 44511,
+    title: {
+      english: 'Chainsaw Man',
+      romaji: 'Chainsaw Man',
+      native: 'チェンソーマン',
+    },
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/127230-01e405f63d0c9f13cf6b92a2a0d778fb.jpg',
+    coverImage: {
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx127230-01e405f63d0c9f13cf6b92a2a0d778fb.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx127230-01e405f63d0c9f13cf6b92a2a0d778fb.jpg',
+      color: '#e47025',
+    },
+    description: 'Denji is a teenage boy living with a Chainsaw Devil named Pochita. Due to the debt his father left behind, he has been living a rock-bottom life while repaying his debt by harvesting devil corpses with Pochita.',
+    genres: ['Action', 'Comedy', 'Drama', 'Supernatural'],
+    averageScore: 84,
+    popularity: 240000,
+    episodes: 12,
+    duration: 24,
+    format: 'TV',
+    status: 'FINISHED',
+    season: 'FALL',
+    seasonYear: 2022,
+    studios: { nodes: [{ name: 'MAPPA', isAnimationStudio: true }] },
+    nextAiringEpisode: null,
+    trailer: { id: 'q15CRdE5Bv0', site: 'youtube' },
+    source: 'fallback',
+  },
+  {
+    id: 16498,
+    idMal: 16498,
+    title: {
+      english: 'Attack on Titan',
+      romaji: 'Shingeki no Kyojin',
+      native: '進撃の巨人',
+    },
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/16498-8jpFfEkWRfs2.jpg',
+    coverImage: {
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-C6FPmWm59CyP.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx16498-C6FPmWm59CyP.jpg',
+      color: '#463b2f',
+    },
+    description: 'Centuries ago, mankind was slaughtered to near extinction by monstrous humanoid creatures called Titans, forcing humans to hide in fear behind enormous concentric walls.',
+    genres: ['Action', 'Drama', 'Fantasy', 'Mystery'],
+    averageScore: 85,
+    popularity: 380000,
+    episodes: 25,
+    duration: 24,
+    format: 'TV',
+    status: 'FINISHED',
+    season: 'SPRING',
+    seasonYear: 2013,
+    studios: { nodes: [{ name: 'WIT Studio', isAnimationStudio: true }] },
+    nextAiringEpisode: null,
+    trailer: { id: 'LHtdKWJgev4', site: 'youtube' },
+    source: 'fallback',
+  },
+];
+
+export function getStaticFallbackHeroAnime(): HeroAnime[] {
+  return [...STATIC_FALLBACK_HERO_ANIME];
+}
+
+/**
+ * Converts a standard Anime array (e.g. from Trending/Seasonal hooks) into HeroAnime objects
+ */
+export function convertAnimeListToHeroAnime(animeList: Anime[]): HeroAnime[] {
+  if (!Array.isArray(animeList) || animeList.length === 0) return [];
+  return animeList
+    .filter((a) => Boolean(a && (a.banner || a.image || a.cover)))
+    .map((a) => {
+      const numId = typeof a.id === 'string' && a.id.startsWith('anilist-')
+        ? parseInt(a.id.replace('anilist-', ''), 10) || a.id
+        : typeof a.id === 'string' && /^\d+$/.test(a.id)
+        ? parseInt(a.id, 10)
+        : a.id;
+
+      return {
+        id: numId,
+        idMal: null,
+        title: {
+          english: a.titleEnglish || a.title || null,
+          romaji: a.titleRomaji || a.title || '',
+          native: a.titleJapanese || null,
+        },
+        bannerImage: a.banner || null,
+        coverImage: {
+          extraLarge: a.cover || a.image || '',
+          large: a.image || a.cover || '',
+          color: null,
+        },
+        description: a.description || 'No description available.',
+        genres: a.genres || [],
+        averageScore: a.rating ? Math.round(a.rating * 10) : null,
+        popularity: 0,
+        episodes: a.episodes || 0,
+        duration: null,
+        format: a.type || 'TV',
+        status: a.status || 'Ongoing',
+        season: a.season || null,
+        seasonYear: a.year || null,
+        studios: {
+          nodes: (a.studios || []).map((name) => ({ name, isAnimationStudio: true })),
+        },
+        nextAiringEpisode: null,
+        trailer: null,
+        source: 'fallback' as const,
+      };
+    });
+}
 
 // Fetch with timeout to prevent hanging
 async function fetchWithTimeout(
   url: string,
   options: RequestInit = {},
-  timeout = 10000
+  timeout = 8000
 ): Promise<Response> {
+  if (typeof window === 'undefined' && url.startsWith('/')) {
+    throw new Error(`Relative URL skipped in non-browser context: ${url}`);
+  }
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
   try {
@@ -93,6 +325,7 @@ try {
   localStorage.removeItem('anistream_hero_v8');
   localStorage.removeItem('anistream_hero_v9');
   localStorage.removeItem('anistream_hero_v10');
+  localStorage.removeItem('anistream_hero_v11');
 } catch { /* ignore */ }
 
 function getCurrentSeason(): { season: string; year: number } {
@@ -106,7 +339,7 @@ function getCurrentSeason(): { season: string; year: number } {
   return { season: 'WINTER', year: y + 1 };
 }
 
-/** Fisher-Yates shuffle — keeps diversity across visits */
+/** Fisher-Yates shuffle */
 function shuffleArray<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -121,10 +354,11 @@ function getCachedData(): HeroAnime[] | null {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const cached: CachedHeroData = JSON.parse(raw);
-    if (cached.version !== CACHE_VERSION || Date.now() - cached.timestamp > CACHE_TTL) {
+    if (cached.version !== CACHE_VERSION || !Array.isArray(cached.anime) || cached.anime.length === 0) {
       localStorage.removeItem(CACHE_KEY);
       return null;
     }
+    // Stale after TTL, but still return cached data while background refresh occurs
     return cached.anime;
   } catch {
     return null;
@@ -133,6 +367,7 @@ function getCachedData(): HeroAnime[] | null {
 
 function setCachedData(anime: HeroAnime[], source: string): void {
   try {
+    if (!Array.isArray(anime) || anime.length === 0) return;
     const data: CachedHeroData = { anime, timestamp: Date.now(), source, version: CACHE_VERSION };
     localStorage.setItem(CACHE_KEY, JSON.stringify(data));
   } catch { /* ignore */ }
@@ -158,7 +393,7 @@ function cleanDescription(desc: string): string {
 
 function buildAniListQuery(sort: string, filters: string): string {
   return `{
-  Page(page:1,perPage:50){
+  Page(page:1,perPage:35){
     media(type:ANIME,sort:${sort},isAdult:false${filters}){
       id
       idMal
@@ -181,29 +416,6 @@ function buildAniListQuery(sort: string, filters: string): string {
     }
   }
 }`;
-}
-
-function hasHttpBanner(m: Record<string, unknown>): boolean {
-  const b = m.bannerImage;
-  return typeof b === 'string' && /^https?:\/\//i.test(b.trim());
-}
-
-async function fetchJikanSynopsis(malId: number): Promise<string | null> {
-  try {
-    const res = await fetchWithTimeout(
-      `https://api.jikan.moe/v4/anime/${malId}/full`,
-      { headers: { 'User-Agent': USER_AGENT } },
-      10000
-    );
-    if (!res.ok) return null;
-    const json = (await res.json()) as { data?: { synopsis?: string | null } };
-    const s = json.data?.synopsis;
-    if (typeof s !== 'string') return null;
-    const t = s.replace(/\s*\[Written by[^\]]*\]\s*$/i, '').replace(/\s+/g, ' ').trim();
-    return t.length >= 55 ? t.slice(0, 1200) : null;
-  } catch {
-    return null;
-  }
 }
 
 function clientRecencyScore(m: Record<string, unknown>): number {
@@ -234,21 +446,20 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
   const raw: Record<string, unknown>[] = [];
 
   const queries = [
-    // Current season — most relevant for right now (Spring/Summer 2026)
+    // Current season trending
     buildAniListQuery('TRENDING_DESC', `,season:${season},seasonYear:${seasonYear},format_in:${formats}`),
-    buildAniListQuery('SCORE_DESC', `,season:${season},seasonYear:${seasonYear},status:RELEASING,format_in:${formats}`),
-    // Recent airing — catch multi-cour shows that started last season
-    buildAniListQuery('TRENDING_DESC', `,status:RELEASING,format_in:${formats}`),
-    // Recent years only — exclude legacy titles (pre-2023)
+    // Popular releasing shows
+    buildAniListQuery('POPULARITY_DESC', `,status:RELEASING,format_in:${formats}`),
+    // Top recent trending
     buildAniListQuery('TRENDING_DESC', `,startDate_greater:${currentYear - 3}0000,format_in:${formats}`),
   ];
 
   for (const q of queries) {
     try {
       const chunk = await fetchAniListPage(q);
-      raw.push(...chunk);
+      if (Array.isArray(chunk)) raw.push(...chunk);
     } catch (e) {
-      console.warn('[Hero] AniList page failed:', e);
+      console.warn('[Hero] AniList page query failed:', e);
     }
   }
 
@@ -256,42 +467,35 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
   const seen = new Set<number>();
   const deduped = raw.filter((m) => {
     const id = m.id as number;
-    if (seen.has(id)) return false;
+    if (!id || seen.has(id)) return false;
     seen.add(id);
     return true;
   });
 
-  // Filter: must have banner AND be from 2023 or newer (no legacy shows in spotlight)
+  // Filter: must have either bannerImage OR valid large coverImage
   const candidates = deduped.filter((m) => {
-    if (!hasHttpBanner(m)) return false;
+    const b = m.bannerImage as string | null;
+    const cover = m.coverImage as { extraLarge?: string; large?: string } | null;
+    const hasImage = Boolean(b || cover?.extraLarge || cover?.large);
+    if (!hasImage) return false;
+
     const year = (m.seasonYear as number) || 0;
     const status = (m.status as string) || '';
-    // Always include currently releasing, even if year is unknown
     if (status === 'RELEASING') return true;
-    // For finished shows, only accept 2023+ (more reasonable range)
-    return year >= currentYear - 3;
+    return year >= currentYear - 4;
   });
+
   candidates.sort((a, b) => clientRecencyScore(b) - clientRecencyScore(a));
 
-  // Shuffle within tiers so repeat visitors see a fresh rotation
   const top = candidates.slice(0, 10);
   const rest = candidates.slice(10);
   const shuffled = [...shuffleArray(top), ...shuffleArray(rest)];
 
   const out: HeroAnime[] = [];
-  let jikanCalls = 0;
-
-  // Skip Jikan synopsis fetching for faster initial load
-  // If description is missing, we'll still show the anime with available metadata
   for (const m of shuffled) {
     if (out.length >= 20) break;
-
     let desc = cleanDescription((m.description as string) || '');
-
-    // Accept anime even with short/missing descriptions for faster load
-    if (desc.length < 20) {
-      desc = 'No description available.';
-    }
+    if (desc.length < 20) desc = 'No description available.';
 
     out.push({
       ...(m as unknown as HeroAnime),
@@ -304,7 +508,7 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
 }
 
 async function fetchFromHeroSpotlightAPI(): Promise<HeroAnime[]> {
-  const response = await fetch(apiUrl('/api/anime/hero-spotlight'));
+  const response = await fetchWithTimeout(apiUrl('/api/anime/hero-spotlight'), {}, 8000);
   if (!response.ok) {
     throw new Error(`hero-spotlight HTTP ${response.status}`);
   }
@@ -319,6 +523,21 @@ async function fetchFromHeroSpotlightAPI(): Promise<HeroAnime[]> {
   }));
 }
 
+// ─── FALLBACK: BFF Trending (streaming-source backed) ─────────────────────────
+
+async function fetchFromBffTrending(): Promise<HeroAnime[]> {
+  try {
+    const response = await fetchWithTimeout(apiUrl('/api/anime/trending?page=1&limit=20'), {}, 8000);
+    if (!response.ok) return [];
+    const json = (await response.json()) as { results?: Anime[] };
+    const results = json.results || [];
+    return convertAnimeListToHeroAnime(results);
+  } catch (e) {
+    console.warn('[Hero] BFF trending fallback failed:', e);
+    return [];
+  }
+}
+
 // ─── FALLBACK: Jikan (MyAnimeList unofficial API) ─────────────────────────────
 
 async function fetchFromJikan(): Promise<HeroAnime[]> {
@@ -326,27 +545,29 @@ async function fetchFromJikan(): Promise<HeroAnime[]> {
     const response = await fetchWithTimeout(
       'https://api.jikan.moe/v4/top/anime?page=1&limit=20&filter=airing',
       { headers: { 'User-Agent': USER_AGENT } },
-      10000
+      8000
     );
     if (!response.ok) return [];
-    const json = (await response.json()) as { data?: Array<{
-      mal_id: number;
-      title: string;
-      title_english?: string;
-      title_japanese?: string;
-      images?: { jpg?: { image_url?: string; large_image?: string } };
-      synopsis?: string;
-      genres?: Array<{ name: string }>;
-      score?: number;
-      members?: number;
-      episodes?: number;
-      status?: string;
-    }> };
+    const json = (await response.json()) as {
+      data?: Array<{
+        mal_id: number;
+        title: string;
+        title_english?: string;
+        title_japanese?: string;
+        images?: { jpg?: { image_url?: string; large_image?: string } };
+        synopsis?: string;
+        genres?: Array<{ name: string }>;
+        score?: number;
+        members?: number;
+        episodes?: number;
+        status?: string;
+      }>;
+    };
     const results = json.data || [];
     return results.map((item) => ({
       id: item.mal_id,
       idMal: item.mal_id,
-      title: { english: item.title_english, romaji: item.title, native: item.title_japanese },
+      title: { english: item.title_english || null, romaji: item.title, native: item.title_japanese || null },
       bannerImage: null,
       coverImage: {
         extraLarge: item.images?.jpg?.large_image || item.images?.jpg?.image_url || '',
@@ -360,7 +581,7 @@ async function fetchFromJikan(): Promise<HeroAnime[]> {
       episodes: item.episodes || 0,
       duration: null,
       format: 'TV',
-      status: item.status === 'Airing' ? 'RELEASING' : item.status === 'Complete' ? 'FINISHED' : item.status,
+      status: item.status === 'Airing' ? 'RELEASING' : item.status === 'Complete' ? 'FINISHED' : item.status || 'Ongoing',
       season: null,
       seasonYear: null,
       studios: { nodes: [] },
@@ -383,10 +604,10 @@ async function fetchFromKitsu(): Promise<HeroAnime[]> {
       {
         headers: {
           Accept: 'application/vnd.api+json',
-          'User-Agent': USER_AGENT
-        }
+          'User-Agent': USER_AGENT,
+        },
       },
-      10000
+      8000
     );
     if (!response.ok) return [];
     const json = (await response.json()) as {
@@ -395,6 +616,7 @@ async function fetchFromKitsu(): Promise<HeroAnime[]> {
         attributes?: {
           titles?: { en?: string; en_jp?: string; ja_jp?: string };
           coverImage?: { large?: string; original?: string };
+          posterImage?: { large?: string; original?: string };
           synopsis?: string;
           averageRating?: string;
           userCount?: number;
@@ -406,17 +628,17 @@ async function fetchFromKitsu(): Promise<HeroAnime[]> {
     };
     const results = json.data || [];
     return results.map((item) => ({
-      id: parseInt(item.id, 10),
+      id: parseInt(item.id, 10) || item.id,
       idMal: null,
       title: {
-        english: item.attributes?.titles?.en,
+        english: item.attributes?.titles?.en || null,
         romaji: item.attributes?.titles?.en_jp || '',
-        native: item.attributes?.titles?.ja_jp,
+        native: item.attributes?.titles?.ja_jp || null,
       },
-      bannerImage: null,
+      bannerImage: item.attributes?.coverImage?.original || item.attributes?.coverImage?.large || null,
       coverImage: {
-        extraLarge: item.attributes?.coverImage?.large || item.attributes?.coverImage?.original || '',
-        large: item.attributes?.coverImage?.large || '',
+        extraLarge: item.attributes?.posterImage?.original || item.attributes?.posterImage?.large || '',
+        large: item.attributes?.posterImage?.large || '',
         color: null,
       },
       description: cleanDescription(item.attributes?.synopsis || ''),
@@ -440,138 +662,31 @@ async function fetchFromKitsu(): Promise<HeroAnime[]> {
   }
 }
 
-// ─── FALLBACK: Anime-Planet API ────────────────────────────────────────────────
-
-async function fetchFromAnimePlanet(): Promise<HeroAnime[]> {
-  try {
-    // Anime-Planet doesn't have a public API, use their discover page
-    const response = await fetch('https://www.anime-planet.com/anime/all');
-    if (!response.ok) return [];
-    // Note: This would require HTML parsing which is complex; return empty for now
-    // A proper implementation would use a backend service
-    console.warn('[Hero] Anime-Planet fallback: no public API available');
-    return [];
-  } catch (e) {
-    console.warn('[Hero] Anime-Planet fallback failed:', e);
-    return [];
-  }
-}
-
-// ─── FALLBACK: BFF Trending (works without AniList) ─────────────────────────
-
-async function fetchFromBffTrending(): Promise<HeroAnime[]> {
-  try {
-    const response = await fetchWithTimeout(apiUrl('/api/anime/trending?page=1&limit=20'), {}, 10000);
-    if (!response.ok) return [];
-    const json = (await response.json()) as { results?: Anime[] };
-    const results = json.results || [];
-    return results.map((a) => ({
-      id: a.id,
-      idMal: null,
-      title: { english: a.title, romaji: a.titleJapanese || a.title, native: null },
-      bannerImage: a.banner || null,
-      coverImage: { extraLarge: a.image || a.cover || '', large: a.image || a.cover || '', color: null },
-      description: a.description || '',
-      genres: a.genres || [],
-      averageScore: a.rating ? Math.round(a.rating * 10) : null,
-      popularity: 0,
-      episodes: a.episodes || 0,
-      duration: null,
-      format: a.type || 'TV',
-      status: a.status || 'Unknown',
-      season: a.season || null,
-      seasonYear: a.year || null,
-      studios: { nodes: [] },
-      nextAiringEpisode: null,
-      trailer: null,
-      source: 'bff' as const,
-    }));
-  } catch (e) {
-    console.warn('[Hero] BFF trending fallback failed:', e);
-    return [];
-  }
-}
-
-// ─── GITHUB STATIC DATASET FALLBACK ─────────────────────────────────────────────
-
-async function fetchFromGitHubDataset(): Promise<HeroAnime[]> {
-  try {
-    // Use a reliable GitHub-hosted anime dataset as ultimate fallback
-    const response = await fetch('https://raw.githubusercontent.com/manami-project/anime-offline-database/master/anime-offline-database.json');
-    if (!response.ok) return [];
-    
-    const json = await response.json();
-    const data = json.data || [];
-    
-    // Filter for currently popular/recent anime and convert to our format
-    const recentAnime = data
-      .filter((item: any) => {
-        const year = item?.season?.year || 0;
-        const currentYear = new Date().getFullYear();
-        // Prioritize recent anime (2023+)
-        return year >= currentYear - 2;
-      })
-      .slice(0, 20);
-    
-    return recentAnime.map((item: any) => ({
-      id: item?.sources?.[0]?.split('/').pop() || Math.random(),
-      idMal: item?.sources?.find((s: string) => s.includes('myanimelist'))?.split('/').pop() || null,
-      title: {
-        english: item?.title?.english || null,
-        romaji: item?.title?.romaji || item?.title?.english || '',
-        native: item?.title?.native || null,
-      },
-      bannerImage: item?.picture || null,
-      coverImage: {
-        extraLarge: item?.picture || '',
-        large: item?.picture || '',
-        color: null,
-      },
-      description: item?.synopsis || 'No description available.',
-      genres: item?.tags || [],
-      averageScore: item?.score ? Math.round(item.score * 10) : null,
-      popularity: 0,
-      episodes: item?.episodes || 0,
-      duration: null,
-      format: item?.type || 'TV',
-      status: item?.status === 'finished' ? 'FINISHED' : item?.status === 'airing' ? 'RELEASING' : 'Unknown',
-      season: item?.season?.season || null,
-      seasonYear: item?.season?.year || null,
-      studios: { nodes: [] },
-      nextAiringEpisode: null,
-      trailer: null,
-      source: 'github' as const,
-    }));
-  } catch (e) {
-    console.warn('[Hero] GitHub dataset fallback failed:', e);
-    return [];
-  }
-}
-
 // ─── TMDB API FALLBACK ─────────────────────────────────────────────────────────
 
 async function fetchFromTMDB(): Promise<HeroAnime[]> {
   try {
-    // TMDB (The Movie Database) has anime data and is very reliable
     const apiKey = import.meta.env.VITE_TMDB_API_KEY || '2dca580c2a14b55200e784d157207b4d';
     const response = await fetchWithTimeout(
       `https://api.themoviedb.org/3/discover/tv?api_key=${apiKey}&with_genres=16&sort_by=popularity.desc&page=1`,
       { headers: { 'User-Agent': USER_AGENT } },
-      10000
+      8000
     );
     if (!response.ok) return [];
-    
-    const json = await response.json() as { results?: Array<{
-      id: number;
-      name: string;
-      overview: string;
-      poster_path: string;
-      backdrop_path: string;
-      vote_average: number;
-      first_air_date: string;
-      genre_ids: number[];
-    }> };
-    
+
+    const json = (await response.json()) as {
+      results?: Array<{
+        id: number;
+        name: string;
+        overview: string;
+        poster_path: string;
+        backdrop_path: string;
+        vote_average: number;
+        first_air_date: string;
+        genre_ids: number[];
+      }>;
+    };
+
     const results = json.results || [];
     return results.slice(0, 20).map((item) => ({
       id: item.id,
@@ -588,7 +703,7 @@ async function fetchFromTMDB(): Promise<HeroAnime[]> {
         color: null,
       },
       description: item.overview || 'No description available.',
-      genres: [], // TMDB uses genre IDs, would need mapping
+      genres: [],
       averageScore: item.vote_average ? Math.round(item.vote_average * 10) : null,
       popularity: 0,
       episodes: 0,
@@ -608,22 +723,46 @@ async function fetchFromTMDB(): Promise<HeroAnime[]> {
   }
 }
 
-// ─── Orchestrator ───────────────────────────────────────────────────────────
+// ─── Master Orchestrator ───────────────────────────────────────────────────
 
-async function fetchHeroAnime(): Promise<HeroAnime[]> {
-  // 1) BFF trending (streaming-source backed) - MOST RELIABLE
+export async function fetchHeroAnime(): Promise<HeroAnime[]> {
+  // 1) Direct AniList GraphQL — highest quality metadata & banners
+  try {
+    const data = await fetchFromAniList();
+    if (data.length > 0) {
+      console.log(`[Hero] ✅ ${data.length} anime from AniList direct`);
+      setCachedData(data, 'AniList');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] AniList direct failed, trying fallbacks:', err);
+  }
+
+  // 2) BFF trending (streaming-source backed)
   try {
     const data = await fetchFromBffTrending();
     if (data.length > 0) {
-      console.log(`[Hero] ✅ ${data.length} anime from BFF trending (primary source)`);
+      console.log(`[Hero] ✅ ${data.length} anime from BFF trending`);
       setCachedData(data, 'BFF-trending');
       return data;
     }
   } catch (err) {
-    console.warn('[Hero] BFF trending failed, trying fallbacks:', err);
+    console.warn('[Hero] BFF trending failed, trying next fallback:', err);
   }
 
-  // 2) Jikan (MyAnimeList unofficial API) - MORE RELIABLE THAN ANILIST
+  // 3) Server hero-spotlight API
+  try {
+    const data = await fetchFromHeroSpotlightAPI();
+    if (data.length > 0) {
+      console.log(`[Hero] ✅ ${data.length} from /api/anime/hero-spotlight`);
+      setCachedData(data, 'hero-spotlight');
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Hero] hero-spotlight API failed:', err);
+  }
+
+  // 4) Jikan (MyAnimeList)
   try {
     const data = await fetchFromJikan();
     if (data.length > 0) {
@@ -635,7 +774,7 @@ async function fetchHeroAnime(): Promise<HeroAnime[]> {
     console.warn('[Hero] Jikan failed:', err);
   }
 
-  // 3) Kitsu API - RELIABLE FALLBACK
+  // 5) Kitsu API
   try {
     const data = await fetchFromKitsu();
     if (data.length > 0) {
@@ -647,7 +786,7 @@ async function fetchHeroAnime(): Promise<HeroAnime[]> {
     console.warn('[Hero] Kitsu failed:', err);
   }
 
-  // 4) TMDB API - VERY RELIABLE MOVIE DATABASE
+  // 6) TMDB API
   try {
     const data = await fetchFromTMDB();
     if (data.length > 0) {
@@ -659,61 +798,29 @@ async function fetchHeroAnime(): Promise<HeroAnime[]> {
     console.warn('[Hero] TMDB failed:', err);
   }
 
-  // 5) GitHub Static Dataset - ULTIMATE FALLBACK
-  try {
-    const data = await fetchFromGitHubDataset();
-    if (data.length > 0) {
-      console.log(`[Hero] ✅ ${data.length} anime from GitHub dataset`);
-      setCachedData(data, 'GitHub');
-      return data;
-    }
-  } catch (err) {
-    console.warn('[Hero] GitHub dataset failed:', err);
-  }
-
-  // 6) Server hero-spotlight API (AniList + Jikan synopsis) - LESS RELIABLE
-  try {
-    const data = await fetchFromHeroSpotlightAPI();
-    if (data.length > 0) {
-      console.log(
-        `[Hero] ✅ ${data.length} from /api/anime/hero-spotlight (${data.filter((d) => d.trailer?.id).length} w/ trailers)`
-      );
-      setCachedData(data, 'hero-spotlight');
-      return data;
-    }
-  } catch (err) {
-    console.warn('[Hero] hero-spotlight API failed:', err);
-  }
-
-  // 7) Direct AniList GraphQL - LEAST RELIABLE (moved to last)
-  try {
-    const data = await fetchFromAniList();
-    if (data.length > 0) {
-      console.log(`[Hero] ✅ ${data.length} anime from AniList direct (${data.filter((d) => d.trailer?.id).length} w/ trailers)`);
-      setCachedData(data, 'AniList');
-      return data;
-    }
-  } catch (err) {
-    console.warn('[Hero] AniList direct failed:', err);
-  }
-
-  // 8) Return cached data if available (app may be temporarily offline)
+  // 7) Return cached data if available
   const cached = getCachedData();
   if (cached && cached.length > 0) {
-    console.warn('[Hero] All sources failed, returning cached data');
+    console.warn('[Hero] All remote sources failed, returning cached data');
     return cached;
   }
 
-  // 9) Return empty array instead of throwing to prevent UI crash
-  console.warn('[Hero] All hero sources failed, returning empty array');
-  return [];
+  // 8) Guaranteed static fallback (prevents UI from ever being empty or disappearing)
+  console.log('[Hero] Using built-in curated spotlight fallback');
+  return getStaticFallbackHeroAnime();
 }
 
 // ─── React Hook ─────────────────────────────────────────────────────────────
 
 export function useHeroAnime() {
-  const [heroAnime, setHeroAnime] = useState<HeroAnime[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [heroAnime, setHeroAnime] = useState<HeroAnime[]>(() => {
+    const cached = getCachedData();
+    return cached && cached.length > 0 ? cached : getStaticFallbackHeroAnime();
+  });
+  const [isLoading, setIsLoading] = useState(() => {
+    const cached = getCachedData();
+    return !(cached && cached.length > 0);
+  });
   const [error, setError] = useState<Error | null>(null);
   const fetchedRef = useRef(false);
 
@@ -722,7 +829,9 @@ export function useHeroAnime() {
     setError(null);
     try {
       const data = await fetchHeroAnime();
-      setHeroAnime(data);
+      if (data && data.length > 0) {
+        setHeroAnime(data);
+      }
     } catch (err) {
       setError(err as Error);
     } finally {
@@ -738,13 +847,21 @@ export function useHeroAnime() {
     if (cached && cached.length > 0) {
       setHeroAnime(cached);
       setIsLoading(false);
-      // Background refresh if > 15 min old
+
+      // Background refresh check
       try {
         const raw = localStorage.getItem(CACHE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Date.now() - parsed.timestamp > 15 * 60 * 1000) {
-            fetchHeroAnime().then(setHeroAnime).catch(() => {});
+            fetchHeroAnime()
+              .then((fresh) => {
+                // NEVER overwrite with empty array
+                if (fresh && fresh.length > 0) {
+                  setHeroAnime(fresh);
+                }
+              })
+              .catch(() => {});
           }
         }
       } catch { /* ignore */ }
@@ -760,11 +877,11 @@ export function useHeroAnime() {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 export function getHeroTitle(anime: HeroAnime): string {
-  return anime.title.english || anime.title.romaji;
+  return anime.title?.english || anime.title?.romaji || 'Unknown Anime';
 }
 
 export function getStudioName(anime: HeroAnime): string | null {
-  const studio = anime.studios.nodes.find(s => s.isAnimationStudio) || anime.studios.nodes[0];
+  const studio = anime.studios?.nodes?.find((s) => s.isAnimationStudio) || anime.studios?.nodes?.[0];
   return studio?.name || null;
 }
 
@@ -775,8 +892,13 @@ export function formatHeroRating(score: number | null): string | null {
 
 export function getFormatLabel(format: string | null): string {
   const labels: Record<string, string> = {
-    TV: 'TV Series', TV_SHORT: 'TV Short', MOVIE: 'Movie',
-    SPECIAL: 'Special', OVA: 'OVA', ONA: 'ONA', MUSIC: 'Music',
+    TV: 'TV Series',
+    TV_SHORT: 'TV Short',
+    MOVIE: 'Movie',
+    SPECIAL: 'Special',
+    OVA: 'OVA',
+    ONA: 'ONA',
+    MUSIC: 'Music',
   };
   return labels[format || ''] || format || 'TV';
 }

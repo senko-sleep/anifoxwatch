@@ -13,7 +13,7 @@ import {
   useAnilistHomeAction,
 } from '@/hooks/useAnilistHomeSections';
 import { useWatchHistory } from '@/hooks/useWatchHistory';
-import { useHeroAnime } from '@/hooks/useHeroAnimeMultiSource';
+import { useHeroAnime, convertAnimeListToHeroAnime, getStaticFallbackHeroAnime } from '@/hooks/useHeroAnimeMultiSource';
 import { AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useEffect, useMemo, useCallback } from 'react';
@@ -51,7 +51,19 @@ const Index = () => {
   const { data: moviesData,    isLoading: moviesLoading,    refetch: refetchMovies   } = useAnilistHomeMovies(20);
   const { data: actionData,    isLoading: actionLoading,    refetch: refetchAction   } = useAnilistHomeAction(20);
   const { history, removeFromHistory }                        = useWatchHistory();
-  const { heroAnime, isLoading: heroLoading }                 = useHeroAnime();
+  const { heroAnime: rawHeroAnime, isLoading: heroLoading }   = useHeroAnime();
+
+  // Robust hero anime selection with multiple fallback layers
+  const effectiveHeroAnime = useMemo(() => {
+    if (rawHeroAnime && rawHeroAnime.length > 0) return rawHeroAnime;
+    if (trendingAnime && trendingAnime.length > 0) {
+      return convertAnimeListToHeroAnime(trendingAnime);
+    }
+    if (seasonalData?.results && seasonalData.results.length > 0) {
+      return convertAnimeListToHeroAnime(seasonalData.results);
+    }
+    return getStaticFallbackHeroAnime();
+  }, [rawHeroAnime, trendingAnime, seasonalData?.results]);
 
   // Scroll restoration
   const SCROLL_KEY = 'anistream_scroll_positions';
@@ -128,8 +140,8 @@ const Index = () => {
       <Navbar />
 
 {/* ── Hero ─────────────────────────────────────────────────────── */}
-      {heroAnime.length > 0 ? (
-        <HeroSection heroAnime={heroAnime} />
+      {effectiveHeroAnime.length > 0 ? (
+        <HeroSection heroAnime={effectiveHeroAnime} />
       ) : heroLoading ? (
         <section className="relative w-full sm:px-6 lg:px-8">
           <div className="mx-auto h-[340px] sm:h-[500px] w-full max-w-7xl animate-pulse sm:rounded-2xl bg-zinc-900/80" />
@@ -139,13 +151,7 @@ const Index = () => {
           </div>
         </section>
       ) : (
-        <section className="relative w-full sm:px-6 lg:px-8">
-          <div className="mx-auto h-[200px] sm:h-[300px] w-full max-w-7xl shimmer sm:rounded-2xl" />
-          <div className="mt-3 flex justify-center gap-2">
-            <AlertCircle className="h-4 w-4 text-zinc-600" />
-            <span className="text-[11px] text-zinc-600">Spotlight unavailable</span>
-          </div>
-        </section>
+        <HeroSection heroAnime={getStaticFallbackHeroAnime()} />
       )}
 
       {/* ── Error banner ──────────────────────────────────────────────── */}

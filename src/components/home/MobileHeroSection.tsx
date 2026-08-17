@@ -1,41 +1,53 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Play, Star, Sparkles, Captions, Film } from 'lucide-react';
-import { cn, ensureHttps, pickAnimePoster } from '@/lib/utils';
+import { cn, ensureHttps, pickAnimePoster, generateWatchUrl } from '@/lib/utils';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
-import { useHeroAnime, getHeroTitle, formatHeroRating } from '@/hooks/useHeroAnimeMultiSource';
+import {
+  useHeroAnime,
+  getHeroTitle,
+  formatHeroRating,
+  getStaticFallbackHeroAnime,
+} from '@/hooks/useHeroAnimeMultiSource';
 
 const FILM_GRAIN = `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`;
 
 export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHeroAnime>['heroAnime'] }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isLandscape } = useBreakpoint();
 
-  const slides = useMemo(
-    () => heroAnime.filter(a => !!(a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large)),
-    [heroAnime]
-  );
+  const slides = useMemo(() => {
+    const list = (heroAnime || []).filter(
+      (a) => Boolean(a && (a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large))
+    );
+    return list.length > 0 ? list : getStaticFallbackHeroAnime();
+  }, [heroAnime]);
 
-  const [idx, setIdx]         = useState(0);
+  const count = slides.length;
+  const [idx, setIdx] = useState(0);
   const [prevIdx, setPrevIdx] = useState<number | null>(null);
   const [panelVisible, setPanelVisible] = useState(true);
   const touchStartX = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isPaused    = useRef(false);
-  const count = slides.length;
+  const isPaused = useRef(false);
 
-  const go = useCallback((next: number) => {
-    if (count === 0) return;
-    const n = ((next % count) + count) % count;
-    if (n === idx) return;
-    setPanelVisible(false);
-    setPrevIdx(idx);
-    setIdx(n);
-    setTimeout(() => setPanelVisible(true), 120);
-    setTimeout(() => setPrevIdx(null), 650);
-  }, [idx, count]);
+  // Safe clamped index
+  const safeIdx = count > 0 ? ((idx % count) + count) % count : 0;
+
+  const go = useCallback(
+    (next: number) => {
+      if (count === 0) return;
+      const n = ((next % count) + count) % count;
+      if (n === safeIdx) return;
+      setPanelVisible(false);
+      setPrevIdx(safeIdx);
+      setIdx(n);
+      setTimeout(() => setPanelVisible(true), 120);
+      setTimeout(() => setPrevIdx(null), 650);
+    },
+    [safeIdx, count]
+  );
 
   useEffect(() => {
     if (idx >= count && count > 0) setIdx(0);
@@ -43,13 +55,19 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
 
   useEffect(() => {
     if (count <= 1) return;
-    const tick = () => { if (!isPaused.current) go(idx + 1); };
-    intervalRef.current = setInterval(tick, 8000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [idx, count, go]);
+    const tick = () => {
+      if (!isPaused.current) go(safeIdx + 1);
+    };
+    intervalRef.current = setInterval(tick, 7000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [safeIdx, count, go]);
 
   useEffect(() => {
-    const onVis = () => { isPaused.current = document.hidden; };
+    const onVis = () => {
+      isPaused.current = document.hidden;
+    };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
@@ -65,32 +83,31 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
     if (touchStartX.current === null || touchStartY.current === null) return;
     const dx = e.changedTouches[0].clientX - touchStartX.current;
     const dy = e.changedTouches[0].clientY - touchStartY.current;
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 36) go(dx < 0 ? idx + 1 : idx - 1);
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 36) {
+      go(dx < 0 ? safeIdx + 1 : safeIdx - 1);
+    }
     touchStartX.current = null;
     touchStartY.current = null;
-    setTimeout(() => { isPaused.current = false; }, 1000);
+    setTimeout(() => {
+      isPaused.current = false;
+    }, 1000);
   };
 
-  // ── Loading skeleton ────────────────────────────────────────────────────────
-  if (!slides.length) {
-    return (
-      <div className="mx-4">
-        <div
-          className="rounded-2xl shimmer bg-zinc-900 border border-white/[0.06]"
-          style={{ aspectRatio: '16 / 9' }}
-        />
-        <div style={{ height: '24px' }} />
-      </div>
-    );
-  }
+  const onTouchCancel = () => {
+    touchStartX.current = null;
+    touchStartY.current = null;
+    isPaused.current = false;
+  };
 
-  const anime       = slides[idx];
-  const title       = getHeroTitle(anime);
-  const rating      = formatHeroRating(anime.averageScore);
-  const watchPath   = generateWatchUrl({ title: title, id: String(anime.id), genres: anime.genres });
+  const anime = slides[safeIdx] || slides[0];
+  if (!anime) return null;
+
+  const title = getHeroTitle(anime);
+  const rating = formatHeroRating(anime.averageScore);
+  const watchPath = generateWatchUrl({ title: title, id: String(anime.id), genres: anime.genres });
   const formatLabel = (anime.format || 'TV').replace(/_/g, ' ');
   const seasonLabel = [anime.season, anime.seasonYear].filter(Boolean).join(' ');
-  const epCount     = anime.episodes != null && anime.episodes > 0 ? `${anime.episodes} eps` : null;
+  const epCount = anime.episodes != null && anime.episodes > 0 ? `${anime.episodes} eps` : null;
   const posterSrc = (() => {
     if (anime.coverImage && typeof anime.coverImage === 'object') {
       return anime.coverImage.extraLarge || anime.coverImage.large || '';
@@ -113,9 +130,8 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
 
   const displayDescription = (() => {
     if (cleanDescription && cleanDescription.length > 10) return cleanDescription;
-    const g = anime.genres && Array.isArray(anime.genres)
-      ? anime.genres.slice(0, 3).join(', ')
-      : '';
+    const g =
+      anime.genres && Array.isArray(anime.genres) ? anime.genres.slice(0, 3).join(', ') : '';
     return g
       ? `${title} — A premium ${g} anime. Follow the journey on AniFox.`
       : `${title} — Start watching now on AniFox.`;
@@ -126,6 +142,7 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
       className="mx-4 select-none"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchCancel}
     >
       {/* ── CARD — Widescreen display box with aspect ratio 16/9 ─────────────────── */}
       <div
@@ -141,15 +158,17 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
       >
         {/* ── Background slides — absolute crossfade ─────────────── */}
         {slides.map((a, i) => {
-          const bg = ensureHttps(a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large || '');
-          const isActive = i === idx;
-          const isPrev   = i === prevIdx;
+          const banner = a.bannerImage;
+          const cover = a.coverImage?.extraLarge || a.coverImage?.large;
+          const bg = ensureHttps(banner || cover || '');
+          const isActive = i === safeIdx;
+          const isPrev = i === prevIdx;
           if (!isActive && !isPrev) return null;
           return (
             <div
-              key={a.id}
+              key={`${a.id}-${i}`}
               className={cn(
-                'absolute inset-0 transition-opacity duration-[600ms] will-change-[opacity]',
+                'absolute inset-0 transition-opacity duration-500 will-change-[opacity]',
                 isActive ? 'opacity-100 z-[1]' : 'opacity-0 z-[0]'
               )}
               aria-hidden={!isActive}
@@ -158,11 +177,16 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
                 src={bg}
                 alt=""
                 className="w-full h-full object-cover"
-                style={{ objectPosition: 'center 20%' }}
+                style={{ objectPosition: banner ? 'center 20%' : 'center top' }}
                 loading={i === 0 ? 'eager' : 'lazy'}
                 decoding="async"
                 referrerPolicy="no-referrer"
                 draggable={false}
+                onError={(e) => {
+                  if (cover && (e.currentTarget.src !== cover)) {
+                    e.currentTarget.src = ensureHttps(cover);
+                  }
+                }}
               />
             </div>
           );
@@ -172,7 +196,8 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
         <div
           className="pointer-events-none absolute inset-0 z-[2]"
           style={{
-            background: 'linear-gradient(to bottom, rgba(10,10,15,0.3) 0%, rgba(10,10,15,0.7) 40%, rgba(8,10,15,0.96) 72%, #080a0f 100%)',
+            background:
+              'linear-gradient(to bottom, rgba(10,10,15,0.3) 0%, rgba(10,10,15,0.7) 40%, rgba(8,10,15,0.96) 72%, #080a0f 100%)',
           }}
         />
 
@@ -185,16 +210,19 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
         {/* Subtle warm accent glow at bottom-left */}
         <div
           className="pointer-events-none absolute bottom-0 left-0 z-[3] w-[60%] h-[60%] opacity-[0.12]"
-          style={{ background: 'radial-gradient(ellipse at 0% 100%, hsl(28 95% 55% / 1) 0%, transparent 65%)' }}
+          style={{
+            background: 'radial-gradient(ellipse at 0% 100%, hsl(28 95% 55% / 1) 0%, transparent 65%)',
+          }}
         />
 
         {/* ── SPOTLIGHT badge — top left ─────────────────────────────────── */}
         <div className="absolute top-[10px] left-[12px] z-[4] flex items-center gap-1 bg-black/45 backdrop-blur-md px-2 py-0.5 rounded-full border border-white/[0.04]">
           <span className="flex items-center gap-0.5 text-[7.5px] font-bold uppercase tracking-[0.18em] text-fox-orange drop-shadow-sm">
-             <Sparkles className="w-2 h-2" />Spotlight
+            <Sparkles className="w-2 h-2" />
+            Spotlight
           </span>
           {seasonLabel && (
-             <span className="text-[7.5px] text-white/50 font-medium uppercase tracking-wide">
+            <span className="text-[7.5px] text-white/50 font-medium uppercase tracking-wide">
               · {seasonLabel}
             </span>
           )}
@@ -224,7 +252,7 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
             )}
           </div>
 
-          {/* Right side: Title, Sleek Badges, and Description */}
+          {/* Right side: Title, Badges, and Description */}
           <div className="flex-1 flex flex-col justify-end min-w-0">
             <h1
               className="font-display font-black text-white leading-tight mb-1 tracking-tight text-shadow"
@@ -239,7 +267,7 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
               {title}
             </h1>
 
-            {/* Makeover: Black & Sleek Unified Badges Container */}
+            {/* Badges Container */}
             <div className="bg-zinc-950/80 border border-zinc-800/80 backdrop-blur-md rounded-lg py-1 px-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 shadow-sm w-full mb-1">
               {rating && (
                 <>
@@ -256,9 +284,7 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
               {epCount && (
                 <>
                   <span className="w-px h-2 bg-zinc-800" />
-                  <span className="text-[7.5px] font-semibold text-zinc-400">
-                    {epCount}
-                  </span>
+                  <span className="text-[7.5px] font-semibold text-zinc-400">{epCount}</span>
                 </>
               )}
               <span className="w-px h-2 bg-zinc-800" />
@@ -268,7 +294,7 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
               </span>
             </div>
 
-            {/* Description Synopsis next to the card/details */}
+            {/* Description Synopsis */}
             <p className="text-[9.5px] text-zinc-400 line-clamp-2 leading-relaxed font-medium">
               {displayDescription}
             </p>
@@ -287,11 +313,11 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
         </button>
       </div>
 
-      {/* ── Pagination dots — outside card ───────────────────────────────────── */}
+      {/* ── Pagination dots ── */}
       {count > 1 && (
         <div
-           className="flex items-center justify-center"
-           style={{ marginTop: '8px', marginBottom: '2px' }}
+          className="flex items-center justify-center"
+          style={{ marginTop: '8px', marginBottom: '2px' }}
           role="tablist"
           aria-label="Slide navigation"
         >
@@ -300,7 +326,7 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
               key={i}
               onClick={() => go(i)}
               aria-label={`Slide ${i + 1}`}
-              aria-selected={i === idx}
+              aria-selected={i === safeIdx}
               role="tab"
               className="touch-manipulation"
               style={{ margin: '0 2.5px', padding: '4px' }}
@@ -308,10 +334,10 @@ export function MobileHero({ heroAnime }: { heroAnime: ReturnType<typeof useHero
               <span
                 className={cn(
                   'block rounded-full transition-all duration-300',
-                  i === idx ? 'bg-fox-orange' : 'bg-white/20'
+                  i === safeIdx ? 'bg-fox-orange' : 'bg-white/20'
                 )}
                 style={{
-                  width:  i === idx ? '18px' : '6px',
+                  width: i === safeIdx ? '18px' : '6px',
                   height: '6px',
                 }}
               />

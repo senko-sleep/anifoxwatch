@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
 import { useBreakpoint } from '@/hooks/useBreakpoint';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { Play, Star, Clock, Captions, Sparkles, BookmarkPlus, ChevronRight, TrendingUp } from 'lucide-react';
+import { Play, Star, Clock, Sparkles, ChevronRight, ChevronLeft, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn, normalizeAnimeGenresForDisplay, isPlaceholderAnimeDescription, generateWatchUrl } from '@/lib/utils';
 import { apiUrl } from '@/lib/api-config';
@@ -17,8 +17,8 @@ interface HeroSectionProps {
   heroAnime: HeroAnime[];
 }
 
-const SLIDE_DURATION_MS = 18000;
-const TRANSITION_DURATION_MS = 700;
+const SLIDE_DURATION_MS = 14000;
+const TRANSITION_DURATION_MS = 600;
 
 function heroSynopsis(anime: HeroAnime): string {
   const raw = anime.description?.replace(/\s+/g, ' ').trim() || '';
@@ -31,20 +31,17 @@ function heroSynopsis(anime: HeroAnime): string {
 }
 
 export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
-  const { isMobile, isLandscape } = useBreakpoint();
+  const { isMobile } = useBreakpoint();
 
-/**
- * Hero anime: Multi-source fallback system supporting AniList, Jikan (MAL), Kitsu, 
- * Anime-Planet, and BFF trending. Works even when AniList is down.
- * Must have either bannerImage or coverImage for display.
- */
+  // Filter: must have banner OR cover for hero display
+  const slides = useMemo(() => {
+    const valid = (heroAnime || []).filter(
+      (a) => Boolean(a && (a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large))
+    );
+    return valid.length > 0 ? valid : heroAnime || [];
+  }, [heroAnime]);
 
-// Filter: must have banner OR cover for hero display
-const slides = useMemo(
-  () => heroAnime.filter((a) => !!(a.bannerImage || a.coverImage?.extraLarge)),
-  [heroAnime]
-);
-
+  const count = slides.length;
   const [currentIndex, setCurrentIndex] = useState(0);
   const [prevIndex, setPrevIndex] = useState<number | null>(null);
   const [_progress, setProgress] = useState(0);
@@ -56,39 +53,90 @@ const slides = useMemo(
   const progressRef = useRef<number>(0);
   const animFrameRef = useRef<number>(0);
   const lastTimeRef = useRef<number>(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const anime = slides[currentIndex];
-  const count = slides.length;
+  // Safe clamped index to prevent undefined slide crashes
+  const safeIndex = count > 0 ? ((currentIndex % count) + count) % count : 0;
+  const anime = slides[safeIndex];
+
+  // Auto-reset index if slide list changes
+  useEffect(() => {
+    if (currentIndex >= count && count > 0) {
+      setCurrentIndex(0);
+    }
+  }, [count, currentIndex]);
 
   const displayGenres = useMemo(
-    () => anime ? normalizeAnimeGenresForDisplay(anime.genres) : [],
+    () => (anime ? normalizeAnimeGenresForDisplay(anime.genres) : []),
     [anime?.genres]
   );
 
+  // Preload upcoming banners
   useEffect(() => {
     slides.slice(0, 5).forEach((a) => {
-      if (a.bannerImage) {
+      const src = a.bannerImage || a.coverImage?.extraLarge;
+      if (src) {
         const img = new Image();
-        img.src = a.bannerImage;
+        img.src = src;
       }
     });
   }, [slides]);
 
-  const goToSlide = useCallback((index: number) => {
-    if (index === currentIndex) return;
-    setContentVisible(false);
-    setPrevIndex(currentIndex);
-    setCurrentIndex(index);
-    progressRef.current = 0;
-    setProgress(0);
-    setTimeout(() => setContentVisible(true), 120);
-    setTimeout(() => setPrevIndex(null), TRANSITION_DURATION_MS);
-  }, [currentIndex]);
+  const goToSlide = useCallback(
+    (index: number) => {
+      if (count === 0) return;
+      const targetIndex = ((index % count) + count) % count;
+      if (targetIndex === safeIndex) return;
+
+      setContentVisible(false);
+      setPrevIndex(safeIndex);
+      setCurrentIndex(targetIndex);
+      progressRef.current = 0;
+      setProgress(0);
+      lastTimeRef.current = performance.now();
+
+      setTimeout(() => setContentVisible(true), 120);
+      setTimeout(() => setPrevIndex(null), TRANSITION_DURATION_MS);
+    },
+    [safeIndex, count]
+  );
 
   const handleNext = useCallback(() => {
-    goToSlide((currentIndex + 1) % count);
-  }, [currentIndex, count, goToSlide]);
+    if (count <= 1) return;
+    goToSlide(safeIndex + 1);
+  }, [safeIndex, count, goToSlide]);
 
+  const handlePrev = useCallback(() => {
+    if (count <= 1) return;
+    goToSlide(safeIndex - 1);
+  }, [safeIndex, count, goToSlide]);
+
+  // Handle visibility changes (pause when tab hidden, resume when tab active)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        setIsPaused(true);
+      } else {
+        lastTimeRef.current = performance.now();
+        setIsPaused(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
+
+  // Keyboard navigation when user is interacting with hero
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      handlePrev();
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      handleNext();
+    }
+  };
+
+  // Auto-advance animation timer
   useEffect(() => {
     if (isPaused || count <= 1) return;
     lastTimeRef.current = performance.now();
@@ -99,6 +147,7 @@ const slides = useMemo(
       lastTimeRef.current = now;
       progressRef.current += delta;
       setProgress(Math.min((progressRef.current / SLIDE_DURATION_MS) * 100, 100));
+
       if (progressRef.current >= SLIDE_DURATION_MS) {
         handleNext();
         return;
@@ -108,53 +157,64 @@ const slides = useMemo(
 
     animFrameRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animFrameRef.current);
-  }, [currentIndex, isPaused, count, handleNext]);
+  }, [safeIndex, isPaused, count, handleNext]);
 
-  if (!anime) return null;
+  if (!anime || count === 0) {
+    return (
+      <section className="relative w-full sm:px-4 lg:px-6 pt-0 pb-2 sm:pt-5 sm:pb-5">
+        <div className="mx-auto h-[340px] sm:h-[500px] w-full max-w-7xl animate-pulse sm:rounded-2xl bg-zinc-900/80" />
+      </section>
+    );
+  }
 
   const title = getHeroTitle(anime);
   const studio = getStudioName(anime);
   const rating = formatHeroRating(anime.averageScore);
   const seasonLabel = getSeasonLabel(anime.season, anime.seasonYear);
-  const watchPath = generateWatchUrl({
-    title: title,
-    titleEnglish: anime.title.english,
-    titleRomaji: anime.title.romaji,
-    id: String(anime.id),
-    genres: anime.genres
-  }, 1); // Start from episode 1
+  const watchPath = generateWatchUrl(
+    {
+      title: title,
+      titleEnglish: anime.title?.english,
+      titleRomaji: anime.title?.romaji,
+      id: String(anime.id),
+      genres: anime.genres,
+    },
+    1
+  );
 
   const formatLabel = (anime.format || 'TV').replace(/_/g, ' ');
   const runtimeLabel =
     anime.duration != null && anime.duration > 0 ? `${anime.duration} min` : null;
   const epCountLabel = anime.episodes != null && anime.episodes > 0 ? `${anime.episodes} eps` : null;
-
   const synopsis = heroSynopsis(anime);
   const posterSrc = anime.coverImage?.extraLarge || anime.coverImage?.large || '';
 
   return (
-    <section className="relative w-full sm:px-4 lg:px-6 pt-0 pb-2 sm:pt-5 sm:pb-5">
+    <section
+      className="relative w-full sm:px-4 lg:px-6 pt-0 pb-2 sm:pt-5 sm:pb-5 group/hero"
+      aria-label="Spotlight Anime Carousel"
+    >
       <div
+        ref={containerRef}
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
         className={cn(
           'relative mx-auto max-w-7xl overflow-hidden bg-[#0c0e14]',
           'sm:rounded-2xl sm:border sm:border-white/[0.07]',
-          'shadow-2xl shadow-black/60'
+          'shadow-2xl shadow-black/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-fox-orange/50'
         )}
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
       >
         {/* Background slides */}
-        <div
-          className="relative w-full h-[160px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]"
-        >
-
+        <div className="relative w-full h-[220px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]">
           {slides.map((a, idx) => {
-            const isActive = idx === currentIndex;
+            const isActive = idx === safeIndex;
             const isPrev = idx === prevIndex;
             const show = isActive || isPrev;
             return (
               <HeroSlideBg
-                key={a.id}
+                key={`${a.id}-${idx}`}
                 anime={a}
                 idx={idx}
                 isActive={isActive}
@@ -173,13 +233,25 @@ const slides = useMemo(
             }}
           />
 
-          {/* Gradient layers */}
+          {/* Gradient overlays */}
           <div className="pointer-events-none absolute inset-0 z-[4]">
-            {/* Left fade — softer on mobile since content is bottom-anchored */}
-            <div className="absolute inset-0 bg-gradient-to-r from-[#0c0e14]/75 via-[#0c0e14]/30 to-transparent sm:from-[#0c0e14] sm:via-[#0c0e14]/65 sm:to-transparent" />
-            {/* Bottom fade — strong on mobile for text legibility */}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent sm:hidden" style={{ background: 'linear-gradient(to top, #0c0e14 0%, #0c0e14cc 35%, #0c0e1460 60%, transparent 100%)' }} />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent hidden sm:block" style={{ background: 'linear-gradient(to top, #0c0e14 0%, #0c0e1490 22%, transparent 60%)' }} />
+            {/* Left fade */}
+            <div className="absolute inset-0 bg-gradient-to-r from-[#0c0e14]/90 via-[#0c0e14]/50 to-transparent sm:from-[#0c0e14] sm:via-[#0c0e14]/65 sm:to-transparent" />
+            {/* Bottom fade */}
+            <div
+              className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/60 to-transparent sm:hidden"
+              style={{
+                background:
+                  'linear-gradient(to top, #0c0e14 0%, #0c0e14e6 45%, #0c0e1470 70%, transparent 100%)',
+              }}
+            />
+            <div
+              className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent hidden sm:block"
+              style={{
+                background:
+                  'linear-gradient(to top, #0c0e14 0%, #0c0e1490 22%, transparent 60%)',
+              }}
+            />
             {/* Right vignette to blend poster */}
             <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-[#0c0e14]/70 via-transparent to-transparent" />
             {/* Top edge */}
@@ -190,37 +262,43 @@ const slides = useMemo(
           <div
             className="pointer-events-none absolute bottom-0 left-0 z-[4] w-[65%] h-[55%] opacity-[0.22] sm:w-[55%] sm:h-[50%] sm:opacity-[0.18]"
             aria-hidden
-            style={{ background: 'radial-gradient(ellipse at 20% 100%, hsl(28 95% 55% / 1) 0%, transparent 65%)' }}
+            style={{
+              background:
+                'radial-gradient(ellipse at 20% 100%, hsl(28 95% 55% / 1) 0%, transparent 65%)',
+            }}
           />
 
           {/* ── Content panel ─────────────────────────────────────── */}
           <div className="pointer-events-none absolute inset-0 z-[5] flex items-end lg:items-center">
-            <div className="w-full flex items-end lg:items-center justify-between px-3 pb-2 sm:px-7 sm:pb-8 lg:px-10 lg:pb-0 gap-2 sm:gap-4">
-
+            <div className="w-full flex items-end lg:items-center justify-between px-3 pb-3 sm:px-7 sm:pb-8 lg:px-10 lg:pb-0 gap-2 sm:gap-4">
               {/* Left: text content */}
               <div
                 className={cn(
                   'pointer-events-auto flex flex-col gap-1 sm:gap-3.5 max-w-[min(28rem,95vw)] sm:max-w-[min(34rem,56%)] lg:max-w-[min(38rem,52%)] xl:max-w-[42rem] transition-all ease-out',
-                  contentVisible ? 'translate-y-0 opacity-100 duration-500' : 'translate-y-3 opacity-0 duration-200'
+                  contentVisible
+                    ? 'translate-y-0 opacity-100 duration-500'
+                    : 'translate-y-3 opacity-0 duration-200'
                 )}
               >
-                {/* Spotlight label — mobile: single line, desktop: full */}
+                {/* Spotlight badge */}
                 <div className="flex items-center gap-1 sm:gap-2">
-                  <span className="flex items-center gap-0.5 text-[7px] font-bold uppercase tracking-[0.18em] text-fox-orange sm:text-[10px]">
-                    <Sparkles className="h-2 w-2 sm:h-3.5 sm:w-3.5 text-fox-orange/80" />
-                    Spotlight
+                  <span className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-[0.18em] text-fox-orange sm:text-[10px] bg-fox-orange/10 px-2 py-0.5 rounded-full border border-fox-orange/20">
+                    <Sparkles className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5 text-fox-orange" />
+                    Spotlight #{safeIndex + 1}
                   </span>
                   {seasonLabel && (
                     <>
                       <span className="text-zinc-700 text-[8px] sm:text-[10px]">·</span>
-                      <span className="text-[7px] sm:text-[10px] text-zinc-500 uppercase tracking-wide">{seasonLabel}</span>
+                      <span className="text-[7px] sm:text-[10px] text-zinc-400 uppercase tracking-wide">
+                        {seasonLabel}
+                      </span>
                     </>
                   )}
                 </div>
 
                 {/* Title */}
                 <h1
-                  className="font-display text-sm font-bold leading-[1.2] tracking-tight text-white drop-shadow-[0_2px_24px_rgba(0,0,0,0.9)] line-clamp-2 sm:line-clamp-none sm:text-2xl md:text-3xl lg:text-[1.9rem] xl:text-[2.2rem]"
+                  className="font-display text-base font-bold leading-[1.2] tracking-tight text-white drop-shadow-[0_2px_24px_rgba(0,0,0,0.9)] line-clamp-2 sm:line-clamp-none sm:text-2xl md:text-3xl lg:text-[1.9rem] xl:text-[2.2rem]"
                   style={{ textWrap: 'balance' } as CSSProperties}
                 >
                   {title}
@@ -285,10 +363,10 @@ const slides = useMemo(
                         state: { from: location.pathname + location.search },
                       })
                     }
-                    className="h-6 sm:h-10 gap-1 sm:gap-2 rounded-full bg-fox-orange px-2.5 sm:px-6 text-[10px] font-semibold text-white shadow-lg shadow-fox-orange/30 ring-1 ring-white/10 hover:bg-fox-orange/90 sm:text-sm transition-all duration-200 hover:scale-[1.03] hover:shadow-fox-orange/45"
+                    className="h-7 sm:h-10 gap-1 sm:gap-2 rounded-full bg-fox-orange px-3.5 sm:px-6 text-[11px] font-semibold text-white shadow-lg shadow-fox-orange/30 ring-1 ring-white/10 hover:bg-fox-orange/90 sm:text-sm transition-all duration-200 hover:scale-[1.03] hover:shadow-fox-orange/45"
                   >
-                    <Play className="h-2 w-2 sm:h-3.5 sm:w-3.5 fill-white" />
-                    Watch
+                    <Play className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5 fill-white" />
+                    Watch Now
                   </Button>
                   <Link
                     to="/browse"
@@ -298,7 +376,6 @@ const slides = useMemo(
                     <ChevronRight className="h-3.5 w-3.5" />
                   </Link>
                 </div>
-
               </div>
 
               {/* Right: floating poster card */}
@@ -309,7 +386,8 @@ const slides = useMemo(
                 )}
               >
                 {/* Current poster */}
-                <div className="relative w-[140px] xl:w-[158px] aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl shadow-black/70 ring-1 ring-white/10 group/poster cursor-pointer"
+                <div
+                  className="relative w-[140px] xl:w-[158px] aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl shadow-black/70 ring-1 ring-white/10 group/poster cursor-pointer"
                   onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
                 >
                   {posterSrc ? (
@@ -339,24 +417,28 @@ const slides = useMemo(
 
                 {/* Up next thumbnails */}
                 <div className="flex flex-col gap-1.5 w-[140px] xl:w-[158px]">
-                  <p className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600 flex items-center gap-1">
+                  <p className="text-[9px] font-semibold uppercase tracking-widest text-zinc-500 flex items-center gap-1">
                     <TrendingUp className="w-3 h-3" />
                     Up Next
                   </p>
                   {slides
-                    .slice(currentIndex + 1, currentIndex + 3)
-                    .concat(currentIndex + 3 > slides.length ? slides.slice(0, Math.max(0, 2 - (slides.length - currentIndex - 1))) : [])
+                    .slice(safeIndex + 1, safeIndex + 3)
+                    .concat(
+                      safeIndex + 3 > slides.length
+                        ? slides.slice(0, Math.max(0, 2 - (slides.length - safeIndex - 1)))
+                        : []
+                    )
                     .slice(0, 2)
                     .map((a, i) => {
                       const upNextTitle = getHeroTitle(a);
-                      const upNextIdx = (currentIndex + 1 + i) % slides.length;
+                      const upNextIdx = (safeIndex + 1 + i) % slides.length;
                       return (
                         <button
-                          key={a.id}
+                          key={`${a.id}-${i}`}
                           onClick={() => goToSlide(upNextIdx)}
                           className="group/next flex items-center gap-2 rounded-xl overflow-hidden bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all duration-200 p-1.5 text-left"
                         >
-                          <div className="w-9 h-12 shrink-0 rounded-lg overflow-hidden">
+                          <div className="w-9 h-12 shrink-0 rounded-lg overflow-hidden bg-zinc-800">
                             <img
                               src={a.coverImage?.large || a.coverImage?.extraLarge || ''}
                               alt=""
@@ -376,25 +458,51 @@ const slides = useMemo(
             </div>
           </div>
 
-          {/* Slide dots */}
-          <div className="pointer-events-auto absolute bottom-0 inset-x-0 z-[6] flex items-center justify-center gap-0.5 pb-1 sm:pb-0">
-            {slides.slice(0, 12).map((_, idx) => (
+          {/* Desktop Left / Right Navigation Arrow Buttons */}
+          {count > 1 && (
+            <div className="hidden sm:flex pointer-events-none absolute inset-y-0 inset-x-3 items-center justify-between z-[7]">
               <button
-                key={idx}
                 type="button"
-                onClick={() => goToSlide(idx)}
-                className="p-1 sm:p-2 touch-manipulation flex items-center justify-center"
-                aria-label={`Slide ${idx + 1}`}
+                onClick={handlePrev}
+                aria-label="Previous slide"
+                className="pointer-events-auto w-9 h-9 rounded-full bg-black/40 hover:bg-black/80 backdrop-blur-md border border-white/10 text-white/75 hover:text-white flex items-center justify-center transition-all duration-200 opacity-0 group-hover/hero:opacity-100 hover:scale-110 shadow-lg"
               >
-                <span className={cn(
-                  'block rounded-full transition-all duration-300',
-                  idx === currentIndex
-                    ? 'w-3 h-[3px] bg-fox-orange shadow-[0_0_4px_1px] shadow-fox-orange/60 sm:w-5 sm:h-1'
-                    : 'w-[3px] h-[3px] bg-white/25 hover:bg-white/50 sm:w-1 sm:h-1'
-                )} />
+                <ChevronLeft className="w-5 h-5" />
               </button>
-            ))}
-          </div>
+              <button
+                type="button"
+                onClick={handleNext}
+                aria-label="Next slide"
+                className="pointer-events-auto w-9 h-9 rounded-full bg-black/40 hover:bg-black/80 backdrop-blur-md border border-white/10 text-white/75 hover:text-white flex items-center justify-center transition-all duration-200 opacity-0 group-hover/hero:opacity-100 hover:scale-110 shadow-lg"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+
+          {/* Slide navigation dots */}
+          {count > 1 && (
+            <div className="pointer-events-auto absolute bottom-0 inset-x-0 z-[6] flex items-center justify-center gap-0.5 pb-1 sm:pb-2">
+              {slides.slice(0, 12).map((_, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => goToSlide(idx)}
+                  className="p-1 sm:p-2 touch-manipulation flex items-center justify-center"
+                  aria-label={`Slide ${idx + 1}`}
+                >
+                  <span
+                    className={cn(
+                      'block rounded-full transition-all duration-300',
+                      idx === safeIndex
+                        ? 'w-3 h-[3px] bg-fox-orange shadow-[0_0_4px_1px] shadow-fox-orange/60 sm:w-5 sm:h-1'
+                        : 'w-[3px] h-[3px] bg-white/25 hover:bg-white/50 sm:w-1 sm:h-1'
+                    )}
+                  />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </section>
@@ -422,8 +530,7 @@ function HeroSlideBg({
       out.push(b);
       out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(b)}`);
     }
-    // Use cover image as fallback when no banner
-    if (c && !b) {
+    if (c) {
       out.push(c);
       out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(c)}`);
     }
@@ -459,12 +566,14 @@ function HeroSlideBg({
           )}
           sizes="100vw"
           referrerPolicy="no-referrer"
-          style={{ objectPosition: hasBanner ? 'center 30%' : hasCover ? 'center top' : 'center 15%' }}
+          style={{
+            objectPosition: hasBanner ? 'center 30%' : hasCover ? 'center top' : 'center 15%',
+          }}
           loading={idx < 3 ? 'eager' : 'lazy'}
           decoding="async"
-          onError={() =>
-            setSrcIndex((i) => (candidates.length > 0 && i + 1 < candidates.length ? i + 1 : i))
-          }
+          onError={() => {
+            setSrcIndex((i) => (candidates.length > 0 && i + 1 < candidates.length ? i + 1 : i));
+          }}
         />
       ) : (
         <div className="h-full w-full bg-zinc-950" />
@@ -481,13 +590,11 @@ function SynopsisText({ synopsis }: { synopsis: string }) {
   useEffect(() => {
     const checkOverflow = () => {
       if (textRef.current) {
-        // Check if scrollHeight is greater than clientHeight (text is clamped)
         setIsOverflowing(textRef.current.scrollHeight > textRef.current.clientHeight);
       }
     };
 
     checkOverflow();
-    // Re-check on window resize
     window.addEventListener('resize', checkOverflow);
     return () => window.removeEventListener('resize', checkOverflow);
   }, [synopsis]);
@@ -505,6 +612,7 @@ function SynopsisText({ synopsis }: { synopsis: string }) {
       </p>
       {isOverflowing && (
         <button
+          type="button"
           onClick={() => setIsExpanded(!isExpanded)}
           className="mt-1 text-[11px] font-medium text-fox-orange hover:text-fox-orange/80 transition-colors"
         >

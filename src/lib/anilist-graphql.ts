@@ -36,8 +36,27 @@ function withFetchTimeout(init: RequestInit): RequestInit {
 
 async function fetchWith429Retry(init: RequestInit): Promise<Response> {
   let attempt = 0;
+  const isRelative = ANILIST_GRAPHQL_URL.startsWith('/');
+  const targetUrl = (typeof window === 'undefined' && isRelative)
+    ? 'https://graphql.anilist.co'
+    : ANILIST_GRAPHQL_URL;
+
   while (true) {
-    const res = await fetch(ANILIST_GRAPHQL_URL, withFetchTimeout(init));
+    let res: Response;
+    try {
+      res = await fetch(targetUrl, withFetchTimeout(init));
+    } catch (err) {
+      if (targetUrl !== 'https://graphql.anilist.co') {
+        try {
+          res = await fetch('https://graphql.anilist.co', withFetchTimeout(init));
+        } catch {
+          throw err;
+        }
+      } else {
+        throw err;
+      }
+    }
+
     if (res.status !== 429) return res;
     if (attempt >= MAX_429_RETRIES) return res;
 
