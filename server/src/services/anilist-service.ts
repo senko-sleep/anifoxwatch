@@ -95,6 +95,36 @@ interface AniListGenreResponse {
 const ANILIST_API_URL = 'https://graphql.anilist.co';
 const ANILIST_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
+// Rate limiting for AniList API
+const anilistRequestTimes: number[] = [];
+const ANILIST_RATE_LIMIT_PER_MINUTE = 60; // AniList allows ~90 requests/min, stay conservative
+
+/**
+ * Check if we're within rate limits and wait if necessary
+ */
+async function checkRateLimit(): Promise<void> {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60 * 1000;
+
+    // Remove requests older than 1 minute
+    while (anilistRequestTimes.length > 0 && anilistRequestTimes[0] < oneMinuteAgo) {
+        anilistRequestTimes.shift();
+    }
+
+    // If we're at the limit, wait
+    if (anilistRequestTimes.length >= ANILIST_RATE_LIMIT_PER_MINUTE) {
+        const oldestRequest = anilistRequestTimes[0];
+        const waitTime = oldestRequest + 60 * 1000 - now;
+        if (waitTime > 0) {
+            console.log(`[AniList] Rate limit reached, waiting ${waitTime}ms`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+    }
+
+    // Record this request
+    anilistRequestTimes.push(Date.now());
+}
+
 /**
  * Mapping from AniList formats to our formats
  */
@@ -175,6 +205,9 @@ export class AniListService {
         const staleData = staleEntry?.data as T | undefined;
 
         try {
+            // Apply rate limiting before making the request
+            await checkRateLimit();
+
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 10000);
 
@@ -188,7 +221,7 @@ export class AniListService {
                 body: JSON.stringify({ query, variables }),
                 signal: controller.signal
             });
-            
+
             clearTimeout(timeoutId);
 
             if (!response.ok) {

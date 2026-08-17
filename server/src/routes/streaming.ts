@@ -262,13 +262,13 @@ function setProtocolCache(domain: string, protocol: 'http' | 'https'): void {
 
 // POWERHOUSE MODE: Massive cache to eliminate buffering entirely
 // 1GB cache fits ~150 segments (half an episode) for zero buffering
-const IS_LOW_MEMORY = process.env.NODE_ENV === 'production' && !process.env.POSTGRES_URL;
-const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 200 * 1024 * 1024 : 1024 * 1024 * 1024; // 200MB on low-memory, 1GB otherwise for powerhouse mode
-const SEGMENT_CACHE_TTL = 60 * 60 * 1000; // 60 minutes - entire episode cached
+const IS_LOW_MEMORY = process.env.NODE_ENV === 'production' && (!process.env.POSTGRES_URL || process.env.RENDER === 'true');
+const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 50 * 1024 * 1024 : 512 * 1024 * 1024; // 50MB on low-memory (Render), 512MB otherwise
+const SEGMENT_CACHE_TTL = 30 * 60 * 1000; // 30 minutes - reduced from 60 minutes
 
 // Manifest cache - m3u8 manifests are small but critical for startup performance
-const MANIFEST_CACHE_MAX_ENTRIES = 5000; // Cache up to 5000 manifests for powerhouse mode
-const MANIFEST_CACHE_TTL = 60 * 60 * 1000; // 60 minutes - entire session cached
+const MANIFEST_CACHE_MAX_ENTRIES = IS_LOW_MEMORY ? 500 : 2000; // 500 on low-memory (Render), 2000 otherwise
+const MANIFEST_CACHE_TTL = 30 * 60 * 1000; // 30 minutes - reduced from 60 minutes
 
 interface SegmentCacheEntry { data: Buffer; contentType: string; fetchedAt: number; size: number; lastUsed: number }
 interface ManifestCacheEntry { data: string; fetchedAt: number; lastUsed: number }
@@ -343,9 +343,9 @@ function manifestCacheSet(url: string, data: string): void {
 // Stream result cache
 // ---------------------------------------------------------------------------
 
-const STREAM_CACHE_TTL = 20 * 60 * 1000; // 20 minutes — long enough to survive most "re-watch" patterns
+const STREAM_CACHE_TTL = 15 * 60 * 1000; // 15 minutes — reduced from 20 minutes
 // MEMORY OPTIMIZATION: Reduce cache on low-memory systems (Render free tier)
-const STREAM_CACHE_MAX = IS_LOW_MEMORY ? 20 : 200; // 20 entries on Render, 200 elsewhere
+const STREAM_CACHE_MAX = IS_LOW_MEMORY ? 10 : 100; // 10 entries on Render, 100 elsewhere
 
 interface StreamCacheEntry { data: any; expiresAt: number }
 const streamCache = new Map<string, StreamCacheEntry>();

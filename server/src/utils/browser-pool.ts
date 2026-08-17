@@ -15,7 +15,7 @@ class BrowserPool {
         }
         this.cluster = await Cluster.launch({
             concurrency: Cluster.CONCURRENCY_CONTEXT,
-            maxConcurrency: 5,
+            maxConcurrency: process.env.NODE_ENV === 'production' ? 2 : 5,
             puppeteerOptions: {
                 headless: true,
                 args: [
@@ -26,7 +26,8 @@ class BrowserPool {
                     '--no-first-run',
                     '--no-zygote',
                     '--single-process',
-                    '--disable-gpu'
+                    '--disable-gpu',
+                    '--window-size=1280,720'
                 ],
             } as any,
         });

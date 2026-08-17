@@ -61,11 +61,12 @@ class StreamExtractor {
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
                     '--disable-gpu',
-                    '--window-size=1920,1080',
+                    '--window-size=1280,720',
                     '--disable-web-security',
                     '--disable-features=IsolateOrigins,site-per-process',
-                    '--js-flags="--max-old-space-size=256"',
-                    '--no-zygote'
+                    '--js-flags="--max-old-space-size=128"',
+                    '--no-zygote',
+                    '--single-process'
                 ]
             });
 
@@ -85,7 +86,7 @@ class StreamExtractor {
     }
 
     private activePages = 0;
-    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 3 : 8;
+    private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 1 : 3;
 
     /**
      * Create a new page with proper settings
@@ -389,8 +390,8 @@ class StreamExtractor {
                         let playWaitTime = 0;
                         while (capturedM3u8s.size === 0 && playWaitTime < 5000) {
                             await this.delay(200);
-                            playWaitTime += 200;2
-                        }2
+                            playWaitTime += 200;
+                        }
                     } catch { }
                 }
             } catch (navError: any) {

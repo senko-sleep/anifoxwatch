@@ -188,10 +188,74 @@ app.use('/api/monitoring', monitoringRoutes);
 // route all queries through here so they originate from the server.
 // In-memory stale-while-revalidate cache keyed by request body hash.
 const anilistProxyCache = new Map<string, { data: unknown; at: number }>();
-const ANILIST_CACHE_TTL = 5 * 60 * 1000; // 5 min fresh, stale served forever on failure
+const ANILIST_CACHE_TTL = 3 * 60 * 1000; // 3 min fresh, stale served forever on failure
+// Detect Render environment for memory optimization
+const IS_RENDER = process.env.RENDER === 'true' || process.env.RENDER_EXTERNAL_URL;
+const ANILIST_CACHE_MAX = IS_RENDER ? 50 : (process.env.NODE_ENV === 'production' ? 100 : 500); // Lower limit on Render
+
+// Rate limiting for AniList API
+const anilistRequestQueue: Array<{ resolve: (value: any) => void; reject: (reason: any) => void; request: any }> = [];
+let anilistQueueProcessing = false;
+const ANILIST_RATE_LIMIT_DELAY = 1000; // 1 second between requests (60 requests/minute)
+const ANILIST_MAX_RETRIES = 3;
+
+async function processAnilistQueue() {
+    if (anilistQueueProcessing) return;
+    anilistQueueProcessing = true;
+
+    while (anilistRequestQueue.length > 0) {
+        const { resolve, reject, request } = anilistRequestQueue.shift()!;
+        try {
+            const result = await executeAnilistRequest(request);
+            resolve(result);
+        } catch (error) {
+            reject(error);
+        }
+        // Add delay between requests to respect rate limits
+        if (anilistRequestQueue.length > 0) {
+            await new Promise(r => setTimeout(r, ANILIST_RATE_LIMIT_DELAY));
+        }
+    }
+
+    anilistQueueProcessing = false;
+}
+
+async function executeAnilistRequest(request: any, retryCount = 0): Promise<any> {
+    try {
+        const { default: axios } = await import('axios');
+        const response = await axios.post('https://graphql.anilist.co', request.body, {
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            timeout: 10000,
+        });
+
+        if (response.status === 429) {
+            if (retryCount < ANILIST_MAX_RETRIES) {
+                const backoffTime = Math.pow(2, retryCount) * 1000; // Exponential backoff
+                console.log(`[AniList] Rate limited, retrying in ${backoffTime}ms (attempt ${retryCount + 1}/${ANILIST_MAX_RETRIES})`);
+                await new Promise(r => setTimeout(r, backoffTime));
+                return executeAnilistRequest(request, retryCount + 1);
+            }
+            throw new Error('AniList rate limit exceeded after retries');
+        }
+
+        return response.data;
+    } catch (error: any) {
+        if (error.response?.status === 429 && retryCount < ANILIST_MAX_RETRIES) {
+            const backoffTime = Math.pow(2, retryCount) * 1000;
+            console.log(`[AniList] Rate limited, retrying in ${backoffTime}ms (attempt ${retryCount + 1}/${ANILIST_MAX_RETRIES})`);
+            await new Promise(r => setTimeout(r, backoffTime));
+            return executeAnilistRequest(request, retryCount + 1);
+        }
+        throw error;
+    }
+}
 
 app.post('/api/anilist/graphql', async (req: Request, res: Response): Promise<void> => {
-    const cacheKey = JSON.stringify(req.body);
+    // Generate better cache key based on query hash (more efficient than full body)
+    const query = req.body.query || '';
+    const variables = req.body.variables || {};
+    const cacheKey = `${query.substring(0, 100)}:${JSON.stringify(variables)}`;
+
     const cached = anilistProxyCache.get(cacheKey);
     const isFresh = cached && Date.now() - cached.at < ANILIST_CACHE_TTL;
     if (isFresh) {
@@ -200,15 +264,25 @@ app.post('/api/anilist/graphql', async (req: Request, res: Response): Promise<vo
         res.json(cached.data);
         return;
     }
+
     try {
-        const { default: axios } = await import('axios');
-        const response = await axios.post('https://graphql.anilist.co', req.body, {
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            timeout: 10000,
+        // Use rate-limited queue for AniList requests
+        const queuedRequest = new Promise((resolve, reject) => {
+            anilistRequestQueue.push({ resolve, reject, request: { body: req.body } });
         });
-        anilistProxyCache.set(cacheKey, { data: response.data, at: Date.now() });
+
+        processAnilistQueue();
+
+        const response = await queuedRequest;
+
+        // Limit cache size to prevent memory issues
+        if (anilistProxyCache.size >= ANILIST_CACHE_MAX) {
+            const oldestKey = anilistProxyCache.keys().next().value;
+            if (oldestKey) anilistProxyCache.delete(oldestKey);
+        }
+        anilistProxyCache.set(cacheKey, { data: response, at: Date.now() });
         res.set('Cache-Control', 'public, max-age=300');
-        res.json(response.data);
+        res.json(response);
     } catch (err: unknown) {
         const axiosErr = err as { response?: { status?: number; data?: unknown } };
         // AniList down/blocked — serve stale cache if available
