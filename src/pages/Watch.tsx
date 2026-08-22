@@ -468,9 +468,24 @@ const Watch = () => {
     if (!targetEpisode) {
       targetEpisode = episodes[0];
     }
-    
-    // Always update selectedAnimeId and selectedEpisode (even if they were already set)
-    // This ensures they're always in sync when episodes change
+
+    // Skip update if we already have this episode correctly selected.
+    // This is critical for AniList IDs: streaming starts immediately via the
+    // constructed ID path (`anilist-XXXX?ep=N`). When the episode list arrives
+    // later, don't reset selectedEpisode — that would abort the in-flight stream
+    // fetch and restart it, adding 2-5s of extra latency.
+    if (
+      selectedAnimeId === cleanAnimeId &&
+      selectedEpisodeNum === targetEpisode.number &&
+      (selectedEpisode === targetEpisode.id ||
+        // AniList constructed ID is already covering this episode number
+        selectedEpisode === `${cleanAnimeId}?ep=${targetEpisode.number}`)
+    ) {
+      // Episode already selected correctly — just ensure animeId is synced
+      if (selectedAnimeId !== cleanAnimeId) setSelectedAnimeId(cleanAnimeId);
+      return;
+    }
+
     setSelectedAnimeId(cleanAnimeId);
     setSelectedEpisode(targetEpisode.id);
     setSelectedEpisodeNum(targetEpisode.number);

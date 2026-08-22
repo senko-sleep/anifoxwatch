@@ -414,6 +414,15 @@ const getProxyBaseUrl = (req: Request): string => {
         return `${envBase}/api/stream/proxy`;
     }
 
+    // Priority 2: Render deployments — RENDER_EXTERNAL_URL or RENDER_EXTERNAL_HOSTNAME is automatically provided by Render
+    const renderUrl = process.env.RENDER_EXTERNAL_URL?.replace(/\/$/, '');
+    if (renderUrl) {
+        return `${renderUrl}/api/stream/proxy`;
+    }
+    const renderHost = process.env.RENDER_EXTERNAL_HOSTNAME?.replace(/\/$/, '');
+    if (renderHost) {
+        return `https://${renderHost}/api/stream/proxy`;
+    }
 
     // Priority 3: Vercel deployments — VERCEL_URL is always set to the deployment hostname.
     // Use HTTPS by default; Vercel terminates TLS at the edge and forwards via x-forwarded-proto.
@@ -429,8 +438,18 @@ const getProxyBaseUrl = (req: Request): string => {
         return `${cleverUrl}/api/stream/proxy`;
     }
 
+    const koyebDomain = process.env.KOYEB_PUBLIC_DOMAIN?.replace(/\/$/, '');
+    if (koyebDomain) {
+        return `https://${koyebDomain}/api/stream/proxy`;
+    }
+
+    const flyAppName = process.env.FLY_APP_NAME;
+    if (flyAppName) {
+        return `https://${flyAppName}.fly.dev/api/stream/proxy`;
+    }
+
     // Priority 5: Infer from incoming request (works for same-origin deployments like Vercel,
-    // Cloudflare Workers, Firebase Functions, etc.)
+    // Cloudflare Workers, Firebase Functions, Render, etc.)
     const rawProto = String(req.headers['x-forwarded-proto'] || req.protocol || 'https').split(',')[0].trim();
     const host = req.headers['x-forwarded-host'] || req.headers['host'];
     if (host) {

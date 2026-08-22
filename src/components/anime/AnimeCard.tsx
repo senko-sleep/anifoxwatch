@@ -59,11 +59,18 @@ export const AnimeCard = ({ anime, className, style, onMouseEnter: onCardMouseEn
   // valid descriptions but no audio availability metadata until we hit the streaming API.
   const missingAudioInfo = (anime.subCount ?? 0) === 0 && (anime.dubCount ?? 0) === 0;
 
-  // Determine if this is hentai content
-  const isHentai = anime.genres?.some(g => 
-    ['Hentai', 'Ecchi', 'Yaoi', 'Yuri'].includes(g)
-  ) || anime.source?.toLowerCase().includes('hentai') || anime.source?.toLowerCase().includes('hanime');
-  
+  // Determine if this is hentai content.
+  // Only the explicit "Hentai" genre tag, the isMature flag, or known hentai
+  // source-ID prefixes should route to /watch/hentai/…
+  // Ecchi, Yaoi, Yuri etc. are standard anime genres — do NOT treat them as hentai.
+  const hentaiSourcePrefixes = ['watchhentai-', 'hanime-', 'akih-', 'hentai-'];
+  const isHentai =
+    anime.isMature === true ||
+    anime.genres?.includes('Hentai') ||
+    anime.source?.toLowerCase().includes('hentai') ||
+    anime.source?.toLowerCase().includes('hanime') ||
+    hentaiSourcePrefixes.some(prefix => anime.id.toLowerCase().startsWith(prefix));
+
   // Generate slug and type prefix for routing
   const slug = anime.id.replace(/^(watchhentai-|hanime-|akih-|aniwaves-|yomi-)/, '').replace(/\//g, '-');
   const typePrefix = isHentai ? 'hentai' : 'anime';

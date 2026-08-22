@@ -115,11 +115,13 @@ export function generateWatchUrl(anime: { title?: string | null; id?: string; ti
   const title = anime.titleEnglish || anime.titleRomaji || anime.title || '';
   const episodeParam = episode ? `?ep=${episode}` : '';
 
-  // Determine if this is hentai content
+  // Determine if this is hentai content.
+  // Only the explicit "Hentai" genre, the isMature flag, or known hentai source-ID
+  // prefixes should route to /watch/hentai/… — Ecchi, Yaoi, Yuri are standard anime genres.
   const hentaiSourcePrefixes = ['watchhentai-', 'hanime-', 'akih-', 'hentai-'];
   const isHentai =
-    anime.isMature ||
-    anime.genres?.some(g => ['Hentai', 'Ecchi', 'Yaoi', 'Yuri'].includes(g)) ||
+    anime.isMature === true ||
+    anime.genres?.includes('Hentai') ||
     anime.source?.toLowerCase().includes('hentai') ||
     anime.source?.toLowerCase().includes('hanime') ||
     hentaiSourcePrefixes.some(prefix => anime.id?.toLowerCase().startsWith(prefix));

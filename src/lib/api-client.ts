@@ -528,8 +528,9 @@ class AnimeApiClient {
     async getEpisodes(animeId: string, source?: string): Promise<Episode[]> {
         const params = new URLSearchParams({ id: animeId });
         if (source) params.append('source', source);
-        // Add cache-busting timestamp to force fresh fetch
-        params.append('_t', String(Date.now()));
+        // No cache-busting: episode lists are stable within a session.
+        // The server-side route has its own TTL, and the client cache (10 min)
+        // eliminates the ~500-1500ms round-trip on repeat visits or episode switches.
         const response = await this.fetch<{ episodes: Episode[] }>(
             `/api/anime/episodes?${params}`
         );
