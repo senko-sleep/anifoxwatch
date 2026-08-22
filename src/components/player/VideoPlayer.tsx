@@ -21,7 +21,10 @@ import {
   Unlock,
   Volume1,
   Sun,
-  RotateCw
+  RotateCw,
+  RotateCcw,
+  ArrowLeft,
+  ListVideo
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
@@ -1325,25 +1328,53 @@ export const VideoPlayer = ({
     };
   }, [intro, outro, onEnded, hasNextEpisode, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, autoFullscreen, isMobile]);
 
-  // Fullscreen change handler
+  // Comprehensive fullscreen change handler for iOS, Android, and desktop browsers
   useEffect(() => {
     const handleFullscreenChange = () => {
-      const inFullscreen = !!document.fullscreenElement;
+      const inFullscreen = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement ||
+        (videoRef.current as any)?.webkitDisplayingFullscreen
+      );
       setIsFullscreen(inFullscreen);
-      // If exited fullscreen while landscape was locked, unlock orientation
-      if (!inFullscreen && isLandscapeLockedRef.current) {
-        isLandscapeLockedRef.current = false;
-        setIsLandscapeLocked(false);
-        try {
-          if ((screen.orientation as any).unlock) {
+
+      // If exited fullscreen, unlock orientation cleanly
+      if (!inFullscreen) {
+        if (isLandscapeLockedRef.current) {
+          isLandscapeLockedRef.current = false;
+          setIsLandscapeLocked(false);
+        }
+        if (screen.orientation && (screen.orientation as any).unlock) {
+          try {
             (screen.orientation as any).unlock();
-          }
-        } catch (_e) { /* ignore */ }
+          } catch (_e) { /* ignore */ }
+        }
       }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    const video = videoRef.current;
+    if (video) {
+      video.addEventListener('webkitbeginfullscreen', handleFullscreenChange);
+      video.addEventListener('webkitendfullscreen', handleFullscreenChange);
+    }
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+      if (video) {
+        video.removeEventListener('webkitbeginfullscreen', handleFullscreenChange);
+        video.removeEventListener('webkitendfullscreen', handleFullscreenChange);
+      }
+    };
   }, []);
 
   // Next episode countdown timer
@@ -1504,29 +1535,26 @@ export const VideoPlayer = ({
     const video = videoRef.current;
     if (!container || !video) return;
 
-    if (document.fullscreenElement || (video as any).webkitDisplayingFullscreen) {
-      if (isMobile() && screen.orientation && (screen.orientation as any).unlock) {
-        try {
-          (screen.orientation as any).unlock();
-        } catch (e) {
-          playerLog('warn', 'Orientation unlock failed', e);
-        }
-      }
+    const isCurrentlyFullscreen = !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (video as any).webkitDisplayingFullscreen
+    );
+
+    if (isCurrentlyFullscreen) {
       if (document.exitFullscreen) {
-        await document.exitFullscreen();
+        await document.exitFullscreen().catch(() => {});
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
       } else if ((video as any).webkitExitFullscreen) {
         (video as any).webkitExitFullscreen();
       }
-    } else {
-      // Lock orientation to landscape BEFORE entering fullscreen on mobile
-      if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
-        try {
-          await (screen.orientation as any).lock('landscape');
-        } catch (e) {
-          playerLog('warn', 'Orientation lock failed', e);
-        }
+      if (screen.orientation && (screen.orientation as any).unlock) {
+        try { (screen.orientation as any).unlock(); } catch (_e) {}
       }
-
+      setIsFullscreen(false);
+    } else {
       let enteredFs = false;
       if (container.requestFullscreen) {
         try {
@@ -1535,22 +1563,28 @@ export const VideoPlayer = ({
         } catch (e) {
           playerLog('warn', 'container.requestFullscreen failed', e);
         }
+      } else if ((container as any).webkitRequestFullscreen) {
+        try {
+          (container as any).webkitRequestFullscreen();
+          enteredFs = true;
+        } catch (e) {}
       }
 
-      // Ensure orientation lock is attempted even if fullscreen entered via video element
-      if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
+      if (!enteredFs && (video as any).webkitEnterFullscreen) {
         try {
-          await (screen.orientation as any).lock('landscape');
+          (video as any).webkitEnterFullscreen();
+          enteredFs = true;
         } catch (e) {
-          playerLog('warn', 'Orientation lock failed', e);
+          playerLog('warn', 'webkitEnterFullscreen failed', e);
         }
       }
 
-      if (!enteredFs && isMobile() && (video as any).webkitEnterFullscreen) {
-        try {
-          (video as any).webkitEnterFullscreen();
-        } catch (e) {
-          playerLog('warn', 'webkitEnterFullscreen failed', e);
+      if (enteredFs) {
+        setIsFullscreen(true);
+        if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
+          try {
+            (screen.orientation as any).lock('landscape').catch(() => {});
+          } catch (_e) {}
         }
       }
     }
@@ -1616,38 +1650,36 @@ export const VideoPlayer = ({
 
     try {
       if (isLandscapeLockedRef.current) {
-        // Unlock orientation
         if ((screen.orientation as any).unlock) {
-          (screen.orientation as any).unlock();
+          try { (screen.orientation as any).unlock(); } catch (_e) {}
         }
-        // Exit fullscreen if active
         if (document.fullscreenElement) {
-          await document.exitFullscreen();
+          await document.exitFullscreen().catch(() => {});
         } else if ((video as any).webkitDisplayingFullscreen) {
           (video as any).webkitExitFullscreen?.();
         }
         isLandscapeLockedRef.current = false;
         setIsLandscapeLocked(false);
       } else {
-        // Enter fullscreen FIRST
         let enteredFs = false;
         if (container.requestFullscreen) {
           await container.requestFullscreen();
           enteredFs = true;
         } else if ((video as any).webkitEnterFullscreen) {
           (video as any).webkitEnterFullscreen();
+          enteredFs = true;
         }
 
-        // Lock orientation AFTER
         if (enteredFs && screen.orientation && (screen.orientation as any).lock) {
-          await (screen.orientation as any).lock('landscape');
+          try {
+            await (screen.orientation as any).lock('landscape');
+          } catch (_e) {}
         }
         isLandscapeLockedRef.current = true;
         setIsLandscapeLocked(true);
       }
     } catch (e) {
       playerLog('warn', 'Landscape lock toggle failed', e);
-      // Fallback to regular fullscreen
       toggleFullscreen();
     }
   }, [toggleFullscreen]);
@@ -2068,284 +2100,284 @@ export const VideoPlayer = ({
       {/* Controls overlay */}
       <div
         className={cn(
-          "absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/30 transition-opacity duration-300",
-          showControls ? "opacity-100" : "opacity-0 pointer-events-none"
+          "absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/75 transition-opacity duration-300 pointer-events-none flex flex-col justify-between",
+          showControls ? "opacity-100" : "opacity-0"
         )}
       >
-        {/* Top bar controls (Mobile only) */}
-        {isMobile() && (
-          <div className="absolute top-2 left-2 right-2 flex items-start justify-between z-30 pointer-events-none">
-            <div className="flex items-center gap-1.5 pointer-events-auto">
-              {onBack && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onBack(); }}
-                  className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center active:scale-90 transition-transform"
-                >
-                  <ChevronsLeft className="w-4 h-4 text-white" />
-                </button>
-              )}
-              <div className="px-2 py-1 bg-black/50 backdrop-blur-sm rounded-md max-w-[160px]">
-                <p className="text-white text-[10px] font-medium truncate">
-                  {animeTitle} - EP {selectedEpisodeNum}
+        {/* Top bar controls — with safe area padding */}
+        <div className="w-full px-3 sm:px-5 pt-3 sm:pt-4 pt-safe flex items-center justify-between z-30 pointer-events-auto">
+          {/* Left: Back button + Anime / Episode Title */}
+          <div className="flex items-center gap-2 min-w-0 flex-1 mr-2">
+            {(onBack || isFullscreen) && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isFullscreen) {
+                    toggleFullscreen();
+                  } else if (onBack) {
+                    onBack();
+                  }
+                }}
+                title={isFullscreen ? "Exit fullscreen" : "Back"}
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/10 hover:bg-white/20 active:scale-90 transition-all flex items-center justify-center text-white shrink-0 shadow-lg"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            )}
+            <div className="min-w-0 flex-1">
+              {animeTitle && (
+                <p className="text-[10px] sm:text-xs font-semibold text-fox-orange tracking-wide uppercase truncate leading-tight">
+                  {animeTitle}
                 </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5 pointer-events-auto">
-              {onEpisodes && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onEpisodes(); }}
-                  className="px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-sm flex items-center gap-1 active:scale-90 transition-transform"
-                >
-                  <RotateCw className="w-3 h-3 text-white" />
-                  <span className="text-white text-[10px] font-medium">Episodes</span>
-                </button>
               )}
-              {onShowSettings && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onShowSettings(); }}
-                  className="w-8 h-8 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center active:scale-90 transition-transform"
-                >
-                  <Settings className="w-3.5 h-3.5 text-white" />
-                </button>
-              )}
+              <p className="text-xs sm:text-sm font-bold text-white truncate leading-snug">
+                Episode {selectedEpisodeNum}
+              </p>
             </div>
           </div>
-        )}
 
-        {/* Center play button — only visible when paused */}
-        {!isPlaying && !isLoading && (
-          <button
-            onClick={(e) => { e.stopPropagation(); togglePlay(); }}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-fox-orange/90 flex items-center justify-center hover:bg-fox-orange transition-colors z-10"
-          >
-            <Play className="w-8 h-8 text-white ml-0.5" fill="white" />
-          </button>
-        )}
-
-        {/* Bottom controls — stopPropagation on touch so taps here never reach the video */}
-          <div
-            className="absolute bottom-0 left-0 right-0 p-4 space-y-2"
-            onTouchStart={(e) => e.stopPropagation()}
-            onTouchEnd={(e) => e.stopPropagation()}
-            onTouchMove={(e) => e.stopPropagation()}
-          >
-            {/* Progress bar — Netflix / YouTube premium style */}
-            <div
-              ref={progressContainerRef}
-              className="relative group/progress cursor-pointer py-2"
-              onMouseEnter={() => setIsProgressHovering(true)}
-              onMouseLeave={() => setIsProgressHovering(false)}
-              onMouseMove={(e) => setProgressMouseX(e.clientX)}
-              onClick={(e) => {
-                const rect = progressContainerRef.current?.getBoundingClientRect();
-                if (rect) {
-                  const x = e.clientX - rect.left;
-                  const percentage = x / rect.width;
-                  const dur = durationRef.current || duration || 0;
-                  const time = percentage * dur;
-                  handleSeek([time]);
-                }
-              }}
-              onTouchStart={(e) => {
-                e.stopPropagation();
-                if (e.touches[0]) {
-                  setIsProgressTouching(true);
-                  setProgressTouchX(e.touches[0].clientX);
-                }
-              }}
-              onTouchMove={(e) => {
-                e.stopPropagation();
-                if (e.touches[0]) {
-                  setProgressTouchX(e.touches[0].clientX);
-                }
-              }}
-              onTouchEnd={(e) => {
-                e.stopPropagation();
-                setTimeout(() => setIsProgressTouching(false), 300);
-              }}
-            >
-              {/* Track container — grows on hover like Netflix */}
-              <div className={cn(
-                "relative w-full rounded-full overflow-hidden transition-all duration-200 ease-out",
-                isMobile()
-                  ? "h-[5px]"
-                  : "h-[3px] group-hover/progress:h-[6px]"
-              )}>
-                {/* Background track */}
-                <div className="absolute inset-0 bg-white/20" />
-                {/* Buffered */}
-                <div
-                  className="absolute inset-y-0 left-0 bg-white/30 transition-[width] duration-300"
-                  style={{ width: `${duration > 0 ? (buffered / duration) * 100 : 0}%` }}
-                />
-                {/* Played — with glow on hover. ref is updated directly in handleTimeUpdate (no React state churn) */}
-                <div
-                  ref={progressPlayedRef}
-                  className={cn(
-                    "absolute inset-y-0 left-0 bg-fox-orange transition-shadow duration-200",
-                    (isProgressHovering || isProgressTouching) && "shadow-[0_0_8px_rgba(255,120,30,0.6)]"
-                  )}
-                  style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
-                />
-                {/* Hover position indicator line */}
-                {(isProgressHovering || isProgressTouching) && progressContainerRef.current && (() => {
-                  const rect = progressContainerRef.current!.getBoundingClientRect();
-                  const mx = (isProgressTouching ? progressTouchX : progressMouseX) - rect.left;
-                  const pct = Math.max(0, Math.min(100, (mx / rect.width) * 100));
-                  return (
-                    <div
-                      className="absolute inset-y-0 w-[2px] bg-white/60 pointer-events-none z-10"
-                      style={{ left: `${pct}%`, transform: 'translateX(-50%)' }}
-                    />
-                  );
-                })()}
-              </div>
-
-              {/* Scrub dot — ref is updated directly in handleTimeUpdate for zero-render-cost positioning */}
-              <div
-                ref={progressScrubDotRef}
-                className={cn(
-                  "absolute top-1/2 -translate-y-1/2 rounded-full bg-fox-orange border-2 border-white transition-all duration-200 pointer-events-none z-20",
-                  (isProgressHovering || isProgressTouching)
-                    ? "w-[14px] h-[14px] opacity-100 shadow-[0_0_10px_rgba(255,120,30,0.7)]"
-                    : "w-[10px] h-[10px] opacity-0"
-                )}
-                style={{
-                  left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%`,
-                  transform: 'translate(-50%, -50%)',
-                }}
-              />
-
-              {/* Video Preview — reads frames from the main video element */}
-              <VideoPreview
-                ref={videoPreviewRef}
-                videoRef={videoRef}
-                duration={duration}
-                isHovering={isProgressHovering || isProgressTouching}
-                mouseX={isProgressTouching ? progressTouchX : progressMouseX}
-                containerRef={progressContainerRef}
-                poster={poster ?? ''}
-              />
-            </div>
-
-          {/* Control buttons */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 md:gap-3">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={(e) => { e.stopPropagation(); togglePlay(); }}
-                className={cn(
-                  "text-white hover:bg-white/20",
-                  isMobile() && "h-9 w-9"
-                )}
-              >
-                {isPlaying ? (
-                  <Pause className={cn(isMobile() ? "w-5 h-5" : "w-5 h-5")} />
-                ) : (
-                  <Play className={cn(isMobile() ? "w-5 h-5" : "w-5 h-5")} />
-                )}
-              </Button>
-
-               {/* Volume - Desktop only */}
-               {!isMobile() && (
-                 <div className="flex items-center gap-2 group/volume">
-                   <Button
-                     variant="ghost"
-                     size="icon"
-                     onClick={toggleMute}
-                     className="text-white hover:bg-white/20"
-                   >
-                     {isMuted || volume === 0 ? (
-                       <VolumeX className="w-5 h-5" />
-                     ) : (
-                       <Volume2 className="w-5 h-5" />
-                     )}
-                   </Button>
-                   <div className="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-200">
-                     <Slider
-                       value={[isMuted ? 0 : volume]}
-                       max={1}
-                       step={0.01}
-                       onValueChange={handleVolumeChange}
-                       className="w-20"
-                     />
-                   </div>
-                 </div>
-               )}
-               {/* Mobile: Subtitles toggle */}
-               {isMobile() && (
-                 <Button
-                   variant="ghost"
-                   size="icon"
-                   onClick={toggleSubtitles}
-                   className={cn(
-                     "text-white hover:bg-white/20",
-                     subtitleEnabled && "text-fox-orange",
-                     subtitles.length === 0 && "opacity-50 cursor-not-allowed"
-                   )}
-                 >
-                   <Subtitles className="w-5 h-5" />
-                 </Button>
-               )}
-
-              <span className={cn(
-                "text-white ml-1 md:ml-2",
-                isMobile() ? "text-xs font-medium" : "text-sm"
-              )}>
-                {formatTime(currentTime)} / {formatTime(duration)}
+          {/* Right: Quick actions (Quality badge, Episodes drawer, Settings) */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 pointer-events-auto">
+            {hlsStats && (
+              <span className="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-white/10 backdrop-blur-md border border-white/10 text-white/90">
+                {hlsStats.level}p
               </span>
+            )}
 
-              {hlsStats && (
-                <span className="text-white/60 text-xs ml-2 hidden sm:inline">
-                  {hlsStats.level}p
-                </span>
-              )}
-            </div>
+            {onEpisodes && isMobile() && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onEpisodes(); }}
+                className="px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 hover:bg-white/20 flex items-center gap-1.5 active:scale-95 transition-all text-white shadow-lg"
+              >
+                <ListVideo className="w-3.5 h-3.5 text-fox-orange" />
+                <span className="text-white text-[11px] font-medium">Episodes</span>
+              </button>
+            )}
 
-          <div className="flex items-center gap-1 md:gap-2">
-            {/* Mobile: settings gear */}
             {isMobile() && (
-              <Button
-                variant="ghost"
-                size="icon"
+              <button
                 onClick={(e) => {
                   e.stopPropagation();
                   setShowMobileSettings(prev => !prev);
                 }}
-                className="text-white hover:bg-white/20 h-9 w-9"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-black/60 backdrop-blur-md border border-white/10 hover:bg-white/20 flex items-center justify-center active:scale-90 transition-all text-white shadow-lg"
               >
-                <Settings className="w-5 h-5" />
-              </Button>
+                <Settings className="w-4 h-4" />
+              </button>
             )}
-            {/* Mobile: Subtitles toggle */}
-            {isMobile() && subtitles.length > 0 && (
+          </div>
+        </div>
+
+        {/* Center Quick Controls (Seek -10s, Play/Pause, Seek +10s) */}
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none z-20"
+        >
+          <div
+            className={cn(
+              "flex items-center justify-center gap-6 sm:gap-10 transition-all duration-200",
+              showControls ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
+            )}
+          >
+            {/* -10s button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSeek([Math.max(0, currentTime - 10)]);
+              }}
+              title="Rewind 10 seconds"
+              className="pointer-events-auto w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-black/50 backdrop-blur-md border border-white/15 hover:bg-white/20 active:scale-90 transition-all flex flex-col items-center justify-center text-white shadow-xl"
+            >
+              <RotateCcw className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              <span className="text-[9px] font-bold leading-none mt-0.5 text-white/80">10</span>
+            </button>
+
+            {/* Play / Pause button */}
+            <button
+              onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+              title={isPlaying ? "Pause" : "Play"}
+              className="pointer-events-auto w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-fox-orange hover:bg-fox-orange/95 active:scale-90 transition-all flex items-center justify-center text-white shadow-xl shadow-fox-orange/35 ring-4 ring-white/10"
+            >
+              {isPlaying ? (
+                <Pause className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
+              ) : (
+                <Play className="w-6 h-6 sm:w-7 sm:h-7 fill-current ml-0.5" />
+              )}
+            </button>
+
+            {/* +10s button */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSeek([Math.min(duration, currentTime + 10)]);
+              }}
+              title="Forward 10 seconds"
+              className="pointer-events-auto w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-black/50 backdrop-blur-md border border-white/15 hover:bg-white/20 active:scale-90 transition-all flex flex-col items-center justify-center text-white shadow-xl"
+            >
+              <RotateCw className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
+              <span className="text-[9px] font-bold leading-none mt-0.5 text-white/80">10</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Bottom controls — with safe area padding */}
+        <div
+          className="w-full px-3 sm:px-5 pb-3 sm:pb-4 pb-safe space-y-2 pointer-events-auto z-30"
+          onTouchStart={(e) => e.stopPropagation()}
+          onTouchEnd={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+        >
+          {/* Progress bar — sleek scrub track */}
+          <div
+            ref={progressContainerRef}
+            className="relative group/progress cursor-pointer py-2"
+            onMouseEnter={() => setIsProgressHovering(true)}
+            onMouseLeave={() => setIsProgressHovering(false)}
+            onMouseMove={(e) => setProgressMouseX(e.clientX)}
+            onClick={(e) => {
+              const rect = progressContainerRef.current?.getBoundingClientRect();
+              if (rect) {
+                const x = e.clientX - rect.left;
+                const percentage = Math.max(0, Math.min(1, x / rect.width));
+                const dur = durationRef.current || duration || 0;
+                handleSeek([percentage * dur]);
+              }
+            }}
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              if (e.touches[0]) {
+                setIsProgressTouching(true);
+                setProgressTouchX(e.touches[0].clientX);
+              }
+            }}
+            onTouchMove={(e) => {
+              e.stopPropagation();
+              if (e.touches[0]) {
+                setProgressTouchX(e.touches[0].clientX);
+              }
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation();
+              setTimeout(() => setIsProgressTouching(false), 300);
+            }}
+          >
+            {/* Track container */}
+            <div className={cn(
+              "relative w-full rounded-full overflow-hidden transition-all duration-200 ease-out",
+              isMobile()
+                ? "h-[5px]"
+                : "h-[3px] group-hover/progress:h-[6px]"
+            )}>
+              {/* Background track */}
+              <div className="absolute inset-0 bg-white/20" />
+              {/* Buffered */}
+              <div
+                className="absolute inset-y-0 left-0 bg-white/30 transition-[width] duration-300"
+                style={{ width: `${duration > 0 ? (buffered / duration) * 100 : 0}%` }}
+              />
+              {/* Played track */}
+              <div
+                ref={progressPlayedRef}
+                className={cn(
+                  "absolute inset-y-0 left-0 bg-fox-orange transition-shadow duration-200",
+                  (isProgressHovering || isProgressTouching) && "shadow-[0_0_10px_rgba(255,120,30,0.8)]"
+                )}
+                style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+              />
+            </div>
+
+            {/* Scrub dot */}
+            <div
+              ref={progressScrubDotRef}
+              className={cn(
+                "absolute top-1/2 -translate-y-1/2 rounded-full bg-fox-orange border-2 border-white transition-all duration-200 pointer-events-none z-20",
+                (isProgressHovering || isProgressTouching)
+                  ? "w-3.5 h-3.5 opacity-100 shadow-[0_0_10px_rgba(255,120,30,0.8)]"
+                  : "w-2.5 h-2.5 opacity-0"
+              )}
+              style={{
+                left: `${duration > 0 ? (currentTime / duration) * 100 : 0}%`,
+                transform: 'translate(-50%, -50%)',
+              }}
+            />
+
+            {/* Video Preview */}
+            <VideoPreview
+              ref={videoPreviewRef}
+              videoRef={videoRef}
+              duration={duration}
+              isHovering={isProgressHovering || isProgressTouching}
+              mouseX={isProgressTouching ? progressTouchX : progressMouseX}
+              containerRef={progressContainerRef}
+              poster={poster ?? ''}
+            />
+          </div>
+
+          {/* Control buttons row */}
+          <div className="flex items-center justify-between">
+            {/* Left controls: Play/pause, Volume (desktop), Time */}
+            <div className="flex items-center gap-1.5 sm:gap-3">
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={toggleSubtitles}
-                className={cn(
-                  "text-white hover:bg-white/20",
-                  subtitleEnabled && "text-fox-orange"
-                )}
+                onClick={(e) => { e.stopPropagation(); togglePlay(); }}
+                className="text-white hover:bg-white/20 h-8 w-8 sm:h-9 sm:w-9"
               >
-                <Subtitles className="w-5 h-5" />
-              </Button>
-            )}
-            {/* Mobile: Subtitles toggle */}
-            {isMobile() && subtitles.length > 0 && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={toggleSubtitles}
-                className={cn(
-                  "text-white hover:bg-white/20",
-                  subtitleEnabled && "text-fox-orange"
+                {isPlaying ? (
+                  <Pause className="w-4 h-4 sm:w-5 sm:h-5" />
+                ) : (
+                  <Play className="w-4 h-4 sm:w-5 sm:h-5" />
                 )}
-              >
-                <Subtitles className="w-5 h-5" />
               </Button>
-            )}
+
+              {/* Volume - Desktop only */}
+              {!isMobile() && (
+                <div className="flex items-center gap-2 group/volume">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={toggleMute}
+                    className="text-white hover:bg-white/20 h-9 w-9"
+                  >
+                    {isMuted || volume === 0 ? (
+                      <VolumeX className="w-5 h-5" />
+                    ) : (
+                      <Volume2 className="w-5 h-5" />
+                    )}
+                  </Button>
+                  <div className="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-200">
+                    <Slider
+                      value={[isMuted ? 0 : volume]}
+                      max={1}
+                      step={0.01}
+                      onValueChange={handleVolumeChange}
+                      className="w-20"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <span className="text-white/90 text-xs sm:text-sm font-medium font-mono">
+                {formatTime(currentTime)} <span className="text-white/40">/</span> {formatTime(duration)}
+              </span>
+            </div>
+
+            {/* Right controls: Subtitles, Settings, Fullscreen */}
+            <div className="flex items-center gap-1 sm:gap-2">
+              {/* Mobile Subtitles toggle */}
+              {isMobile() && subtitles.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={toggleSubtitles}
+                  className={cn(
+                    "text-white hover:bg-white/20 h-8 w-8 sm:h-9 sm:w-9 transition-colors",
+                    subtitleEnabled ? "text-fox-orange bg-fox-orange/15" : "text-white/70"
+                  )}
+                  title="Toggle subtitles"
+                >
+                  <Subtitles className="w-4 h-4 sm:w-5 sm:h-5" />
+                </Button>
+              )}
 
               {/* Desktop: Subtitles dropdown */}
               {!isMobile() && subtitles.length > 0 && (
@@ -2446,36 +2478,18 @@ export const VideoPlayer = ({
                 </>
               )}
 
-              {/* Mobile: Landscape lock button */}
-              {isMobile() && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => { e.stopPropagation(); toggleLandscapeLock(); }}
-                  title={isLandscapeLocked ? 'Unlock orientation' : 'Watch in landscape'}
-                  className={cn(
-                    "hover:bg-white/20 h-9 w-9 transition-colors",
-                    isLandscapeLocked ? "text-fox-orange" : "text-white"
-                  )}
-                >
-                  <RotateCw className="w-5 h-5" />
-                </Button>
-              )}
-
-              {/* Fullscreen */}
+              {/* Fullscreen Button */}
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
-                className={cn(
-                  "text-white hover:bg-white/20",
-                  isMobile() && "h-9 w-9"
-                )}
+                className="text-white hover:bg-white/20 h-8 w-8 sm:h-9 sm:w-9"
+                title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
               >
                 {isFullscreen ? (
-                  <Minimize className={cn(isMobile() ? "w-5 h-5" : "w-5 h-5")} />
+                  <Minimize className="w-4 h-4 sm:w-5 sm:h-5" />
                 ) : (
-                  <Maximize className={cn(isMobile() ? "w-5 h-5" : "w-5 h-5")} />
+                  <Maximize className="w-4 h-4 sm:w-5 sm:h-5" />
                 )}
               </Button>
             </div>

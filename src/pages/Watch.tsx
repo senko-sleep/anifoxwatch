@@ -1175,115 +1175,132 @@ const Watch = () => {
         </div>
 
         <main className="flex-1">
-          {/* Episode nav + title + sub/dub — premium compact bar */}
-          <div className="px-3 py-2.5 bg-gradient-to-b from-zinc-900 to-zinc-900/80 border-b border-white/[0.06] backdrop-blur-sm">
-            <div className="flex items-center gap-2">
-              <button onClick={() => navigate(backUrl)} className="shrink-0 w-8 h-8 flex items-center justify-center rounded-xl bg-white/[0.06] active:bg-white/[0.12] touch-manipulation border border-white/[0.05]">
-                <ArrowLeft className="w-4 h-4 text-white/80" />
+          {/* Episode Info & Navigation Header */}
+          <div className="px-3.5 py-3 bg-gradient-to-b from-zinc-900/95 to-zinc-900/80 border-b border-white/[0.08] backdrop-blur-md">
+            {/* Top row: Back + Title + Sub/Dub */}
+            <div className="flex items-center gap-2.5">
+              <button
+                onClick={() => navigate(backUrl)}
+                className="shrink-0 w-8 h-8 flex items-center justify-center rounded-xl bg-white/[0.06] hover:bg-white/[0.12] active:scale-95 touch-manipulation border border-white/[0.08] text-white/90 transition-all shadow-sm"
+              >
+                <ArrowLeft className="w-4 h-4" />
               </button>
               <div className="min-w-0 flex-1">
-                <p className="text-[9px] text-fox-orange font-bold uppercase tracking-widest truncate leading-none mb-0.5">{anime?.title}</p>
-                <p className="text-[12px] font-semibold text-white truncate leading-snug">
+                <p className="text-[10px] text-fox-orange font-bold uppercase tracking-wider truncate leading-none mb-1">
+                  {anime?.title}
+                </p>
+                <p className="text-xs font-bold text-white truncate leading-snug">
                   Episode {currentEpisode?.number || selectedEpisodeNum}
                   {currentEpisode?.title && currentEpisode.title !== `Episode ${currentEpisode.number}` && (
                     <span className="text-zinc-400 font-normal text-[11px]"> — {currentEpisode.title}</span>
                   )}
                 </p>
               </div>
-              {/* Sub/Dub pill toggle */}
-              <div className="flex items-center rounded-lg overflow-hidden border border-white/[0.08] shrink-0">
+
+              {/* Sub/Dub Segmented Pill Toggle */}
+              <div className="flex items-center p-0.5 rounded-xl bg-black/40 border border-white/[0.08] shrink-0 shadow-inner">
                 {(currentEpisode?.hasSub !== false) && (
                   <button
                     onClick={() => { setAudioManuallySet(true); setAudioType('sub'); }}
-                    className={cn("px-2.5 py-1.5 text-[10px] font-bold touch-manipulation transition-colors",
-                      audioType === 'sub' ? "bg-fox-orange text-white" : "bg-transparent text-white/50 active:bg-white/5")}
-                  >SUB</button>
+                    className={cn(
+                      "px-2.5 py-1 text-[10px] font-bold rounded-lg touch-manipulation transition-all duration-200",
+                      audioType === 'sub'
+                        ? "bg-fox-orange text-white shadow-md shadow-fox-orange/30"
+                        : "text-white/50 hover:text-white/80 active:bg-white/5"
+                    )}
+                  >
+                    SUB
+                  </button>
                 )}
                 {dubAvailable && (
                   <button
                     onClick={() => { setAudioManuallySet(true); setAudioType('dub'); }}
-                    className={cn("px-2.5 py-1.5 text-[10px] font-bold touch-manipulation transition-colors",
-                      audioType === 'dub' ? "bg-green-500 text-white" : "bg-transparent text-white/50 active:bg-white/5")}
-                  >DUB</button>
+                    className={cn(
+                      "px-2.5 py-1 text-[10px] font-bold rounded-lg touch-manipulation transition-all duration-200",
+                      audioType === 'dub'
+                        ? "bg-green-500 text-white shadow-md shadow-green-500/30"
+                        : "text-white/50 hover:text-white/80 active:bg-white/5"
+                    )}
+                  >
+                    DUB
+                  </button>
                 )}
               </div>
-              {/* Landscape mode */}
-              <button
-                onClick={handleLandscapeMode}
-                title={isLandscapeLocked ? 'Unlock orientation' : 'Watch in landscape'}
-                className={cn(
-                  "w-8 h-8 flex items-center justify-center rounded-xl touch-manipulation transition-all shrink-0 border",
-                  isLandscapeLocked
-                    ? "bg-fox-orange/20 text-fox-orange border-fox-orange/30"
-                    : "bg-white/[0.06] text-white/60 active:bg-white/[0.12] border-white/[0.05]"
-                )}
-              >
-                <RotateCw className="w-3.5 h-3.5" />
-              </button>
-              {/* Prev/Next */}
-              <div className="flex items-center gap-1 shrink-0">
-                <button onClick={handlePrevEpisode} disabled={!hasPrev}
-                  className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/[0.06] disabled:opacity-25 active:bg-white/[0.12] touch-manipulation border border-white/[0.05]">
-                  <ChevronLeft className="w-4 h-4 text-white" />
+            </div>
+
+            {/* Bottom row: Episode Prev/Next Navigation */}
+            <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-white/[0.04]">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={handlePrevEpisode}
+                  disabled={!hasPrev}
+                  className="px-2.5 py-1 rounded-lg bg-white/[0.05] border border-white/[0.06] text-white/80 disabled:opacity-25 hover:bg-white/10 active:scale-95 touch-manipulation text-[11px] font-semibold flex items-center gap-1 transition-all"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" /> Prev
                 </button>
-                <button onClick={handleNextEpisode} disabled={!hasNext}
-                  className="w-8 h-8 flex items-center justify-center rounded-xl bg-white/[0.06] disabled:opacity-25 active:bg-white/[0.12] touch-manipulation border border-white/[0.05]">
-                  <ChevronRight className="w-4 h-4 text-white" />
+                <button
+                  onClick={handleNextEpisode}
+                  disabled={!hasNext}
+                  className="px-2.5 py-1 rounded-lg bg-white/[0.05] border border-white/[0.06] text-white/80 disabled:opacity-25 hover:bg-white/10 active:scale-95 touch-manipulation text-[11px] font-semibold flex items-center gap-1 transition-all"
+                >
+                  Next <ChevronRight className="w-3.5 h-3.5" />
                 </button>
               </div>
+
+              {/* Server selector pill dropdown or active server tag */}
+              {servers && servers.filter(s => s.name.toLowerCase() !== 'default').length > 1 && (
+                <div className="flex items-center gap-1 overflow-x-auto scrollbar-none max-w-[55%]">
+                  {servers.filter(s => s.name.toLowerCase() !== 'default').map(s => (
+                    <button
+                      key={s.name}
+                      onClick={() => { setSelectedServer(s.name); setUserPickedServer(true); setServerRetryCount(0); }}
+                      className={cn(
+                        "shrink-0 px-2.5 py-0.5 rounded-full text-[10px] font-medium touch-manipulation transition-all",
+                        selectedServer === s.name
+                          ? "bg-fox-orange/20 text-fox-orange border border-fox-orange/40"
+                          : "bg-white/[0.04] text-white/40 border border-white/[0.04]"
+                      )}
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Server selector — compact, only shown when servers are loaded */}
-          {servers && servers.filter(s => s.name.toLowerCase() !== 'default').length > 1 && (
-            <div className="px-3 py-2 bg-zinc-900/40 border-b border-white/[0.04] flex items-center gap-2 overflow-x-auto scrollbar-none">
-              <span className="text-[9px] text-zinc-500 uppercase tracking-widest shrink-0 font-semibold">Server</span>
-              {servers.filter(s => s.name.toLowerCase() !== 'default').map(s => (
-                <button
-                  key={s.name}
-                  onClick={() => { setSelectedServer(s.name); setUserPickedServer(true); setServerRetryCount(0); }}
-                  className={cn(
-                    "shrink-0 px-3 py-1 rounded-full text-[10px] font-semibold touch-manipulation transition-all",
-                    selectedServer === s.name
-                      ? "bg-fox-orange text-white shadow-sm shadow-fox-orange/30"
-                      : "bg-white/[0.06] text-white/50 active:bg-white/[0.12] border border-white/[0.06]"
-                  )}
-                >{s.name}</button>
-              ))}
-            </div>
-          )}
-
-          {/* Episode List — Premium 2-column card grid */}
-          <div className="px-3 pt-4 pb-2">
-            {/* Section header */}
+          {/* Episode List Section */}
+          <div className="px-3.5 pt-4 pb-2">
+            {/* Section Header */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <div className="w-1 h-4 rounded-full bg-fox-orange" />
-                <p className="text-[11px] font-bold text-white/90 uppercase tracking-wider">Episodes</p>
-                <span className="text-[10px] text-zinc-600 font-medium">{episodes?.length || 0}</span>
+                <div className="w-1 h-3.5 rounded-full bg-fox-orange" />
+                <p className="text-xs font-bold text-white uppercase tracking-wider">Episodes</p>
+                <span className="text-[10px] text-zinc-500 font-medium bg-white/5 px-1.5 py-0.5 rounded">
+                  {episodes?.length || 0}
+                </span>
               </div>
-              {/* Watched count */}
               {(() => {
                 const watchedCount = episodes?.filter(ep => {
                   const prog = getEpisodeProgress(ep.number);
                   return prog >= 0.9;
                 }).length || 0;
                 return watchedCount > 0 ? (
-                  <span className="text-[10px] text-green-500/80 font-medium">✓ {watchedCount} watched</span>
+                  <span className="text-[10px] text-green-400/90 font-medium">✓ {watchedCount} completed</span>
                 ) : null;
               })()}
             </div>
 
-            {/* Mobile Season Selector / Tabs */}
+            {/* Mobile Season Selector Tabs */}
             {mobileSeasons.length > 1 && (
               <div className="flex items-center gap-1.5 mb-3 overflow-x-auto scrollbar-none pb-1">
                 <button
                   onClick={() => setMobileSeason('all')}
                   className={cn(
-                    "px-3 py-1 rounded-full text-[10px] font-semibold touch-manipulation whitespace-nowrap transition-all",
+                    "px-3 py-1 rounded-full text-[11px] font-semibold touch-manipulation whitespace-nowrap transition-all",
                     mobileSeason === 'all'
-                      ? "bg-fox-orange text-white shadow-sm shadow-fox-orange/30"
-                      : "bg-white/[0.06] text-white/60 active:bg-white/[0.12] border border-white/[0.06]"
+                      ? "bg-fox-orange text-white shadow-md shadow-fox-orange/30"
+                      : "bg-white/[0.05] text-white/60 hover:bg-white/10 border border-white/[0.06]"
                   )}
                 >
                   All ({episodes?.length || 0})
@@ -1304,10 +1321,10 @@ const Watch = () => {
                         }
                       }}
                       className={cn(
-                        "px-3 py-1 rounded-full text-[10px] font-semibold touch-manipulation whitespace-nowrap transition-all",
+                        "px-3 py-1 rounded-full text-[11px] font-semibold touch-manipulation whitespace-nowrap transition-all",
                         isSeasonActive
-                          ? "bg-fox-orange text-white shadow-sm shadow-fox-orange/30"
-                          : "bg-white/[0.06] text-white/60 active:bg-white/[0.12] border border-white/[0.06]"
+                          ? "bg-fox-orange text-white shadow-md shadow-fox-orange/30"
+                          : "bg-white/[0.05] text-white/60 hover:bg-white/10 border border-white/[0.06]"
                       )}
                     >
                       {s.shortName}
@@ -1317,8 +1334,8 @@ const Watch = () => {
               </div>
             )}
 
-            {/* 2-column card grid */}
-            <div className="grid grid-cols-2 gap-2">
+            {/* 2-column Sleek Episode Grid */}
+            <div className="grid grid-cols-2 gap-2.5">
               {(() => {
                 let displayEps = episodes || [];
                 if (mobileSeason !== 'all' && mobileSeasons.length > 0) {
@@ -1336,109 +1353,119 @@ const Watch = () => {
                     <button
                       key={ep.id}
                       onClick={() => handleEpisodeSelect(ep.id, ep.number)}
-                    className={cn(
-                      "relative rounded-xl text-left overflow-hidden touch-manipulation active:scale-[0.97] transition-all duration-150 flex flex-col",
-                      isActive
-                        ? "ring-2 ring-fox-orange shadow-lg shadow-fox-orange/30"
-                        : isWatched
-                        ? "bg-white/[0.025] border border-white/[0.04]"
-                        : "bg-white/[0.05] border border-white/[0.07] active:bg-white/[0.09]"
-                    )}
-                  >
-                    {/* Card body */}
-                    <div className="flex flex-col p-2.5 gap-1.5 flex-1">
-                      {/* Episode number pill */}
-                      <div className="flex items-center justify-between">
-                        <span className={cn(
-                          "inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold flex-shrink-0",
-                          isActive
-                            ? "bg-fox-orange/90 text-white"
-                            : isWatched
-                            ? "bg-green-500/15 text-green-500"
-                            : "bg-white/[0.08] text-white/70"
-                        )}>
-                          {isActive ? (
-                            <Play className="w-3 h-3 fill-current" />
-                          ) : isWatched ? (
-                            <span className="text-[10px]">✓</span>
-                          ) : (
-                            ep.number
-                          )}
-                        </span>
+                      className={cn(
+                        "relative rounded-xl text-left overflow-hidden touch-manipulation active:scale-[0.97] transition-all duration-200 flex flex-col justify-between p-3",
+                        isActive
+                          ? "bg-fox-orange/15 border-2 border-fox-orange shadow-lg shadow-fox-orange/20"
+                          : isWatched
+                          ? "bg-white/[0.02] border border-white/[0.04] opacity-75"
+                          : "bg-white/[0.04] border border-white/[0.07] hover:bg-white/[0.07]"
+                      )}
+                    >
+                      <div>
+                        {/* Header: Episode Pill + Tag */}
+                        <div className="flex items-center justify-between mb-2">
+                          <span className={cn(
+                            "inline-flex items-center justify-center min-w-[28px] h-6 px-1.5 rounded-lg text-xs font-bold",
+                            isActive
+                              ? "bg-fox-orange text-white"
+                              : isWatched
+                              ? "bg-green-500/15 text-green-400"
+                              : "bg-white/[0.08] text-white/80"
+                          )}>
+                            {isActive ? (
+                              <Play className="w-3 h-3 fill-current" />
+                            ) : isWatched ? (
+                              "✓"
+                            ) : (
+                              ep.number
+                            )}
+                          </span>
 
-                        {/* Progress badge or sub/dub */}
-                        <div className="flex items-center gap-1 ml-1">
-                          {isWatched && !isActive && (
-                            <span className="text-[9px] font-bold text-green-500 bg-green-500/10 px-1 py-0.5 rounded">Done</span>
-                          )}
-                          {isInProgress && !isActive && (
-                            <span className="text-[9px] font-bold text-fox-orange bg-fox-orange/10 px-1 py-0.5 rounded">{Math.round(progress * 100)}%</span>
-                          )}
-                          {!isWatched && !isInProgress && (() => {
-                            const effectiveDubCount = anime?.dubCount ?? 0;
-                            const epHasDub = ep.hasDub || dubAvailable || (effectiveDubCount > 0 && ep.number <= effectiveDubCount);
-                            return epHasDub ? (
-                              <span className="text-[9px] text-green-500/70 font-medium">DUB</span>
-                            ) : null;
-                          })()}
+                          <div className="flex items-center gap-1">
+                            {isInProgress && !isActive && (
+                              <span className="text-[9px] font-bold text-fox-orange bg-fox-orange/15 px-1.5 py-0.5 rounded">
+                                {Math.round(progress * 100)}%
+                              </span>
+                            )}
+                            {!isWatched && !isInProgress && (() => {
+                              const effectiveDubCount = anime?.dubCount ?? 0;
+                              const epHasDub = ep.hasDub || dubAvailable || (effectiveDubCount > 0 && ep.number <= effectiveDubCount);
+                              return epHasDub ? (
+                                <span className="text-[9px] text-green-400/80 font-semibold bg-green-500/10 px-1 py-0.5 rounded">DUB</span>
+                              ) : null;
+                            })()}
+                          </div>
                         </div>
+
+                        {/* Title */}
+                        <p className={cn(
+                          "text-xs leading-snug line-clamp-2 font-medium",
+                          isActive ? "text-white font-bold" : isWatched ? "text-white/50" : "text-white/80"
+                        )}>
+                          {ep.title && ep.title !== `Episode ${ep.number}` ? ep.title : `Episode ${ep.number}`}
+                        </p>
                       </div>
 
-                      {/* Episode title */}
-                      <p className={cn(
-                        "text-[11px] leading-snug line-clamp-2 font-medium",
-                        isActive ? "text-white" : isWatched ? "text-white/40" : "text-white/75"
-                      )}>
-                        {ep.title && ep.title !== `Episode ${ep.number}` ? ep.title : `Episode ${ep.number}`}
-                      </p>
-                    </div>
-
-                    {/* Active glow gradient */}
-                    {isActive && (
-                      <div className="absolute inset-0 bg-fox-orange/10 pointer-events-none" />
-                    )}
-
-                    {/* Progress bar at bottom */}
-                    {progress > 0 && (
-                      <div className="h-[3px] bg-white/[0.06] w-full flex-shrink-0">
-                        <div
-                          className={cn(
-                            "h-full transition-all duration-500",
-                            isWatched ? "bg-green-500" : "bg-fox-orange"
-                          )}
-                          style={{ width: `${Math.min(100, progress * 100)}%` }}
-                        />
-                      </div>
-                    )}
-                  </button>
-                );
-              });
-            })()}
-          </div>
+                      {/* Progress Bar */}
+                      {progress > 0 && (
+                        <div className="h-[2.5px] bg-white/[0.08] rounded-full w-full mt-2.5 overflow-hidden">
+                          <div
+                            className={cn(
+                              "h-full transition-all duration-300 rounded-full",
+                              isWatched ? "bg-green-500" : "bg-fox-orange"
+                            )}
+                            style={{ width: `${Math.min(100, progress * 100)}%` }}
+                          />
+                        </div>
+                      )}
+                    </button>
+                  );
+                });
+              })()}
+            </div>
           </div>
 
-          {/* About — compact card at the bottom */}
-          <div className="px-3 pt-2 pb-safe pb-6">
-            <div className="flex gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/[0.04]">
-              <img src={anime?.image} alt="" className="h-20 w-14 shrink-0 rounded-lg object-cover shadow-lg" referrerPolicy="no-referrer" />
+          {/* Anime Detail Card at Bottom */}
+          <div className="px-3.5 pt-3 pb-safe pb-8">
+            <div className="flex gap-3.5 p-3.5 rounded-2xl bg-white/[0.03] border border-white/[0.06] backdrop-blur-md shadow-xl">
+              <img
+                src={anime?.image}
+                alt=""
+                className="h-24 w-16 shrink-0 rounded-xl object-cover shadow-md border border-white/10"
+                referrerPolicy="no-referrer"
+              />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-white leading-tight truncate">{anime?.title}</p>
-                {anime?.titleJapanese && <p className="text-[10px] italic text-zinc-500 truncate mt-0.5">{anime.titleJapanese}</p>}
-                <div className="flex flex-wrap gap-1 mt-1.5">
+                {anime?.titleJapanese && (
+                  <p className="text-[10px] italic text-zinc-500 truncate mt-0.5">{anime.titleJapanese}</p>
+                )}
+                <div className="flex flex-wrap gap-1.5 mt-2">
                   {formatRating(anime?.rating) && (
-                    <span className="inline-flex items-center gap-0.5 text-[10px] text-yellow-400 bg-yellow-500/10 px-1.5 py-0.5 rounded">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-yellow-400 bg-yellow-500/10 border border-yellow-500/20 px-1.5 py-0.5 rounded-md">
                       <Star className="h-2.5 w-2.5 fill-current" />{formatRating(anime?.rating)}
                     </span>
                   )}
-                  <span className="text-[10px] text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded">{anime?.type}</span>
-                  {anime?.status && <span className={cn(
-                    "text-[10px] px-1.5 py-0.5 rounded",
-                    anime.status === 'Ongoing' ? "text-green-400 bg-green-500/10" :
-                    anime.status === 'Completed' ? "text-blue-400 bg-blue-500/10" : "text-yellow-400 bg-yellow-500/10"
-                  )}>{anime.status}</span>}
+                  {anime?.type && (
+                    <span className="text-[10px] font-medium text-zinc-400 bg-white/5 border border-white/[0.06] px-1.5 py-0.5 rounded-md">
+                      {anime.type}
+                    </span>
+                  )}
+                  {anime?.status && (
+                    <span className={cn(
+                      "text-[10px] font-semibold px-1.5 py-0.5 rounded-md border",
+                      anime.status === 'Ongoing'
+                        ? "text-green-400 bg-green-500/10 border-green-500/20"
+                        : "text-blue-400 bg-blue-500/10 border-blue-500/20"
+                    )}>
+                      {anime.status}
+                    </span>
+                  )}
                 </div>
                 {plainDescription(anime?.description) && (
-                  <p className="mt-2 text-[11px] leading-relaxed text-zinc-500 line-clamp-3">{plainDescription(anime?.description)}</p>
+                  <p className="mt-2 text-[11px] leading-relaxed text-zinc-400 line-clamp-3">
+                    {plainDescription(anime?.description)}
+                  </p>
                 )}
               </div>
             </div>

@@ -14,5 +14,7 @@ services:
         value: 8080
       - key: ENABLE_ADULT_CONTENT
         value: "true"
+      - key: BASE_URL
+        value: "https://anifoxwatch-dko2.onrender.com"
     healthCheckPath: /health
     autoDeploy: false

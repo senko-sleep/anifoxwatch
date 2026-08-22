@@ -2,6 +2,16 @@ import { logger } from '../utils/logger.js';
 
 let puppeteer: any = null;
 
+/**
+ * True on low-memory environments (Render free tier, etc.) where Chromium will OOM.
+ * Render free tier has ~512MB RAM; Chromium needs ~400MB on top of the Node heap.
+ * On these environments we skip Puppeteer entirely and rely on HTTP-only extraction.
+ */
+const IS_LOW_MEMORY =
+    process.env.RENDER === 'true' ||
+    process.env.IS_LOW_MEMORY === 'true' ||
+    (process.env.NODE_ENV === 'production' && parseInt(process.env.MEMORY_LIMIT_MB || '0', 10) < 512);
+
 interface ExtractedStream {
     url: string;
     quality: string;
@@ -26,8 +36,13 @@ class StreamExtractor {
     private readonly RESULT_CACHE_TTL_MS = 30 * 60 * 1000;
 
 
-    /** Pre-launch Puppeteer so the first watch request avoids a 10–15s cold start. */
+    /** Pre-launch Puppeteer so the first watch request avoids a 10–15s cold start.
+     *  No-op on low-memory environments (Render free tier) where Puppeteer is disabled. */
     async warmBrowser(): Promise<void> {
+        if (IS_LOW_MEMORY) {
+            logger.info('[StreamExtractor] Browser warm-up skipped (low-memory/Render environment)');
+            return;
+        }
         try {
             await this.getBrowser();
         } catch (error) {
@@ -36,9 +51,16 @@ class StreamExtractor {
     }
 
     /**
-     * Get or create browser instance (singleton)
+     * Get or create browser instance (singleton).
+     * On low-memory environments (Render free tier) this throws immediately so
+     * callers can fall back to HTTP-only extraction without burning 20s waiting
+     * for Chromium to crash.
      */
     private async getBrowser(): Promise<any> {
+        if (IS_LOW_MEMORY) {
+            throw new Error('[StreamExtractor] Puppeteer disabled on low-memory environment (Render free tier). Use HTTP extraction instead.');
+        }
+
         if (this.browser && this.browser.connected) {
             return this.browser;
         }

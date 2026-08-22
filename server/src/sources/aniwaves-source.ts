@@ -70,6 +70,67 @@ export class AniwavesSource extends BaseAnimeSource {
         });
     }
 
+    // ─── HTTP-only m3u8 extraction (no Puppeteer) ──────────────────────────
+    // Used as a fallback on low-memory environments (e.g. Render free tier)
+    // where Chromium cannot be launched. Mirrors YomiSource.extractM3u8FromUrl.
+
+    private async httpExtractM3u8(embedUrl: string): Promise<string | null> {
+        const embedClient = axios.create({
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,*/*',
+            },
+        });
+
+        const scanForM3u8 = (text: string): string | null => {
+            // Direct .m3u8 link in HTML/JS
+            const matches = text.match(/https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*/g);
+            if (matches) {
+                const valid = matches.filter(u => !u.includes('subtitles') && !u.includes('ping'));
+                if (valid.length) return valid[0];
+            }
+            // JS variable patterns: file:"...", src:"...", url:"...", source:"..."
+            const jsMatch = text.match(/(?:file|src|url|source)\s*[=:]\s*["']([^"']+\.m3u8[^"']*)/i);
+            if (jsMatch) return jsMatch[1];
+            return null;
+        };
+
+        try {
+            let origin: string;
+            try { origin = new URL(embedUrl).origin; } catch { origin = this.baseUrl; }
+
+            const resp = await embedClient.get(embedUrl, {
+                headers: { Referer: origin, Origin: origin },
+                maxRedirects: 5,
+            });
+            const html: string = typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data);
+
+            const direct = scanForM3u8(html);
+            if (direct) return direct;
+
+            // Follow one iframe level
+            const $ = cheerio.load(html);
+            const iframeSrc = $('iframe').attr('src') || $('iframe').attr('data-src');
+            if (iframeSrc && iframeSrc.startsWith('http')) {
+                let iframeOrigin: string;
+                try { iframeOrigin = new URL(iframeSrc).origin; } catch { iframeOrigin = origin; }
+                const iResp = await embedClient.get(iframeSrc, {
+                    headers: { Referer: embedUrl, Origin: iframeOrigin },
+                    maxRedirects: 3,
+                });
+                const iHtml: string = typeof iResp.data === 'string' ? iResp.data : JSON.stringify(iResp.data);
+                const iResult = scanForM3u8(iHtml);
+                if (iResult) return iResult;
+            }
+        } catch (e: any) {
+            logger.warn(`[Aniwaves] HTTP m3u8 extract failed for ${embedUrl}: ${e.message}`, undefined, this.name);
+        }
+        return null;
+    }
+
+
+
     // ─── Transport winner helpers ───────────────────────────────────────────
 
     private getWinnerKey(urlPath: string): string {
@@ -591,12 +652,31 @@ export class AniwavesSource extends BaseAnimeSource {
                     } catch {
                         origin = this.baseUrl;
                     }
-                    logger.info(`[Aniwaves] Successfully extracted ${extractedSources.length} streams`, undefined, this.name);
+                    logger.info(`[Aniwaves] Successfully extracted ${extractedSources.length} streams via Puppeteer`, undefined, this.name);
                 } else {
-                    logger.warn(`[Aniwaves] Stream extraction failed: ${extraction.error || 'No streams found'}. Falling back to embed URL`, undefined, this.name);
+                    logger.warn(`[Aniwaves] Puppeteer extraction failed: ${extraction.error || 'No streams found'}. Trying HTTP fallback...`, undefined, this.name);
                 }
             } catch (extError: any) {
-                logger.error(`[Aniwaves] Error extracting streams: ${extError.message}`, extError, undefined, this.name);
+                logger.warn(`[Aniwaves] Puppeteer unavailable (${extError.message}). Trying HTTP fallback...`, undefined, this.name);
+            }
+
+            // HTTP-only fallback: when Puppeteer is disabled (Render free tier) or failed,
+            // try fetching the embed page via axios and scanning for .m3u8 URLs in HTML/JS.
+            if (extractedSources.length === 0) {
+                logger.info(`[Aniwaves] Attempting HTTP-only m3u8 extraction for ${embedUrl}`, undefined, this.name);
+                const httpM3u8 = await this.httpExtractM3u8(embedUrl);
+                if (httpM3u8) {
+                    try { origin = new URL(embedUrl).origin; } catch { /* keep default */ }
+                    extractedSources = [{
+                        url: httpM3u8,
+                        quality: 'auto',
+                        isM3U8: true,
+                        isEmbed: false,
+                        isDirect: false,
+                        server: serverId || 'Aniwaves',
+                    }];
+                    logger.info(`[Aniwaves] HTTP fallback extracted stream: ${httpM3u8.substring(0, 80)}...`, undefined, this.name);
+                }
             }
 
             // Aniwaves' embed URL is domain-locked — it only renders on aniwaves.ru
@@ -609,6 +689,7 @@ export class AniwavesSource extends BaseAnimeSource {
                 logger.warn(`[Aniwaves] No direct streams extracted for ${embedUrl} — returning empty (no domain-locked embed fallback)`, undefined, this.name);
                 return { sources: [], subtitles: [] };
             }
+
 
             const streamData: StreamingData = {
                 sources: extractedSources,

@@ -3432,11 +3432,15 @@ export class SourceManager {
         let resolved = false;
         let graceTimer: ReturnType<typeof setTimeout> | null = null;
         const GRACE_PERIOD = 500;
-        // 15s for cross-source fallback — needs AniList API + search + episodes + streaming
-        const CROSS_SOURCE_FALLBACK_MAX_MS = 15_000;
-        // 20s global safety net — allows cross-source fallback to complete before resolving empty
-        const STREAM_GLOBAL_MAX_MS = 20_000;
+        // On Render free tier, cold starts eat into the budget — give cross-source fallback
+        // a few extra seconds to complete. IS_LOW_MEMORY is true when RENDER=true.
+        const IS_RENDER = process.env.RENDER === 'true' || process.env.IS_LOW_MEMORY === 'true';
+        // 15s (non-Render) / 20s (Render) for cross-source fallback — needs AniList API + search + episodes + streaming
+        const CROSS_SOURCE_FALLBACK_MAX_MS = IS_RENDER ? 20_000 : 15_000;
+        // 20s (non-Render) / 25s (Render) global safety net — matches route-level GLOBAL_TIMEOUT_MS
+        const STREAM_GLOBAL_MAX_MS = IS_RENDER ? 25_000 : 20_000;
         const ONLY_IP_LOCKED_WAIT_MS = category === 'dub' ? 12_000 : 2_000;
+
 
         // Use existing priority from above
         const localPriority = STREAM_PRIORITY;
