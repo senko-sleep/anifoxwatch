@@ -58,7 +58,7 @@ const SORT_MAP: Record<string, string> = {
 // ─── Search ──────────────────────────────────────────────────────────────────
 
 /**
- * Search anime on AniList by query string.
+ * Search anime on AniList by query string with Jikan and Kitsu fallbacks.
  */
 export async function searchAniList(
   query: string,
@@ -78,31 +78,120 @@ export async function searchAniList(
     }
   }`;
 
+  // 1. Try AniList GraphQL
   try {
     const res = await fetchAniListGraphQL({ query: gql });
-    if (!res.ok) throw new Error(`AniList ${res.status}`);
-    const json = await res.json() as {
-      errors?: { message: string }[];
-      data?: { Page?: { pageInfo?: any; media?: AniListHomeMedia[] } };
-    };
-    if (json.errors?.length) throw new Error(json.errors[0].message);
+    if (res.ok) {
+      const json = await res.json() as {
+        errors?: { message: string }[];
+        data?: { Page?: { pageInfo?: any; media?: AniListHomeMedia[] } };
+      };
+      if (!json.errors?.length && json.data?.Page?.media) {
+        const media = json.data.Page.media;
+        const pageInfo = json.data.Page.pageInfo;
+        const results = media.map((m) => mapAniListMediaToAnime(m));
 
-    const media = (json.data?.Page?.media ?? []) as AniListHomeMedia[];
-    const pageInfo = json.data?.Page?.pageInfo;
-
-    const results = media.map((m) => mapAniListMediaToAnime(m));
-
-    return {
-      results,
-      totalPages: pageInfo?.lastPage ?? 1,
-      currentPage: pageInfo?.currentPage ?? page,
-      hasNextPage: pageInfo?.hasNextPage ?? false,
-      totalResults: pageInfo?.total ?? results.length,
-    };
-  } catch (err) {
-    console.error('[AniList Search]', err);
-    return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, totalResults: 0 };
+        if (results.length > 0) {
+          return {
+            results,
+            totalPages: pageInfo?.lastPage ?? 1,
+            currentPage: pageInfo?.currentPage ?? page,
+            hasNextPage: pageInfo?.hasNextPage ?? false,
+            totalResults: pageInfo?.total ?? results.length,
+          };
+        }
+      }
+    }
+  } catch {
+    // AniList failed / 403, proceed to Jikan fallback
   }
+
+  // 2. Fallback: Jikan (MyAnimeList) Search
+  try {
+    const sfwParam = mode === 'safe' ? '&sfw=true' : '';
+    const jikanUrl = `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(query)}&page=${page}&limit=${perPage}${sfwParam}`;
+    const jikanRes = await fetch(jikanUrl);
+    if (jikanRes.ok) {
+      const jikanJson = await jikanRes.json();
+      const items = jikanJson.data || [];
+      if (items.length > 0) {
+        const results: Anime[] = items.map((item: any) => ({
+          id: `mal-${item.mal_id}`,
+          title: item.title_english || item.title,
+          titleJapanese: item.title_japanese || item.title,
+          image: item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
+          cover: item.images?.jpg?.image_url || '',
+          banner: item.images?.jpg?.large_image_url || undefined,
+          description: (item.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+          type: item.type === 'Movie' ? 'Movie' : item.type === 'OVA' ? 'OVA' : item.type === 'ONA' ? 'ONA' : item.type === 'Special' ? 'Special' : 'TV',
+          status: item.status === 'Airing' ? 'Ongoing' : item.status === 'Complete' ? 'Completed' : 'Upcoming',
+          rating: item.score,
+          episodes: item.episodes || 0,
+          genres: item.genres?.map((g: any) => g.name) || [],
+          studios: item.studios?.map((s: any) => s.name) || [],
+          year: item.year || item.aired?.prop?.from?.year,
+          season: item.season?.toLowerCase(),
+          isMature: Boolean(item.rating?.includes('Rx') || item.rating?.includes('R+')),
+          source: 'jikan',
+        }));
+
+        return {
+          results,
+          totalPages: jikanJson.pagination?.last_visible_page ?? 1,
+          currentPage: page,
+          hasNextPage: jikanJson.pagination?.has_next_page ?? false,
+          totalResults: jikanJson.pagination?.items?.total ?? results.length,
+        };
+      }
+    }
+  } catch {
+    // Jikan failed, proceed to Kitsu fallback
+  }
+
+  // 3. Fallback: Kitsu Search
+  try {
+    const offset = (page - 1) * perPage;
+    const kitsuUrl = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(query)}&page[limit]=${perPage}&page[offset]=${offset}`;
+    const kitsuRes = await fetch(kitsuUrl, { headers: { Accept: 'application/vnd.api+json' } });
+    if (kitsuRes.ok) {
+      const kitsuJson = await kitsuRes.json();
+      const items = kitsuJson.data || [];
+      if (items.length > 0) {
+        const results: Anime[] = items.map((item: any) => ({
+          id: `kitsu-${item.id}`,
+          title: item.attributes?.titles?.en || item.attributes?.titles?.en_jp || item.attributes?.canonicalTitle || '',
+          titleJapanese: item.attributes?.titles?.ja_jp || item.attributes?.titles?.en_jp,
+          image: item.attributes?.posterImage?.large || item.attributes?.coverImage?.large || '',
+          cover: item.attributes?.posterImage?.large || '',
+          banner: item.attributes?.coverImage?.original || item.attributes?.coverImage?.large || undefined,
+          description: (item.attributes?.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+          type: item.attributes?.subtype === 'movie' ? 'Movie' : item.attributes?.subtype === 'OVA' ? 'OVA' : item.attributes?.subtype === 'ONA' ? 'ONA' : item.attributes?.subtype === 'special' ? 'Special' : 'TV',
+          status: item.attributes?.status === 'current' ? 'Ongoing' : item.attributes?.status === 'finished' ? 'Completed' : 'Upcoming',
+          rating: item.attributes?.averageRating ? parseFloat(item.attributes.averageRating) / 10 : undefined,
+          episodes: item.attributes?.episodeCount || 0,
+          genres: [],
+          studios: [],
+          year: item.attributes?.startDate ? new Date(item.attributes.startDate).getFullYear() : undefined,
+          season: undefined,
+          isMature: item.attributes?.ageRating === 'R18',
+          source: 'kitsu',
+        }));
+
+        const total = kitsuJson.meta?.count || results.length;
+        return {
+          results,
+          totalPages: Math.ceil(total / perPage),
+          currentPage: page,
+          hasNextPage: offset + perPage < total,
+          totalResults: total,
+        };
+      }
+    }
+  } catch {
+    // Kitsu failed
+  }
+
+  return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, totalResults: 0 };
 }
 
 // ─── Browse ──────────────────────────────────────────────────────────────────
@@ -216,15 +305,106 @@ export async function browseAniList(
       results = results.sort(() => Math.random() - 0.5);
     }
 
-    return {
-      results,
-      totalPages: pageInfo?.lastPage ?? 1,
-      currentPage: pageInfo?.currentPage ?? page,
-      hasNextPage: pageInfo?.hasNextPage ?? false,
-      totalResults: pageInfo?.total ?? results.length,
-    };
-  } catch (err) {
-    console.error('[AniList Browse]', err);
-    return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, totalResults: 0 };
+    if (results.length > 0) {
+      return {
+        results,
+        totalPages: pageInfo?.lastPage ?? 1,
+        currentPage: pageInfo?.currentPage ?? page,
+        hasNextPage: pageInfo?.hasNextPage ?? false,
+        totalResults: pageInfo?.total ?? results.length,
+      };
+    }
+  } catch {
+    // AniList failed, fall back to Jikan
   }
+
+  // Fallback 1: Jikan
+  try {
+    const jikanFilter = filters.status === 'Ongoing' ? '&filter=airing' : filters.status === 'Upcoming' ? '&filter=upcoming' : '&filter=bypopularity';
+    const jikanType = filters.type === 'Movie' ? '&type=movie' : filters.type === 'OVA' ? '&type=ova' : '';
+    const jikanUrl = `https://api.jikan.moe/v4/top/anime?page=${page}&limit=${perPage}${jikanFilter}${jikanType}`;
+    const jikanRes = await fetch(jikanUrl);
+    if (jikanRes.ok) {
+      const jikanJson = await jikanRes.json();
+      const items = jikanJson.data || [];
+      if (items.length > 0) {
+        const results: Anime[] = items.map((item: any) => ({
+          id: `mal-${item.mal_id}`,
+          title: item.title_english || item.title,
+          titleJapanese: item.title_japanese || item.title,
+          image: item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
+          cover: item.images?.jpg?.image_url || '',
+          banner: item.images?.jpg?.large_image_url || undefined,
+          description: (item.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+          type: item.type === 'Movie' ? 'Movie' : item.type === 'OVA' ? 'OVA' : item.type === 'ONA' ? 'ONA' : item.type === 'Special' ? 'Special' : 'TV',
+          status: item.status === 'Airing' ? 'Ongoing' : item.status === 'Complete' ? 'Completed' : 'Upcoming',
+          rating: item.score,
+          episodes: item.episodes || 0,
+          genres: item.genres?.map((g: any) => g.name) || [],
+          studios: item.studios?.map((s: any) => s.name) || [],
+          year: item.year || item.aired?.prop?.from?.year,
+          season: item.season?.toLowerCase(),
+          isMature: false,
+          source: 'jikan',
+        }));
+
+        return {
+          results,
+          totalPages: jikanJson.pagination?.last_visible_page ?? 1,
+          currentPage: page,
+          hasNextPage: jikanJson.pagination?.has_next_page ?? false,
+          totalResults: jikanJson.pagination?.items?.total ?? results.length,
+        };
+      }
+    }
+  } catch {
+    // Jikan failed
+  }
+
+  // Fallback 2: Kitsu
+  try {
+    const offset = (page - 1) * perPage;
+    const kitsuStatus = filters.status === 'Ongoing' ? '&filter[status]=current' : filters.status === 'Upcoming' ? '&filter[status]=upcoming' : '';
+    const kitsuSubtype = filters.type === 'Movie' ? '&filter[subtype]=movie' : '';
+    const kitsuUrl = `https://kitsu.io/api/edge/anime?page[limit]=${perPage}&page[offset]=${offset}&sort=-popularityRank${kitsuStatus}${kitsuSubtype}`;
+    const kitsuRes = await fetch(kitsuUrl, { headers: { Accept: 'application/vnd.api+json' } });
+    if (kitsuRes.ok) {
+      const kitsuJson = await kitsuRes.json();
+      const items = kitsuJson.data || [];
+      if (items.length > 0) {
+        const results: Anime[] = items.map((item: any) => ({
+          id: `kitsu-${item.id}`,
+          title: item.attributes?.titles?.en || item.attributes?.titles?.en_jp || item.attributes?.canonicalTitle || '',
+          titleJapanese: item.attributes?.titles?.ja_jp || item.attributes?.titles?.en_jp,
+          image: item.attributes?.posterImage?.large || item.attributes?.coverImage?.large || '',
+          cover: item.attributes?.posterImage?.large || '',
+          banner: item.attributes?.coverImage?.original || item.attributes?.coverImage?.large || undefined,
+          description: (item.attributes?.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+          type: item.attributes?.subtype === 'movie' ? 'Movie' : item.attributes?.subtype === 'OVA' ? 'OVA' : item.attributes?.subtype === 'ONA' ? 'ONA' : item.attributes?.subtype === 'special' ? 'Special' : 'TV',
+          status: item.attributes?.status === 'current' ? 'Ongoing' : item.attributes?.status === 'finished' ? 'Completed' : 'Upcoming',
+          rating: item.attributes?.averageRating ? parseFloat(item.attributes.averageRating) / 10 : undefined,
+          episodes: item.attributes?.episodeCount || 0,
+          genres: [],
+          studios: [],
+          year: item.attributes?.startDate ? new Date(item.attributes.startDate).getFullYear() : undefined,
+          season: undefined,
+          isMature: false,
+          source: 'kitsu',
+        }));
+
+        const total = kitsuJson.meta?.count || results.length;
+        return {
+          results,
+          totalPages: Math.ceil(total / perPage),
+          currentPage: page,
+          hasNextPage: offset + perPage < total,
+          totalResults: total,
+        };
+      }
+    }
+  } catch {
+    // Kitsu failed
+  }
+
+  return { results: [], totalPages: 0, currentPage: page, hasNextPage: false, totalResults: 0 };
 }

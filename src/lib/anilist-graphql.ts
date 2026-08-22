@@ -45,6 +45,16 @@ async function fetchWith429Retry(init: RequestInit): Promise<Response> {
     let res: Response;
     try {
       res = await fetch(targetUrl, withFetchTimeout(init));
+      // If the backend proxy failed with 403/502/503, try direct AniList
+      if (!res.ok && (res.status === 403 || res.status >= 500) && targetUrl !== 'https://graphql.anilist.co') {
+        try {
+          const directRes = await fetch('https://graphql.anilist.co', withFetchTimeout(init));
+          if (directRes.ok) return directRes;
+          res = directRes;
+        } catch {
+          // Keep original res
+        }
+      }
     } catch (err) {
       if (targetUrl !== 'https://graphql.anilist.co') {
         try {
@@ -73,9 +83,8 @@ async function fetchAniListOnceWithTransientRetry(init: RequestInit): Promise<Re
   for (let attempt = 0; attempt < MAX_TRANSIENT_RETRIES; attempt++) {
     try {
       const res = await fetchWith429Retry(init);
-      // 403/Forbidden: AniList API blocked/disabled - serve stale from cache or return error
+      // 403/Forbidden: AniList API blocked/disabled - return immediately so callers fall back
       if (res.status === 403) {
-        console.warn('[AniList] API returned 403 Forbidden - API may be temporarily disabled');
         return res;
       }
       if (res.ok) return res;

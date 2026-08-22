@@ -316,3 +316,248 @@ export async function fetchTrendingFromKitsu(perPage: number = 24): Promise<Anim
 export async function fetchLatestFromJikan(perPage: number = 24): Promise<Anime[]> {
   return fetchFromJikanTop(1, perPage, 'airing');
 }
+
+export async function fetchSeasonalFromJikan(year: number, season: string): Promise<SeasonalResponse> {
+  try {
+    const s = season.toLowerCase();
+    const res = await fetch(`https://api.jikan.moe/v4/seasons/${year}/${s}?limit=25`);
+    if (!res.ok) throw new Error(`Jikan HTTP ${res.status}`);
+    const json = await res.json();
+    const results: Anime[] = (json.data || []).map((item: any) => ({
+      id: `mal-${item.mal_id}`,
+      title: item.title_english || item.title,
+      titleJapanese: item.title,
+      image: item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
+      cover: item.images?.jpg?.image_url || '',
+      banner: undefined,
+      description: (item.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+      type: 'TV' as const,
+      status: item.status === 'Airing' ? 'Ongoing' : item.status === 'Complete' ? 'Completed' : 'Upcoming',
+      rating: item.score,
+      episodes: item.episodes || 0,
+      genres: item.genres?.map((g: any) => g.name) || [],
+      studios: item.studios?.map((s: any) => s.name) || [],
+      year,
+      season: s,
+      isMature: false,
+      source: 'jikan',
+    }));
+    return {
+      results,
+      pageInfo: { hasNextPage: json.pagination?.has_next_page ?? false, currentPage: 1, totalPages: 1, totalItems: results.length },
+      seasonInfo: { year, season: s },
+      source: 'jikan',
+    };
+  } catch {
+    return {
+      results: [],
+      pageInfo: { hasNextPage: false, currentPage: 1, totalPages: 0, totalItems: 0 },
+      seasonInfo: { year, season: season.toLowerCase() },
+      source: 'jikan',
+    };
+  }
+}
+
+export async function fetchUpcomingFromJikan(perPage: number = 24): Promise<AnimeSearchResult> {
+  try {
+    const res = await fetch(`https://api.jikan.moe/v4/seasons/upcoming?limit=${perPage}`);
+    if (!res.ok) throw new Error(`Jikan HTTP ${res.status}`);
+    const json = await res.json();
+    const results: Anime[] = (json.data || []).map((item: any) => ({
+      id: `mal-${item.mal_id}`,
+      title: item.title_english || item.title,
+      titleJapanese: item.title,
+      image: item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
+      cover: item.images?.jpg?.image_url || '',
+      banner: undefined,
+      description: (item.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+      type: 'TV' as const,
+      status: 'Upcoming' as const,
+      rating: item.score,
+      episodes: item.episodes || 0,
+      genres: item.genres?.map((g: any) => g.name) || [],
+      studios: [],
+      year: undefined,
+      season: undefined,
+      isMature: false,
+      source: 'jikan',
+    }));
+    return {
+      results,
+      totalPages: 1,
+      currentPage: 1,
+      hasNextPage: json.pagination?.has_next_page ?? false,
+      totalResults: results.length,
+    };
+  } catch {
+    return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
+  }
+}
+
+export async function fetchUpcomingFromKitsu(perPage: number = 24): Promise<AnimeSearchResult> {
+  try {
+    const res = await fetch(`https://kitsu.io/api/edge/anime?page[limit]=${perPage}&filter[status]=upcoming&sort=-userCount`, {
+      headers: { Accept: 'application/vnd.api+json' },
+    });
+    if (!res.ok) throw new Error(`Kitsu HTTP ${res.status}`);
+    const json = await res.json();
+    const results: Anime[] = (json.data || []).map((item: any) => ({
+      id: `kitsu-${item.id}`,
+      title: item.attributes?.titles?.en || item.attributes?.titles?.en_jp || '',
+      titleJapanese: item.attributes?.titles?.en_jp,
+      image: item.attributes?.posterImage?.large || item.attributes?.coverImage?.large || '',
+      cover: item.attributes?.posterImage?.large || '',
+      banner: undefined,
+      description: (item.attributes?.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+      type: 'TV' as const,
+      status: 'Upcoming' as const,
+      rating: item.attributes?.averageRating ? parseFloat(item.attributes.averageRating) / 10 : undefined,
+      episodes: item.attributes?.episodeCount || 0,
+      genres: [],
+      studios: [],
+      year: undefined,
+      season: undefined,
+      isMature: false,
+      source: 'kitsu',
+    }));
+    return { results, totalPages: 1, currentPage: 1, hasNextPage: false, totalResults: results.length };
+  } catch {
+    return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
+  }
+}
+
+export async function fetchPopularMoviesFromJikan(perPage: number = 20): Promise<AnimeSearchResult> {
+  try {
+    const res = await fetch(`https://api.jikan.moe/v4/top/anime?type=movie&limit=${perPage}`);
+    if (!res.ok) throw new Error(`Jikan HTTP ${res.status}`);
+    const json = await res.json();
+    const results: Anime[] = (json.data || []).map((item: any) => ({
+      id: `mal-${item.mal_id}`,
+      title: item.title_english || item.title,
+      titleJapanese: item.title,
+      image: item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
+      cover: item.images?.jpg?.image_url || '',
+      banner: undefined,
+      description: (item.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+      type: 'Movie' as const,
+      status: 'Completed' as const,
+      rating: item.score,
+      episodes: 1,
+      genres: item.genres?.map((g: any) => g.name) || [],
+      studios: [],
+      year: item.year,
+      season: undefined,
+      isMature: false,
+      source: 'jikan',
+    }));
+    return {
+      results,
+      totalPages: 1,
+      currentPage: 1,
+      hasNextPage: json.pagination?.has_next_page ?? false,
+      totalResults: results.length,
+    };
+  } catch {
+    return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
+  }
+}
+
+export async function fetchPopularMoviesFromKitsu(perPage: number = 20): Promise<AnimeSearchResult> {
+  try {
+    const res = await fetch(`https://kitsu.io/api/edge/anime?page[limit]=${perPage}&filter[subtype]=movie&sort=-userCount`, {
+      headers: { Accept: 'application/vnd.api+json' },
+    });
+    if (!res.ok) throw new Error(`Kitsu HTTP ${res.status}`);
+    const json = await res.json();
+    const results: Anime[] = (json.data || []).map((item: any) => ({
+      id: `kitsu-${item.id}`,
+      title: item.attributes?.titles?.en || item.attributes?.titles?.en_jp || '',
+      titleJapanese: item.attributes?.titles?.en_jp,
+      image: item.attributes?.posterImage?.large || item.attributes?.coverImage?.large || '',
+      cover: item.attributes?.posterImage?.large || '',
+      banner: undefined,
+      description: (item.attributes?.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+      type: 'Movie' as const,
+      status: 'Completed' as const,
+      rating: item.attributes?.averageRating ? parseFloat(item.attributes.averageRating) / 10 : undefined,
+      episodes: 1,
+      genres: [],
+      studios: [],
+      year: undefined,
+      season: undefined,
+      isMature: false,
+      source: 'kitsu',
+    }));
+    return { results, totalPages: 1, currentPage: 1, hasNextPage: false, totalResults: results.length };
+  } catch {
+    return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
+  }
+}
+
+export async function fetchActionTrendingFromJikan(perPage: number = 20): Promise<AnimeSearchResult> {
+  try {
+    const res = await fetch(`https://api.jikan.moe/v4/anime?genres=1&order_by=popularity&sort=desc&limit=${perPage}`);
+    if (!res.ok) throw new Error(`Jikan HTTP ${res.status}`);
+    const json = await res.json();
+    const results: Anime[] = (json.data || []).map((item: any) => ({
+      id: `mal-${item.mal_id}`,
+      title: item.title_english || item.title,
+      titleJapanese: item.title,
+      image: item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
+      cover: item.images?.jpg?.image_url || '',
+      banner: undefined,
+      description: (item.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+      type: 'TV' as const,
+      status: item.status === 'Airing' ? 'Ongoing' : 'Completed',
+      rating: item.score,
+      episodes: item.episodes || 0,
+      genres: item.genres?.map((g: any) => g.name) || ['Action'],
+      studios: [],
+      year: item.year,
+      season: undefined,
+      isMature: false,
+      source: 'jikan',
+    }));
+    return {
+      results,
+      totalPages: 1,
+      currentPage: 1,
+      hasNextPage: json.pagination?.has_next_page ?? false,
+      totalResults: results.length,
+    };
+  } catch {
+    return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
+  }
+}
+
+export async function fetchActionTrendingFromKitsu(perPage: number = 20): Promise<AnimeSearchResult> {
+  try {
+    const res = await fetch(`https://kitsu.io/api/edge/anime?page[limit]=${perPage}&filter[categories]=action&sort=-userCount`, {
+      headers: { Accept: 'application/vnd.api+json' },
+    });
+    if (!res.ok) throw new Error(`Kitsu HTTP ${res.status}`);
+    const json = await res.json();
+    const results: Anime[] = (json.data || []).map((item: any) => ({
+      id: `kitsu-${item.id}`,
+      title: item.attributes?.titles?.en || item.attributes?.titles?.en_jp || '',
+      titleJapanese: item.attributes?.titles?.en_jp,
+      image: item.attributes?.posterImage?.large || item.attributes?.coverImage?.large || '',
+      cover: item.attributes?.posterImage?.large || '',
+      banner: undefined,
+      description: (item.attributes?.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+      type: 'TV' as const,
+      status: item.attributes?.status === 'current' ? 'Ongoing' : 'Completed',
+      rating: item.attributes?.averageRating ? parseFloat(item.attributes.averageRating) / 10 : undefined,
+      episodes: item.attributes?.episodeCount || 0,
+      genres: ['Action'],
+      studios: [],
+      year: undefined,
+      season: undefined,
+      isMature: false,
+      source: 'kitsu',
+    }));
+    return { results, totalPages: 1, currentPage: 1, hasNextPage: false, totalResults: results.length };
+  } catch {
+    return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
+  }
+}

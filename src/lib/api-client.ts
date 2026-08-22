@@ -1,6 +1,6 @@
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { getApiConfig, getApiFallbackUrl } from './api-config';
-import { fetchAniListAnimeByNumericId } from './anilist-anime-by-id';
+import { fetchAniListAnimeByNumericId, fetchAnimeWithFallback } from './anilist-anime-by-id';
 import { ping } from '@/utils/keep-alive';
 
 interface BrowseFilters {
@@ -506,20 +506,20 @@ class AnimeApiClient {
         try {
             const params = new URLSearchParams({ id });
             if (source) params.append('source', source);
-            return await this.fetch<Anime>(`/api/anime?${params}`);
+            const res = await this.fetch<Anime>(`/api/anime?${params}`);
+            if (res && res.title && res.title !== 'Unknown') {
+                return res;
+            }
         } catch {
-            return this.getAnimeAnilistFallback(id);
+            // Edge API failed / AniList blocked — fall through to multi-source client-side fallback
         }
+        return this.getAnimeAnilistFallback(id, source);
     }
 
-    /** When edge API returns 404 for anilist-* ids, load metadata directly from AniList GraphQL. */
-    private async getAnimeAnilistFallback(id: string): Promise<Anime | null> {
-        const m = /^anilist-(\d+)$/i.exec(id.trim());
-        if (!m) return null;
-        const numericId = parseInt(m[1], 10);
-        if (Number.isNaN(numericId)) return null;
+    /** Multi-source fallback: AniList -> Jikan -> Kitsu -> Synthetic Fallback */
+    private async getAnimeAnilistFallback(id: string, source?: string): Promise<Anime | null> {
         try {
-            return await fetchAniListAnimeByNumericId(numericId);
+            return await fetchAnimeWithFallback(id, source);
         } catch {
             return null;
         }

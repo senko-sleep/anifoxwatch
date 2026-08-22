@@ -12,6 +12,13 @@ import {
   fetchTrendingFromJikan,
   fetchTrendingFromKitsu,
   fetchLatestFromJikan,
+  fetchSeasonalFromJikan,
+  fetchUpcomingFromJikan,
+  fetchUpcomingFromKitsu,
+  fetchPopularMoviesFromJikan,
+  fetchPopularMoviesFromKitsu,
+  fetchActionTrendingFromJikan,
+  fetchActionTrendingFromKitsu,
 } from '@/lib/anilist-home-queries';
 
 const homeRetry = {
@@ -32,7 +39,7 @@ export function useAnilistHomeTrending(perPage: number = 24) {
   return useQuery<Anime[], Error>({
     queryKey: [...homeAnilistKey.trending, perPage],
     queryFn: async () => {
-      // 1) BFF trending (streaming-source backed) - best for playable content
+      // 1) BFF trending (streaming-source backed)
       try {
         const results = await apiClient.getTrending(1);
         if (results?.length) return results.slice(0, perPage);
@@ -43,7 +50,7 @@ export function useAnilistHomeTrending(perPage: number = 24) {
         const anilistData = await fetchTrendingFromAniList(perPage);
         if (anilistData?.length) return anilistData;
       } catch (err) {
-        console.error('[useAnilistHomeTrending] AniList fetch failed:', err);
+        console.warn('[useAnilistHomeTrending] AniList fetch failed, using fallback');
       }
       
       // 3) Jikan (MyAnimeList) trending
@@ -51,7 +58,7 @@ export function useAnilistHomeTrending(perPage: number = 24) {
         const jikanData = await fetchTrendingFromJikan(perPage);
         if (jikanData?.length) return jikanData;
       } catch (err) {
-        console.error('[useAnilistHomeTrending] Jikan fetch failed:', err);
+        console.warn('[useAnilistHomeTrending] Jikan fetch failed:', err);
       }
       
       // 4) Kitsu trending
@@ -59,7 +66,7 @@ export function useAnilistHomeTrending(perPage: number = 24) {
         const kitsuData = await fetchTrendingFromKitsu(perPage);
         if (kitsuData?.length) return kitsuData;
       } catch (err) {
-        console.error('[useAnilistHomeTrending] Kitsu fetch failed:', err);
+        console.warn('[useAnilistHomeTrending] Kitsu fetch failed:', err);
       }
       
       return [];
@@ -78,32 +85,28 @@ export function useAnilistHomeLatest(perPage: number = 24) {
       try {
         const anilistData = await fetchLatestFromAniList(perPage);
         if (anilistData && anilistData.length > 0) return anilistData;
-      } catch (error) {
-        console.error('[useAnilistHomeLatest] AniList fetch failed:', error);
+      } catch {
+        // Fall through cleanly
       }
       
       // 2) BFF latest
       try {
         const results = await apiClient.getLatest(1);
         if (results?.length) return results.slice(0, perPage);
-      } catch (error) {
-        console.error('[useAnilistHomeLatest] BFF latest fetch failed:', error);
-      }
+      } catch { /* ignore */ }
       
       // 3) BFF trending
       try {
         const results = await apiClient.getTrending(1);
         if (results?.length) return results.slice(0, perPage);
-      } catch (error) {
-        console.error('[useAnilistHomeLatest] BFF trending fetch failed:', error);
-      }
+      } catch { /* ignore */ }
       
       // 4) Jikan latest (airing)
       try {
         const jikanData = await fetchLatestFromJikan(perPage);
         if (jikanData?.length) return jikanData;
       } catch (error) {
-        console.error('[useAnilistHomeLatest] Jikan fetch failed:', error);
+        console.warn('[useAnilistHomeLatest] Jikan fetch failed:', error);
       }
       
       // 5) Kitsu trending
@@ -111,10 +114,9 @@ export function useAnilistHomeLatest(perPage: number = 24) {
         const kitsuData = await fetchTrendingFromKitsu(perPage);
         if (kitsuData?.length) return kitsuData;
       } catch (error) {
-        console.error('[useAnilistHomeLatest] Kitsu fetch failed:', error);
+        console.warn('[useAnilistHomeLatest] Kitsu fetch failed:', error);
       }
       
-      console.warn('[useAnilistHomeLatest] All sources failed, returning empty');
       return [];
     },
     staleTime: 3 * 60 * 1000,
@@ -127,19 +129,25 @@ export function useAnilistHomeSeasonal(year: number, season: string, enabled: bo
   return useQuery<SeasonalResponse, Error>({
     queryKey: homeAnilistKey.seasonal(year, season),
     queryFn: async () => {
+      // 1) BFF seasonal
       try {
-        // BFF seasonal uses streaming sources; still keep AniList fallback for richness.
         const results = await apiClient.getSeasonal(year, season.toLowerCase(), 1);
         if (results?.results?.length) return results;
       } catch { /* ignore */ }
+
+      // 2) AniList seasonal
       try {
         const anilistResults = await fetchSeasonalFromAniList(year, season);
         if (anilistResults?.results?.length) return anilistResults;
-      } catch (err) {
-        console.error('[useAnilistHomeSeasonal] AniList fetch failed:', err);
-      }
-      // Return empty response instead of throwing
-      return { results: [], pageInfo: { hasNextPage: false, currentPage: 1, totalPages: 0, totalItems: 0 }, seasonInfo: { year, season: season.toLowerCase() }, source: 'AniList' };
+      } catch { /* ignore */ }
+
+      // 3) Jikan seasonal
+      try {
+        const jikanResults = await fetchSeasonalFromJikan(year, season);
+        if (jikanResults?.results?.length) return jikanResults;
+      } catch { /* ignore */ }
+
+      return { results: [], pageInfo: { hasNextPage: false, currentPage: 1, totalPages: 0, totalItems: 0 }, seasonInfo: { year, season: season.toLowerCase() }, source: 'empty' };
     },
     enabled: enabled && !!year && !!season,
     staleTime: 15 * 60 * 1000,
@@ -152,17 +160,30 @@ export function useAnilistHomeUpcoming(perPage: number = 24) {
   return useQuery<AnimeSearchResult, Error>({
     queryKey: [...homeAnilistKey.upcoming, perPage],
     queryFn: async () => {
-      // Upcoming is often AniList-only; prefer AniList but allow BFF if it returns anything.
+      // 1) AniList upcoming
       try {
         const anilist = await fetchUpcomingFromAniList(perPage);
         if (anilist?.results?.length) return anilist;
-      } catch (err) {
-        console.error('[useAnilistHomeUpcoming] AniList fetch failed:', err);
-      }
+      } catch { /* ignore */ }
+
+      // 2) Jikan upcoming
+      try {
+        const jikan = await fetchUpcomingFromJikan(perPage);
+        if (jikan?.results?.length) return jikan;
+      } catch { /* ignore */ }
+
+      // 3) Kitsu upcoming
+      try {
+        const kitsu = await fetchUpcomingFromKitsu(perPage);
+        if (kitsu?.results?.length) return kitsu;
+      } catch { /* ignore */ }
+
+      // 4) BFF browse upcoming
       try {
         const r = await apiClient.browseAnime({ status: 'upcoming', sort: 'popularity' }, 1, false, perPage);
         if (r?.results?.length) return r;
       } catch { /* ignore */ }
+
       return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
     },
     staleTime: 30 * 60 * 1000,
@@ -175,16 +196,30 @@ export function useAnilistHomeMovies(perPage: number = 20) {
   return useQuery<AnimeSearchResult, Error>({
     queryKey: [...homeAnilistKey.movies, perPage],
     queryFn: async () => {
+      // 1) AniList movies
       try {
         const anilist = await fetchPopularMoviesFromAniList(perPage);
         if (anilist?.results?.length) return anilist;
-      } catch (err) {
-        console.error('[useAnilistHomeMovies] AniList fetch failed:', err);
-      }
+      } catch { /* ignore */ }
+
+      // 2) Jikan movies
+      try {
+        const jikan = await fetchPopularMoviesFromJikan(perPage);
+        if (jikan?.results?.length) return jikan;
+      } catch { /* ignore */ }
+
+      // 3) Kitsu movies
+      try {
+        const kitsu = await fetchPopularMoviesFromKitsu(perPage);
+        if (kitsu?.results?.length) return kitsu;
+      } catch { /* ignore */ }
+
+      // 4) BFF browse movies
       try {
         const r = await apiClient.browseAnime({ type: 'Movie', sort: 'popularity' }, 1, false, perPage);
         if (r?.results?.length) return r;
       } catch { /* ignore */ }
+
       return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
     },
     staleTime: 2 * 60 * 1000,
@@ -197,16 +232,30 @@ export function useAnilistHomeAction(perPage: number = 20) {
   return useQuery<AnimeSearchResult, Error>({
     queryKey: [...homeAnilistKey.action, perPage],
     queryFn: async () => {
+      // 1) AniList action
       try {
         const anilist = await fetchActionTrendingFromAniList(perPage);
         if (anilist?.results?.length) return anilist;
-      } catch (err) {
-        console.error('[useAnilistHomeAction] AniList fetch failed:', err);
-      }
+      } catch { /* ignore */ }
+
+      // 2) Jikan action
+      try {
+        const jikan = await fetchActionTrendingFromJikan(perPage);
+        if (jikan?.results?.length) return jikan;
+      } catch { /* ignore */ }
+
+      // 3) Kitsu action
+      try {
+        const kitsu = await fetchActionTrendingFromKitsu(perPage);
+        if (kitsu?.results?.length) return kitsu;
+      } catch { /* ignore */ }
+
+      // 4) BFF browse action
       try {
         const r = await apiClient.browseAnime({ genre: 'Action', sort: 'trending' }, 1, false, perPage);
         if (r?.results?.length) return r;
       } catch { /* ignore */ }
+
       return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
     },
     staleTime: 2 * 60 * 1000,

@@ -69,21 +69,86 @@ async function fetchSuggestions(q: string): Promise<SearchResult[]> {
     }
   }`;
 
-  const response = await fetchAniListGraphQLFast({ query: gql });
-  if (!response.ok) throw new Error(`AniList ${response.status}`);
-  const body = await response.json() as {
-    errors?: { message?: string }[];
-    data?: { Page?: { media?: AniListHomeMedia[] } };
-  };
-  if (body.errors?.length) throw new Error(body.errors[0]?.message || 'AniList search failed');
-
-  const results = (body.data?.Page?.media || []).map((media) => mapAniListMediaToAnime(media));
-  suggestionCache.set(key, results);
-  if (suggestionCache.size > 40) {
-    const oldest = suggestionCache.keys().next().value;
-    if (oldest) suggestionCache.delete(oldest);
+  try {
+    const response = await fetchAniListGraphQLFast({ query: gql });
+    if (response.ok) {
+      const body = await response.json() as {
+        errors?: { message?: string }[];
+        data?: { Page?: { media?: AniListHomeMedia[] } };
+      };
+      if (!body.errors?.length && body.data?.Page?.media) {
+        const results = body.data.Page.media.map((media) => mapAniListMediaToAnime(media));
+        if (results.length > 0) {
+          suggestionCache.set(key, results);
+          return results;
+        }
+      }
+    }
+  } catch {
+    // AniList failed
   }
-  return results;
+
+  // Fallback 1: Jikan
+  try {
+    const jikanRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(q)}&limit=6&sfw=true`);
+    if (jikanRes.ok) {
+      const jikanJson = await jikanRes.json();
+      const items = jikanJson.data || [];
+      if (items.length > 0) {
+        const results = items.map((item: any) => ({
+          id: `mal-${item.mal_id}`,
+          title: item.title_english || item.title,
+          titleEnglish: item.title_english,
+          titleRomaji: item.title,
+          image: item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || '',
+          description: (item.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+          type: item.type || 'TV',
+          status: item.status === 'Airing' ? 'Ongoing' : 'Completed',
+          rating: item.score,
+          genres: item.genres?.map((g: any) => g.name) || [],
+          subCount: item.episodes || 1,
+          dubCount: 0,
+        }));
+        suggestionCache.set(key, results);
+        return results;
+      }
+    }
+  } catch {
+    // Jikan failed
+  }
+
+  // Fallback 2: Kitsu
+  try {
+    const kitsuRes = await fetch(`https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(q)}&page[limit]=6`, {
+      headers: { Accept: 'application/vnd.api+json' },
+    });
+    if (kitsuRes.ok) {
+      const kitsuJson = await kitsuRes.json();
+      const items = kitsuJson.data || [];
+      if (items.length > 0) {
+        const results = items.map((item: any) => ({
+          id: `kitsu-${item.id}`,
+          title: item.attributes?.titles?.en || item.attributes?.titles?.en_jp || item.attributes?.canonicalTitle || '',
+          titleEnglish: item.attributes?.titles?.en,
+          titleRomaji: item.attributes?.titles?.en_jp,
+          image: item.attributes?.posterImage?.large || item.attributes?.coverImage?.large || '',
+          description: (item.attributes?.synopsis || '').replace(/<[^>]+>/g, '').trim(),
+          type: item.attributes?.subtype || 'TV',
+          status: item.attributes?.status === 'current' ? 'Ongoing' : 'Completed',
+          rating: item.attributes?.averageRating ? parseFloat(item.attributes.averageRating) / 10 : undefined,
+          genres: [],
+          subCount: item.attributes?.episodeCount || 1,
+          dubCount: 0,
+        }));
+        suggestionCache.set(key, results);
+        return results;
+      }
+    }
+  } catch {
+    // Kitsu failed
+  }
+
+  return [];
 }
 
 export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: SearchAutocompleteProps) => {

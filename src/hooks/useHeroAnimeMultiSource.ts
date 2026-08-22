@@ -432,10 +432,15 @@ function clientRecencyScore(m: Record<string, unknown>): number {
 }
 
 async function fetchAniListPage(query: string): Promise<Record<string, unknown>[]> {
-  const response = await fetchAniListGraphQL({ query });
-  const json = await response.json();
-  if (json.errors) throw new Error(json.errors[0]?.message || 'AniList query failed');
-  return json?.data?.Page?.media || [];
+  try {
+    const response = await fetchAniListGraphQL({ query });
+    if (!response.ok) return [];
+    const json = await response.json();
+    if (json?.errors) return [];
+    return json?.data?.Page?.media || [];
+  } catch {
+    return [];
+  }
 }
 
 async function fetchFromAniList(): Promise<HeroAnime[]> {
@@ -458,8 +463,8 @@ async function fetchFromAniList(): Promise<HeroAnime[]> {
     try {
       const chunk = await fetchAniListPage(q);
       if (Array.isArray(chunk)) raw.push(...chunk);
-    } catch (e) {
-      console.warn('[Hero] AniList page query failed:', e);
+    } catch {
+      // Ignored - fallbacks will handle
     }
   }
 
