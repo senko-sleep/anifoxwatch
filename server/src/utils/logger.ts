@@ -101,7 +101,9 @@ class Logger {
 
     // Production logic - still log important events
     if (level >= LogLevel.WARN) return true;
-    if (source === 'API' || source === 'STREAM' || source === 'SourceManager') return true;
+    // CACHE is on this list because cache effectiveness is only diagnosable in production: how
+    // many entries survived a restart, and how often a refresh is failing behind a stale value.
+    if (source === 'API' || source === 'STREAM' || source === 'SourceManager' || source === 'CACHE') return true;
     return false;
   }
 
