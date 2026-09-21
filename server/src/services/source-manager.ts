@@ -16,12 +16,22 @@ import { logger, PerformanceTimer, createRequestContext } from '../utils/logger.
 import { AnimeCache } from '../lib/anime-cache.js';
 import { animeCache, episodesCache, searchCache, trendingCache } from '../lib/memory-cache.js';
 import { anilistService } from './anilist-service.js';
-import { reliableRequest, retry, withTimeout } from '../middleware/reliability.js';
+import { reliableRequest, retry, settleByDeadline, withTimeout } from '../middleware/reliability.js';
 import { REGISTERED_SOURCE_NAMES, KNOWN_SOURCE_PREFIXES } from '../registered-sources.js';
 import { reconstructAnimeKaiCompoundFromWatchUrl } from '../utils/animekai-compound-from-watch.js';
 import { isLikelyHentai } from './hentai-resolver-service.js';
 
 export { REGISTERED_SOURCE_NAMES };
+
+/**
+ * How long a search may take before it answers with whatever it has.
+ *
+ * Chosen against the measured shape of the latency distribution rather than as a round number:
+ * a healthy source answers in roughly 300ms, so 2.5s is about eight times the normal case — long
+ * enough that a merely slow source is still included, short enough that a hung one never decides
+ * how long the user waits.
+ */
+const SEARCH_DEADLINE_MS = Number(process.env.SEARCH_DEADLINE_MS) || 2_500;
 
 interface StreamingSource extends AnimeSource {
     getStreamingLinks?(episodeId: string, server?: string, category?: 'sub' | 'dub', options?: SourceRequestOptions): Promise<StreamingData>;
@@ -1021,7 +1031,13 @@ export class SourceManager {
         const dollar = slug.indexOf('$');
         if (dollar !== -1) slug = slug.slice(0, dollar);
         slug = this.extractRawId(slug);
-        
+
+        // The episode selector has to go first. Aniwaves IDs carry it as "&eps=2", which leaves
+        // the slug ending in a digit that is not the source ID, so the trailing-ID strip below
+        // matches nothing and the ID survives into the query: "made in abyss 77127". Sources then
+        // reject their own correct hit as not a convincing match for a title nobody has.
+        slug = slug.replace(/[&?]eps?=\d+$/i, '');
+
         // Strip common episode suffixes: -episode-1, -ep-1, -1, etc.
         slug = slug.replace(/-episode-\d+$/i, '')
                   .replace(/-ep-\d+$/i, '')
@@ -1382,7 +1398,15 @@ export class SourceManager {
                     })
             );
 
-            const results = await Promise.all(searchPromises);
+            // Bounded by a deadline rather than by the slowest source. Each source is wrapped in
+            // executeReliably (2 attempts x 25s + 1s backoff), so one unreachable source could
+            // otherwise hold the whole search for ~51s while the other two answered in ~300ms.
+            const { values: results } = await settleByDeadline(
+                `Search "${query}"`,
+                searchPromises,
+                SEARCH_DEADLINE_MS,
+                (i) => ({ results: [], totalPages: 0, currentPage: page, hasNextPage: false, sourceName: sourcesToTry[i].name })
+            );
 
             // Merge results and add prefixes if missing
             const combinedResults: AnimeBase[] = [];

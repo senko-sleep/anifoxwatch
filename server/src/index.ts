@@ -395,7 +395,12 @@ const startServer = async (port: number) => {
         console.log(`📡 Registered sources (same as SourceManager constructor): ${REGISTERED_SOURCE_NAMES.join(' → ')}`);
         // Pre-warm Puppeteer (used by Aniwaves embed extractor) in the background so the
         // first /api/stream/watch request does not block on browser launch (~10–15 s cold start).
-        void streamExtractor.warmBrowser();
+        // Not on Render's free tier: there it competes with boot for a fraction of a CPU and
+        // ~512 MB, times out, and — worse — holds Chromium's memory for sources that mostly
+        // don't need it. The browser starts on demand instead. PUPPETEER_WARMUP=true forces it.
+        if (process.env.PUPPETEER_WARMUP === 'true' || !(process.env.RENDER === 'true' || process.env.RENDER_EXTERNAL_URL)) {
+            void streamExtractor.warmBrowser();
+        }
     });
 
     // Connection timeout settings to prevent hanging connections

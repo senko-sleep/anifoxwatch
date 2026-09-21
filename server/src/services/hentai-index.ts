@@ -40,6 +40,19 @@ export interface IndexEntry {
     blocked?: boolean;
 }
 
+// ── Sources that can't be reached ────────────────────────────────────────────
+//
+// A site can be reachable from one host and not another (a bot check that passes on a home
+// connection can refuse a datacenter). Its titles would then be listed as playable and fail
+// on click, so while a source is unreachable its entries are left out of everything the
+// index returns. Probed at boot and every few minutes, so it recovers by itself.
+
+const down = new Set<SourceName>();
+const PROBE_MS = 10 * 60 * 1000;
+
+/** Not shown: excluded by the catalog's safety list, or from a source that isn't answering. */
+const hidden = (e: IndexEntry): boolean => Boolean(e.blocked) || down.has(e.source);
+
 const CACHE_FILE = path.resolve(process.cwd(), '.cache', 'hentai-index.json');
 /**
  * A snapshot shipped with the app. Hosts with an ephemeral disk (Render's free tier wipes it
@@ -209,20 +222,47 @@ export function refresh(): Promise<void> {
     return crawling;
 }
 
+/**
+ * Ask each site for its first listing page. A source that answers nothing is marked down, but
+ * only while at least one other source answered — if none did, the network is the problem, not
+ * the sites, and hiding everything would just blank the catalog.
+ */
+async function probeSources(): Promise<void> {
+    const probes: [SourceName, () => Promise<AnimeSearchResult>][] = [
+        ['WatchHentai', () => watchHentaiSource.listSeries(1)],
+        ['HentaiMama', () => hentaiMamaSource.listSeries(1)],
+        ['HentaiHaven', () => hentaiHavenSource.listSeries(1)],
+    ];
+    const answered = await Promise.all(
+        probes.map(async ([name, list]) => [name, await list().then((r) => (r.results?.length ?? 0) > 0).catch(() => false)] as const)
+    );
+    if (!answered.some(([, ok]) => ok)) return;
+
+    for (const [name, ok] of answered) {
+        if (ok && down.delete(name)) logger.info(`[hentai-index] ${name} is answering again`);
+        if (!ok && !down.has(name)) {
+            down.add(name);
+            logger.warn(`[hentai-index] ${name} isn't answering from here — its titles are hidden until it does`);
+        }
+    }
+}
+
 /** Load the saved index and keep it fresh. Safe to call from anywhere, any number of times. */
 export function start(): void {
     if (started) return;
     started = true;
     const fresh = loadFromDisk() && Date.now() - updatedAt < MAX_AGE_MS;
     if (!fresh) void refresh();
+    void probeSources();
     setInterval(() => void refresh(), REFRESH_MS).unref();
+    setInterval(() => void probeSources(), PROBE_MS).unref();
 }
 
 export function stats() {
     const bySource: Record<string, number> = {};
     entries.forEach((e) => (bySource[e.source] = (bySource[e.source] ?? 0) + 1));
     const blocked = [...entries.values()].filter((e) => e.blocked).map((e) => `${e.source}:${e.slug}`);
-    return { total: entries.size, bySource, updatedAt, crawling: Boolean(crawling), blockedCount: blocked.length, blocked };
+    return { total: entries.size, bySource, down: [...down], updatedAt, crawling: Boolean(crawling), blockedCount: blocked.length, blocked };
 }
 
 /** Wait for a first usable index on a cold start (bounded — never blocks a request for long). */
@@ -293,7 +333,7 @@ export function groupEntries(list: IndexEntry[]): IndexEntry[][] {
 export function siblings(entry: IndexEntry): IndexEntry[] {
     const out: IndexEntry[] = [];
     for (const e of entries.values()) {
-        if (e.source !== entry.source && !e.blocked && e.norm === entry.norm && yearsCompatible(e.year, entry.year)) out.push(e);
+        if (e.source !== entry.source && !hidden(e) && e.norm === entry.norm && yearsCompatible(e.year, entry.year)) out.push(e);
     }
     return out;
 }
@@ -328,7 +368,7 @@ export function matchTitle(titles: string[], year?: number | null): IndexEntry[]
 
     const best = new Map<SourceName, { entry: IndexEntry; score: number }>();
     for (const entry of entries.values()) {
-        if (entry.blocked) continue;
+        if (hidden(entry)) continue;
         let score = 0;
         for (const w of wanted) score = Math.max(score, titleSimilarity(w, entry.norm));
         if (score < MATCH_THRESHOLD) continue;
@@ -351,7 +391,7 @@ export function searchEntries(query: string): IndexEntry[] {
 
     const hits: { e: IndexEntry; rank: number }[] = [];
     for (const e of entries.values()) {
-        if (e.blocked) continue;
+        if (hidden(e)) continue;
         const tokens = split(e.norm);
         const ok = words.every((w) => tokens.some((t) => t.startsWith(w)));
         if (!ok) continue;
@@ -365,12 +405,12 @@ export function searchEntries(query: string): IndexEntry[] {
 /** Newest first — what "just landed" looks like across both sites. */
 export function newest(limit: number, opts: { released?: boolean } = {}): IndexEntry[] {
     return [...entries.values()]
-        .filter((e) => !e.blocked && (opts.released ? !e.upcoming : true))
+        .filter((e) => !hidden(e) && (opts.released ? !e.upcoming : true))
         .sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
         .slice(0, limit);
 }
 
 export const findEntry = (source: SourceName, slug: string): IndexEntry | undefined => {
     const e = entries.get(`${source}:${slug}`);
-    return e && !e.blocked ? e : undefined;
+    return e && !hidden(e) ? e : undefined;
 };

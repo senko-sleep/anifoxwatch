@@ -337,3 +337,75 @@ export function forceResetCircuitBreaker(sourceName: string): void {
 }
 
 export { getCircuitBreaker, isCircuitBreakerOpen, recordSuccess, recordFailure };
+
+/**
+ * Await a fan-out, but bound the wait by a deadline instead of by the slowest member.
+ *
+ * `Promise.all` over N sources makes the user pay for max(latency), and the retry/timeout policy
+ * around each source puts that maximum at tens of seconds. Latency that high is indistinguishable
+ * from failure to whoever is waiting, and the irony is that the answer is usually already in hand:
+ * the fast sources returned in a few hundred milliseconds and the request sat on them.
+ *
+ * So: settle what has arrived by `deadlineMs` and return that. Stragglers are not cancelled —
+ * they run to completion and populate their per-source caches, so the straggler that missed this
+ * deadline is what makes the next request fast. This is the standard tail-tolerance trade (Dean &
+ * Barroso, *The Tail at Scale*): serve a slightly less complete answer now rather than a complete
+ * one long after the user gave up.
+ *
+ * @param label       Identifies the fan-out in the log line emitted when a deadline is missed.
+ * @param tasks       The fan-out. Each must settle on its own; rejections count as "arrived empty".
+ * @param deadlineMs  How long the caller is willing to wait in total.
+ * @param fallback    Stand-in value for a task that has not settled in time.
+ * @returns           Settled values in the original order, with `fallback` where one is late.
+ */
+export async function settleByDeadline<T>(
+    label: string,
+    tasks: Promise<T>[],
+    deadlineMs: number,
+    fallback: (index: number) => T
+): Promise<{ values: T[]; lateCount: number }> {
+    if (tasks.length === 0) return { values: [], lateCount: 0 };
+
+    const values = new Array<T>(tasks.length);
+    const arrived = new Array<boolean>(tasks.length).fill(false);
+    let settledCount = 0;
+
+    // Never let a straggler's own rejection escape as an unhandled rejection: this function
+    // stops awaiting these promises at the deadline, so nothing else is left to catch them.
+    const tracked = tasks.map((task, i) =>
+        task.then(
+            (value) => { values[i] = value; arrived[i] = true; settledCount++; },
+            () => { arrived[i] = true; settledCount++; }
+        )
+    );
+
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, deadlineMs);
+        // Do not hold the event loop open purely to wait out a deadline.
+        timer.unref?.();
+    });
+
+    try {
+        await Promise.race([Promise.all(tracked), deadline]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+
+    let lateCount = 0;
+    for (let i = 0; i < tasks.length; i++) {
+        if (!arrived[i]) {
+            values[i] = fallback(i);
+            lateCount++;
+        }
+    }
+
+    if (lateCount > 0) {
+        logger.warn(
+            `[${label}] Answered at the ${deadlineMs}ms deadline with ${settledCount}/${tasks.length} sources; ` +
+            `${lateCount} still running (their results will warm the cache)`
+        );
+    }
+
+    return { values, lateCount };
+}

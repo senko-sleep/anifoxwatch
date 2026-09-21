@@ -66,6 +66,20 @@ export class HentaiHavenSource extends BaseAnimeSource {
         }
     }
 
+    /** One live request, uncached and unretried, saying exactly what happened — for diagnostics. */
+    async probe(): Promise<{ ok: boolean; ms: number; error?: string }> {
+        const started = Date.now();
+        try {
+            await curlGet(`${this.baseUrl}/api/manga/?page=1&per_page=1`, {
+                headers: { 'User-Agent': UA, Accept: 'application/json', Referer: `${HH_BASE}/` },
+                timeoutMs: 15000,
+            });
+            return { ok: true, ms: Date.now() - started };
+        } catch (e) {
+            return { ok: false, ms: Date.now() - started, error: (e as Error).message };
+        }
+    }
+
     /** One page of the full catalogue, newest first — the crawler walks these. */
     async listSeries(page: number = 1, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const key = `list:${page}`;

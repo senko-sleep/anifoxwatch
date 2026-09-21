@@ -2,6 +2,13 @@ import { logger } from '../utils/logger.js';
 
 let puppeteer: any = null;
 
+/**
+ * How long Chromium gets to start. A shared-CPU container (Render's free tier is a fraction of a
+ * core) needs far longer than a laptop's few seconds, and giving up early just leaves the first
+ * real request to pay for a second attempt.
+ */
+const LAUNCH_TIMEOUT_MS = Number(process.env.PUPPETEER_LAUNCH_TIMEOUT_MS) || (process.env.NODE_ENV === 'production' ? 60_000 : 20_000);
+
 interface ExtractedStream {
     url: string;
     quality: string;
@@ -25,6 +32,36 @@ class StreamExtractor {
     private resultCache: Map<string, { result: ExtractionResult; timestamp: number }> = new Map();
     private readonly RESULT_CACHE_TTL_MS = 30 * 60 * 1000;
 
+    // ─── Launch circuit breaker ─────────────────────────────────────────────
+    // A host that cannot run Chromium cannot run it on the next request either, and every
+    // doomed attempt costs the caller the full LAUNCH_TIMEOUT_MS. That budget belongs to the
+    // sources that need no browser (Yomi, Anichi resolve over plain HTTP in about a second):
+    // if a launch failure is allowed to burn it, a *recoverable* episode 404s instead.
+    // So after a failure the breaker opens and launches fail instantly until it is due to
+    // retry, backing off 30s → 1m → 2m → … → 15m.
+    private launchFailures = 0;
+    private retryLaunchAt = 0;
+    private static readonly BREAKER_BASE_MS = 30_000;
+    private static readonly BREAKER_MAX_MS = 15 * 60_000;
+
+    /** Whether a launch may be attempted now, i.e. the breaker is closed or due to retry. */
+    private launchAllowed(): boolean {
+        return this.launchFailures === 0 || Date.now() >= this.retryLaunchAt;
+    }
+
+    private openBreaker(): void {
+        this.launchFailures += 1;
+        const backoff = Math.min(
+            StreamExtractor.BREAKER_BASE_MS * 2 ** (this.launchFailures - 1),
+            StreamExtractor.BREAKER_MAX_MS
+        );
+        this.retryLaunchAt = Date.now() + backoff;
+        logger.warn(
+            `[StreamExtractor] Browser unavailable (failure ${this.launchFailures}); ` +
+            `skipping extraction for ${Math.round(backoff / 1000)}s`
+        );
+    }
+
 
     /** Pre-launch Puppeteer so the first watch request avoids a 10–15s cold start. */
     async warmBrowser(): Promise<void> {
@@ -43,8 +80,18 @@ class StreamExtractor {
             return this.browser;
         }
 
+        // A browser that died (Chromium is the first thing the OOM killer takes on a small
+        // container) must not be held on to, or every later extraction reuses the corpse.
+        if (this.browser) {
+            this.browser = null;
+        }
+
         if (this.browserLaunchPromise) {
             return this.browserLaunchPromise;
+        }
+
+        if (!this.launchAllowed()) {
+            throw new Error(`Browser unavailable (retrying in ${Math.round((this.retryLaunchAt - Date.now()) / 1000)}s)`);
         }
 
         try {
@@ -54,6 +101,8 @@ class StreamExtractor {
             }
             const launchPromise = puppeteer.launch({
                 headless: true,
+                // Puppeteer's own limit is 30s and would fire before ours, so it is set to match.
+                timeout: LAUNCH_TIMEOUT_MS,
                 executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
                 args: [
                     '--no-sandbox',
@@ -61,25 +110,64 @@ class StreamExtractor {
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
                     '--disable-gpu',
-                    '--window-size=1920,1080',
+                    // 1920x1080 buys nothing here — nothing is ever rendered for a human, and the
+                    // backing store is paid for in the memory the launch is already short of.
+                    '--window-size=1280,720',
                     '--disable-web-security',
                     '--js-flags="--max-old-space-size=256"',
-                    '--no-zygote'
+                    '--no-zygote',
+                    // Startup work that only pays off for an interactive browser. On a shared
+                    // core each of these is a slice of the launch budget spent on nothing.
+                    '--disable-extensions',
+                    '--disable-background-networking',
+                    '--disable-background-timer-throttling',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-renderer-backgrounding',
+                    '--disable-breakpad',
+                    '--disable-crash-reporter',
+                    '--disable-component-update',
+                    '--disable-default-apps',
+                    '--disable-sync',
+                    '--no-first-run',
+                    '--no-default-browser-check',
+                    '--metrics-recording-only',
+                    '--mute-audio'
                 ]
             });
 
+            let timedOut = false;
             this.browserLaunchPromise = Promise.race([
                 launchPromise,
-                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Puppeteer launch timeout')), 20000))
+                new Promise<any>((_, reject) => setTimeout(() => {
+                    timedOut = true;
+                    reject(new Error(`Puppeteer launch timeout (${LAUNCH_TIMEOUT_MS}ms)`));
+                }, LAUNCH_TIMEOUT_MS + 5000))
             ]);
 
+            // Losing the race abandons the launch but not the process: a Chromium that starts
+            // a second late would otherwise stay resident for the life of the server, and on a
+            // 512MB container a couple of those are the difference between slow and OOM-killed.
+            launchPromise.then(
+                (late: any) => { if (timedOut) late.close().catch(() => {}); },
+                () => {}
+            );
+
             this.browser = await this.browserLaunchPromise;
+            this.launchFailures = 0;
+            this.browser.once('disconnected', () => {
+                logger.warn('[StreamExtractor] Browser disconnected — next request relaunches');
+                this.browser = null;
+            });
             logger.info('[StreamExtractor] Browser launched');
             return this.browser;
         } catch (error) {
-            this.browserLaunchPromise = null;
+            this.openBreaker();
             logger.error(`[StreamExtractor] Failed to launch browser: ${error}`);
             throw error;
+        } finally {
+            // Cleared either way: kept after a success it would hand out a stale browser
+            // forever, and kept after a failure it would serve the same rejection forever.
+            this.browserLaunchPromise = null;
         }
     }
 
@@ -317,6 +405,12 @@ class StreamExtractor {
             return cached.result;
         }
 
+        // Fail instantly rather than queueing behind a launch that is known to be failing,
+        // so the caller still has its time budget left for the browser-free sources.
+        if (!this.browser && !this.browserLaunchPromise && !this.launchAllowed()) {
+            return { success: false, streams: [], subtitles: [], error: 'Browser unavailable' };
+        }
+
         // Dedup: return an existing in-flight extraction for the same URL
         const existing = this.inFlight.get(embedUrl);
         if (existing) {
@@ -488,9 +582,25 @@ class StreamExtractor {
     }
 
     /**
+     * Can Chromium actually start here? Stream extraction for the mainstream sources is built on
+     * it, so on a host where it cannot launch every anime episode returns no sources, and the only
+     * evidence in the logs is a generic "no streams extracted".
+     */
+    async probe(): Promise<{ ok: boolean; ms: number; version?: string; error?: string }> {
+        const started = Date.now();
+        try {
+            const browser = await this.getBrowser();
+            return { ok: true, ms: Date.now() - started, version: await browser.version() };
+        } catch (error: any) {
+            return { ok: false, ms: Date.now() - started, error: error?.message ?? String(error) };
+        }
+    }
+
+    /**
      * Close browser instance
      */
     async close(): Promise<void> {
+        this.browserLaunchPromise = null;
         if (this.browser) {
             await this.browser.close();
             this.browser = null;

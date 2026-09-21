@@ -2,6 +2,9 @@ import { Router, type Request, type Response } from 'express';
 import { browse, getGenres, getHome, getTitle, indexInfo, search } from '../services/hentai-catalog.js';
 import type { AdultSort } from '../services/anilist-adult.js';
 import { logger } from '../utils/logger.js';
+import { curlVersion } from '../utils/curl-fetch.js';
+import { hentaiHavenSource } from '../sources/hentaihaven-source.js';
+import { streamExtractor } from '../services/stream-extractor.js';
 
 /**
  * The adult catalog's own API — the counterpart to /api/anime for the WatchHentai
@@ -58,6 +61,20 @@ router.get('/search', async (req, res) => {
     } catch (e) {
         fail(res, 'search', e, { results: [], totalPages: 0, currentPage: 1, hasNextPage: false });
     }
+});
+
+/**
+ * Debug: can this host reach the sites that need special handling? Answers "why does X work on my
+ * machine and not on the server" without needing the server's logs.
+ */
+router.get('/diag', async (_req, res) => {
+    res.json({
+        curl: await curlVersion(),
+        // Anime streaming runs through Chromium; without it every mainstream episode 404s.
+        browser: await streamExtractor.probe(),
+        hentaiHaven: await hentaiHavenSource.probe(),
+        index: indexInfo(),
+    });
 });
 
 /** Debug: how much of each site the index holds. */
