@@ -122,6 +122,23 @@ const DEAD_DOMAINS = new Set([
  * ad blobs (images, tracking pixels) disguised as video — they cause
  * `fragParsingError` because they aren't valid MPEG-TS / fMP4.
  */
+/**
+ * Whether a Rust data-plane proxy (media-proxy/) sits in front of this process.
+ *
+ * Off by default, so a deployment without it behaves exactly as before: the flag only chooses
+ * who moves the bytes, never which bytes are moved.
+ */
+const MEDIA_ACCEL_ENABLED = process.env.MEDIA_ACCEL === '1';
+
+/** The origin of a referer URL, or undefined if it is not parseable as one. */
+function safeOriginOf(referer: string): string | undefined {
+    try {
+        return new URL(referer).origin;
+    } catch {
+        return undefined;
+    }
+}
+
 const AD_CDN_DOMAINS = [
     'ibyteimg.com',       // ByteDance / TikTok ad CDN
     'ad-site-i18n',       // ByteDance ad path component
@@ -1322,6 +1339,25 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             (matchedProxyConfig ? matchedProxyConfig[1].referer : undefined) ||
             refererCombos[0]?.referer ||
             'https://watchhentai.net/';
+
+        // Hand the bytes to the Rust data plane when it is in front of us (see media-proxy/).
+        // Everything above this line is the decision — which URL, which referer, is the domain
+        // dead — and that stays here, where the per-CDN knowledge lives. What follows would be
+        // pure byte-shovelling, and a 50MB file has no reason to pass through this process at
+        // all. Answering with the directive and no body means it does not: the response never
+        // leaves the loopback interface, and the client still sees a single ordinary response.
+        // When no Rust proxy is deployed the flag is unset and the native pipe below runs.
+        if (MEDIA_ACCEL_ENABLED) {
+            const accelOrigin =
+                (matchedProxyConfig ? matchedProxyConfig[1].origin : undefined) ||
+                safeOriginOf(bestReferer);
+            res.set('X-Media-Fetch', url);
+            res.set('X-Media-Referer', bestReferer);
+            if (accelOrigin) res.set('X-Media-Origin', accelOrigin);
+            logger.info(`[PROXY] Delegated to media-proxy: ${domain}`, { domain, requestId });
+            res.status(204).end();
+            return;
+        }
         const requestHeaders: Record<string, string> = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': '*/*',

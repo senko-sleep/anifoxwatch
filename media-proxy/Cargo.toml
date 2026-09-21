@@ -1,0 +1,23 @@
+[package]
+name = "media-proxy"
+version = "0.1.0"
+edition = "2021"
+description = "Data-plane proxy for AniStream Hub: Node decides, this streams the bytes."
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+# No gzip/brotli: those make reqwest transparently decompress a body while its Content-Encoding
+# header is still forwarded to the client, which then tries to decompress it a second time. A
+# proxy wants the bytes exactly as they arrived, so compression is left to the two real endpoints.
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
+futures-util = "0.3"
+http = "1"
+bytes = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

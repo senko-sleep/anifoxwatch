@@ -1,0 +1,2 @@
+# Shell scripts run inside Linux containers: a CRLF here makes the shebang unparseable
+*.sh text eol=lf

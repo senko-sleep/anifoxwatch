@@ -13,9 +13,15 @@ The frontend is a static build hosted separately (Firebase Hosting) and reaches 
 5. Point the frontend at it: set `VITE_API_URL` in `.env.production` (and `.env.firebase`) to the
    service URL, then `npm run deploy:hosting`.
 
-The URL Render assigns depends on the service name and may get a random suffix. **`.env.production`
-currently points at `https://anifoxwatch-dko2.onrender.com`** — an older service. Until you change it,
-the frontend keeps talking to that one.
+The URL Render assigns depends on the service name and may get a random suffix. **Two services of this
+API currently exist** — `anifoxwatch.onrender.com` and `anifoxwatch-dko2.onrender.com` — and
+`.env.production` / `.env.firebase` point the frontend at the `-dko2` one. Redeploy the one the frontend
+uses (or point `VITE_API_URL` at the other), and delete whichever you don't need: each free service uses
+the same 750 monthly hours.
+
+Environment set in `render.yaml` only applies to a service created from the Blueprint. A service created
+by hand (which these look like — `PORT` is Render's own 10000, not the 8080 in the file) needs
+`TRUST_PROXY=1` added under **Environment** in its dashboard.
 
 ## What is configured for you
 
@@ -51,11 +57,31 @@ cp .cache/hentai-index.json seed/hentai-index.json
 sources launch Chromium, which is the likeliest thing to run it out; if the service restarts under
 load, move to a paid plan.
 
-## Not verified
+## Checking a deployed service
 
-- The image itself was **not built** here (Docker's Linux engine wouldn't start on the dev machine).
-  The TypeScript build and the frontend build both pass, and the Dockerfile changes are two lines.
-- **HentaiHaven on Linux.** It works with the Windows `curl` and with Python's OpenSSL, so Cloudflare
-  isn't blocking OpenSSL clients in general — but Render's IP range and Linux `curl` weren't tested.
-  If `/api/hentai/index` shows `HentaiHaven: 0` after a deploy, that's the cause; the site keeps
-  working on the other two.
+`GET /api/hentai/diag` answers "can this host reach the sites?" without needing the logs:
+
+```json
+{ "curl": "curl 7.88.1 (x86_64-pc-linux-gnu) …",
+  "hentaiHaven": { "ok": false, "ms": 412, "error": "curl https://hentaihaven.xxx/…: HTTP 403" },
+  "index": { "total": 3900, "bySource": {…}, "down": ["HentaiHaven"], … } }
+```
+
+- `error: "curl is not installed"` → the image predates the `curl` line in the Dockerfile; redeploy.
+- `error: "…: HTTP 403"` → the site's bot check is refusing this host. Nothing in the app can fix that.
+- `down` lists sources the index has stopped advertising because they didn't answer. Their titles are
+  hidden from browse, search and "watchable on" until the next probe (every 10 minutes) succeeds.
+
+## Known limits
+
+- **HentaiHaven was observed failing on Render's free tier** (its titles returned errors while
+  HentaiMama on the same service streamed fine). It works from a home connection. The likely cause is
+  the site's bot check refusing datacenter addresses; `/api/hentai/diag` will say which. With the
+  source-down handling above this now degrades to "HentaiHaven titles aren't shown" rather than
+  "clicking them fails".
+- **Puppeteer launch timeouts.** The free plan is a fraction of a CPU and ~512 MB, so launching Chromium
+  can take a minute or fail. The browser is no longer started at boot on Render (it starts on demand,
+  with a 60 s limit; `PUPPETEER_LAUNCH_TIMEOUT_MS` and `PUPPETEER_WARMUP=true` override). Sources that
+  need Chromium (Anichi, the 9anime family) are the ones affected; the hentai sources don't use it.
+- The image itself was not built on the dev machine (Docker's Linux engine wouldn't start); Render's own
+  build is the first real one. The TypeScript and frontend builds both pass.

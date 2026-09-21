@@ -370,7 +370,11 @@ const startServer = async (port: number) => {
         console.log('⚠️  POSTGRES_URL not set - using in-memory caching only');
     }
 
-    const server = app.listen(port, () => {
+    // Behind the Rust data plane (see deploy/start.sh) this binds loopback, so the proxy is the
+    // only public listener and nothing can reach the API by skipping it. Unset, it binds all
+    // interfaces as before, which is what a single-process deployment needs.
+    const host = process.env.HOST;
+    const onListening = () => {
         const isProduction = process.env.NODE_ENV === 'production';
         const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
 
@@ -401,7 +405,9 @@ const startServer = async (port: number) => {
         if (process.env.PUPPETEER_WARMUP === 'true' || !(process.env.RENDER === 'true' || process.env.RENDER_EXTERNAL_URL)) {
             void streamExtractor.warmBrowser();
         }
-    });
+    };
+
+    const server = host ? app.listen(port, host, onListening) : app.listen(port, onListening);
 
     // Connection timeout settings to prevent hanging connections
     server.keepAliveTimeout = 65000; // Slightly higher than typical LB timeout (60s)
@@ -426,21 +432,32 @@ const startServer = async (port: number) => {
 
     // Self-ping keep-alive to prevent idle shutdown on Render/Koyeb/Clever Cloud free tiers
     if (process.env.NODE_ENV === 'production') {
-        const BASE_URL =
+        const externalUrl =
             process.env.RENDER_EXTERNAL_URL ||
             process.env.CLEVER_APP_URL ||
-            process.env.BASE_URL ||
-            `http://localhost:${port}`;
+            process.env.BASE_URL;
         const KEEP_ALIVE_INTERVAL = 3 * 60 * 1000; // 3 minutes — keeps origin warm
-        setInterval(async () => {
-            try {
-                const res = await fetch(`${BASE_URL}/health`);
-                console.log(`🏓 Keep-alive ping: ${res.status}`);
-            } catch (err) {
-                console.log(`🏓 Keep-alive ping failed (non-fatal): ${(err as Error).message}`);
-            }
-        }, KEEP_ALIVE_INTERVAL);
-        console.log(`🏓 Keep-alive pinger started (every ${KEEP_ALIVE_INTERVAL / 60000} min)`);
+
+        if (!externalUrl) {
+            // Idle shutdown is decided by traffic arriving at the platform's router, so a ping
+            // to our own loopback address is invisible to it: it keeps nothing awake and only
+            // makes the logs look as though something is. Say so rather than pretending to work
+            // — the fix is to set RENDER_EXTERNAL_URL (or BASE_URL) to the public URL.
+            console.log(
+                '🏓 Keep-alive disabled: no external URL configured. A loopback self-ping cannot ' +
+                'prevent idle shutdown — set RENDER_EXTERNAL_URL or BASE_URL to the public URL.'
+            );
+        } else {
+            setInterval(async () => {
+                try {
+                    const res = await fetch(`${externalUrl}/health`);
+                    console.log(`🏓 Keep-alive ping: ${res.status}`);
+                } catch (err) {
+                    console.log(`🏓 Keep-alive ping failed (non-fatal): ${(err as Error).message}`);
+                }
+            }, KEEP_ALIVE_INTERVAL);
+            console.log(`🏓 Keep-alive pinger started for ${externalUrl} (every ${KEEP_ALIVE_INTERVAL / 60000} min)`);
+        }
     }
 };
 
