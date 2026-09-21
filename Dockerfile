@@ -10,13 +10,17 @@
 # Setting MEDIA_ACCEL=0 leaves Node serving media itself, exactly as before the split.
 
 # ── Rust data plane ────────────────────────────────────────────────────────────
-FROM rust:1.83-slim-bookworm AS rust-builder
+# Tracks the latest stable toolchain on purpose. There is no Cargo.lock yet, so cargo resolves every
+# dependency to its newest release, and those routinely demand a newer compiler than any pin chosen
+# today (a 1.83 pin failed exactly that way: zeroize 1.9 needs edition2024, icu_* needs 1.88).
+# Once a Cargo.lock is committed, pin this to a fixed version and build with --locked.
+FROM rust:1-slim-bookworm AS rust-builder
 
 WORKDIR /build
 
 # Dependencies are their own layer: they are what takes the minutes, and they change far less
 # often than main.rs does. The dummy main is what lets cargo resolve and compile them alone.
-COPY media-proxy/Cargo.toml ./Cargo.toml
+COPY media-proxy/Cargo.* ./
 RUN mkdir -p src && echo 'fn main() {}' > src/main.rs
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
