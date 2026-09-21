@@ -1,3 +1,7 @@
+# Render Blueprint — the API. The frontend is a static build hosted separately (Firebase
+# Hosting); it finds this service through VITE_API_URL (see .env.production).
+#
+# Create it: Dashboard → New → Blueprint → pick this repo. Render reads this file.
 services:
   - type: web
     name: anistream-hub-api
@@ -5,6 +9,8 @@ services:
     dockerfilePath: ./Dockerfile
     dockerContext: .
     plan: free
+    healthCheckPath: /health
+    autoDeploy: false
     envVars:
       - key: NODE_ENV
         value: production
@@ -14,5 +20,11 @@ services:
         value: 8080
       - key: ENABLE_ADULT_CONTENT
         value: "true"
-    healthCheckPath: /health
-    autoDeploy: false
+      # Render's router sits in front of the app: without this every visitor looks like one
+      # address (the router's), which breaks per-client logging and limits.
+      - key: TRUST_PROXY
+        value: "1"
+      # Who may call the API from a browser. "*" is fine while the API is public; set it to the
+      # frontend's origin (e.g. https://your-app.web.app) to restrict it.
+      - key: CORS_ORIGIN
+        value: "*"

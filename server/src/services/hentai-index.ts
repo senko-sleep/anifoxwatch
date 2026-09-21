@@ -41,6 +41,14 @@ export interface IndexEntry {
 }
 
 const CACHE_FILE = path.resolve(process.cwd(), '.cache', 'hentai-index.json');
+/**
+ * A snapshot shipped with the app. Hosts with an ephemeral disk (Render's free tier wipes it
+ * on every spin-down) start with no cache file, and an index that's empty until a three-site
+ * crawl finishes means the first visitors get partial search results. The snapshot is only a
+ * starting point: it is loaded when there's no cache of our own, then refreshed in the
+ * background like any stale cache.
+ */
+const SEED_FILE = path.resolve(process.cwd(), 'seed', 'hentai-index.json');
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const REFRESH_MS = 6 * 60 * 60 * 1000;
 const CONCURRENCY = 4;
@@ -144,23 +152,30 @@ async function crawlSource(source: SourceName, list: (page: number) => Promise<A
 function persist(): void {
     try {
         fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-        fs.writeFileSync(CACHE_FILE, JSON.stringify({ updatedAt, entries: [...entries.values()] }));
+        fs.writeFileSync(CACHE_FILE, JSON.stringify({ updatedAt, entries: [...entries.values()], blockedNorms }));
     } catch (e) {
         logger.warn(`[hentai-index] could not persist: ${(e as Error).message}`);
     }
 }
 
 function loadFromDisk(): boolean {
-    try {
-        const raw = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8')) as { updatedAt: number; entries: IndexEntry[] };
-        if (!raw.entries?.length) return false;
-        raw.entries.forEach((e) => entries.set(keyOf(e), e));
-        setBlocked([]); // recomputed as soon as the catalog's exclusion list arrives
-        updatedAt = raw.updatedAt;
-        return true;
-    } catch {
-        return false;
+    for (const file of [CACHE_FILE, SEED_FILE]) {
+        try {
+            const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { updatedAt: number; entries: IndexEntry[]; blockedNorms?: string[] };
+            if (!raw.entries?.length) continue;
+            raw.entries.forEach((e) => entries.set(keyOf(e), e));
+            updatedAt = raw.updatedAt; // before setBlocked, which saves the index
+            // The exclusion list normally arrives from AniList after boot. Restoring the last one
+            // known means the protection is already in force on the first request, and stays so if
+            // AniList can't be reached; the fresh list replaces it as soon as it arrives.
+            setBlocked(raw.blockedNorms ?? []);
+            if (file === SEED_FILE) logger.info(`[hentai-index] no saved index — starting from the bundled snapshot (${entries.size} titles)`);
+            return true;
+        } catch {
+            /* missing or unreadable — try the next one */
+        }
     }
+    return false;
 }
 
 export function refresh(): Promise<void> {
@@ -232,8 +247,11 @@ const isBlockedNorm = (norm: string): boolean => blockedNorms.some((b) => titleS
  * checked against the same list, and blocked ones drop out of every query below.
  */
 export function setBlocked(titles: string[]): void {
-    blockedNorms = [...new Set(titles.map(normalizeTitle).filter((n) => n.length >= 3))];
+    const next = [...new Set(titles.map(normalizeTitle).filter((n) => n.length >= 3))];
+    const changed = next.length !== blockedNorms.length || next.some((n, i) => n !== blockedNorms[i]);
+    blockedNorms = next;
     for (const e of entries.values()) e.blocked = isBlockedNorm(e.norm) || undefined;
+    if (changed && next.length && entries.size) persist();
 }
 
 export const isBlockedEntry = (source: SourceName, slug: string): boolean => Boolean(entries.get(`${source}:${slug}`)?.blocked);

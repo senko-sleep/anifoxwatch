@@ -12,6 +12,7 @@ import { logger, createRequestContext, PerformanceTimer } from './utils/logger.j
 import { reliabilityMiddleware, healthCheckMiddleware } from './middleware/reliability.js';
 import { REGISTERED_SOURCE_NAMES } from './registered-sources.js';
 import { initDatabase } from './lib/db.js';
+import { anilistSlot, anilistThrottled, anilistOk } from './lib/anilist-pace.js';
 import { streamExtractor } from './services/stream-extractor.js';
 // Extend Request interface to include id and reliability utilities
 interface ExtendedRequest extends Request {
@@ -208,35 +209,14 @@ const ANILIST_CACHE_TTL = 3 * 60 * 1000; // 3 min fresh, stale served forever on
 const IS_RENDER = process.env.RENDER === 'true' || process.env.RENDER_EXTERNAL_URL;
 const ANILIST_CACHE_MAX = IS_RENDER ? 50 : (process.env.NODE_ENV === 'production' ? 100 : 500); // Lower limit on Render
 
-// Rate limiting for AniList API
-const anilistRequestQueue: Array<{ resolve: (value: any) => void; reject: (reason: any) => void; request: any }> = [];
-let anilistQueueProcessing = false;
-const ANILIST_RATE_LIMIT_DELAY = 1000; // 1 second between requests (60 requests/minute)
 const ANILIST_MAX_RETRIES = 3;
-
-async function processAnilistQueue() {
-    if (anilistQueueProcessing) return;
-    anilistQueueProcessing = true;
-
-    while (anilistRequestQueue.length > 0) {
-        const { resolve, reject, request } = anilistRequestQueue.shift()!;
-        try {
-            const result = await executeAnilistRequest(request);
-            resolve(result);
-        } catch (error) {
-            reject(error);
-        }
-        // Add delay between requests to respect rate limits
-        if (anilistRequestQueue.length > 0) {
-            await new Promise(r => setTimeout(r, ANILIST_RATE_LIMIT_DELAY));
-        }
-    }
-
-    anilistQueueProcessing = false;
-}
 
 async function executeAnilistRequest(request: any, retryCount = 0): Promise<any> {
     try {
+        // One pace for every AniList request this process makes (lib/anilist-pace). This used to be a
+        // serial queue with a fixed 1s sleep between requests, so a page needing ten queries waited
+        // ten seconds — and it counted only its own traffic against AniList's limit.
+        await anilistSlot();
         const { default: axios } = await import('axios');
         const response = await axios.post('https://graphql.anilist.co', request.body, {
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -253,8 +233,10 @@ async function executeAnilistRequest(request: any, retryCount = 0): Promise<any>
             throw new Error('AniList rate limit exceeded after retries');
         }
 
+        anilistOk();
         return response.data;
     } catch (error: any) {
+        if (error.response?.status === 429) anilistThrottled(parseInt(error.response.headers?.['retry-after'], 10) || undefined);
         if (error.response?.status === 429 && retryCount < ANILIST_MAX_RETRIES) {
             const backoffTime = Math.pow(2, retryCount) * 1000;
             console.log(`[AniList] Rate limited, retrying in ${backoffTime}ms (attempt ${retryCount + 1}/${ANILIST_MAX_RETRIES})`);
@@ -281,14 +263,7 @@ app.post('/api/anilist/graphql', async (req: Request, res: Response): Promise<vo
     }
 
     try {
-        // Use rate-limited queue for AniList requests
-        const queuedRequest = new Promise((resolve, reject) => {
-            anilistRequestQueue.push({ resolve, reject, request: { body: req.body } });
-        });
-
-        processAnilistQueue();
-
-        const response = await queuedRequest;
+        const response = await executeAnilistRequest({ body: req.body });
 
         // Limit cache size to prevent memory issues
         if (anilistProxyCache.size >= ANILIST_CACHE_MAX) {

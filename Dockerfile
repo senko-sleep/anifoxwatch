@@ -24,6 +24,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     chromium \
     chromium-sandbox \
     ca-certificates \
+    curl \
     fonts-ipafont-gothic \
     fonts-wqy-zenhei \
     fonts-freefont-ttf \
@@ -58,6 +59,9 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
+
+# Starting point for the hentai index on hosts whose disk is wiped between runs (see hentai-index.ts).
+COPY server/seed ./seed
 
 ENV PORT=8080
 EXPOSE 8080
