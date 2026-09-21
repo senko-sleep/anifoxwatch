@@ -33,6 +33,32 @@ by hand (which these look like — `PORT` is Render's own 10000, not the 8080 in
 | `curl` in the image | hentaihaven.xxx challenges Node's TLS fingerprint; that source shells out to `curl` (`server/src/utils/curl-fetch.ts`). |
 | `server/seed/hentai-index.json` | See below. |
 
+## Two processes in one container
+
+Since the Rust data plane landed, the image runs two processes (`deploy/start.sh`):
+
+| Process | Port | Job |
+|---|---|---|
+| `media-proxy` (Rust) | `$PORT`, public | Carries media bytes; forwards everything else to Node |
+| `node dist/index.js` | `NODE_PORT` (3001), loopback | All the API logic, scraping and policy |
+
+Node still decides everything about a media request — which URL, which referer, whether the domain
+is dead. When it has decided, it answers `204` with `X-Media-Fetch` / `X-Media-Referer` /
+`X-Media-Origin` and no body, and the Rust process performs that fetch and streams it to the
+client. This is nginx's `X-Accel-Redirect` arrangement: a 50MB MP4 never passes through Node, and
+the client never learns the upstream CDN URL.
+
+`MEDIA_ACCEL=0` turns the handoff off and Node serves media itself, exactly as it did before —
+useful for isolating whether a playback problem is in the proxy or in the decision that preceded it.
+
+If either process exits, `start.sh` takes the container down rather than leaving a half-dead
+service passing health checks.
+
+**`RENDER_EXTERNAL_URL` matters more than it looks.** The keep-alive pinger uses it to reach itself
+through the public router; without it there is nothing to ping that the platform can see, and the
+pinger now says so at boot and stays off instead of hitting loopback and appearing to work. A
+service created by hand may not have it — set it, or set `BASE_URL`, to the public URL.
+
 ## Free-tier behaviour
 
 **Spin-down.** A free service sleeps after ~15 minutes without traffic and takes roughly a minute to
@@ -53,7 +79,9 @@ cd server && npm run dev          # let it crawl, hit /api/hentai/search?q=a onc
 cp .cache/hentai-index.json seed/hentai-index.json
 ```
 
-**Memory.** The free plan has 512 MB and the image caps Node's heap at 320 MB. The Puppeteer-based
+**Memory.** The free plan has 512 MB and the image caps Node's heap at 256 MB (down from 320 MB:
+Node no longer buffers media, and the headroom goes to Chromium, whose launch is what actually runs
+out of it). The Puppeteer-based
 sources launch Chromium, which is the likeliest thing to run it out; if the service restarts under
 load, move to a paid plan.
 
@@ -83,5 +111,8 @@ load, move to a paid plan.
   can take a minute or fail. The browser is no longer started at boot on Render (it starts on demand,
   with a 60 s limit; `PUPPETEER_LAUNCH_TIMEOUT_MS` and `PUPPETEER_WARMUP=true` override). Sources that
   need Chromium (Anichi, the 9anime family) are the ones affected; the hentai sources don't use it.
-- The image itself was not built on the dev machine (Docker's Linux engine wouldn't start); Render's own
-  build is the first real one. The TypeScript and frontend builds both pass.
+- **The Rust binary has never been compiled.** The dev machine has no Rust toolchain, and the Docker
+  build could not run there either (7.4 GB of RAM with ~120 MB free once Docker Desktop's VM was up).
+  Render's build is therefore the first real compile of `media-proxy/`. If it fails, the Node half is
+  untouched and unaffected: set `MEDIA_ACCEL=0` and revert `CMD` to `["node", "dist/index.js"]` to get
+  the previous single-process image back. The TypeScript build passes.
