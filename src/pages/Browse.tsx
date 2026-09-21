@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useSearchParams, useLocation } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { AnimeGrid } from '@/components/anime/AnimeGrid';
+import { HentaiHome } from '@/components/hentai/HentaiHome';
+import { useHentaiGenres } from '@/hooks/useHentai';
 import { useSearch, useBrowse } from '@/hooks/useAnime';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -69,10 +71,10 @@ const ADULT_GENRES = [
   'Censored', 'Cosplay', 'Creampie', 'Dark Skin', 'Deepthroat', 'Demon', 'Double Penetration',
   'Facesitting', 'Facial', 'Family', 'Femdom', 'Footjob', 'Foot Job', 'Furry', 'Futanari', 'Gangbang',
   'Glasses', 'Gyaru', 'Hand Job', 'Hardcore', 'Horny Slut', 'Hospital', 'Housewife', 'Humiliation', 'Incest', 'Inflation',
-  'Internal Cumshot', 'Lactation', 'Large Breasts', 'Lolicon', 'Loli', 'Magical Girls', 'Maid', 'Masturbation',
+  'Internal Cumshot', 'Lactation', 'Large Breasts', 'Magical Girls', 'Maid', 'Masturbation',
   'Megane', 'MILF', 'Mind Break', 'Mind Control', 'Molestation', 'Monster', 'Nekomimi', 'NTR', 'Nuns', 'Nurses',
   'Office Ladies', 'Orgy', 'Paizuri', 'Plot', 'POV', 'Pregnant', 'Princess', 'Public Sex', 'Rape',
-  'Remove Censored', 'Reverse Rape', 'Rim Job', 'Scat', 'School Girls', 'Sex Toys', 'Shimapan', 'Shoutacon', 'Shota', 'Slaves',
+  'Remove Censored', 'Reverse Rape', 'Rim Job', 'Scat', 'School Girls', 'Sex Toys', 'Shimapan', 'Slaves',
   'Softcore', 'Squirting', 'Stocking', 'Strap On', 'Strapped On', 'Succubus', 'Swimsuit',
   'Teacher', 'Tentacles', 'Threesome', 'Three Some', 'Tits Fuck', 'Torture', 'Toys', 'Train Molestation', 'Trap',
   'Tsundere', 'Uncensored', 'Urination', 'Vanilla', 'Virgins', 'Widow', 'X-Ray'
@@ -147,6 +149,7 @@ const Browse = () => {
   const [gridSize, setGridSize] = useState<'compact' | 'normal'>('normal');
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [mode, setMode] = useState<'safe' | 'mixed' | 'adult'>(initialMode);
+  const { data: hentaiGenres } = useHentaiGenres(mode === 'adult');
   const [jumpPage, setJumpPage] = useState("");
   const [genresExpanded, setGenresExpanded] = useState(true);
   
@@ -225,7 +228,9 @@ const Browse = () => {
     if (urlMode === 'safe') {
       validUrlGenres = urlGenres.filter(genre => SAFE_GENRES.includes(genre));
     } else if (urlMode === 'adult') {
-      validUrlGenres = urlGenres.filter(genre => ADULT_GENRES.includes(genre));
+      // The adult catalog's own genres; until they load, trust the URL so a shelf's "see all" isn't dropped.
+      const known = hentaiGenres?.map((g) => g.name);
+      validUrlGenres = known ? urlGenres.filter((genre) => known.includes(genre)) : urlGenres;
     }
 
     const currentGenresStr = selectedGenres.sort().join(',');
@@ -503,8 +508,12 @@ const Browse = () => {
 
   const activeFilterCount = selectedGenres.length + (typeFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0) + (selectedYearRange > 0 ? 1 : 0);
 
+  // Adult mode offers the genres the adult catalog actually has (the static list is only a fallback).
+  // The adult default screen: featured + shelves. The full grid still follows it.
+  const isAdultHome = mode === 'adult' && !hasSearchQuery && activeFilterCount === 0;
+
   let allGenres = SAFE_GENRES;
-  if (mode === 'adult') allGenres = ADULT_GENRES;
+  if (mode === 'adult') allGenres = hentaiGenres?.length ? hentaiGenres.map((g) => g.name) : ADULT_GENRES;
   else if (mode === 'mixed') allGenres = MIXED_GENRES;
 
   const FilterPanel = ({ isMobile = false }: { isMobile?: boolean }) => (
@@ -930,6 +939,13 @@ const Browse = () => {
                   </div>
                 )}
 
+                {isAdultHome && (
+                  <div className="mb-14">
+                    <HentaiHome />
+                    <h2 className="mt-14 text-lg font-semibold">All titles</h2>
+                  </div>
+                )}
+
                 {/* Error State */}
                 {error && (
                   <div className="mb-4 p-4 rounded-lg border border-red-500/20 bg-red-500/[0.05]">
@@ -942,7 +958,7 @@ const Browse = () => {
                   <div className={cn(
                     "grid gap-3 sm:gap-4",
                     gridSize === 'compact'
-                      ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7"
+                      ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8"
                       : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
                   )}>
                     {Array.from({ length: 24 }).map((_, i) => (
@@ -969,7 +985,7 @@ const Browse = () => {
                     {/* Results Grid */}
                     <AnimeGrid
                       anime={displayResults}
-                      columns={gridSize === 'compact' ? 5 : 4}
+                      columns={gridSize === 'compact' ? 8 : 6}
                     />
 
                     {/* Infinite Scroll Loading Indicator */}

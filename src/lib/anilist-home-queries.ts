@@ -11,7 +11,7 @@ import type { Anime, AnimeSearchResult } from '@/types/anime';
 const MEDIA_FIELDS = `
   id
   title { romaji english }
-  coverImage { extraLarge large }
+  coverImage { extraLarge large color }
   bannerImage
   description
   genres
@@ -45,7 +45,7 @@ const formatMap: Record<string, Anime['type']> = {
 export interface AniListHomeMedia {
   id: number;
   title: { english: string | null; romaji: string };
-  coverImage: { extraLarge: string; large: string };
+  coverImage: { extraLarge: string; large: string; color?: string | null };
   bannerImage: string | null;
   description: string | null;
   genres: string[];
@@ -84,6 +84,7 @@ export function mapAniListMediaToAnime(m: AniListHomeMedia, yearFallback?: numbe
     studios: m.studios?.nodes?.map((s) => s.name) ?? [],
     year,
     season: m.season || undefined,
+    accentColor: m.coverImage?.color || undefined,
     isMature: m.isAdult ?? false,
     source: 'anilist',
   };
@@ -560,4 +561,196 @@ export async function fetchActionTrendingFromKitsu(perPage: number = 20): Promis
   } catch {
     return { results: [], totalPages: 0, currentPage: 1, hasNextPage: false, totalResults: 0 };
   }
+}
+
+// ─── Related titles ──────────────────────────────────────────────────────────
+
+/** Relation types that mean "same story" — shown before community picks. */
+const STORY_RELATIONS = new Set(['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SPIN_OFF', 'ALTERNATIVE', 'SUMMARY']);
+
+interface RelatedMedia extends AniListHomeMedia {
+  type?: string;
+}
+
+/**
+ * Titles actually related to one anime, straight from AniList:
+ * its franchise (sequels, prequels, spin-offs) first, then what AniList users
+ * recommend for it, best-rated first. Resolves by AniList id when we have it,
+ * otherwise by best title match.
+ */
+export async function fetchRelatedFromAniList(
+  animeId: string | undefined,
+  title: string | undefined,
+  includeAdult = false
+): Promise<Anime[]> {
+  const anilistId = animeId?.match(/^anilist-(\d+)$/)?.[1];
+  if (!anilistId && !title) return [];
+
+  const node = `${MEDIA_FIELDS} type isAdult`;
+  const query = `query ($id: Int, $search: String) {
+    Media(id: $id, search: $search, type: ANIME) {
+      id
+      relations { edges { relationType(version: 2) node { ${node} } } }
+      recommendations(sort: RATING_DESC, perPage: 25) {
+        nodes { rating mediaRecommendation { ${node} } }
+      }
+    }
+  }`;
+
+  const res = await fetchAniListGraphQL({
+    query,
+    variables: anilistId ? { id: Number(anilistId) } : { search: title },
+  });
+  if (!res.ok) throw new Error(`[AniList] HTTP ${res.status}`);
+
+  const json = (await res.json()) as {
+    errors?: { message: string }[];
+    data?: {
+      Media?: {
+        id: number;
+        relations?: { edges: { relationType: string; node: RelatedMedia }[] };
+        recommendations?: { nodes: { rating: number | null; mediaRecommendation: RelatedMedia | null }[] };
+      } | null;
+    };
+  };
+  const media = json.data?.Media;
+  if (!media) return [];
+
+  const seen = new Set<number>([media.id]);
+  const out: Anime[] = [];
+  const add = (m: RelatedMedia | null | undefined) => {
+    if (!m || seen.has(m.id) || m.type !== 'ANIME') return;
+    if (m.isAdult && !includeAdult) return;
+    seen.add(m.id);
+    out.push(mapAniListMediaToAnime(m));
+  };
+
+  (media.relations?.edges ?? [])
+    .filter((e) => STORY_RELATIONS.has(e.relationType))
+    .forEach((e) => add(e.node));
+
+  (media.recommendations?.nodes ?? [])
+    .filter((n) => (n.rating ?? 0) > 0)
+    .forEach((n) => add(n.mediaRecommendation));
+
+  return out;
+}
+
+// ─── Seasons ─────────────────────────────────────────────────────────────────
+// AniList models every season of a show as its own entry, linked by
+// PREQUEL / SEQUEL edges. Walking that chain gives the season list.
+
+export interface SeasonEntry {
+  id: number;
+  title: string;
+  year: number | null;
+  episodes: number | null;
+}
+
+interface SeasonNode {
+  id: number;
+  type?: string;
+  format: string | null;
+  title: { english: string | null; romaji: string };
+  seasonYear: number | null;
+  episodes: number | null;
+}
+
+const SEASON_NODE = 'id type format title { romaji english } seasonYear episodes';
+const SEASON_MAX_HOPS = 12;
+
+const toSeason = (n: SeasonNode): SeasonEntry => ({
+  id: n.id,
+  title: n.title.english || n.title.romaji,
+  year: n.seasonYear,
+  episodes: n.episodes,
+});
+
+async function fetchSeasonLinks(id: number): Promise<{ self: SeasonNode; prequel?: SeasonNode; sequel?: SeasonNode } | null> {
+  const query = `query ($id: Int) {
+    Media(id: $id, type: ANIME) {
+      ${SEASON_NODE}
+      relations { edges { relationType(version: 2) node { ${SEASON_NODE} } } }
+    }
+  }`;
+  const res = await fetchAniListGraphQL({ query, variables: { id } });
+  if (!res.ok) throw new Error(`[AniList] HTTP ${res.status}`);
+  const json = (await res.json()) as {
+    data?: { Media?: (SeasonNode & { relations?: { edges: { relationType: string; node: SeasonNode }[] } }) | null };
+  };
+  const media = json.data?.Media;
+  if (!media) return null;
+
+  // Follow every prequel/sequel, not only the TV ones: a franchise often runs
+  // season → film → season, and stopping at the film hides everything after it.
+  // Which entries are *listed* as seasons is decided separately, by isSeason.
+  const edges = media.relations?.edges ?? [];
+  const linked = (type: string) => edges.find((e) => e.relationType === type && e.node.type === 'ANIME')?.node;
+  return { self: media, prequel: linked('PREQUEL'), sequel: linked('SEQUEL') };
+}
+
+/** Only full TV entries are seasons; films and specials are stops along the way. */
+const isSeason = (n: SeasonNode) => n.type === 'ANIME' && (n.format === 'TV' || n.format === 'TV_SHORT');
+
+/** Every TV season of a franchise, in watch order. One entry (or none) means "no season picker". */
+export async function fetchSeasonChain(animeId: string | undefined): Promise<SeasonEntry[]> {
+  const startId = Number(animeId?.match(/^anilist-(\d+)$/)?.[1]);
+  if (!startId) return [];
+
+  const start = await fetchSeasonLinks(startId);
+  if (!start) return [];
+
+  const seen = new Set<number>([startId]);
+  const before: SeasonEntry[] = [];
+  const after: SeasonEntry[] = [];
+
+  let cursor = start.prequel;
+  for (let hop = 0; cursor && !seen.has(cursor.id) && hop < SEASON_MAX_HOPS; hop++) {
+    seen.add(cursor.id);
+    if (isSeason(cursor)) before.unshift(toSeason(cursor));
+    cursor = (await fetchSeasonLinks(cursor.id))?.prequel;
+  }
+
+  cursor = start.sequel;
+  for (let hop = 0; cursor && !seen.has(cursor.id) && hop < SEASON_MAX_HOPS; hop++) {
+    seen.add(cursor.id);
+    if (isSeason(cursor)) after.push(toSeason(cursor));
+    cursor = (await fetchSeasonLinks(cursor.id))?.sequel;
+  }
+
+  return [...before, toSeason(start.self), ...after];
+}
+
+
+// ─── Artwork ─────────────────────────────────────────────────────────────────
+
+export interface AniListArtwork {
+  /** AniList's wide banner. */
+  banner?: string;
+  /** A frame from the trailer — the fallback when there's no banner. */
+  trailerThumb?: string;
+}
+
+/**
+ * Wide artwork for one title. The API's anime endpoint only carries the small cover, so
+ * anything wide (a movie's frame on its title page, a player poster) is fetched here.
+ */
+export async function fetchAniListArtwork(animeId: string | undefined): Promise<AniListArtwork> {
+  const id = Number(animeId?.match(/^anilist-(\d+)$/)?.[1]);
+  if (!id) return {};
+
+  const res = await fetchAniListGraphQL({
+    query: `query ($id: Int) { Media(id: $id, type: ANIME) { bannerImage trailer { site thumbnail } } }`,
+    variables: { id },
+  });
+  if (!res.ok) return {};
+
+  const json = (await res.json()) as {
+    data?: { Media?: { bannerImage: string | null; trailer: { site: string | null; thumbnail: string | null } | null } | null };
+  };
+  const media = json.data?.Media;
+  return {
+    banner: media?.bannerImage || undefined,
+    trailerThumb: media?.trailer?.thumbnail || undefined,
+  };
 }

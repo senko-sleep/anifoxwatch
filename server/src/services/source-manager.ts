@@ -1,7 +1,9 @@
 import {
     AnimeSource,
     AniwavesSource,
-    WatchHentaiSource,
+    watchHentaiSource,
+    hentaiMamaSource,
+    hentaiHavenSource,
     YomiSource,
     ReAnimeSource,
     AnichiSource,
@@ -15,7 +17,7 @@ import { AnimeCache } from '../lib/anime-cache.js';
 import { animeCache, episodesCache, searchCache, trendingCache } from '../lib/memory-cache.js';
 import { anilistService } from './anilist-service.js';
 import { reliableRequest, retry, withTimeout } from '../middleware/reliability.js';
-import { REGISTERED_SOURCE_NAMES } from '../registered-sources.js';
+import { REGISTERED_SOURCE_NAMES, KNOWN_SOURCE_PREFIXES } from '../registered-sources.js';
 import { reconstructAnimeKaiCompoundFromWatchUrl } from '../utils/animekai-compound-from-watch.js';
 import { isLikelyHentai } from './hentai-resolver-service.js';
 
@@ -161,7 +163,9 @@ export class SourceManager {
         this.registerSource(new AnichiSource());
 
         // ✅ HENTAI SOURCES (for adult anime)
-        this.registerSource(new WatchHentaiSource());
+        this.registerSource(watchHentaiSource);
+        this.registerSource(hentaiMamaSource);
+        this.registerSource(hentaiHavenSource);
 
         // Hanime source is placeholder - requires JS rendering, not currently functional
 
@@ -956,14 +960,8 @@ export class SourceManager {
     /**
      * Known source prefixes for ID detection
      */
-    private readonly knownPrefixes = [
-        'animekai-', 'animepahe-',
-        '9anime-', 'gogoanime-', 'consumet-',
-        'animeflv-', 'anilist-', 'watchhentai-', 'hanime-', 'akih-',
-        'aniwave-', 'aniwaves-', 'aniwatch-', 'allanime-', 'miruro-',
-        'gogoorat-', 'wcofun-', 'animeheaven-', 'kaido-'
-    ];
-    private readonly adultSourceNames = new Set(['AkiH', 'WatchHentai']);
+    private readonly knownPrefixes = KNOWN_SOURCE_PREFIXES;
+    private readonly adultSourceNames = new Set(['AkiH', 'WatchHentai', 'HentaiMama', 'HentaiHaven']);
 
     /**
      * Consumet AnimeKai episode IDs (fetchAnimeInfo): "show-slug-suffix$ep=N$token=..."
@@ -990,6 +988,8 @@ export class SourceManager {
         const genres = (anime.genres || []).map((g) => String(g).toLowerCase());
         return (
             id.startsWith('watchhentai-') ||
+            id.startsWith('hentaimama-') ||
+            id.startsWith('hentaihaven-') ||
             id.startsWith('akih-') ||
             id.startsWith('hanime-') ||
             title.includes('hentai') ||
@@ -1079,6 +1079,8 @@ export class SourceManager {
             'AnimeFreak': 'animefreak-',
             'AkiH': 'akih-',
             'WatchHentai': 'watchhentai-',
+            'HentaiMama': 'hentaimama-',
+            'HentaiHaven': 'hentaihaven-',
             // 'Hanime': 'hanime-', // Placeholder - not currently functional
             'Miruro': 'miruro-'
         };
@@ -1162,6 +1164,8 @@ export class SourceManager {
             { prefix: 'akih-', source: 'AkiH' },
             { prefix: 'watchhentai-series/', source: 'WatchHentai' },
             { prefix: 'watchhentai-videos/', source: 'WatchHentai' },
+            { prefix: 'hentaimama-', source: 'HentaiMama' },
+            { prefix: 'hentaihaven-', source: 'HentaiHaven' },
             { prefix: 'animeflv-', source: 'AnimeFLV' },
             { prefix: 'gogoorat-', source: 'GogoOrAt' },
             { prefix: 'wcofun-', source: 'Wcofun' },
@@ -1219,54 +1223,40 @@ export class SourceManager {
         console.log(`🔍 [SourceManager] Search request: "${query}" (page: ${page}, mode: ${mode}, source: ${resolvedSource || 'auto'})`);
 
         if (mode === 'adult') {
-            const adultSources = ['WatchHentai', 'AkiH'] // Hanime placeholder removed
-                .map(name => this.getAvailableSource(name))
-                .filter(source => source && source.isAvailable) as StreamingSource[];
-
-            if (adultSources.length === 0) {
-                // Try to force get them if getAvailableSource failed due to strict checks but we want to try?
-                // getAvailableSource uses isAvailable check.
-                throw new Error('Adult sources (WatchHentai) are not available');
-            }
-
+            // Use AniList for adult search (it works reliably)
+            // WatchHentai's search is broken and returns unrelated results
+            console.log(`[SourceManager] Adult search using AniList for "${query}"`);
+            
             try {
-                const searchPromises = adultSources.map(source =>
-                    source.search(query, page)
-                        .then(res => ({ ...res, sourceName: source.name }))
-                        .catch(e => ({ results: [], totalPages: 0, currentPage: page, hasNextPage: false, sourceName: source.name }))
-                );
-
-                const results = await Promise.all(searchPromises);
-
-                // Merge results
-                const combinedResults: AnimeBase[] = [];
-                let maxTotalPages = 0;
-                let hasNextPage = false;
-
-                results.forEach(r => {
-                    if (r.results) combinedResults.push(...r.results);
-                    if (r.totalPages > maxTotalPages) maxTotalPages = r.totalPages;
-                    if (r.hasNextPage) hasNextPage = true;
+                const anilistResults = await anilistService.advancedSearch({
+                    search: query,
+                    page,
+                    perPage: 20,
+                    sort: ['SEARCH_MATCH'],
+                    isAdult: true
                 });
-
-                const uniqueResults = this.deduplicateResults(combinedResults);
-                const enrichedResults = await this.enrichWithAniListData(uniqueResults);
-
+                
+                console.log(`[SourceManager] AniList returned ${anilistResults.results?.length || 0} results`);
+                
+                // Enrich with streaming source availability info
+                const enrichedResults = await this.enrichWithAniListData(anilistResults.results || []);
+                
                 timer.end();
                 return {
                     results: enrichedResults,
-                    totalPages: maxTotalPages,
-                    currentPage: page,
-                    hasNextPage: hasNextPage,
+                    totalPages: anilistResults.totalPages || 1,
+                    currentPage: anilistResults.currentPage || page,
+                    hasNextPage: anilistResults.hasNextPage || false,
                     totalResults: enrichedResults.length,
-                    source: adultSources.map(s => s.name).join('+')
+                    source: 'AniList (Adult)'
                 };
             } catch (error) {
-                throw new Error('Adult search failed');
+                console.error(`[SourceManager] Adult search failed:`, error);
+                throw new Error('Adult search failed via AniList');
             }
         }
 
-        // Mixed Mode: Search both Preferred/Selected source AND Adult sources, then merge
+        // Mixed Mode: Search both standard sources (which includes adult content in their results)
         if (mode === 'mixed') {
             const standardSources = this.sourceOrder
                 .filter(name => !this.adultSourceNames.has(name))
@@ -1274,18 +1264,20 @@ export class SourceManager {
                 .filter(source => source && source.isAvailable)
                 .slice(0, 2) as StreamingSource[];
 
-            const adultSources = ['WatchHentai', 'AkiH'] // Hanime placeholder removed
-                .map(name => this.getAvailableSource(name))
-                .filter(source => source && source.isAvailable) as StreamingSource[];
-
             const searchPromises: Promise<AnimeSearchResult>[] = [];
 
-            // Add adult sources first to prioritize them
-            adultSources.forEach(source => {
-                searchPromises.push(source.search(query, page).catch(e => ({
-                    results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: source.name
-                })));
-            });
+            // Add AniList search with adult content
+            searchPromises.push(
+                anilistService.advancedSearch({
+                    search: query,
+                    page,
+                    perPage: 20,
+                    sort: ['SEARCH_MATCH'],
+                    isAdult: true
+                }).catch(e => ({
+                    results: [], totalPages: 0, currentPage: page, hasNextPage: false, source: 'AniList'
+                }))
+            );
 
             // Add standard sources
             standardSources.forEach(source => {
@@ -1296,7 +1288,7 @@ export class SourceManager {
 
             const results = await Promise.all(searchPromises);
 
-            // Merge results - adult content first
+            // Merge results
             const combinedResults: AnimeBase[] = [];
             let maxTotalPages = 0;
             let hasNextPage = false;
@@ -1318,7 +1310,7 @@ export class SourceManager {
                 currentPage: page,
                 hasNextPage: hasNextPage,
                 totalResults: enrichedResults.length,
-                source: 'Mixed'
+                source: 'Mixed (AniList + Standard Sources)'
             };
         }
 
@@ -1980,6 +1972,8 @@ export class SourceManager {
         const isAdultContent = animeId.toLowerCase().startsWith('hh-') || 
                               animeId.toLowerCase().startsWith('hanime-') ||
                               animeId.toLowerCase().startsWith('watchhentai-') ||
+                              animeId.toLowerCase().startsWith('hentaimama-') ||
+                              animeId.toLowerCase().startsWith('hentaihaven-') ||
                               animeId.toLowerCase().startsWith('akih-');
 
         // If no known prefix, resolve to an AnimeKai ID via title search first.
@@ -3248,6 +3242,8 @@ export class SourceManager {
         const isAdultContent = resolvedEpisodeId.toLowerCase().startsWith('hh-') || 
                               resolvedEpisodeId.toLowerCase().startsWith('hanime-') ||
                               resolvedEpisodeId.toLowerCase().startsWith('watchhentai-') ||
+                              resolvedEpisodeId.toLowerCase().startsWith('hentaimama-') ||
+                              resolvedEpisodeId.toLowerCase().startsWith('hentaihaven-') ||
                               resolvedEpisodeId.toLowerCase().startsWith('akih-') ||
                               (forcedTitle != null && isLikelyHentai(forcedTitle)) ||
                               (anilistId != null && anilistId === 1639);
@@ -3420,7 +3416,12 @@ export class SourceManager {
         // Only skip cross-source for AnimeKai compound IDs with tokens — those have source-native
         // tokens that cross-source can't replicate. For all other source-prefixed IDs (aniwaves-,
         // reanime-, anichi-), keep cross-source as a fallback safety net in case the primary fails.
-        const skipCrossSourceFallback = isAnimeKaiCompound && hasSourcePrefix && !isAnilistId && finalSources.length > 0;
+        // Adult ids play from the adult catalog or not at all: a title-search across the
+        // mainstream sources could land on an unrelated show and serve it under this title.
+        const isAdultEpisodeId = /^(watchhentai|hentaimama|hentaihaven|hanime|akih|hentai)-/i.test(episodeId);
+        const skipCrossSourceFallback =
+            isAdultEpisodeId ||
+            (isAnimeKaiCompound && hasSourcePrefix && !isAnilistId && finalSources.length > 0);
         const effectivePickOrder = skipCrossSourceFallback
             ? pickOrder.filter((name) => name !== 'cross-source')
             : pickOrder;
@@ -3444,10 +3445,28 @@ export class SourceManager {
         const result = await new Promise<StreamingData>((resolveStream) => {
             let pending = effectivePickOrder.length;
 
+            // A source-native episode id (`aniwaves-74534&eps=1`) names one exact entry.
+            // The cross-source fallback only knows the *title*, so on a franchise like
+            // "Spy x Family" it can land on a different season and silently play the
+            // wrong episode. When we hold an exact id, treat that fallback as a last
+            // resort: wait for the real sources, and only use it if they come back empty.
+            const hasAuthoritativeId = hasSourcePrefix && !isAnilistId;
+
             const pickBestAndResolve = (force = false) => {
                 if (resolved) return;
-                const ok = allResults.filter(r => r.success);
-                if (ok.length === 0) return false;
+                const all = allResults.filter(r => r.success);
+                if (all.length === 0) return false;
+
+                let ok = all;
+                if (hasAuthoritativeId) {
+                    const native = all.filter(r => r.source !== 'cross-source');
+                    if (native.length > 0) {
+                        ok = native;
+                    } else if (!force && pending > 0) {
+                        console.log(`   ⏳ Holding cross-source result — waiting for ${pending} source(s) that know the exact episode id...`);
+                        return false;
+                    }
+                }
                 const hasRealStream = (r: RaceResult) =>
                     r.data.sources.some((s) => {
                         const u = this.getStreamUrl(s);
@@ -3530,7 +3549,11 @@ export class SourceManager {
                     const firstSuccess = ok[0].source;
                     const hasPlayable = ok.some(r => r.data?.sources?.some(s => this.isProxyablePlayableSource(s)));
 
-                    const isHighPriorityDub = category === 'dub' && hasPlayable && (firstSuccess === 'Aniwaves' || firstSuccess === 'cross-source' || firstSuccess === 'ReAnime');
+                    // Never short-circuit on a title-searched result while a source that
+                    // knows the exact episode id is still in flight (see `hasAuthoritativeId`).
+                    const crossSourceOnly = hasAuthoritativeId && ok.every(r => r.source === 'cross-source');
+                    const isHighPriorityDub = category === 'dub' && hasPlayable && !crossSourceOnly &&
+                        (firstSuccess === 'Aniwaves' || firstSuccess === 'cross-source' || firstSuccess === 'ReAnime');
                     if (isHighPriorityDub) {
                         console.log(`   ⚡ High-priority playable source (${firstSuccess}) available, resolving instantly!`);
                         pickBestAndResolve();
@@ -3838,7 +3861,7 @@ export class SourceManager {
         const isHentaiQuery =
             (category as string) === 'hentai' ||
             (title && isLikelyHentai(title)) ||
-            (episodeId && (episodeId.includes('watchhentai') || episodeId.includes('hanime') || episodeId.includes('akih'))) ||
+            (episodeId && (episodeId.includes('watchhentai') || episodeId.includes('hentaimama') || episodeId.includes('hentaihaven') || episodeId.includes('hanime') || episodeId.includes('akih'))) ||
             (anilistId != null && anilistId === 1639);
 
         // Registered, currently enabled sources to try for cross-source fallback.
@@ -3868,9 +3891,10 @@ export class SourceManager {
                     try {
                         // For dub category, try multiple search strategies
                         // Keep season numbers for better matching - don't strip them
+                        const titleVariants = this.titleSearchVariants(title);
                         const searchTitles = category === 'dub'
-                            ? [title, `${title} dub`, `${title} (Dub)`]
-                            : [title];
+                            ? titleVariants.flatMap((t) => [t, `${t} dub`, `${t} (Dub)`])
+                            : titleVariants;
 
                         let searchResult: AnimeSearchResult | null = null;
                         let bestMatch: AnimeBase | null = null;
@@ -3897,7 +3921,15 @@ export class SourceManager {
                                         bestMatch = this.findBestMatch(searchTitle, dubResults.length > 0 ? dubResults : res.results)
                                             ?? (dubResults.length > 0 ? dubResults[0] : res.results[0]);
                                     }
-                                    
+
+                                    // A title search is a guess, and a site's own search returns *something* for
+                                    // any query. Taking the first hit is how "Overflow" ended up playing an
+                                    // unrelated show. Refuse a weak match: no source beats the wrong one.
+                                    if (bestMatch && this.calculateSimilarity(title, bestMatch.title) < 0.4) {
+                                        console.log(`   🚫 ${srcName}: "${bestMatch.title}" is not a convincing match for "${title}" — skipping`);
+                                        bestMatch = null;
+                                    }
+
                                     if (bestMatch) {
                                         console.log(`   📺 ${srcName} found: "${bestMatch.title}" (${bestMatch.id})`);
                                         break;
@@ -4013,9 +4045,10 @@ export class SourceManager {
         console.log(`[AllAnime fallback] Searching "${title}" ep ${targetEpNum} (${category})`);
 
         // For dub, try multiple search patterns
+        const titleVariants = this.titleSearchVariants(title);
         const searchTitles = category === 'dub'
-            ? [`${title} dub`, `${title} (Dub)`, title.replace(/\s+season\s+\d+/i, '') + ' dub', title]
-            : [title];
+            ? titleVariants.flatMap((t) => [`${t} dub`, `${t} (Dub)`, t.replace(/\s+season\s+\d+/i, '') + ' dub', t])
+            : titleVariants;
 
         let bestMatch: AnimeBase | null = null;
 
@@ -4614,7 +4647,7 @@ export class SourceManager {
             const candidates = (all?.results || []).filter((r) => {
                 const id = String(r?.id || '').toLowerCase();
                 if (!id || id.startsWith('anilist-')) return false;
-                return !includeAdultSources || id.startsWith('watchhentai-') || id.startsWith('akih-') || id.startsWith('hanime-');
+                return !includeAdultSources || id.startsWith('watchhentai-') || id.startsWith('hentaimama-') || id.startsWith('hentaihaven-') || id.startsWith('akih-') || id.startsWith('hanime-');
             });
             if (!candidates.length) continue;
 
@@ -4647,10 +4680,25 @@ export class SourceManager {
     /**
      * Calculate similarity between two strings (simple Levenshtein-based ratio)
      */
+    /**
+     * Search engines on the sources index "Spy x Family", not "SPY×FAMILY" — a query
+     * carrying the multiplication sign returns the wrong entries (often a later season
+     * of the same franchise). Offer the spaced-x spelling alongside the original.
+     */
+    private titleSearchVariants(title: string): string[] {
+        const folded = title.replace(/[×✕⨯╳]/g, ' x ').replace(/\s+/g, ' ').trim();
+        return folded && folded.toLowerCase() !== title.toLowerCase() ? [folded, title] : [title];
+    }
+
     private calculateSimilarity(str1: string, str2: string): number {
         // Strip common noise words (sub/dub/uncut) before similarity and length checks
         const cleanString = (s: string): string => {
             return s.toLowerCase()
+                // "SPY×FAMILY" and "Spy x Family" are the same show. Fold the
+                // multiplication sign to a letter x *before* punctuation is stripped,
+                // otherwise it becomes a space and the titles never line up — which
+                // pushed the matcher onto a different season of the same franchise.
+                .replace(/[×✕⨯╳]/g, ' x ')
                 .replace(/\b(dub|dubbed|sub|subbed|uncensored|uncut|dual audio|multi audio)\b/g, '')
                 .replace(/[^a-z0-9\s]/g, ' ')
                 .replace(/\s+/g, ' ')

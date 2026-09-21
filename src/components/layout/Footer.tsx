@@ -1,89 +1,85 @@
 import { Link } from 'react-router-dom';
 import { Logo } from '@/components/ui/Logo';
-import { Github, Twitter, MessageCircle } from 'lucide-react';
 
-export const Footer = () => {
-  return (
-    <footer className="border-t border-border bg-fox-darker">
-      <div className="container py-8 sm:py-12">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 sm:gap-8">
-          {/* Brand */}
-          <div className="col-span-2 md:col-span-1">
-            <Logo size="md" />
-            <p className="mt-3 sm:mt-4 text-xs sm:text-sm text-muted-foreground">
-              Watch in HD with multiple sources, sub & dub where available. Listings and metadata from{' '}
-              <a
-                href="https://anilist.co"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-zinc-400 hover:text-fox-orange transition-colors"
-              >
-                AniList
-              </a>
-              .
-            </p>
-            <div className="flex items-center gap-3 mt-4">
-              <a
-                href="#"
-                className="p-2 rounded-lg bg-fox-surface hover:bg-fox-orange/20 hover:text-fox-orange transition-colors"
-              >
-                <Github className="w-5 h-5" />
-              </a>
-              <a
-                href="#"
-                className="p-2 rounded-lg bg-fox-surface hover:bg-fox-orange/20 hover:text-fox-orange transition-colors"
-              >
-                <Twitter className="w-5 h-5" />
-              </a>
-              <a
-                href="#"
-                className="p-2 rounded-lg bg-fox-surface hover:bg-fox-orange/20 hover:text-fox-orange transition-colors"
-              >
-                <MessageCircle className="w-5 h-5" />
-              </a>
-            </div>
-          </div>
+/**
+ * The footer is where a streaming site usually turns into a link farm. This
+ * one states what the place is, credits its data, and offers the handful of
+ * routes people actually use — nothing it can't stand behind.
+ */
+const COLUMNS: { heading: string; links: { to: string; label: string }[] }[] = [
+  {
+    heading: 'Watch',
+    links: [
+      { to: '/browse', label: 'Browse everything' },
+      { to: '/browse?status=Ongoing', label: 'Airing this season' },
+      { to: '/browse?type=Movie', label: 'Films' },
+      { to: '/schedule', label: 'Airing schedule' },
+    ],
+  },
+  {
+    heading: 'Explore',
+    links: [
+      { to: '/browse?genres=Action', label: 'Action' },
+      { to: '/browse?genres=Romance', label: 'Romance' },
+      { to: '/browse?genres=Slice%20of%20Life', label: 'Slice of Life' },
+      { to: '/browse?sort=popularity', label: 'All-time favourites' },
+    ],
+  },
+  {
+    heading: 'Behind the scenes',
+    links: [
+      { to: '/status', label: 'Source status' },
+      { to: '/health', label: 'Service health' },
+      { to: '/docs', label: 'API documentation' },
+    ],
+  },
+];
 
-          {/* Links */}
-          <div>
-            <h4 className="font-semibold mb-4">Browse</h4>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><Link to="/browse" className="hover:text-fox-orange transition-colors">All anime</Link></li>
-              <li><Link to="/browse?genres=Action" className="hover:text-fox-orange transition-colors">Browse by genre</Link></li>
-              <li><Link to="/browse?status=ongoing" className="hover:text-fox-orange transition-colors">This season</Link></li>
-              <li><Link to="/browse?sort=popularity" className="hover:text-fox-orange transition-colors">Popular</Link></li>
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-semibold mb-4">Resources</h4>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><Link to="/docs" className="hover:text-fox-orange transition-colors">API Docs</Link></li>
-              <li><Link to="/status" className="hover:text-fox-orange transition-colors">System Status</Link></li>
-              <li><Link to="/health" className="hover:text-fox-orange transition-colors">Service health</Link></li>
-              <li><Link to="/schedule" className="hover:text-fox-orange transition-colors">Airing Schedule</Link></li>
-              <li><a href="#" className="hover:text-fox-orange transition-colors">Support</a></li>
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-semibold mb-4">Legal</h4>
-            <ul className="space-y-2 text-sm text-muted-foreground">
-              <li><a href="#" className="hover:text-fox-orange transition-colors">Terms of Service</a></li>
-              <li><a href="#" className="hover:text-fox-orange transition-colors">Privacy Policy</a></li>
-              <li><a href="#" className="hover:text-fox-orange transition-colors">DMCA</a></li>
-            </ul>
-          </div>
-        </div>
-
-        <div className="mt-8 sm:mt-12 pt-4 sm:pt-6 border-t border-border">
-          <p className="text-center text-xs sm:text-sm text-muted-foreground">
-            © {new Date().getFullYear()} AniFox. All rights reserved.
-            <span className="mx-2">•</span>
-            Made with <span className="text-fox-orange">♥</span> for anime fans
+export const Footer = () => (
+  <footer className="mt-16 border-t border-white/[0.06]">
+    <div className="page-x py-12 sm:py-16">
+      <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_repeat(3,1fr)]">
+        <div className="max-w-sm">
+          <Logo size="md" />
+          <p className="mt-4 text-[13px] leading-relaxed text-muted-foreground">
+            A quiet place to find something to watch. Listings, artwork and scores come from{' '}
+            <a
+              href="https://anilist.co"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground/80 underline decoration-white/20 underline-offset-4 transition-colors hover:text-[hsl(var(--primary))]"
+            >
+              AniList
+            </a>
+            ; playback comes from whichever source is healthiest at the time.
           </p>
         </div>
+
+        {COLUMNS.map((col) => (
+          <div key={col.heading}>
+            <h3 className="eyebrow">{col.heading}</h3>
+            <ul className="mt-4 space-y-2.5">
+              {col.links.map((link) => (
+                <li key={link.to}>
+                  <Link
+                    to={link.to}
+                    className="text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </div>
-    </footer>
-  );
-};
+
+      <div className="hairline mt-12" />
+
+      <div className="mt-6 flex flex-col gap-2 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+        <p>© {new Date().getFullYear()} AniFox — made for people who rewatch things.</p>
+        <p>All titles belong to their respective creators and licensors.</p>
+      </div>
+    </div>
+  </footer>
+);

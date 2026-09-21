@@ -23,6 +23,12 @@ export interface AnimeBase {
     subCount?: number;
     dubCount?: number;
     isMature?: boolean;
+    /** Published without censor bars (adult catalog). */
+    uncensored?: boolean;
+    /** Adult catalog: which sites can play this title. Empty = listed, but no site carries it. */
+    watchableOn?: string[];
+    /** Cover colour (hex) — drives per-title accent lighting. */
+    accentColor?: string;
     source?: string; // Which source this came from
     nextAiringEpisode?: number;
     timeUntilAiring?: number; // in seconds

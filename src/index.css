@@ -1,77 +1,92 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+   AniFox design system — "lantern light"
+   A dark, warm-tinted night palette borrowed from late-night TV: deep indigo
+   ink, ember-lit accents, glass that reflects rather than obscures. Every
+   surface is a thin pane over the artwork, never a box that hides it.
+   ========================================================================== */
+
 @layer base {
   :root {
-    --background: 220 20% 4%;
-    --foreground: 220 10% 98%;
+    /* Core palette */
+    --background: 234 30% 5%;
+    --foreground: 40 22% 95%;
 
-    --card: 220 20% 8%;
-    --card-foreground: 220 10% 98%;
-    --card-hover: 220 20% 12%;
+    --card: 234 24% 9%;
+    --card-foreground: 40 22% 95%;
+    --card-hover: 234 22% 13%;
 
-    --popover: 220 20% 8%;
-    --popover-foreground: 220 10% 98%;
+    --popover: 234 26% 8%;
+    --popover-foreground: 40 22% 95%;
 
-    --primary: 25 95% 55%;
-    --primary-foreground: 0 0% 100%;
-    --primary-glow: 25 100% 65%;
+    /* Ember — the one warm accent. Used for actions, never for decoration. */
+    --primary: 26 88% 58%;
+    --primary-foreground: 24 40% 8%;
+    --primary-glow: 32 96% 66%;
 
-    --secondary: 220 15% 12%;
-    --secondary-foreground: 220 10% 98%;
+    /* Iris — cool counterweight, used for atmosphere and secondary state. */
+    --iris: 256 58% 66%;
 
-    --muted: 220 15% 15%;
-    --muted-foreground: 220 10% 65%;
+    --secondary: 234 20% 13%;
+    --secondary-foreground: 40 18% 92%;
 
-    --accent: 25 95% 55%;
-    --accent-foreground: 0 0% 100%;
+    --muted: 234 18% 15%;
+    --muted-foreground: 232 12% 63%;
 
-    --destructive: 0 84% 60%;
+    --accent: 26 88% 58%;
+    --accent-foreground: 24 40% 8%;
+
+    --destructive: 358 70% 58%;
     --destructive-foreground: 0 0% 98%;
 
-    --border: 220 15% 15%;
-    --input: 220 15% 15%;
-    --ring: 25 95% 55%;
+    --border: 234 18% 17%;
+    --input: 234 18% 17%;
+    --ring: 26 88% 58%;
 
-    --radius: 0.75rem;
+    --radius: 0.875rem;
 
-    /* Custom AniFox tokens - Modern HD Dark */
-    /* Premium Orange / Gold-Orange */
-    --fox-orange: 28 95% 55%;
-    --fox-orange-light: 32 100% 65%;
-    --fox-orange-dark: 20 90% 45%;
+    /* Brand aliases (kept so existing markup keeps working) */
+    --fox-orange: 26 88% 58%;
+    --fox-orange-light: 32 96% 66%;
+    --fox-orange-dark: 18 82% 48%;
 
-    /* Sleek Dark Backgrounds (Blue-black based) */
-    --fox-dark: 220 30% 6%;
-    --fox-darker: 220 40% 3%;
-    --fox-surface: 220 25% 10%;
-    --fox-surface-hover: 220 25% 14%;
+    --fox-dark: 234 28% 7%;
+    --fox-darker: 236 34% 4%;
+    --fox-surface: 234 22% 11%;
+    --fox-surface-hover: 234 20% 15%;
 
-    --fox-badge-sub: 200 70% 50%;
-    --fox-badge-dub: 142 60% 45%;
-    --fox-badge-18: 0 75% 55%;
+    --fox-badge-sub: 199 74% 56%;
+    --fox-badge-dub: 152 52% 48%;
+    --fox-badge-18: 358 70% 58%;
 
-    /* Gradients - Modern & Sleek */
-    --gradient-orange: linear-gradient(135deg, hsl(28 95% 55%), hsl(40 100% 60%));
-    --gradient-dark: linear-gradient(180deg, hsl(220 30% 8%), hsl(220 40% 4%));
-    --gradient-card: linear-gradient(145deg, hsl(220 20% 10%) 0%, hsl(220 20% 6%) 100%);
+    /* Glass system — tint, hairline and reflection are tokens so panes match. */
+    --glass-tint: 234 30% 12%;
+    --glass-alpha: 0.42;
+    --glass-blur: 20px;
+    --glass-hairline: 0 0% 100% / 0.09;
+    --glass-reflection: 0 0% 100% / 0.07;
 
-    /* Shadows - Sharp & Deep */
-    --shadow-glow: 0 0 40px -10px hsl(28 95% 55% / 0.4);
-    --shadow-card: 0 20px 40px -20px hsl(0 0% 0% / 0.7);
-    --shadow-elevated: 0 30px 60px -15px hsl(0 0% 0% / 0.8);
+    /* Per-title accent. Components override this with the show's cover colour
+       so each anime lights its own corner of the page. */
+    --atmos: 26 88% 58%;
 
-    --sidebar-background: 220 30% 6%;
-    --sidebar-foreground: 220 10% 98%;
-    --sidebar-primary: 28 95% 55%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 12%;
-    --sidebar-accent-foreground: 220 10% 98%;
-    --sidebar-border: 220 15% 15%;
-    --sidebar-ring: 28 95% 55%;
+    --shadow-soft: 0 10px 30px -18px hsl(236 40% 2% / 0.9);
+    --shadow-lifted: 0 24px 48px -24px hsl(236 40% 2% / 0.95);
+    --shadow-page: 0 40px 80px -40px hsl(236 40% 2% / 1);
+
+    --sidebar-background: 234 28% 7%;
+    --sidebar-foreground: 40 18% 94%;
+    --sidebar-primary: 26 88% 58%;
+    --sidebar-primary-foreground: 24 40% 8%;
+    --sidebar-accent: 234 20% 13%;
+    --sidebar-accent-foreground: 40 18% 94%;
+    --sidebar-border: 234 18% 17%;
+    --sidebar-ring: 26 88% 58%;
   }
 }
 
@@ -81,42 +96,51 @@
   }
 
   html {
-    scroll-behavior: smooth;
+    /* No CSS smooth-scroll: it turns End / Space / scrollbar drags into slow glides. */
     overflow-y: scroll;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
   }
 
-  /* Mobile-first sizing: slightly tighter typographic scale */
   @media (max-width: 640px) {
-    html {
-      font-size: 15px;
-    }
+    html { font-size: 15px; }
   }
 
   body {
     @apply text-foreground font-sans antialiased;
-    font-family: 'Inter', system-ui, sans-serif;
     background-color: hsl(var(--background));
-    background-image:
-      radial-gradient(ellipse 130% 90% at 50% -25%, hsl(var(--fox-orange) / 0.14), transparent 55%),
-      radial-gradient(ellipse 70% 45% at 100% 20%, hsl(265 45% 22% / 0.18), transparent 50%),
-      radial-gradient(ellipse 60% 40% at 0% 80%, hsl(200 50% 18% / 0.12), transparent 45%),
-      linear-gradient(180deg, hsl(220 32% 6%) 0%, hsl(var(--background)) 42%);
-    /* Prevent layout shifts and improve scroll performance */
     min-height: 100vh;
     min-height: 100dvh;
     overflow-x: hidden;
   }
 
-  /* Subtle film grain — sits behind app content */
+  /* Atmospheric lighting: one warm source top-centre, one cool wash low-left.
+     Lives on its own fixed, GPU-composited layer — `background-attachment: fixed`
+     repaints the whole viewport every scroll frame; this is painted once. */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    transform: translateZ(0);
+    will-change: transform;
+    background-image:
+      radial-gradient(ellipse 120% 80% at 50% -20%, hsl(26 88% 58% / 0.10), transparent 60%),
+      radial-gradient(ellipse 80% 50% at 92% 8%, hsl(256 58% 50% / 0.10), transparent 55%),
+      radial-gradient(ellipse 70% 45% at 4% 88%, hsl(200 60% 42% / 0.07), transparent 55%);
+  }
+
+  /* Film grain — the faint texture of a rewatched tape. Composited once, not per frame. */
   body::before {
     content: '';
     position: fixed;
     inset: 0;
     pointer-events: none;
     z-index: 0;
-    opacity: 0.04;
+    transform: translateZ(0);
+    will-change: transform;
+    opacity: 0.035;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
 
@@ -125,445 +149,375 @@
     z-index: 1;
   }
 
-  /* Improve scroll performance and prevent blackouts */
   * {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Remove gray tap highlight on mobile touch */
   a, button, [role="button"] {
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* Ensure images don't cause layout shifts */
   img {
     display: block;
     max-width: 100%;
     height: auto;
   }
 
-  /* Custom scrollbar — hide on mobile for cleaner look */
-  @media (max-width: 640px) {
-    ::-webkit-scrollbar {
-      width: 0px;
-      height: 0px;
-    }
-
-    /* Momentum scrolling for all scrollable containers on iOS */
-    .overflow-x-auto,
-    .overflow-y-auto {
-      -webkit-overflow-scrolling: touch;
-    }
-  }
-
-  @media (min-width: 641px) {
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-  }
-
-  ::-webkit-scrollbar-track {
-    background: hsl(var(--fox-dark));
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted));
+  /* One focus treatment everywhere — visible, never garish. */
+  :focus-visible {
+    outline: 2px solid hsl(var(--primary) / 0.75);
+    outline-offset: 2px;
     border-radius: 4px;
   }
 
+  h1, h2, h3 {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.28);
+    color: hsl(var(--foreground));
+  }
+
+  @media (max-width: 640px) {
+    ::-webkit-scrollbar { width: 0; height: 0; }
+    .overflow-x-auto, .overflow-y-auto { -webkit-overflow-scrolling: touch; }
+  }
+
+  @media (min-width: 641px) {
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+  }
+
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(234 14% 24%);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+    border-radius: 999px;
+  }
+
   ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--fox-orange) / 0.6);
+    background: hsl(234 14% 34%);
+    background-clip: padding-box;
+  }
+}
+
+@layer components {
+  /* Page frame — one gutter for every page, so the left edge never jumps. */
+  .page-x {
+    width: 100%;
+    max-width: 96rem;
+    margin-inline: auto;
+    padding-inline: 1rem;
+  }
+  @media (min-width: 640px) { .page-x { padding-inline: 1.75rem; } }
+  @media (min-width: 1280px) { .page-x { padding-inline: 2.5rem; } }
+
+  /* Mobile bottom-nav clearance. */
+  .page-bottom { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+  @media (min-width: 768px) { .page-bottom { padding-bottom: 2.5rem; } }
+
+  /* A pane: tinted, blurred, hairline-bordered, with one reflection along the
+     top edge. Depth comes from the shadow, not from more blur. */
+  .glass {
+    background:
+      linear-gradient(
+        180deg,
+        hsl(var(--glass-tint) / calc(var(--glass-alpha) + 0.12)),
+        hsl(var(--glass-tint) / var(--glass-alpha))
+      );
+    backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
+    border: 1px solid hsl(var(--glass-hairline));
+    box-shadow:
+      inset 0 1px 0 hsl(var(--glass-reflection)),
+      var(--shadow-soft);
+  }
+
+  /* Heavier pane for overlays that must stay readable over artwork. */
+  .glass-solid {
+    background: linear-gradient(180deg, hsl(234 30% 9% / 0.94), hsl(234 32% 7% / 0.96));
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    border: 1px solid hsl(var(--glass-hairline));
+    box-shadow: inset 0 1px 0 hsl(var(--glass-reflection)), var(--shadow-lifted);
+  }
+
+  /* Small inline pane: chips, badges, pills laid over posters. */
+  .glass-chip {
+    background: hsl(236 30% 6% / 0.62);
+    backdrop-filter: blur(10px) saturate(140%);
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    border: 1px solid hsl(0 0% 100% / 0.1);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.06);
+  }
+
+  /* Interactive pane — the hover state is light, not motion. */
+  .glass-button {
+    background: hsl(0 0% 100% / 0.05);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid hsl(0 0% 100% / 0.09);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.06);
+    transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease;
+  }
+  .glass-button:hover {
+    background: hsl(0 0% 100% / 0.09);
+    border-color: hsl(0 0% 100% / 0.16);
+  }
+
+  .glass-input {
+    background: hsl(0 0% 100% / 0.04);
+    border: 1px solid hsl(0 0% 100% / 0.08);
+    box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.04);
+    transition: background-color 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+  }
+  .glass-input:focus-within {
+    background: hsl(0 0% 100% / 0.06);
+    border-color: hsl(var(--primary) / 0.45);
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.12);
+  }
+
+  /* Hairline rule that fades at both ends. */
+  .hairline {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.1), transparent);
+  }
+
+  /* Posters get a hairline — that's it. */
+  .art-frame {
+    position: relative;
+    overflow: hidden;
+    border-radius: 0.875rem;
+    background: hsl(234 24% 9%);
+    box-shadow:
+      inset 0 0 0 1px hsl(0 0% 100% / 0.07),
+      var(--shadow-soft);
+  }
+
+  /* Scrim under text placed on artwork — readability first, always. */
+  .art-scrim {
+    background: linear-gradient(
+      to top,
+      hsl(236 34% 4% / 0.96) 0%,
+      hsl(236 34% 4% / 0.78) 32%,
+      hsl(236 34% 4% / 0.25) 62%,
+      transparent 100%
+    );
+  }
+
+  .section-title {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: hsl(var(--foreground));
+  }
+
+  .eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .btn-ember {
+    background: linear-gradient(180deg, hsl(32 94% 62%), hsl(24 88% 54%));
+    color: hsl(24 45% 10%);
+    box-shadow:
+      inset 0 1px 0 hsl(40 100% 85% / 0.5),
+      0 10px 24px -14px hsl(26 88% 58% / 0.9);
+    transition: filter 200ms ease, box-shadow 200ms ease;
+  }
+  .btn-ember:hover {
+    filter: brightness(1.06);
+    box-shadow:
+      inset 0 1px 0 hsl(40 100% 85% / 0.55),
+      0 14px 30px -14px hsl(26 88% 58% / 1);
+  }
+
+  /* A wash of the title's own colour, behind detail pages and heroes. */
+  .atmos-wash {
+    background:
+      radial-gradient(ellipse 90% 70% at 15% 0%, hsl(var(--atmos) / 0.22), transparent 62%),
+      radial-gradient(ellipse 70% 60% at 88% 12%, hsl(var(--atmos) / 0.10), transparent 60%);
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(234 20% 12%) 0%,
+      hsl(234 18% 16%) 50%,
+      hsl(234 20% 12%) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.8s ease-in-out infinite;
+    border-radius: 0.5rem;
+  }
+  .shimmer {
+    background: linear-gradient(90deg, hsl(234 20% 12%) 0%, hsl(234 18% 16%) 50%, hsl(234 20% 12%) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.8s ease-in-out infinite;
   }
 }
 
 @layer utilities {
-  /* Safe-area padding utilities for notched phones (iPhone X+) */
-  .pb-safe {
-    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
-  }
-  .pt-safe {
-    padding-top: env(safe-area-inset-top);
-  }
+  .pb-safe { padding-bottom: max(1.5rem, env(safe-area-inset-bottom)); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
 
-  .text-gradient-orange {
+  .text-gradient-ember {
+    background-image: linear-gradient(135deg, hsl(36 96% 68%), hsl(22 88% 56%));
     @apply bg-clip-text text-transparent;
-    background-image: var(--gradient-orange);
+  }
+  .text-gradient-orange {
+    background-image: linear-gradient(135deg, hsl(36 96% 68%), hsl(22 88% 56%));
+    @apply bg-clip-text text-transparent;
   }
 
-  .bg-gradient-orange {
-    background-image: var(--gradient-orange);
+  .fade-edge-r { mask-image: linear-gradient(to right, black 88%, transparent 100%); }
+  .fade-edge-b { mask-image: linear-gradient(to bottom, black 92%, transparent 100%); }
+
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
+  .scrollbar-none::-webkit-scrollbar { display: none; }
+
+  /* Standard props only where ::-webkit-scrollbar is unsupported — in Chrome they override it and bring back the arrow buttons. */
+  @supports not selector(::-webkit-scrollbar) {
+    .scrollbar-thin { scrollbar-width: thin; scrollbar-color: hsl(234 14% 26%) transparent; }
+  }
+  .scrollbar-thin::-webkit-scrollbar { width: 5px; }
+  .scrollbar-thin::-webkit-scrollbar-button { display: none; height: 0; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(234 14% 26%); border-radius: 999px; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: hsl(234 14% 36%); }
+
+  /* Browse / search filter rail — same class names, new finish. */
+  .fox-sidebar {
+    background: linear-gradient(180deg, hsl(234 30% 8% / 0.7), hsl(234 32% 6% / 0.55));
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    border-right: 1px solid hsl(0 0% 100% / 0.06);
   }
 
-  .glow-orange {
-    box-shadow: var(--shadow-glow);
-  }
-
-  .card-hover {
-    @apply transition-all duration-300 ease-out;
-  }
-
-  .card-hover:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--shadow-elevated);
-  }
-
-  .animate-pulse-glow {
-    animation: pulse-glow 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse-glow {
-
-    0%,
-    100% {
-      box-shadow: 0 0 20px -5px hsl(24 95% 53% / 0.3);
-    }
-
-    50% {
-      box-shadow: 0 0 30px -5px hsl(24 95% 53% / 0.6);
-    }
-  }
-
-  .animate-fade-in {
-    animation: fade-in 0.5s ease-out forwards;
-  }
-
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .animate-slide-up {
-    animation: slide-up 0.4s ease-out forwards;
-  }
-
-  @keyframes slide-up {
-    from {
-      opacity: 0;
-      transform: translateY(20px);
-    }
-
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  /* Shimmer loading effect */
-  .shimmer {
-    background: linear-gradient(90deg,
-        hsl(var(--fox-surface)) 0%,
-        hsl(var(--fox-surface-hover)) 50%,
-        hsl(var(--fox-surface)) 100%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s ease-in-out infinite;
-  }
-
-  @keyframes shimmer {
-    0% {
-      background-position: -200% 0;
-    }
-
-    100% {
-      background-position: 200% 0;
-    }
-  }
-
-  .shimmer-dark {
-    background: linear-gradient(90deg,
-        hsl(var(--fox-dark)) 0%,
-        hsl(var(--fox-darker)) 50%,
-        hsl(var(--fox-dark)) 100%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s ease-in-out infinite;
-  }
-
-  /* Hide scrollbar utility */
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Glass effect */
-  .glass {
-    @apply bg-white/5 backdrop-blur-xl border border-white/10;
-  }
-
-  /* Premium card effect */
-  .premium-card {
-    @apply bg-gradient-to-br from-fox-surface/80 to-fox-surface/40 border border-white/5 backdrop-blur-xl;
-  }
-
-  /* Glow text effect */
-  .text-glow {
-    text-shadow: 0 0 20px hsl(var(--fox-orange) / 0.5);
-  }
-
-  /* Smooth scale on hover */
-  .hover-scale {
-    @apply transition-transform duration-300;
-  }
-
-  .hover-scale:hover {
-    @apply scale-105;
-  }
-
-  /* Animate in from bottom */
-  .animate-in-up {
-    animation: animate-in-up 0.4s ease-out forwards;
-  }
-
-  @keyframes animate-in-up {
-    from {
-      opacity: 0;
-      transform: translateY(20px);
-    }
-
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  /* Floating animation */
-  .animate-float {
-    animation: float 3s ease-in-out infinite;
-  }
-
-  @keyframes float {
-
-    0%,
-    100% {
-      transform: translateY(0);
-    }
-
-    50% {
-      transform: translateY(-10px);
-    }
-  }
-
-  /* Glassmorphism panels */
-  .glass-panel {
-    @apply bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] shadow-2xl;
-  }
-
-  .glass-panel-dark {
-    @apply bg-black/40 backdrop-blur-2xl border border-white/[0.06] shadow-2xl;
-  }
-
-  .glass-card {
-    @apply bg-white/[0.04] backdrop-blur-xl border border-white/[0.08] rounded-2xl;
-  }
-
-  .glass-input {
-    @apply bg-white/[0.06] backdrop-blur-xl border border-white/[0.1] focus:border-fox-orange/50 focus:bg-white/[0.08];
-  }
-
-  .glass-button {
-    @apply bg-white/[0.08] backdrop-blur-xl border border-white/[0.1] hover:bg-white/[0.12] hover:border-white/[0.15] transition-all duration-300;
-  }
-
-  .glass-button-active {
-    @apply bg-fox-orange/20 backdrop-blur-xl border border-fox-orange/30 text-fox-orange;
-  }
-
-  /* Cinematic gradient overlays */
-  .cinematic-gradient {
-    background: linear-gradient(180deg, 
-      transparent 0%, 
-      hsl(var(--background) / 0.4) 40%, 
-      hsl(var(--background) / 0.8) 70%, 
-      hsl(var(--background)) 100%);
-  }
-
-  .cinematic-vignette {
-    box-shadow: inset 0 0 150px 60px hsl(var(--background) / 0.8);
-  }
-
-  /* Sidebar styling */
-  .sidebar-glass {
-    @apply bg-gradient-to-b from-white/[0.04] to-white/[0.02] backdrop-blur-2xl border-r border-white/[0.06];
-  }
-
-  /* Content area styling */
-  .content-fade-edge {
-    mask-image: linear-gradient(to bottom, black 95%, transparent 100%);
-  }
-
-  /* Badge styling for filters */
-  .filter-badge {
-    @apply px-3 py-1.5 rounded-full text-xs font-medium transition-all duration-200 cursor-pointer;
-  }
-
-  .filter-badge-inactive {
-    @apply bg-white/[0.06] text-zinc-400 border border-white/[0.08] hover:bg-white/[0.1] hover:text-white hover:border-white/[0.15];
-  }
-
-  .filter-badge-active {
-    @apply bg-fox-orange/20 text-fox-orange border border-fox-orange/40 shadow-lg shadow-fox-orange/10;
-  }
-
-  /* Scrollbar for filter panel */
-  .scrollbar-thin {
-    scrollbar-width: thin;
-    scrollbar-color: hsl(var(--fox-orange) / 0.3) transparent;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar {
-    width: 4px;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: hsl(var(--fox-orange) / 0.3);
-    border-radius: 2px;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--fox-orange) / 0.5);
-  }
-
-  /* No scrollbar */
-  .scrollbar-none {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .scrollbar-none::-webkit-scrollbar {
-    display: none;
-  }
-
-  /* Fox-fire search bar */
   .fox-search-bar {
-    @apply bg-black/60 backdrop-blur-2xl border-b border-fox-orange/[0.08];
-    box-shadow: 0 1px 20px -4px hsl(var(--fox-orange) / 0.06), 0 4px 12px -2px rgba(0,0,0,0.5);
+    background: hsl(234 32% 6% / 0.72);
+    backdrop-filter: blur(22px) saturate(140%);
+    -webkit-backdrop-filter: blur(22px) saturate(140%);
+    border-bottom: 1px solid hsl(0 0% 100% / 0.06);
   }
 
   .fox-search-input {
-    @apply bg-white/[0.04] border border-white/[0.06] rounded-xl transition-all duration-300;
+    background: hsl(0 0% 100% / 0.04);
+    border: 1px solid hsl(0 0% 100% / 0.08);
+    border-radius: 0.75rem;
+    transition: background-color 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
   }
   .fox-search-input:focus-within {
-    @apply border-fox-orange/30 bg-white/[0.06];
-    box-shadow: 0 0 0 1px hsl(var(--fox-orange) / 0.15), 0 0 20px -6px hsl(var(--fox-orange) / 0.15);
+    background: hsl(0 0% 100% / 0.06);
+    border-color: hsl(var(--primary) / 0.4);
+    box-shadow: 0 0 0 3px hsl(var(--primary) / 0.1);
   }
 
-  /* Fox-fire sidebar */
-  .fox-sidebar {
-    @apply bg-gradient-to-b from-black/50 via-black/40 to-black/30 backdrop-blur-2xl border-r border-fox-orange/[0.06];
-  }
-
-  /* Fox-fire filter section header */
   .fox-section-title {
-    @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-fox-orange/60;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: hsl(232 12% 55%);
   }
 
-  /* Fox-fire filter button */
   .fox-filter-btn {
-    @apply relative bg-white/[0.03] border border-white/[0.06] rounded-xl text-sm font-medium text-zinc-500 transition-all duration-200;
+    position: relative;
+    background: hsl(0 0% 100% / 0.035);
+    border: 1px solid hsl(0 0% 100% / 0.07);
+    border-radius: 0.75rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: hsl(232 12% 62%);
+    transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
   }
   .fox-filter-btn:hover {
-    @apply bg-white/[0.06] border-fox-orange/20 text-zinc-300;
+    background: hsl(0 0% 100% / 0.07);
+    border-color: hsl(0 0% 100% / 0.14);
+    color: hsl(var(--foreground));
   }
   .fox-filter-btn-active {
-    @apply bg-fox-orange/[0.12] border-fox-orange/30 text-fox-orange;
-    box-shadow: 0 0 12px -3px hsl(var(--fox-orange) / 0.2);
+    background: hsl(var(--primary) / 0.14);
+    border-color: hsl(var(--primary) / 0.36);
+    color: hsl(32 96% 72%);
   }
 
-  /* Fox-fire genre chip */
   .fox-chip {
-    @apply px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all duration-200 cursor-pointer border;
+    padding: 0.25rem 0.625rem;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
   }
   .fox-chip-inactive {
-    @apply bg-white/[0.03] text-zinc-500 border-white/[0.05];
+    background: hsl(0 0% 100% / 0.035);
+    color: hsl(232 12% 62%);
+    border-color: hsl(0 0% 100% / 0.06);
   }
   .fox-chip-inactive:hover {
-    @apply bg-white/[0.06] text-zinc-300 border-white/[0.1];
+    background: hsl(0 0% 100% / 0.07);
+    color: hsl(var(--foreground));
+    border-color: hsl(0 0% 100% / 0.12);
   }
   .fox-chip-active {
-    @apply bg-fox-orange/[0.15] text-fox-orange border-fox-orange/30;
-    box-shadow: 0 0 8px -2px hsl(var(--fox-orange) / 0.25);
+    background: hsl(var(--primary) / 0.15);
+    color: hsl(32 96% 72%);
+    border-color: hsl(var(--primary) / 0.34);
   }
 
-  /* Fox-fire divider */
   .fox-divider {
-    @apply h-px bg-gradient-to-r from-transparent via-fox-orange/[0.12] to-transparent;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.08), transparent);
   }
 
-  /* Fox-fire mode selector */
   .fox-mode-select {
-    @apply bg-white/[0.04] border border-white/[0.06] rounded-xl transition-all duration-200;
+    background: hsl(0 0% 100% / 0.04);
+    border: 1px solid hsl(0 0% 100% / 0.07);
+    border-radius: 0.75rem;
+    transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease;
   }
   .fox-mode-select-active {
-    @apply border-fox-orange/30 bg-fox-orange/[0.08] text-fox-orange;
+    background: hsl(var(--primary) / 0.12);
+    border-color: hsl(var(--primary) / 0.34);
+    color: hsl(32 96% 72%);
   }
 
-  /* Hero section animations */
-  .animate-fade-in-up {
-    animation: fade-in-up 0.8s ease-out forwards;
-    opacity: 0;
+  /* Entrance motion — short, once, never looping. */
+  .animate-rise { animation: rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .animate-fade { animation: fade 320ms ease-out both; }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: none; }
+  }
+  @keyframes fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
   }
 
-  @keyframes fade-in-up {
-    from {
-      opacity: 0;
-      transform: translateY(30px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  .animate-subtle-zoom {
-    animation: subtle-zoom 20s ease-out infinite alternate;
-  }
-
-  @keyframes subtle-zoom {
-    0% {
-      transform: scale(1);
-    }
-    100% {
-      transform: scale(1.05);
-    }
-  }
-
-  .animate-pulse-slow {
-    animation: pulse-slow 8s ease-in-out infinite;
-  }
-
-  @keyframes pulse-slow {
-    0%, 100% {
-      opacity: 0.3;
-    }
-    50% {
-      opacity: 0.6;
-    }
-  }
-
-  /* Accessibility & Performance: Respect user motion preferences */
   @media (prefers-reduced-motion: reduce) {
-    *,
-    ::before,
-    ::after {
+    *, ::before, ::after {
       animation-duration: 0.01ms !important;
       animation-iteration-count: 1 !important;
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+    .art-frame:hover, .group:hover .art-frame { transform: none; }
   }
 }

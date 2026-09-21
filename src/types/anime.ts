@@ -2,6 +2,8 @@ export interface Anime {
   id: string;
   streamingId?: string; // The actual streaming source ID for navigation
   title: string;
+  titleEnglish?: string;
+  titleRomaji?: string;
   titleJapanese?: string;
   image: string;
   cover?: string;
@@ -20,10 +22,16 @@ export interface Anime {
   subCount?: number;
   dubCount?: number;
   isMature?: boolean;
+  /** Published without censor bars (adult catalog). */
+  uncensored?: boolean;
+  /** Adult catalog: which sites can play this title. Empty = listed, but no site carries it. */
+  watchableOn?: string[];
   source?: string;
   // AniList specific fields
   bannerImage?: string;
   coverImage?: string;
+  /** AniList cover colour (hex) — drives each title's on-page accent lighting. */
+  accentColor?: string;
   nextAiringEpisode?: number;
   timeUntilAiring?: number; // in seconds
 }

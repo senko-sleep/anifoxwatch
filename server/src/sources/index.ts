@@ -7,7 +7,9 @@ export { ReAnimeSource } from './reanime-source.js';
 export { AnichiSource } from './anichi-source.js';
 
 // Adult streaming source
-export { WatchHentaiSource } from './watchhentai-source.js';
+export { WatchHentaiSource, watchHentaiSource } from './watchhentai-source.js';
+export { HentaiMamaSource, hentaiMamaSource } from './hentaimama-source.js';
+export { HentaiHavenSource, hentaiHavenSource } from './hentaihaven-source.js';
 // Hanime source is placeholder - requires JS rendering, not currently functional
 // export { HanimeSource } from './hanime-source.js';
 

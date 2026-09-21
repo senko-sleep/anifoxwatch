@@ -1,10 +1,9 @@
-import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Play, X, ChevronLeft, ChevronRight } from 'lucide-react';
-import { WatchHistoryItem } from '@/lib/watch-history';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { ensureHttps, generateWatchUrl } from '@/lib/utils';
+import { X } from 'lucide-react';
+import type { WatchHistoryItem } from '@/lib/watch-history';
+import { cn, ensureHttps } from '@/lib/utils';
+import { watchPath } from '@/lib/routes';
 
 interface ContinueWatchingProps {
     items: WatchHistoryItem[];
@@ -23,12 +22,20 @@ function pickMainSrc(item: WatchHistoryItem, phase: ImagePhase | undefined): str
     return frame || poster;
 }
 
+function timeLeftLabel(item: WatchHistoryItem): string | null {
+    if (!(item.duration > 0) || item.timestamp >= item.duration) return null;
+    const mins = Math.max(1, Math.round((item.duration - item.timestamp) / 60));
+    return `${mins} min left`;
+}
+
+/**
+ * The shelf that picks up where the viewer stopped. Wide stills instead of
+ * posters, because a frame from the episode is the strongest reminder of
+ * where you were — the poster stays as a small anchor in the corner.
+ */
 export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => {
     const location = useLocation();
     const scrollRef = useRef<HTMLDivElement>(null);
-    const [canScrollLeft, setCanScrollLeft] = useState(false);
-    const [canScrollRight, setCanScrollRight] = useState(true);
-    /** Per anime: episode still → poster only → hide broken layer */
     const [heroPhase, setHeroPhase] = useState<Record<string, ImagePhase>>({});
     const [posterDead, setPosterDead] = useState<Record<string, boolean>>({});
 
@@ -45,166 +52,105 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
     const onHeroError = useCallback((animeId: string, item: WatchHistoryItem) => {
         setHeroPhase((prev) => {
             const cur = prev[animeId];
-            const hasFrame = !!(item.frameThumbnail?.trim());
-            if (hasFrame && cur !== 'poster' && cur !== 'none') {
-                return { ...prev, [animeId]: 'poster' };
-            }
+            const hasFrame = !!item.frameThumbnail?.trim();
+            if (hasFrame && cur !== 'poster' && cur !== 'none') return { ...prev, [animeId]: 'poster' };
             return { ...prev, [animeId]: 'none' };
         });
     }, []);
 
-    const checkScroll = () => {
-        if (!scrollRef.current) return;
-        const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
-        setCanScrollLeft(scrollLeft > 0);
-        setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 10);
-    };
-
-    const scroll = (direction: 'left' | 'right') => {
-        if (!scrollRef.current) return;
-        const scrollAmount = scrollRef.current.clientWidth * 0.8;
-        scrollRef.current.scrollBy({
-            left: direction === 'left' ? -scrollAmount : scrollAmount,
-            behavior: 'smooth'
-        });
-        setTimeout(checkScroll, 300);
-    };
-
-    if (!items || items.length === 0) return null;
+    if (!items?.length) return null;
 
     return (
-        <div className="relative group/slider">
-            {canScrollLeft && (
-                <button
-                    onClick={() => scroll('left')}
-                    className="absolute left-0 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full bg-fox-orange/90 backdrop-blur-sm flex items-center justify-center text-white shadow-lg opacity-0 group-hover/slider:opacity-100 transition-all hover:bg-fox-orange hover:scale-110 -translate-x-1/2"
-                >
-                    <ChevronLeft className="w-6 h-6" />
-                </button>
-            )}
-            {canScrollRight && (
-                <button
-                    onClick={() => scroll('right')}
-                    className="absolute right-0 top-1/2 -translate-y-1/2 z-20 w-12 h-12 rounded-full bg-fox-orange/90 backdrop-blur-sm flex items-center justify-center text-white shadow-lg opacity-0 group-hover/slider:opacity-100 transition-all hover:bg-fox-orange hover:scale-110 translate-x-1/2"
-                >
-                    <ChevronRight className="w-6 h-6" />
-                </button>
-            )}
-
-            <div
-                ref={scrollRef}
-                onScroll={checkScroll}
-                className="flex gap-3 sm:gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-4 -mb-4 -mx-1 px-1"
-                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
-            >
+        <div
+            ref={scrollRef}
+            className="scrollbar-hide -mx-1 flex snap-x snap-mandatory gap-4 overflow-x-auto px-1 pb-2"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+        >
                 {items.map((item, index) => {
                     const phase = heroPhase[item.animeId];
                     const mainSrc = pickMainSrc(item, phase);
                     const posterSrc = ensureHttps(item.animeImage);
-                    const showHeroImg = mainSrc.length > 0 && phase !== 'none';
-                    const eager = index < 6;
+                    const showHero = mainSrc.length > 0 && phase !== 'none';
+                    const eager = index < 4;
+                    const left = timeLeftLabel(item);
 
                     return (
-                    <Link
-                        key={item.animeId}
-                        to={generateWatchUrl({ title: item.animeTitle, id: item.animeId, source: item.source }, item.episodeNumber)}
-                        state={{ from: location.pathname + location.search }}
-                        className="shrink-0 w-48 sm:w-56 group/card touch-manipulation"
-                    >
-                        <div className="relative aspect-video rounded-xl overflow-hidden bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-950 shadow-lg ring-1 ring-white/[0.08] transition-all duration-300 group-hover/card:ring-white/20 group-hover/card:shadow-xl group-hover/card:-translate-y-1">
-                            {showHeroImg ? (
-                                <img
-                                    key={`hero-${item.animeId}-${mainSrc.slice(-48)}`}
-                                    src={mainSrc}
-                                    alt={item.animeTitle}
-                                    loading={eager ? 'eager' : 'lazy'}
-                                    {...(eager ? ({ fetchpriority: 'high' } as unknown as Record<string, string>) : {})}
-                                    decoding="async"
-                                    referrerPolicy="no-referrer"
-                                    className="absolute inset-0 w-full h-full object-cover transition-transform duration-500 group-hover/card:scale-110"
-                                    onError={() => onHeroError(item.animeId, item)}
-                                />
-                            ) : null}
-
-                            {/* Gradient overlay */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none" />
-
-                            {/* Small anime poster */}
-                            {!posterDead[item.animeId] && posterSrc ? (
-                                <div className="absolute bottom-8 left-2 w-10 h-14 rounded-md overflow-hidden shadow-lg ring-1 ring-white/20 z-10 bg-zinc-800">
+                        <Link
+                            key={item.animeId}
+                            to={watchPath(
+                                { id: item.animeId, title: item.animeTitle, source: item.source },
+                                item.episodeNumber
+                            )}
+                            state={{ from: location.pathname + location.search }}
+                            className="w-[15rem] shrink-0 snap-start sm:w-[17.5rem]"
+                        >
+                            <div className="art-frame aspect-video w-full">
+                                {showHero ? (
                                     <img
-                                        key={`poster-${item.animeId}-${posterSrc.slice(-48)}`}
-                                        src={posterSrc}
+                                        key={`hero-${item.animeId}-${mainSrc.slice(-48)}`}
+                                        src={mainSrc}
                                         alt=""
-                                        aria-hidden
                                         loading={eager ? 'eager' : 'lazy'}
-                                        {...(eager ? ({ fetchpriority: 'high' } as unknown as Record<string, string>) : {})}
                                         decoding="async"
                                         referrerPolicy="no-referrer"
-                                        className="w-full h-full object-cover"
-                                        onError={() =>
-                                            setPosterDead((p) => ({ ...p, [item.animeId]: true }))
-                                        }
+                                         className="absolute inset-0 h-full w-full object-cover"
+                                        onError={() => onHeroError(item.animeId, item)}
+                                    />
+                                ) : (
+                                    <div className="absolute inset-0 bg-[hsl(234_22%_11%)]" />
+                                )}
+
+                                <div className="art-scrim absolute inset-x-0 bottom-0 h-2/3" />
+
+                                {!posterDead[item.animeId] && posterSrc && (
+                                    <div className="absolute bottom-3 left-3 z-10 h-14 w-10 overflow-hidden rounded-md shadow-lg ring-1 ring-white/15">
+                                        <img
+                                            key={`poster-${item.animeId}-${posterSrc.slice(-48)}`}
+                                            src={posterSrc}
+                                            alt=""
+                                            aria-hidden
+                                            loading={eager ? 'eager' : 'lazy'}
+                                            decoding="async"
+                                            referrerPolicy="no-referrer"
+                                            className="h-full w-full object-cover"
+                                            onError={() => setPosterDead((p) => ({ ...p, [item.animeId]: true }))}
+                                        />
+                                    </div>
+                                )}
+
+                                <div className="absolute inset-x-0 bottom-0 z-10 flex items-end justify-between gap-3 py-3 pl-16 pr-3">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-[13px] font-medium text-foreground">{item.animeTitle}</p>
+                                        <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                                            Episode {item.episodeNumber}
+                                            {left ? ` · ${left}` : ''}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div className="absolute inset-x-0 bottom-0 z-20 h-[3px] bg-[hsl(236_34%_4%_/_0.6)]">
+                                    <div
+                                        className="h-full rounded-r-full bg-[hsl(var(--atmos))]"
+                                        style={{ width: `${Math.min(100, Math.round(item.progress * 100))}%` }}
                                     />
                                 </div>
-                            ) : null}
 
-                            {/* Hover play button */}
-                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/card:opacity-100 transition-opacity duration-300 pointer-events-none">
-                                <div className="w-12 h-12 rounded-full bg-fox-orange/90 flex items-center justify-center transform scale-0 group-hover/card:scale-100 transition-transform duration-300 shadow-xl">
-                                    <Play className="w-6 h-6 text-white fill-white ml-0.5" />
-                                </div>
+                                <button
+                                    type="button"
+                                    aria-label={`Remove ${item.animeTitle} from Continue watching`}
+                                    className="glass-chip absolute right-2 top-2 z-20 grid h-7 w-7 place-items-center rounded-full text-muted-foreground"
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        onRemove(item.animeId);
+                                    }}
+                                >
+                                    <X className="h-3.5 w-3.5" />
+                                </button>
                             </div>
-
-                            {/* Progress bar */}
-                            <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/20 z-10">
-                                <div
-                                    className="h-full bg-fox-orange rounded-full"
-                                    style={{ width: `${Math.min(100, item.progress * 100)}%` }}
-                                />
-                            </div>
-
-                            {/* Episode badge - top left */}
-                            <div className="absolute top-2 left-2 z-10">
-                                <Badge className="bg-fox-orange/90 hover:bg-fox-orange text-white text-[10px] font-bold px-2.5 py-1 rounded-lg backdrop-blur-md shadow-sm border-0">
-                                    EP {item.episodeNumber}
-                                </Badge>
-                            </div>
-
-                            {/* Time left - bottom right */}
-                            {item.duration > 0 && item.timestamp < item.duration && (
-                                <div className="absolute bottom-2 right-2 z-10">
-                                    <span className="text-[10px] font-medium text-white/80 bg-black/70 backdrop-blur-md px-2 py-1 rounded-lg shadow-sm">
-                                        {Math.max(0, Math.floor((item.duration - item.timestamp) / 60))}m left
-                                    </span>
-                                </div>
-                            )}
-
-                            {/* Remove button — always visible on mobile, hover-only on desktop */}
-                            <Button
-                                variant="ghost"
-                                size="icon"
-                                className="absolute top-2 right-2 z-10 h-7 w-7 opacity-60 sm:opacity-0 sm:group-hover/card:opacity-100 transition-opacity bg-black/50 hover:bg-red-500/80 hover:text-white text-white/70 rounded-full"
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    onRemove(item.animeId);
-                                }}
-                                title="Remove from history"
-                            >
-                                <X className="w-3.5 h-3.5" />
-                            </Button>
-                        </div>
-
-                        <div className="mt-3">
-                            <h3 className="font-semibold text-xs sm:text-sm text-zinc-100 line-clamp-1 group-hover/card:text-fox-orange transition-colors">
-                                {item.animeTitle}
-                            </h3>
-                        </div>
-                    </Link>
+                        </Link>
                     );
                 })}
             </div>
-        </div>
     );
 };

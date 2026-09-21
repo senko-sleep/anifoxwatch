@@ -27,7 +27,11 @@ export interface VideoSource {
     ipLocked?: boolean;
     /** Source is an embed page (e.g. animekai.to/iframe/TOKEN). Rendered as an iframe, not HLS. */
     isEmbed?: boolean;
+    /** 'sub' | 'dub' when the backend knows which audio track this stream is. */
+    category?: string;
     originalUrl?: string;
+    /** A teaser clip, not the episode — the source hasn't published the full video. */
+    isPreview?: boolean;
 }
 
 export interface VideoSubtitle {
@@ -58,6 +62,19 @@ export interface SourceHealth {
     status: 'online' | 'offline' | 'degraded';
     latency?: number;
     lastCheck: string;
+}
+
+/** What /api/sources/health/enhanced returns: health plus per-source capabilities. */
+export interface EnhancedSourceHealth extends SourceHealth {
+    capabilities?: {
+        supportsDub: boolean;
+        supportsSub: boolean;
+        hasScheduleData: boolean;
+        hasGenreFiltering: boolean;
+        quality: 'high' | 'medium' | 'low';
+    };
+    successRate?: number;
+    avgLatency?: number;
 }
 
 interface ApiResponse<T> {
@@ -780,20 +797,7 @@ const primaryBase = this.apiBase();
     /**
      * Get enhanced source health with capabilities and performance metrics
      */
-    async getSourceHealthEnhanced(): Promise<Array<{
-        name: string;
-        status: string;
-        lastCheck: string;
-        capabilities?: {
-            supportsDub: boolean;
-            supportsSub: boolean;
-            hasScheduleData: boolean;
-            hasGenreFiltering: boolean;
-            quality: 'high' | 'medium' | 'low';
-        };
-        successRate?: number;
-        avgLatency?: number;
-    }>> {
+    async getSourceHealthEnhanced(): Promise<EnhancedSourceHealth[]> {
         const response = await this.fetch<{ sources: Array<{
             name: string;
             status: string;
@@ -808,7 +812,8 @@ const primaryBase = this.apiBase();
             successRate?: number;
             avgLatency?: number;
         }> }>('/api/sources/health/enhanced');
-        return response.sources || [];
+        // The endpoint types `status` loosely; it only ever sends the three states.
+        return (response.sources || []) as EnhancedSourceHealth[];
     }
 
     /**

@@ -1,80 +1,75 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from 'react';
-import { useBreakpoint } from '@/hooks/useBreakpoint';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { Play, Star, Clock, Sparkles, ChevronRight, ChevronLeft, TrendingUp } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { cn, normalizeAnimeGenresForDisplay, isPlaceholderAnimeDescription, generateWatchUrl } from '@/lib/utils';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Info, Pause, Play, Star } from 'lucide-react';
+import {
+  atmosphereStyle,
+  cn,
+  isPlaceholderAnimeDescription,
+  normalizeAnimeGenresForDisplay,
+} from '@/lib/utils';
+import { animePath, watchPath } from '@/lib/routes';
 import { apiUrl } from '@/lib/api-config';
 import {
-  HeroAnime,
-  getHeroTitle,
-  getStudioName,
   formatHeroRating,
+  getHeroTitle,
   getSeasonLabel,
+  getStudioName,
+  type HeroAnime,
 } from '@/hooks/useHeroAnimeMultiSource';
 
 interface HeroSectionProps {
   heroAnime: HeroAnime[];
 }
 
-const SLIDE_DURATION_MS = 14000;
-const TRANSITION_DURATION_MS = 600;
+const SLIDE_MS = 12000;
+const FADE_MS = 600;
 
-function heroSynopsis(anime: HeroAnime): string {
-  const raw = anime.description?.replace(/\s+/g, ' ').trim() || '';
-  if (raw && !isPlaceholderAnimeDescription(raw)) return raw;
-  const title = getHeroTitle(anime);
-  const g = normalizeAnimeGenresForDisplay(anime.genres).slice(0, 4).join(', ');
-  return g
-    ? `${title} — ${g}. One of the season's most talked-about shows.`
-    : `${title} — dive in and start watching.`;
-}
-
+/**
+ * The spotlight, in two quiet parts. The frame holds one title — its own
+ * cover colour as the light, the sharp poster beside the text. Everything
+ * about what comes next lives in its own row underneath, so nothing competes
+ * with the title for attention.
+ */
 export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
-  const { isMobile } = useBreakpoint();
+  const location = useLocation();
 
-  // Filter: must have banner OR cover for hero display
   const slides = useMemo(() => {
-    const valid = (heroAnime || []).filter(
-      (a) => Boolean(a && (a.bannerImage || a.coverImage?.extraLarge || a.coverImage?.large))
-    );
-    return valid.length > 0 ? valid : heroAnime || [];
+    const valid = (heroAnime || []).filter((a) => Boolean(a && (a.coverImage?.extraLarge || a.coverImage?.large)));
+    return valid.length ? valid.slice(0, 8) : heroAnime || [];
   }, [heroAnime]);
 
   const count = slides.length;
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [prevIndex, setPrevIndex] = useState<number | null>(null);
-  const [_progress, setProgress] = useState(0);
-  const [isPaused, setIsPaused] = useState(false);
-  const [contentVisible, setContentVisible] = useState(true);
+  const [index, setIndex] = useState(0);
+  const [prev, setPrev] = useState<number | null>(null);
+  const [paused, setPaused] = useState(false);
+  const [userPaused, setUserPaused] = useState(false);
+  const [progress, setProgress] = useState(0);
 
-  const navigate = useNavigate();
-  const location = useLocation();
-  const progressRef = useRef<number>(0);
-  const animFrameRef = useRef<number>(0);
-  const lastTimeRef = useRef<number>(0);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef(0);
+  const startedRef = useRef(0);
+  const rowRef = useRef<HTMLUListElement>(null);
 
-  // Safe clamped index to prevent undefined slide crashes
-  const safeIndex = count > 0 ? ((currentIndex % count) + count) % count : 0;
+  const safeIndex = count ? ((index % count) + count) % count : 0;
   const anime = slides[safeIndex];
 
-  // Auto-reset index if slide list changes
-  useEffect(() => {
-    if (currentIndex >= count && count > 0) {
-      setCurrentIndex(0);
-    }
-  }, [count, currentIndex]);
-
-  const displayGenres = useMemo(
-    () => (anime ? normalizeAnimeGenresForDisplay(anime.genres) : []),
-    [anime?.genres]
+  const goTo = useCallback(
+    (next: number) => {
+      if (!count) return;
+      const target = ((next % count) + count) % count;
+      if (target === safeIndex) return;
+      setPrev(safeIndex);
+      setIndex(target);
+      setProgress(0);
+      window.setTimeout(() => setPrev(null), FADE_MS);
+    },
+    [count, safeIndex]
   );
 
-  // Preload upcoming banners
+  const next = useCallback(() => goTo(safeIndex + 1), [goTo, safeIndex]);
+
   useEffect(() => {
-    slides.slice(0, 5).forEach((a) => {
-      const src = a.bannerImage || a.coverImage?.extraLarge;
+    slides.slice(0, 3).forEach((a) => {
+      const src = a.coverImage?.extraLarge || a.coverImage?.large;
       if (src) {
         const img = new Image();
         img.src = src;
@@ -82,87 +77,39 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
     });
   }, [slides]);
 
-  const goToSlide = useCallback(
-    (index: number) => {
-      if (count === 0) return;
-      const targetIndex = ((index % count) + count) % count;
-      if (targetIndex === safeIndex) return;
-
-      setContentVisible(false);
-      setPrevIndex(safeIndex);
-      setCurrentIndex(targetIndex);
-      progressRef.current = 0;
-      setProgress(0);
-      lastTimeRef.current = performance.now();
-
-      setTimeout(() => setContentVisible(true), 120);
-      setTimeout(() => setPrevIndex(null), TRANSITION_DURATION_MS);
-    },
-    [safeIndex, count]
-  );
-
-  const handleNext = useCallback(() => {
-    if (count <= 1) return;
-    goToSlide(safeIndex + 1);
-  }, [safeIndex, count, goToSlide]);
-
-  const handlePrev = useCallback(() => {
-    if (count <= 1) return;
-    goToSlide(safeIndex - 1);
-  }, [safeIndex, count, goToSlide]);
-
-  // Handle visibility changes (pause when tab hidden, resume when tab active)
   useEffect(() => {
-    const handleVisibility = () => {
-      if (document.hidden) {
-        setIsPaused(true);
-      } else {
-        lastTimeRef.current = performance.now();
-        setIsPaused(false);
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
+    const onVisibility = () => setPaused(document.hidden);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
-  // Keyboard navigation when user is interacting with hero
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      handlePrev();
-    } else if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      handleNext();
-    }
-  };
-
-  // Auto-advance animation timer
   useEffect(() => {
-    if (isPaused || count <= 1) return;
-    lastTimeRef.current = performance.now();
-    progressRef.current = 0;
+    if (paused || userPaused || count <= 1) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
+    startedRef.current = performance.now();
     const tick = (now: number) => {
-      const delta = now - lastTimeRef.current;
-      lastTimeRef.current = now;
-      progressRef.current += delta;
-      setProgress(Math.min((progressRef.current / SLIDE_DURATION_MS) * 100, 100));
-
-      if (progressRef.current >= SLIDE_DURATION_MS) {
-        handleNext();
+      const elapsed = now - startedRef.current;
+      setProgress(Math.min(elapsed / SLIDE_MS, 1));
+      if (elapsed >= SLIDE_MS) {
+        next();
         return;
       }
-      animFrameRef.current = requestAnimationFrame(tick);
+      rafRef.current = requestAnimationFrame(tick);
     };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [safeIndex, paused, userPaused, count, next]);
 
-    animFrameRef.current = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animFrameRef.current);
-  }, [safeIndex, isPaused, count, handleNext]);
+  // The row always starts at "next" — scroll it back when the slide changes.
+  useEffect(() => {
+    rowRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
+  }, [safeIndex]);
 
-  if (!anime || count === 0) {
+  if (!anime || !count) {
     return (
-      <section className="relative w-full sm:px-4 lg:px-6 pt-0 pb-2 sm:pt-5 sm:pb-5">
-        <div className="mx-auto h-[340px] sm:h-[500px] w-full max-w-7xl animate-pulse sm:rounded-2xl bg-zinc-900/80" />
+      <section className="page-x pt-4">
+        <div className="skeleton h-[400px] w-full rounded-2xl sm:h-[440px]" />
       </section>
     );
   }
@@ -170,454 +117,292 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const title = getHeroTitle(anime);
   const studio = getStudioName(anime);
   const rating = formatHeroRating(anime.averageScore);
-  const seasonLabel = getSeasonLabel(anime.season, anime.seasonYear);
-  const watchPath = generateWatchUrl(
-    {
-      title: title,
-      titleEnglish: anime.title?.english,
-      titleRomaji: anime.title?.romaji,
-      id: String(anime.id),
-      genres: anime.genres,
-    },
-    1
-  );
+  const season = getSeasonLabel(anime.season, anime.seasonYear);
+  const genres = normalizeAnimeGenresForDisplay(anime.genres).slice(0, 3);
+  const format = (anime.format || 'TV').replace(/_/g, ' ');
+  const episodes = anime.episodes && anime.episodes > 0 ? `${anime.episodes} episodes` : null;
+  const airing = airsIn(anime);
 
-  const formatLabel = (anime.format || 'TV').replace(/_/g, ' ');
-  const runtimeLabel =
-    anime.duration != null && anime.duration > 0 ? `${anime.duration} min` : null;
-  const epCountLabel = anime.episodes != null && anime.episodes > 0 ? `${anime.episodes} eps` : null;
-  const synopsis = heroSynopsis(anime);
-  const posterSrc = anime.coverImage?.extraLarge || anime.coverImage?.large || '';
+  const ref = {
+    id: String(anime.id).startsWith('anilist-') ? String(anime.id) : `anilist-${anime.id}`,
+    title,
+    titleEnglish: anime.title?.english,
+    titleRomaji: anime.title?.romaji,
+    genres: anime.genres,
+  };
+
+  const synopsis = (() => {
+    const raw = anime.description?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || '';
+    if (raw && !isPlaceholderAnimeDescription(raw)) return raw;
+    return genres.length
+      ? `${genres.join(', ')} — one of the season's most talked-about titles.`
+      : 'A spotlight pick from this season.';
+  })();
+
+  // Everything after the current slide, in the order it will appear.
+  const upNext = Array.from({ length: count - 1 }, (_, i) => {
+    const slideIndex = (safeIndex + 1 + i) % count;
+    return { slide: slides[slideIndex], slideIndex };
+  });
+
+  const controlBtn =
+    'grid h-7 w-7 place-items-center rounded-full text-foreground/55 transition-colors hover:bg-white/10 hover:text-foreground';
 
   return (
     <section
-      className="relative w-full sm:px-4 lg:px-6 pt-0 pb-2 sm:pt-5 sm:pb-5 group/hero"
-      aria-label="Spotlight Anime Carousel"
+      aria-roledescription="carousel"
+      aria-label="Spotlight titles"
+      className="page-x pt-3 sm:pt-5"
+      style={atmosphereStyle(anime.coverImage?.color)}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
     >
       <div
-        ref={containerRef}
-        tabIndex={0}
-        onKeyDown={handleKeyDown}
-        className={cn(
-          'relative mx-auto max-w-7xl overflow-hidden bg-[#0c0e14]',
-          'sm:rounded-2xl sm:border sm:border-white/[0.07]',
-          'shadow-2xl shadow-black/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-fox-orange/50'
-        )}
-        onMouseEnter={() => setIsPaused(true)}
-        onMouseLeave={() => setIsPaused(false)}
+        className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[hsl(234_28%_7%)]"
+        style={{ boxShadow: 'var(--shadow-lifted)' }}
       >
-        {/* Background slides */}
-        <div className="relative w-full h-[220px] sm:h-[46vw] sm:min-h-[400px] md:max-h-[560px] lg:h-[42vw] lg:max-h-[640px] xl:h-[38vw] xl:max-h-[680px]">
-          {slides.map((a, idx) => {
-            const isActive = idx === safeIndex;
-            const isPrev = idx === prevIndex;
-            const show = isActive || isPrev;
-            return (
-              <HeroSlideBg
-                key={`${a.id}-${idx}`}
-                anime={a}
-                idx={idx}
-                isActive={isActive}
-                isPrev={isPrev}
-                show={show}
-              />
-            );
-          })}
-
-          {/* Film grain */}
-          <div
-            className="pointer-events-none absolute inset-0 z-[3] opacity-[0.06] mix-blend-overlay"
-            aria-hidden
-            style={{
-              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-            }}
-          />
-
-          {/* Gradient overlays */}
-          <div className="pointer-events-none absolute inset-0 z-[4]">
-            {/* Left fade */}
-            <div className="absolute inset-0 bg-gradient-to-r from-[#0c0e14]/90 via-[#0c0e14]/50 to-transparent sm:from-[#0c0e14] sm:via-[#0c0e14]/65 sm:to-transparent" />
-            {/* Bottom fade */}
-            <div
-              className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/60 to-transparent sm:hidden"
-              style={{
-                background:
-                  'linear-gradient(to top, #0c0e14 0%, #0c0e14e6 45%, #0c0e1470 70%, transparent 100%)',
-              }}
-            />
-            <div
-              className="absolute inset-0 bg-gradient-to-t from-[#0c0e14] via-[#0c0e14]/40 to-transparent hidden sm:block"
-              style={{
-                background:
-                  'linear-gradient(to top, #0c0e14 0%, #0c0e1490 22%, transparent 60%)',
-              }}
-            />
-            {/* Right vignette to blend poster */}
-            <div className="absolute inset-y-0 right-0 w-1/2 bg-gradient-to-l from-[#0c0e14]/70 via-transparent to-transparent" />
-            {/* Top edge */}
-            <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-[#0c0e14]/50 to-transparent" />
-          </div>
-
-          {/* Subtle orange accent glow left-bottom */}
-          <div
-            className="pointer-events-none absolute bottom-0 left-0 z-[4] w-[65%] h-[55%] opacity-[0.22] sm:w-[55%] sm:h-[50%] sm:opacity-[0.18]"
-            aria-hidden
-            style={{
-              background:
-                'radial-gradient(ellipse at 20% 100%, hsl(28 95% 55% / 1) 0%, transparent 65%)',
-            }}
-          />
-
-          {/* ── Content panel ─────────────────────────────────────── */}
-          <div className="pointer-events-none absolute inset-0 z-[5] flex items-end lg:items-center">
-            <div className="w-full flex items-end lg:items-center justify-between px-3 pb-3 sm:px-7 sm:pb-8 lg:px-10 lg:pb-0 gap-2 sm:gap-4">
-              {/* Left: text content */}
-              <div
-                className={cn(
-                  'pointer-events-auto flex flex-col gap-1 sm:gap-3.5 max-w-[min(28rem,95vw)] sm:max-w-[min(34rem,56%)] lg:max-w-[min(38rem,52%)] xl:max-w-[42rem] transition-all ease-out',
-                  contentVisible
-                    ? 'translate-y-0 opacity-100 duration-500'
-                    : 'translate-y-3 opacity-0 duration-200'
-                )}
-              >
-                {/* Spotlight badge */}
-                <div className="flex items-center gap-1 sm:gap-2">
-                  <span className="flex items-center gap-1 text-[8px] font-bold uppercase tracking-[0.18em] text-fox-orange sm:text-[10px] bg-fox-orange/10 px-2 py-0.5 rounded-full border border-fox-orange/20">
-                    <Sparkles className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5 text-fox-orange" />
-                    Spotlight #{safeIndex + 1}
-                  </span>
-                  {seasonLabel && (
-                    <>
-                      <span className="text-zinc-700 text-[8px] sm:text-[10px]">·</span>
-                      <span className="text-[7px] sm:text-[10px] text-zinc-400 uppercase tracking-wide">
-                        {seasonLabel}
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                {/* Title */}
-                <h1
-                  className="font-display text-base font-bold leading-[1.2] tracking-tight text-white drop-shadow-[0_2px_24px_rgba(0,0,0,0.9)] line-clamp-2 sm:line-clamp-none sm:text-2xl md:text-3xl lg:text-[1.9rem] xl:text-[2.2rem]"
-                  style={{ textWrap: 'balance' } as CSSProperties}
-                >
-                  {title}
-                </h1>
-
-                {/* Metadata row */}
-                <div className="flex flex-wrap items-center gap-1 sm:gap-1.5">
-                  {rating && (
-                    <span className="inline-flex items-center gap-0.5 sm:gap-1 rounded-full border border-amber-500/30 bg-amber-950/50 px-1.5 sm:px-2 py-0.5 text-[8px] font-bold text-amber-300 backdrop-blur-sm sm:text-[11px]">
-                      <Star className="h-2 w-2 sm:h-2.5 sm:w-2.5 fill-amber-400 text-amber-400" />
-                      {rating}
-                    </span>
-                  )}
-                  <span className="rounded-full border border-white/[0.1] bg-white/[0.07] px-1.5 sm:px-2 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-zinc-200 backdrop-blur-sm sm:text-[11px]">
-                    {formatLabel}
-                  </span>
-                  {runtimeLabel && (
-                    <span className="hidden sm:inline-flex items-center gap-1 rounded-full border border-white/[0.08] bg-black/30 px-2 py-0.5 text-[10px] text-zinc-300 backdrop-blur-sm sm:text-[11px]">
-                      <Clock className="h-2.5 w-2.5 opacity-60" />
-                      {runtimeLabel}
-                    </span>
-                  )}
-                  {epCountLabel && (
-                    <span className="hidden sm:inline-block rounded-full border border-white/[0.07] bg-white/[0.05] px-2 py-0.5 text-[10px] text-zinc-400 sm:text-[11px]">
-                      {epCountLabel}
-                    </span>
-                  )}
-                </div>
-
-                {/* Studio — desktop only */}
-                {studio && (
-                  <p className="hidden sm:block text-[11px] text-zinc-500 sm:text-xs -mt-1">
-                    <span className="text-zinc-600">by </span>
-                    <span className="text-zinc-400 font-medium">{studio}</span>
-                  </p>
-                )}
-
-                {/* Genres — desktop only */}
-                {displayGenres.length > 0 && (
-                  <div className="hidden sm:flex flex-wrap gap-1.5">
-                    {displayGenres.slice(0, 5).map((g) => (
-                      <span
-                        key={g}
-                        className="rounded-md border border-fox-orange/20 bg-fox-orange/10 px-2 py-0.5 text-[10px] font-medium text-amber-200/90 sm:px-2.5 sm:text-xs"
-                      >
-                        {g}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Synopsis — desktop only, expandable */}
-                <div className="hidden sm:block relative max-w-[44ch] mt-0.5">
-                  <SynopsisText synopsis={synopsis} />
-                </div>
-
-                {/* CTA button */}
-                <div className="flex items-center gap-1.5 sm:gap-2 pt-0.5 sm:pt-1.5">
-                  <Button
-                    onClick={() =>
-                      navigate(watchPath, {
-                        state: { from: location.pathname + location.search },
-                      })
-                    }
-                    className="h-7 sm:h-10 gap-1 sm:gap-2 rounded-full bg-fox-orange px-3.5 sm:px-6 text-[11px] font-semibold text-white shadow-lg shadow-fox-orange/30 ring-1 ring-white/10 hover:bg-fox-orange/90 sm:text-sm transition-all duration-200 hover:scale-[1.03] hover:shadow-fox-orange/45"
-                  >
-                    <Play className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5 fill-white" />
-                    Watch Now
-                  </Button>
-                  <Link
-                    to="/browse"
-                    className="hidden sm:inline-flex items-center gap-1 text-[12px] font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
-                  >
-                    Browse all
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </Link>
-                </div>
-              </div>
-
-              {/* Right: floating poster card */}
-              <div
-                className={cn(
-                  'pointer-events-auto hidden lg:flex flex-col gap-3 shrink-0 transition-all ease-out duration-500',
-                  contentVisible ? 'translate-x-0 opacity-100' : 'translate-x-4 opacity-0'
-                )}
-              >
-                {/* Current poster */}
-                <div
-                  className="relative w-[140px] xl:w-[158px] aspect-[2/3] rounded-2xl overflow-hidden shadow-2xl shadow-black/70 ring-1 ring-white/10 group/poster cursor-pointer"
-                  onClick={() => navigate(watchPath, { state: { from: location.pathname } })}
-                >
-                  {posterSrc ? (
-                    <img
-                      src={posterSrc}
-                      alt={title}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover/poster:scale-105"
-                      loading="eager"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-zinc-900" />
-                  )}
-                  {/* Play overlay */}
-                  <div className="absolute inset-0 bg-black/0 group-hover/poster:bg-black/40 transition-all duration-300 flex items-center justify-center">
-                    <div className="w-10 h-10 rounded-full bg-fox-orange/90 flex items-center justify-center pl-0.5 scale-0 group-hover/poster:scale-100 transition-transform duration-300 shadow-lg shadow-fox-orange/40">
-                      <Play className="w-5 h-5 fill-white text-white" />
-                    </div>
-                  </div>
-                  {rating && (
-                    <div className="absolute top-2 right-2 flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-black/70 backdrop-blur-sm text-[10px] font-bold text-amber-300 border border-amber-500/20">
-                      <Star className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
-                      {rating}
-                    </div>
-                  )}
-                </div>
-
-                {/* Up next thumbnails */}
-                <div className="flex flex-col gap-1.5 w-[140px] xl:w-[158px]">
-                  <p className="text-[9px] font-semibold uppercase tracking-widest text-zinc-500 flex items-center gap-1">
-                    <TrendingUp className="w-3 h-3" />
-                    Up Next
-                  </p>
-                  {slides
-                    .slice(safeIndex + 1, safeIndex + 3)
-                    .concat(
-                      safeIndex + 3 > slides.length
-                        ? slides.slice(0, Math.max(0, 2 - (slides.length - safeIndex - 1)))
-                        : []
-                    )
-                    .slice(0, 2)
-                    .map((a, i) => {
-                      const upNextTitle = getHeroTitle(a);
-                      const upNextIdx = (safeIndex + 1 + i) % slides.length;
-                      return (
-                        <button
-                          key={`${a.id}-${i}`}
-                          onClick={() => goToSlide(upNextIdx)}
-                          className="group/next flex items-center gap-2 rounded-xl overflow-hidden bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] hover:border-white/[0.12] transition-all duration-200 p-1.5 text-left"
-                        >
-                          <div className="w-9 h-12 shrink-0 rounded-lg overflow-hidden bg-zinc-800">
-                            <img
-                              src={a.coverImage?.large || a.coverImage?.extraLarge || ''}
-                              alt=""
-                              className="w-full h-full object-cover group-hover/next:scale-105 transition-transform duration-300"
-                              loading="lazy"
-                              referrerPolicy="no-referrer"
-                            />
-                          </div>
-                          <p className="text-[10px] font-medium text-zinc-400 group-hover/next:text-zinc-200 line-clamp-2 leading-tight transition-colors">
-                            {upNextTitle}
-                          </p>
-                        </button>
-                      );
-                    })}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Desktop Left / Right Navigation Arrow Buttons */}
-          {count > 1 && (
-            <div className="hidden sm:flex pointer-events-none absolute inset-y-0 inset-x-3 items-center justify-between z-[7]">
-              <button
-                type="button"
-                onClick={handlePrev}
-                aria-label="Previous slide"
-                className="pointer-events-auto w-9 h-9 rounded-full bg-black/40 hover:bg-black/80 backdrop-blur-md border border-white/10 text-white/75 hover:text-white flex items-center justify-center transition-all duration-200 opacity-0 group-hover/hero:opacity-100 hover:scale-110 shadow-lg"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-              <button
-                type="button"
-                onClick={handleNext}
-                aria-label="Next slide"
-                className="pointer-events-auto w-9 h-9 rounded-full bg-black/40 hover:bg-black/80 backdrop-blur-md border border-white/10 text-white/75 hover:text-white flex items-center justify-center transition-all duration-200 opacity-0 group-hover/hero:opacity-100 hover:scale-110 shadow-lg"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
-            </div>
+        <div className="relative lg:h-[460px]">
+          {slides.map((slide, i) =>
+            i === safeIndex || i === prev ? (
+              <HeroBackdrop key={`${slide.id}-${i}`} anime={slide} active={i === safeIndex} />
+            ) : null
           )}
 
-          {/* Slide navigation dots */}
-          {count > 1 && (
-            <div className="pointer-events-auto absolute bottom-0 inset-x-0 z-[6] flex items-center justify-center gap-0.5 pb-1 sm:pb-2">
-              {slides.slice(0, 12).map((_, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => goToSlide(idx)}
-                  className="p-1 sm:p-2 touch-manipulation flex items-center justify-center"
-                  aria-label={`Slide ${idx + 1}`}
+          {/* One scrim for the text column, one low; the blurred cover stays soft behind them. */}
+          <div className="pointer-events-none absolute inset-0 z-[3]">
+            <div className="absolute inset-0 bg-gradient-to-r from-[hsl(234_32%_5%_/_0.92)] via-[hsl(234_32%_5%_/_0.6)] to-[hsl(234_32%_5%_/_0.25)]" />
+            <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-[hsl(234_32%_5%_/_0.85)] to-transparent" />
+            <div className="atmos-wash absolute inset-0 opacity-60 mix-blend-screen" />
+          </div>
+
+          <div key={safeIndex} className="animate-fade relative z-[4] flex flex-col justify-end sm:min-h-[27.5rem] sm:flex-row sm:items-end sm:justify-between sm:gap-8 lg:absolute lg:inset-0 lg:min-h-0 lg:gap-10">
+            <div className="w-full max-w-2xl px-4 pb-4 pt-4 sm:p-8 lg:p-10">
+              <div className="flex items-end gap-3 sm:block">
+              <Link
+                to={animePath(ref)}
+                tabIndex={-1}
+                aria-hidden
+                className="art-frame relative block aspect-[2/3] w-[5.25rem] shrink-0 !rounded-lg sm:hidden"
+              >
+                <Thumb anime={anime} eager />
+              </Link>
+              <div className="min-w-0 flex-1">
+              <p className="eyebrow flex items-center gap-2 text-[9.5px] text-[hsl(var(--primary))] sm:text-[11px]">
+                Spotlight
+                {season && <span className="text-muted-foreground">· {season}</span>}
+              </p>
+
+              <h1 className="mt-1.5 font-display text-[1.1rem] font-medium leading-[1.2] sm:mt-2.5 text-foreground sm:text-4xl lg:text-[2.5rem]">
+                {title}
+              </h1>
+
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10.5px] text-muted-foreground sm:mt-3 sm:gap-x-3 sm:gap-y-1.5 sm:text-[13px]">
+                {rating && (
+                  <span className="inline-flex items-center gap-1.5 font-medium text-amber-200">
+                    <Star className="h-3.5 w-3.5 fill-amber-300 text-amber-300" />
+                    {rating}
+                  </span>
+                )}
+                <span className="uppercase tracking-wide">{format}</span>
+                {episodes && <span>{episodes}</span>}
+                {studio && <span className="hidden sm:inline">{studio}</span>}
+                {airing && <span className="text-emerald-300/90">{airing}</span>}
+              </div>
+
+              </div>
+              </div>
+
+              <p className="mt-3 line-clamp-2 max-w-xl text-[12px] leading-relaxed text-foreground/60 sm:mt-3.5 sm:line-clamp-3 sm:text-sm sm:text-foreground/65">
+                {synopsis}
+              </p>
+
+              {genres.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5 sm:mt-3.5 sm:gap-2">
+                  {genres.map((g) => (
+                    <Link
+                      key={g}
+                      to={`/browse?genres=${encodeURIComponent(g)}`}
+                      className="glass-chip rounded-full px-2 py-0.5 text-[10px] text-foreground/70 transition-colors hover:text-foreground sm:px-2.5 sm:py-1 sm:text-[11px]"
+                    >
+                      {g}
+                    </Link>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4 flex flex-wrap items-center gap-2 sm:mt-5 sm:gap-2.5">
+                <Link
+                  to={watchPath(ref, 1)}
+                  state={{ from: location.pathname + location.search }}
+                  className="btn-ember inline-flex h-9 items-center gap-1.5 rounded-full px-4 text-[13px] font-semibold sm:h-11 sm:gap-2 sm:px-6 sm:text-sm"
                 >
-                  <span
-                    className={cn(
-                      'block rounded-full transition-all duration-300',
-                      idx === safeIndex
-                        ? 'w-3 h-[3px] bg-fox-orange shadow-[0_0_4px_1px] shadow-fox-orange/60 sm:w-5 sm:h-1'
-                        : 'w-[3px] h-[3px] bg-white/25 hover:bg-white/50 sm:w-1 sm:h-1'
-                    )}
-                  />
-                </button>
-              ))}
+                  <Play className="h-4 w-4 fill-current" />
+                  Watch now
+                </Link>
+                <Link
+                  to={animePath(ref)}
+                  state={{ from: location.pathname + location.search }}
+                  className="glass-button inline-flex h-9 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium text-foreground/85 sm:h-11 sm:gap-2 sm:px-5 sm:text-sm"
+                >
+                  <Info className="h-4 w-4" />
+                  More details
+                </Link>
+              </div>
             </div>
-          )}
+
+            {/* The title's own poster — the sharp counterpart to the soft backdrop. */}
+            <Link
+              to={animePath(ref)}
+              tabIndex={-1}
+              aria-hidden
+              className="art-frame relative mb-8 mr-8 hidden aspect-[2/3] w-36 shrink-0 sm:block lg:mb-10 lg:mr-10 lg:w-[184px] xl:w-[200px]"
+            >
+              <Thumb anime={anime} eager />
+            </Link>
+          </div>
         </div>
       </div>
+
+      {/* Up next — its own section, outside the frame. */}
+      {count > 1 && (
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between px-0.5">
+            <span className="eyebrow">Up next</span>
+            <div className="flex items-center gap-0.5">
+              <button type="button" onClick={() => goTo(safeIndex - 1)} aria-label="Previous title" className={controlBtn}>
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={next} aria-label="Next title" className={controlBtn}>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setUserPaused((v) => !v)}
+                aria-label={userPaused ? 'Resume carousel' : 'Pause carousel'}
+                className={controlBtn}
+              >
+                {userPaused ? <Play className="h-3 w-3 fill-current" /> : <Pause className="h-3 w-3 fill-current" />}
+              </button>
+            </div>
+          </div>
+
+          <ul ref={rowRef} className="scrollbar-none -mx-1 flex snap-x gap-3 overflow-x-auto px-1 pb-1">
+            {upNext.map(({ slide, slideIndex }, i) => (
+              <li
+                key={`${slide.id}-${slideIndex}`}
+                className="w-[15.5rem] shrink-0 snap-start lg:w-[calc((100%-2.25rem)/4)]"
+              >
+                <button
+                  type="button"
+                  onClick={() => goTo(slideIndex)}
+                  style={atmosphereStyle(slide.coverImage?.color)}
+                  className="glass-button relative flex w-full items-center gap-3 overflow-hidden rounded-xl p-2 text-left"
+                >
+                  <div className="art-frame relative aspect-[2/3] w-11 shrink-0 !rounded-md">
+                    <Thumb anime={slide} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground/90">
+                      {getHeroTitle(slide)}
+                    </p>
+                    <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      {[
+                        formatHeroRating(slide.averageScore) && `★ ${formatHeroRating(slide.averageScore)}`,
+                        (slide.format || 'TV').replace(/_/g, ' '),
+                        normalizeAnimeGenresForDisplay(slide.genres)[0],
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  </div>
+                  {i === 0 && (
+                    <span
+                      className="absolute inset-x-0 bottom-0 h-[2px] origin-left bg-[hsl(var(--primary))]/70"
+                      style={{ transform: `scaleX(${progress})` }}
+                    />
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 };
 
-function HeroSlideBg({
-  anime,
-  idx,
-  isActive,
-  isPrev,
-  show,
-}: {
-  anime: HeroAnime;
-  idx: number;
-  isActive: boolean;
-  isPrev: boolean;
-  show: boolean;
-}) {
-  const candidates = useMemo(() => {
-    const b = anime.bannerImage?.trim();
-    const c = anime.coverImage?.extraLarge?.trim() || anime.coverImage?.large?.trim();
-    const out: string[] = [];
-    if (b) {
-      out.push(b);
-      out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(b)}`);
-    }
-    if (c) {
-      out.push(c);
-      out.push(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(c)}`);
-    }
-    return [...new Set(out.filter(Boolean))];
-  }, [anime.bannerImage, anime.coverImage]);
+/** "Episode 5 in 2d 4h" — the reason to come back, when the title is still airing. */
+function airsIn(anime: HeroAnime): string | null {
+  const n = anime.nextAiringEpisode;
+  if (!n?.airingAt) return null;
+  const ms = n.airingAt * 1000 - Date.now();
+  if (ms <= 0) return null;
+  const mins = Math.floor(ms / 60000);
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const when = d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${mins % 60}m` : `${mins}m`;
+  return `Episode ${n.episode} in ${when}`;
+}
 
+function coverCandidates(anime: HeroAnime): string[] {
+  const cover = anime.coverImage?.extraLarge?.trim() || anime.coverImage?.large?.trim();
+  if (!cover) return [];
+  return [cover, `${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(cover)}`];
+}
+
+/** Poster with a proxy retry — hotlink-blocked covers still render. */
+function Thumb({ anime, eager }: { anime: HeroAnime; eager?: boolean }) {
+  const candidates = useMemo(() => coverCandidates(anime), [anime]);
   const [srcIndex, setSrcIndex] = useState(0);
-  useEffect(() => {
-    setSrcIndex(0);
-  }, [anime.id]);
+  useEffect(() => setSrcIndex(0), [anime.id]);
 
-  const src = candidates[srcIndex] || '';
-  const hasBanner = Boolean(anime.bannerImage?.trim());
-  const hasCover = Boolean(anime.coverImage?.extraLarge || anime.coverImage?.large);
+  const src = candidates[srcIndex];
+  if (!src) return <div className="absolute inset-0 bg-[hsl(234_22%_11%)]" />;
 
   return (
-    <div
-      className="absolute inset-0"
-      style={{
-        opacity: isActive ? 1 : 0,
-        zIndex: isActive ? 2 : isPrev ? 1 : 0,
-        transition: show ? `opacity ${TRANSITION_DURATION_MS}ms ease-in-out` : 'none',
-        willChange: show ? 'opacity' : 'auto',
-      }}
-    >
-      {src ? (
-        <img
-          src={src}
-          alt=""
-          className={cn(
-            'h-full w-full object-cover [image-rendering:auto]',
-            !hasBanner && 'scale-105 sm:scale-100'
-          )}
-          sizes="100vw"
-          referrerPolicy="no-referrer"
-          style={{
-            objectPosition: hasBanner ? 'center 30%' : hasCover ? 'center top' : 'center 15%',
-          }}
-          loading={idx < 3 ? 'eager' : 'lazy'}
-          decoding="async"
-          onError={() => {
-            setSrcIndex((i) => (candidates.length > 0 && i + 1 < candidates.length ? i + 1 : i));
-          }}
-        />
-      ) : (
-        <div className="h-full w-full bg-zinc-950" />
-      )}
-    </div>
+    <img
+      src={src}
+      alt=""
+      loading={eager ? 'eager' : 'lazy'}
+      decoding="async"
+      referrerPolicy="no-referrer"
+      className="absolute inset-0 h-full w-full object-cover"
+      onError={() => setSrcIndex((i) => (i + 1 < candidates.length ? i + 1 : i))}
+    />
   );
 }
 
-function SynopsisText({ synopsis }: { synopsis: string }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [isOverflowing, setIsOverflowing] = useState(false);
-  const textRef = useRef<HTMLParagraphElement>(null);
-
-  useEffect(() => {
-    const checkOverflow = () => {
-      if (textRef.current) {
-        setIsOverflowing(textRef.current.scrollHeight > textRef.current.clientHeight);
-      }
-    };
-
-    checkOverflow();
-    window.addEventListener('resize', checkOverflow);
-    return () => window.removeEventListener('resize', checkOverflow);
-  }, [synopsis]);
+/**
+ * Backdrop: the title's own cover, enlarged and softened into a wash of its
+ * colours. Wide AniList banners are ~400px tall screenshots — stretched to
+ * this frame they read as blur that doesn't belong, so we don't use them.
+ */
+function HeroBackdrop({ anime, active }: { anime: HeroAnime; active: boolean }) {
+  const candidates = useMemo(() => coverCandidates(anime), [anime]);
+  const [srcIndex, setSrcIndex] = useState(0);
+  useEffect(() => setSrcIndex(0), [anime.id]);
+  const src = candidates[srcIndex] || '';
 
   return (
-    <div className="relative">
-      <p
-        ref={textRef}
-        className={cn(
-          'text-[11px] leading-relaxed text-zinc-400/90 sm:text-xs transition-all duration-300',
-          !isExpanded && 'line-clamp-6'
-        )}
-      >
-        {synopsis}
-      </p>
-      {isOverflowing && (
-        <button
-          type="button"
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="mt-1 text-[11px] font-medium text-fox-orange hover:text-fox-orange/80 transition-colors"
-        >
-          {isExpanded ? 'Show less' : 'Read more'}
-        </button>
+    <div
+      className={cn('absolute inset-0 overflow-hidden', active && 'animate-fade')}
+      style={{
+        opacity: active ? 1 : 0,
+        zIndex: active ? 2 : 1,
+        transition: `opacity ${FADE_MS}ms ease-in-out`,
+      } as CSSProperties}
+      aria-hidden
+    >
+      {src && (
+        <img
+          src={src}
+          alt=""
+          className="h-full w-full scale-125 object-cover opacity-80 blur-3xl saturate-150"
+          style={{ objectPosition: 'center 30%' }}
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onError={() => setSrcIndex((i) => (i + 1 < candidates.length ? i + 1 : i))}
+        />
       )}
     </div>
   );

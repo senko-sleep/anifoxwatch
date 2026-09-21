@@ -1,0 +1,14 @@
+# Automatic HTTPS (Let's Encrypt) for {$DOMAIN}. The frontend is served over
+# HTTPS, and browsers refuse to load an http:// API from an https:// page, so
+# the API must be https too.
+{$DOMAIN} {
+	reverse_proxy api:8080 {
+		# Never buffer: video segments and playlists should reach the player as
+		# they arrive, not after the whole response has been collected.
+		flush_interval -1
+		transport http {
+			# Slow upstream sources shouldn't be cut off mid-segment.
+			response_header_timeout 60s
+		}
+	}
+}

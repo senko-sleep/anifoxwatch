@@ -17,6 +17,8 @@ export interface VideoSource {
     /** Server/CDN name (e.g. 'Streamtape', 'Megaup', 'VidCloud') */
     server?: string;
     category?: 'sub' | 'dub' | 'raw';
+    /** A teaser clip, not the episode. Some sources only ever publish a preview for new releases. */
+    isPreview?: boolean;
 }
 
 export interface VideoSubtitle {

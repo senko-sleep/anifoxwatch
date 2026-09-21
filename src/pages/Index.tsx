@@ -1,27 +1,35 @@
+import { useCallback, useEffect, useMemo } from 'react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { HeroSection } from '@/components/home/HeroSection';
 import { ContinueWatching } from '@/components/home/ContinueWatching';
 import { AnimeSlider } from '@/components/home/AnimeSlider';
 import { SectionHeader } from '@/components/shared/SectionHeader';
+import { Button } from '@/components/ui/button';
 import {
-  useAnilistHomeTrending,
-  useAnilistHomeSeasonal,
-  useAnilistHomeUpcoming,
+  useAnilistHomeAction,
   useAnilistHomeLatest,
   useAnilistHomeMovies,
-  useAnilistHomeAction,
+  useAnilistHomeSeasonal,
+  useAnilistHomeTrending,
+  useAnilistHomeUpcoming,
 } from '@/hooks/useAnilistHomeSections';
 import { useWatchHistory } from '@/hooks/useWatchHistory';
-import { useHeroAnime, convertAnimeListToHeroAnime, getStaticFallbackHeroAnime } from '@/hooks/useHeroAnimeMultiSource';
-import { AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { useEffect, useMemo, useCallback } from 'react';
+import {
+  convertAnimeListToHeroAnime,
+  getStaticFallbackHeroAnime,
+  useHeroAnime,
+} from '@/hooks/useHeroAnimeMultiSource';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
-import { useBreakpoint } from '@/hooks/useBreakpoint';
-import { MobileHome } from '@/pages/MobileHome';
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (string | null)[] | null } | null) => {
+import type { Anime } from '@/types/anime';
+
+/**
+ * Home. A spotlight, then shelves — the shape of a good video shop: what's new,
+ * what's on now, what you left unfinished. Rows keep a fixed order between
+ * visits so the page stays a place you can learn rather than a feed.
+ */
+const isAdultTitle = (anime: { title?: string | null; id?: string | null; genres?: (string | null)[] | null } | null) => {
   if (!anime) return false;
   const t = String(anime.title ?? '').toLowerCase();
   const id = String(anime.id ?? '').toLowerCase();
@@ -29,53 +37,50 @@ const isHentai = (anime: { title?: string | null; id?: string | null; genres?: (
   return t.includes('hentai') || id.includes('hentai') || id.includes('hanime') || g.includes('hentai') || g.includes('adult');
 };
 
-// ─── Component ───────────────────────────────────────────────────────────────
+const SCROLL_KEY = 'anistream_scroll_positions';
+const PAGE_KEY = 'home_page';
+
 const Index = () => {
   useDocumentTitle('Home');
-  const { isMobile } = useBreakpoint();
 
-  const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } = useAnilistHomeTrending(24);
+  const { data: trendingAnime, isLoading: trendingLoading, error: trendingError, refetch: refetchTrending } =
+    useAnilistHomeTrending(24);
+
   const { currentSeasonLabel, currentSeasonApi, currentSeasonYear } = useMemo(() => {
     const now = new Date();
     const m = now.getMonth();
     const y = now.getFullYear();
-    if (m <= 1)  return { currentSeasonLabel: `Winter ${y}`,     currentSeasonApi: 'WINTER', currentSeasonYear: y };
-    if (m <= 4)  return { currentSeasonLabel: `Spring ${y}`,     currentSeasonApi: 'SPRING', currentSeasonYear: y };
-    if (m <= 7)  return { currentSeasonLabel: `Summer ${y}`,     currentSeasonApi: 'SUMMER', currentSeasonYear: y };
-    if (m <= 10) return { currentSeasonLabel: `Fall ${y}`,       currentSeasonApi: 'FALL',   currentSeasonYear: y };
-    return       { currentSeasonLabel: `Winter ${y + 1}`, currentSeasonApi: 'WINTER', currentSeasonYear: y + 1 };
+    if (m <= 1) return { currentSeasonLabel: `Winter ${y}`, currentSeasonApi: 'WINTER', currentSeasonYear: y };
+    if (m <= 4) return { currentSeasonLabel: `Spring ${y}`, currentSeasonApi: 'SPRING', currentSeasonYear: y };
+    if (m <= 7) return { currentSeasonLabel: `Summer ${y}`, currentSeasonApi: 'SUMMER', currentSeasonYear: y };
+    if (m <= 10) return { currentSeasonLabel: `Fall ${y}`, currentSeasonApi: 'FALL', currentSeasonYear: y };
+    return { currentSeasonLabel: `Winter ${y + 1}`, currentSeasonApi: 'WINTER', currentSeasonYear: y + 1 };
   }, []);
-  const { data: seasonalData,  isLoading: seasonalLoading,  refetch: refetchSeasonal  } = useAnilistHomeSeasonal(currentSeasonYear, currentSeasonApi, true);
-  const { data: upcomingData }                                = useAnilistHomeUpcoming(24);
-  const { data: latestAnime,   isLoading: latestLoading,    refetch: refetchLatest   } = useAnilistHomeLatest(24);
-  const { data: moviesData,    isLoading: moviesLoading,    refetch: refetchMovies   } = useAnilistHomeMovies(20);
-  const { data: actionData,    isLoading: actionLoading,    refetch: refetchAction   } = useAnilistHomeAction(20);
-  const { history, removeFromHistory }                        = useWatchHistory();
-  const { heroAnime: rawHeroAnime, isLoading: heroLoading }   = useHeroAnime();
 
-  // Robust hero anime selection with multiple fallback layers
-  const effectiveHeroAnime = useMemo(() => {
-    if (rawHeroAnime && rawHeroAnime.length > 0) return rawHeroAnime;
-    if (trendingAnime && trendingAnime.length > 0) {
-      return convertAnimeListToHeroAnime(trendingAnime);
-    }
-    if (seasonalData?.results && seasonalData.results.length > 0) {
-      return convertAnimeListToHeroAnime(seasonalData.results);
-    }
+  const { data: seasonalData, isLoading: seasonalLoading, refetch: refetchSeasonal } =
+    useAnilistHomeSeasonal(currentSeasonYear, currentSeasonApi, true);
+  const { data: upcomingData } = useAnilistHomeUpcoming(24);
+  const { data: latestAnime, isLoading: latestLoading, refetch: refetchLatest } = useAnilistHomeLatest(24);
+  const { data: moviesData, isLoading: moviesLoading, refetch: refetchMovies } = useAnilistHomeMovies(20);
+  const { data: actionData, isLoading: actionLoading, refetch: refetchAction } = useAnilistHomeAction(20);
+  const { history, removeFromHistory } = useWatchHistory();
+  const { heroAnime: rawHeroAnime, isLoading: heroLoading } = useHeroAnime();
+
+  const heroSlides = useMemo(() => {
+    if (rawHeroAnime?.length) return rawHeroAnime;
+    if (trendingAnime?.length) return convertAnimeListToHeroAnime(trendingAnime);
+    if (seasonalData?.results?.length) return convertAnimeListToHeroAnime(seasonalData.results);
     return getStaticFallbackHeroAnime();
   }, [rawHeroAnime, trendingAnime, seasonalData?.results]);
 
-  // Scroll restoration
-  const SCROLL_KEY = 'anistream_scroll_positions';
-  const PAGE_KEY   = 'home_page';
-
+  // Returning to home should return to where you were in it.
   useEffect(() => {
     if (trendingLoading) return;
     try {
       const saved = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || '{}');
       const pos = saved[PAGE_KEY];
       if (pos > 0) {
-        const restore = () => window.scrollTo({ top: pos, behavior: 'instant' });
+        const restore = () => window.scrollTo({ top: pos, behavior: 'instant' as ScrollBehavior });
         setTimeout(restore, 100);
         setTimeout(restore, 400);
       }
@@ -83,7 +88,7 @@ const Index = () => {
   }, [trendingLoading]);
 
   useEffect(() => {
-    let t: NodeJS.Timeout;
+    let t: ReturnType<typeof setTimeout>;
     const handler = () => {
       clearTimeout(t);
       t = setTimeout(() => {
@@ -98,138 +103,116 @@ const Index = () => {
     return () => { window.removeEventListener('scroll', handler); clearTimeout(t); };
   }, []);
 
-  // Filter out hentai per-section; do NOT deduplicate across sections.
-  // Users expect to see popular anime in multiple rows (e.g. a hit show
-  // can be both "Trending Now" and "Latest Episodes").
-  const safe = <T extends { title?: string | null; id?: string | null; genres?: (string | null)[] | null }>(list: T[]) =>
-    list.filter((x) => !isHentai(x));
+  // Filtered per row, never deduplicated across rows: a hit belongs in more
+  // than one shelf, and hiding it makes the rows look broken.
+  const safe = useCallback(<T extends { title?: string | null; id?: string | null; genres?: (string | null)[] | null }>(list: T[]) =>
+    list.filter((x) => !isAdultTitle(x)), []);
 
-  const dedupTrending = safe(trendingAnime?.filter((a) => a.status !== 'Upcoming') ?? []);
-  const dedupSeasonal = safe(seasonalData?.results ?? []);
-  const dedupUpcoming = safe(upcomingData?.results ?? []);
-  const dedupLatest   = safe(latestAnime ?? []);
-  const dedupMovies   = safe(moviesData?.results ?? []);
-  const dedupAction   = safe(actionData?.results ?? []);
-
-  const isLoading      = trendingLoading || heroLoading;
-  const handleRefresh  = () => { refetchTrending(); };
-
-  // Inline empty-state — shown when a section finishes loading but returned nothing
-  const EmptySection = useCallback(({ onRetry }: { onRetry: () => void }) => (
-    <div className="flex items-center gap-3 py-3 px-1 text-sm text-muted-foreground">
-      <AlertCircle className="w-3.5 h-3.5 shrink-0 text-zinc-600" />
-      <span className="text-xs text-zinc-600">Couldn't load — server may be waking up.</span>
-      <Button onClick={onRetry} size="sm" variant="ghost" className="h-6 px-2 text-xs text-zinc-500 hover:text-white ml-auto shrink-0">
-        <RefreshCw className="w-3 h-3 mr-1" />Retry
-      </Button>
-    </div>
-  ), []);
-
-  const SkeletonRow = () => (
-    <div className="flex gap-3 overflow-hidden">
-      {[...Array(8)].map((_, i) => (
-        <div key={i} className="w-[10rem] sm:w-44 shrink-0 aspect-[2/3] rounded-xl bg-white/[0.04] animate-pulse" />
-      ))}
-    </div>
-  );
-
-  if (isMobile) return <MobileHome />;
+  const rows: { key: string; title: string; subtitle?: string; link: string; linkText?: string; items: Anime[]; loading: boolean; retry: () => void }[] = [
+    {
+      key: 'trending',
+      title: 'Trending now',
+      subtitle: 'What everyone is watching this week',
+      link: '/browse?sort=trending',
+      items: safe(trendingAnime?.filter((a) => a.status !== 'Upcoming') ?? []),
+      loading: trendingLoading,
+      retry: refetchTrending,
+    },
+    {
+      key: 'season',
+      title: currentSeasonLabel,
+      subtitle: 'Airing right now',
+      link: '/browse?status=Ongoing',
+      linkText: 'Browse the season',
+      items: safe(seasonalData?.results ?? []),
+      loading: seasonalLoading,
+      retry: refetchSeasonal,
+    },
+    {
+      key: 'latest',
+      title: 'Fresh episodes',
+      subtitle: 'Recently released',
+      link: '/browse?sort=recently_released',
+      items: safe(latestAnime ?? []),
+      loading: latestLoading,
+      retry: refetchLatest,
+    },
+    {
+      key: 'action',
+      title: 'Action',
+      link: '/browse?genres=Action',
+      items: safe(actionData?.results ?? []),
+      loading: actionLoading,
+      retry: refetchAction,
+    },
+    {
+      key: 'movies',
+      title: 'Films',
+      subtitle: 'One sitting, start to finish',
+      link: '/browse?type=Movie',
+      items: safe(moviesData?.results ?? []),
+      loading: moviesLoading,
+      retry: refetchMovies,
+    },
+    {
+      key: 'upcoming',
+      title: 'Coming soon',
+      subtitle: 'Worth remembering',
+      link: '/browse?status=Upcoming',
+      items: safe(upcomingData?.results ?? []),
+      loading: false,
+      retry: () => {},
+    },
+  ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-background to-background text-foreground font-sans">
+    <div className="min-h-screen">
       <Navbar />
 
-{/* ── Hero ─────────────────────────────────────────────────────── */}
-      {effectiveHeroAnime.length > 0 ? (
-        <HeroSection heroAnime={effectiveHeroAnime} />
-      ) : heroLoading ? (
-        <section className="relative w-full sm:px-6 lg:px-8">
-          <div className="mx-auto h-[340px] sm:h-[500px] w-full max-w-7xl animate-pulse sm:rounded-2xl bg-zinc-900/80" />
-          <div className="mt-3 flex justify-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin text-fox-orange/70" />
-            <span className="text-[11px] text-muted-foreground">Loading spotlight…</span>
-          </div>
-        </section>
-      ) : (
-        <HeroSection heroAnime={getStaticFallbackHeroAnime()} />
-      )}
+      <HeroSection heroAnime={heroSlides.length ? heroSlides : getStaticFallbackHeroAnime()} />
 
-      {/* ── Error banner ──────────────────────────────────────────────── */}
       {trendingError && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <div className="flex items-center gap-3 p-3 rounded-lg bg-red-950/20 border border-red-500/10 text-sm">
-            <AlertCircle className="w-4 h-4 text-red-400/80 shrink-0" />
-            <span className="text-zinc-400 flex-1">
-              {import.meta.env.DEV
-                ? <>Could not load home rows from AniList (network or rate limit). Retry in a moment.</>
-                : 'Couldn\'t load anime data. Check your connection and try again.'}
+        <div className="page-x pt-6">
+          <div className="glass flex items-center gap-3 rounded-xl p-3.5 text-[13px]">
+            <AlertCircle className="h-4 w-4 shrink-0 text-amber-300" />
+            <span className="flex-1 text-muted-foreground">
+              Some rows didn't load — the catalogue service may be rate-limiting us. Everything else still works.
             </span>
-            <Button onClick={handleRefresh} size="sm" variant="ghost" className="text-zinc-400 hover:text-white shrink-0 h-7 px-2">
-              <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Retry
+            <Button onClick={() => refetchTrending()} size="sm" variant="ghost" className="h-8 shrink-0 rounded-full px-3">
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Retry
             </Button>
           </div>
         </div>
       )}
 
-      {/* ── Main content ──────────────────────────────────────────────── */}
-      <main className="relative z-10 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pb-[calc(58px+env(safe-area-inset-bottom,0px)+8px)] sm:pb-20 space-y-3 sm:space-y-8 lg:space-y-10 pt-2 sm:pt-6 lg:pt-8">
-
-        {/* Continue Watching */}
+      <main className="page-x page-bottom space-y-12 pt-10 sm:space-y-14">
         {history.length > 0 && (
           <section>
-            <SectionHeader title="Continue Watching" />
+            <SectionHeader title="Pick up where you left off" link="/browse" linkText="Find something new" />
             <ContinueWatching items={history} onRemove={removeFromHistory} />
           </section>
         )}
 
-        {/* Trending Now */}
-        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
-          <SectionHeader title="Trending Now" link="/browse?sort=trending" linkText="View all" />
-          {trendingLoading ? <SkeletonRow /> : dedupTrending.length > 0
-            ? <AnimeSlider anime={dedupTrending.slice(0, 20)} cardSize="md" />
-            : <EmptySection onRetry={refetchTrending} />}
-        </section>
-
-        {/* This Season */}
-        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
-          <SectionHeader title={currentSeasonLabel} link="/browse?status=ongoing" linkText="Browse" />
-          {seasonalLoading ? <SkeletonRow /> : dedupSeasonal.length > 0
-            ? <AnimeSlider anime={dedupSeasonal.slice(0, 20)} cardSize="md" />
-            : <EmptySection onRetry={refetchSeasonal} />}
-        </section>
-
-        {/* Latest Episodes */}
-        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
-          <SectionHeader title="Latest Episodes" link="/browse?sort=recently_released" linkText="More" />
-          {latestLoading ? <SkeletonRow /> : dedupLatest.length > 0
-            ? <AnimeSlider anime={dedupLatest.slice(0, 20)} cardSize="md" />
-            : <EmptySection onRetry={refetchLatest} />}
-        </section>
-
-        {/* Action Anime */}
-        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
-          <SectionHeader title="Action Anime" link="/browse?genre=Action" linkText="View all" />
-          {actionLoading ? <SkeletonRow /> : dedupAction.length > 0
-            ? <AnimeSlider anime={dedupAction.slice(0, 20)} cardSize="md" />
-            : <EmptySection onRetry={refetchAction} />}
-        </section>
-
-        {/* Popular Movies */}
-        <section className="sm:rounded-2xl sm:border sm:border-white/[0.06] sm:bg-white/[0.015] sm:px-4 sm:py-3 lg:p-4">
-          <SectionHeader title="Popular Movies" link="/browse?type=Movie" linkText="View all" />
-          {moviesLoading ? <SkeletonRow /> : dedupMovies.length > 0
-            ? <AnimeSlider anime={dedupMovies.slice(0, 20)} cardSize="md" />
-            : <EmptySection onRetry={refetchMovies} />}
-        </section>
-
-        {/* Coming Soon */}
-        {dedupUpcoming.length > 0 && (
-          <section>
-            <SectionHeader title="Coming Soon" link="/browse?status=upcoming" linkText="All upcoming" />
-            <AnimeSlider anime={dedupUpcoming.slice(0, 20)} cardSize="md" />
-          </section>
+        {rows.map((row) =>
+          row.loading || row.items.length > 0 ? (
+            <section key={row.key}>
+              <SectionHeader title={row.title} subtitle={row.subtitle} link={row.link} linkText={row.linkText} />
+              <AnimeSlider anime={row.items.slice(0, 20)} loading={row.loading} />
+            </section>
+          ) : null
         )}
 
+        {!trendingLoading && !heroLoading && rows.every((r) => r.items.length === 0) && (
+          <div className="glass rounded-2xl p-10 text-center">
+            <h2 className="section-title text-xl">Nothing loaded</h2>
+            <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+              We couldn't reach the catalogue. This is usually brief — try again in a moment.
+            </p>
+            <Button onClick={() => refetchTrending()} className="btn-ember mt-5 rounded-full px-5">
+              <RefreshCw className="mr-2 h-4 w-4" /> Reload
+            </Button>
+          </div>
+        )}
       </main>
 
       <Footer />

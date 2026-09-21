@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { animePath } from '@/lib/routes';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Search, X, Play, Star, TrendingUp, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -222,7 +223,7 @@ export const SearchAutocomplete = ({ onClose, inputRef, className, isMobile }: S
   };
 
   const handleSelect = (result: SearchResult) => {
-    navigate(`/watch?id=${encodeURIComponent(result.id)}`, {
+    navigate(animePath({ id: result.id, title: result.title, genres: result.genres }), {
       state: { from: location.pathname + location.search }
     });
     setQuery('');

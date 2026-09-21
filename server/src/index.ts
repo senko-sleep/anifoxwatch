@@ -3,6 +3,8 @@ import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
 import { fileURLToPath } from 'url';
 import animeRoutes from './routes/anime.js';
+import hentaiRoutes from './routes/hentai.js';
+import { start as startHentaiIndex } from './services/hentai-index.js';
 import sourcesRoutes from './routes/sources.js';
 import streamingRoutes from './routes/streaming.js';
 import monitoringRoutes from './routes/monitoring.js';
@@ -26,6 +28,15 @@ const PORT = process.env.PORT || 3001;
 // Performance optimizations
 app.set('etag', 'strong');
 app.set('x-powered-by', false);
+
+// Behind a reverse proxy (Caddy, nginx, a platform router) every request arrives from
+// the proxy's address. Trusting N hops makes req.ip the real client, so per-IP rate
+// limits and logs mean something. Off by default — trusting it without a proxy would
+// let clients spoof X-Forwarded-For.
+if (process.env.TRUST_PROXY) {
+  const hops = Number(process.env.TRUST_PROXY);
+  app.set('trust proxy', Number.isFinite(hops) ? hops : process.env.TRUST_PROXY);
+}
 
 // CORS configuration
 // Explicitly allow all known frontend origins plus any wildcard from env.
@@ -180,6 +191,10 @@ app.get('/api/image-proxy', async (req: Request, res: Response) => {
 
 // API routes
 app.use('/api/anime', animeRoutes);
+app.use('/api/hentai', hentaiRoutes);
+// Warm the playback index (loads the saved copy, refreshes in the background).
+startHentaiIndex();
+void import('./services/hentai-catalog.js').then((m) => m.warm());
 app.use('/api/sources', sourcesRoutes);
 app.use('/api/stream', streamingRoutes);
 app.use('/api/monitoring', monitoringRoutes);

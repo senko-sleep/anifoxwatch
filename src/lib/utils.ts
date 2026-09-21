@@ -1,14 +1,7 @@
+import type { CSSProperties } from "react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import type { Anime } from '@/types/anime';
-
-/**
- * Legacy function for backward compatibility - redirects to new generateWatchUrl
- */
-export function generateWatchLink(animeId: string, episode?: number): string {
-  // This is a fallback for components that haven't been updated yet
-  return `/watch?id=${encodeURIComponent(animeId)}${episode ? `&ep=${episode}` : ''}`;
-}
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -55,24 +48,29 @@ export function isValidEpisodeCount(n: number | undefined | null): boolean {
  * Strip known streaming-source prefixes from an anime ID so URLs stay clean.
  * The backend's extractRawId handles prefixed IDs transparently, so raw slugs work.
  */
+// Must cover every source the backend registers a prefix for (source-manager's
+// prefixMap): one missing here leaves the source's name sitting in the address bar,
+// and the slug no longer round-trips to the right title.
 const KNOWN_PREFIXES = [
   'animepahe-', 'animekai-',
-  '9anime-', 'aniwave-', 'aniwatch-',
-  'gogoanime-', 'consumet-', 'zoro-', 'animesuge-',
-  'kaido-', 'anix-', 'kickassanime-', 'yugenanime-', 'animixplay-',
+  '9anime-', 'aniwaves-', 'aniwave-', 'aniwatch-', 'anichi-', 'reanime-', 'yomi-',
+  'gogoanime-', 'gogoorat-', 'consumet-', 'zoro-', 'animesuge-', 'allanime-',
+  'kaido-', 'anix-', 'kickassanime-', 'yugenanime-', 'animixplay-', 'wcofun-',
   'animefox-', 'animedao-', 'animeflv-', 'animesaturn-', 'crunchyroll-',
   'animeonsen-', 'marin-', 'animeheaven-', 'animekisa-', 'animeowl-',
-  'animeland-', 'animefreak-', 'miruro-', 'akih-', 'watchhentai-', 'hanime-',
+  'animeland-', 'animefreak-', 'animenana-', 'miruro-',
+  'akih-', 'watchhentai-', 'hentaimama-', 'hentaihaven-', 'hanime-',
 ];
 
-export function stripSourcePrefix(id: string): string {
+/** The source prefix an id starts with, if any — i.e. "this string is already an id". */
+export function sourcePrefixOf(id: string): string | undefined {
   const lower = id.toLowerCase();
-  for (const prefix of KNOWN_PREFIXES) {
-    if (lower.startsWith(prefix)) {
-      return id.slice(prefix.length);
-    }
-  }
-  return id;
+  return KNOWN_PREFIXES.find((prefix) => lower.startsWith(prefix));
+}
+
+export function stripSourcePrefix(id: string): string {
+  const prefix = sourcePrefixOf(id);
+  return prefix ? id.slice(prefix.length) : id;
 }
 
 /**
@@ -103,43 +101,6 @@ export function generateAnimeSlug(title: string | undefined | null, id?: string)
   }
   
   return slug || 'unknown';
-}
-
-/**
- * Generate a watch URL using anime slug instead of numeric ID
- * Creates clean URLs like /watch/anime/attack-on-titan?ep=1 or /watch/hentai/title?ep=1
- * For AniList-sourced anime, embeds the numeric ID in the slug (e.g. chainsaw-man-127230)
- * so the Watch page can resolve it directly without fuzzy search.
- */
-export function generateWatchUrl(anime: { title?: string | null; id?: string; titleEnglish?: string | null; titleRomaji?: string | null; genres?: string[]; source?: string; isMature?: boolean }, episode?: number): string {
-  const title = anime.titleEnglish || anime.titleRomaji || anime.title || '';
-  const episodeParam = episode ? `?ep=${episode}` : '';
-
-  // Determine if this is hentai content.
-  // Only the explicit "Hentai" genre, the isMature flag, or known hentai source-ID
-  // prefixes should route to /watch/hentai/… — Ecchi, Yaoi, Yuri are standard anime genres.
-  const hentaiSourcePrefixes = ['watchhentai-', 'hanime-', 'akih-', 'hentai-'];
-  const isHentai =
-    anime.isMature === true ||
-    anime.genres?.includes('Hentai') ||
-    anime.source?.toLowerCase().includes('hentai') ||
-    anime.source?.toLowerCase().includes('hanime') ||
-    hentaiSourcePrefixes.some(prefix => anime.id?.toLowerCase().startsWith(prefix));
-
-  const typePrefix = isHentai ? 'hentai' : 'anime';
-
-  // For AniList IDs (anilist-XXXXX), embed the numeric ID in the slug so the
-  // Watch page can resolve it instantly: /watch/anime/chainsaw-man-127230
-  if (anime.id?.startsWith('anilist-')) {
-    const numericId = anime.id.replace('anilist-', '');
-    const titleSlug = generateAnimeSlug(title);
-    const slug = titleSlug ? `${titleSlug}-${numericId}` : numericId;
-    return `/watch/${typePrefix}/${slug}${episodeParam}`;
-  }
-
-  // For source-specific IDs (aniwaves-xxx, watchhentai-xxx, etc.)
-  const slug = generateAnimeSlug(title, anime.id);
-  return `/watch/${typePrefix}/${slug}${episodeParam}`;
 }
 
 /** Skip API placeholders like "00", "0 min" */
@@ -353,4 +314,51 @@ export function truncateAtWordBoundary(text: string, maxLength: number): string 
   }
   
   return truncated.slice(0, lastSpaceIndex) + '...';
+}
+
+/**
+ * `#3582d8` → `"212 67% 53%"`, the form CSS custom properties want.
+ * Returns null for anything that isn't a 6-digit hex colour.
+ */
+export function hexToHslTriple(hex: string | undefined | null): string | null {
+  if (!hex || typeof hex !== 'string') return null;
+  const m = hex.trim().match(/^#?([0-9a-f]{6})$/i);
+  if (!m) return null;
+  const int = parseInt(m[1], 16);
+  const r = ((int >> 16) & 255) / 255;
+  const g = ((int >> 8) & 255) / 255;
+  const b = (int & 255) / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  let h = 0;
+  let s = 0;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h /= 6;
+  }
+
+  // Covers can be muddy or blinding; keep the accent usable as light.
+  const sat = Math.min(Math.max(s * 100, 35), 82);
+  const lum = Math.min(Math.max(l * 100, 46), 68);
+  return `${Math.round(h * 360)} ${Math.round(sat)}% ${Math.round(lum)}%`;
+}
+
+/**
+ * Inline style that tints a subtree with a title's own cover colour.
+ * Everything atmospheric (`--atmos`) inherits from here, so one anime's
+ * artwork lights its card, its detail page and its player alike.
+ */
+export function atmosphereStyle(
+  color: string | undefined | null,
+  extra?: Record<string, string | number>
+): CSSProperties {
+  const triple = hexToHslTriple(color);
+  return { ...(triple ? { '--atmos': triple } : {}), ...(extra ?? {}) } as CSSProperties;
 }

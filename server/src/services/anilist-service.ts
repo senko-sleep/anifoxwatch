@@ -5,6 +5,7 @@
 
 import { AnimeBase, AnimeSearchResult } from '../types/anime.js';
 
+import { anilistSlot, anilistThrottled, anilistOk } from '../lib/anilist-pace.js';
 interface AniListGenre {
     id: number;
     name: string;
@@ -96,33 +97,17 @@ const ANILIST_API_URL = 'https://graphql.anilist.co';
 const ANILIST_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 // Rate limiting for AniList API
-const anilistRequestTimes: number[] = [];
-const ANILIST_RATE_LIMIT_PER_MINUTE = 60; // AniList allows ~90 requests/min, stay conservative
 
 /**
- * Check if we're within rate limits and wait if necessary
+ * Wait for this request's turn on the shared AniList pace (lib/anilist-pace).
+ *
+ * This used to keep its own per-minute counter here, but the check read the count
+ * before any caller recorded its request, so a burst of concurrent calls all saw room
+ * and went at once — and a second counter in the adult catalog meant the two together
+ * aimed at twice AniList's real limit. One shared pace replaces both.
  */
 async function checkRateLimit(): Promise<void> {
-    const now = Date.now();
-    const oneMinuteAgo = now - 60 * 1000;
-
-    // Remove requests older than 1 minute
-    while (anilistRequestTimes.length > 0 && anilistRequestTimes[0] < oneMinuteAgo) {
-        anilistRequestTimes.shift();
-    }
-
-    // If we're at the limit, wait
-    if (anilistRequestTimes.length >= ANILIST_RATE_LIMIT_PER_MINUTE) {
-        const oldestRequest = anilistRequestTimes[0];
-        const waitTime = oldestRequest + 60 * 1000 - now;
-        if (waitTime > 0) {
-            console.log(`[AniList] Rate limit reached, waiting ${waitTime}ms`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-        }
-    }
-
-    // Record this request
-    anilistRequestTimes.push(Date.now());
+    await anilistSlot();
 }
 
 /**
@@ -227,6 +212,9 @@ export class AniListService {
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error(`[AniList] API error: ${response.status}`, errorText);
+                if (response.status === 429 || response.status >= 500) {
+                    anilistThrottled(parseInt(response.headers.get('retry-after') ?? '', 10) || undefined);
+                }
                 // On rate limit (429), return stale cache if available
                 if (response.status === 429 && staleData) {
                     console.log('[AniList] Rate limited, using stale cache');
@@ -241,6 +229,7 @@ export class AniListService {
             if (data && typeof data === 'object' && 'errors' in data) {
                 const errors = (data as { errors: Array<{ status?: number; message?: string }> }).errors;
                 const isRateLimited = errors.some(e => e.status === 429 || e.message?.includes('Too Many Requests'));
+                if (isRateLimited) anilistThrottled();
                 if (isRateLimited && staleData) {
                     console.log('[AniList] Rate limited (GraphQL error), using stale cache');
                     return staleData;
@@ -249,6 +238,7 @@ export class AniListService {
                 return staleData || null;
             }
 
+            anilistOk();
             this.setCache(cacheKey, data);
             return data as T;
         } catch (error) {
@@ -278,15 +268,23 @@ export class AniListService {
         format?: string;
         genres?: string[];
         search?: string;
+        isAdult?: boolean;
     }): Promise<AnimeSearchResult> {
         const page = filters.page || 1;
         const perPage = filters.perPage || 20;
 
         let queryArgs = '$page: Int, $perPage: Int';
         let queryBodyArgs = 'page: $page, perPage: $perPage';
-        let mediaArgs = 'type: ANIME, isAdult: false'; // Default no adult for general browse
+        let mediaArgs = 'type: ANIME'; // Default without isAdult
 
         const variables: any = { page, perPage };
+
+        // Handle isAdult parameter
+        if (filters.isAdult !== undefined) {
+            queryArgs += ', $isAdult: Boolean';
+            mediaArgs += ', isAdult: $isAdult';
+            variables.isAdult = filters.isAdult;
+        }
 
         // Text search
         if (filters.search && filters.search.trim()) {
@@ -395,6 +393,7 @@ export class AniListService {
                             medium
                         }
                         bannerImage
+                        isAdult
                         isAdult
                     }
                     pageInfo {

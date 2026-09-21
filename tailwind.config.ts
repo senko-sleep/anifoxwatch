@@ -9,24 +9,14 @@ export default {
       center: true,
       padding: "1rem",
       screens: {
-        "2xl": "1400px",
+        "2xl": "1536px",
       },
     },
     extend: {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
-        display: ['Outfit', 'Inter', 'system-ui', 'sans-serif'],
-      },
-      fontSize: {
-        'xs': 'clamp(0.75rem, 0.7rem + 0.25vw, 0.875rem)',
-        'sm': 'clamp(0.875rem, 0.8rem + 0.375vw, 1rem)',
-        'base': 'clamp(1rem, 0.95rem + 0.25vw, 1.125rem)',
-        'lg': 'clamp(1.125rem, 1.05rem + 0.375vw, 1.25rem)',
-        'xl': 'clamp(1.25rem, 1.15rem + 0.5vw, 1.5rem)',
-        '2xl': 'clamp(1.5rem, 1.35rem + 0.75vw, 1.875rem)',
-        '3xl': 'clamp(1.875rem, 1.65rem + 1.125vw, 2.25rem)',
-        '4xl': 'clamp(2.25rem, 1.95rem + 1.5vw, 3rem)',
-        '5xl': 'clamp(3rem, 2.5rem + 2.5vw, 4rem)',
+        // Editorial serif for titles — the nostalgic half of the identity.
+        display: ['Inter', 'system-ui', 'sans-serif'],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -63,6 +53,10 @@ export default {
           foreground: "hsl(var(--card-foreground))",
           hover: "hsl(var(--card-hover))",
         },
+        iris: {
+          DEFAULT: "hsl(var(--iris))",
+        },
+        atmos: "hsl(var(--atmos))",
         fox: {
           orange: "hsl(var(--fox-orange))",
           "orange-light": "hsl(var(--fox-orange-light))",
@@ -90,8 +84,14 @@ export default {
       },
       borderRadius: {
         lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        md: "calc(var(--radius) - 3px)",
+        sm: "calc(var(--radius) - 6px)",
+        xl: "calc(var(--radius) + 4px)",
+        "2xl": "calc(var(--radius) + 10px)",
+      },
+      transitionTimingFunction: {
+        // One easing for everything that moves.
+        glide: "cubic-bezier(0.22, 1, 0.36, 1)",
       },
       keyframes: {
         "accordion-down": {

@@ -1,0 +1,52 @@
+# One-box deployment: the API (with headless Chromium) behind Caddy, which
+# terminates HTTPS. Works on any Linux VM — built for Oracle Cloud Always Free.
+#
+#   cp .env.example .env   # fill in DOMAIN (and the rest)
+#   docker compose up -d --build
+#
+# Build context is the repo root because server/Dockerfile copies `server/...`.
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      # Behind Caddy: trust one proxy hop so rate limits see real client IPs.
+      TRUST_PROXY: "1"
+      # Your frontend's origin (e.g. https://your-app.web.app). '*' works but is loose.
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      # The image caps Node at 320 MB for tiny free-tier boxes; a 24 GB VM can do better.
+      NODE_OPTIONS: --max-old-space-size=${NODE_HEAP_MB:-2048}
+    # Chromium crashes on Docker's default 64 MB /dev/shm.
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env (e.g. myanime.duckdns.org)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

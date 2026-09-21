@@ -3,8 +3,10 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiClient, SourceHealth, StreamingData, EpisodeServer, ScheduleResponse, LeaderboardResponse, SeasonalResponse } from '@/lib/api-client';
 import { Anime, TopAnime, AnimeSearchResult, Episode } from '@/types/anime';
 import { enrichWithAniListCovers } from '@/lib/anilist-covers';
-import { fetchSeasonalFromAniList } from '@/lib/anilist-home-queries';
+import { fetchSeasonalFromAniList, fetchRelatedFromAniList, fetchSeasonChain, fetchAniListArtwork, type AniListArtwork, type SeasonEntry } from '@/lib/anilist-home-queries';
+import { fetchKitsuEpisodeDetails, type EpisodeDetail } from '@/lib/kitsu-episodes';
 import { searchAniList, browseAniList } from '@/lib/anilist-browse';
+import { hentaiApi, type HentaiSort } from '@/lib/hentai-client';
 
 // ─── Direct AniList seasonal fallback ────────────────────────────────────────
 // Used when the server-side /api/anime/seasonal returns empty (e.g. AniList
@@ -67,10 +69,102 @@ export function useTopRated(page: number = 1, limit: number = 10, source?: strin
     });
 }
 
+/** Stills + synopses for each episode, keyed by episode number. Empty when Kitsu has none. */
+export function useEpisodeDetails(animeId: string | undefined, enabled: boolean = true) {
+    return useQuery<Map<number, EpisodeDetail>, Error>({
+        queryKey: ['episode-details', animeId],
+        queryFn: async () => new Map((await fetchKitsuEpisodeDetails(animeId!)).map((d) => [d.number, d])),
+        enabled: enabled && Boolean(animeId),
+        staleTime: 6 * 60 * 60 * 1000,
+        gcTime: 12 * 60 * 60 * 1000,
+        retry: 1,
+    });
+}
+
+/** Wide artwork (banner, trailer frame) for a title — the stand-in still when there are no episode stills. */
+export function useAnimeArtwork(animeId: string | undefined, enabled: boolean = true) {
+    return useQuery<AniListArtwork, Error>({
+        queryKey: ['artwork', animeId],
+        queryFn: () => fetchAniListArtwork(animeId),
+        enabled: enabled && /^anilist-\d+$/.test(animeId ?? ''),
+        staleTime: 24 * 60 * 60 * 1000,
+        gcTime: 48 * 60 * 60 * 1000,
+        retry: 1,
+    });
+}
+
+/** Every TV season of this show in watch order, from AniList's prequel/sequel links. */
+export function useSeasons(animeId: string | undefined, enabled: boolean = true) {
+    return useQuery<SeasonEntry[], Error>({
+        queryKey: ['seasons', animeId],
+        queryFn: () => fetchSeasonChain(animeId),
+        enabled: enabled && Boolean(animeId),
+        staleTime: 24 * 60 * 60 * 1000,
+        gcTime: 48 * 60 * 60 * 1000,
+        retry: 1,
+    });
+}
+
+/** Franchise entries + AniList community recommendations for one anime. */
+export function useRelatedAnime(animeId: string | undefined, title: string | undefined, includeAdult = false) {
+    return useQuery<Anime[], Error>({
+        queryKey: ['related', animeId, title, includeAdult],
+        queryFn: () => fetchRelatedFromAniList(animeId, title, includeAdult),
+        enabled: Boolean(animeId || title),
+        staleTime: 60 * 60 * 1000,
+        gcTime: 2 * 60 * 60 * 1000,
+        retry: 1,
+    });
+}
+
+// ─── Adult catalog ───────────────────────────────────────────────────────────
+// "+18 Only" reads the adult catalog's own API (/api/hentai). AniList's isAdult flag
+// lists titles nobody can stream, so it is never used — not even in "Mixed".
+
+/** The Browse sort menu's choices, in the adult catalog's terms. */
+const ADULT_SORT: Record<string, HentaiSort> = {
+    popularity: 'popular',
+    trending: 'trending',
+    rating: 'rating',
+    recently_released: 'newest',
+    year: 'newest',
+    title: 'title',
+};
+
+const EMPTY_RESULT: AnimeSearchResult = { results: [], totalPages: 0, currentPage: 1, hasNextPage: false };
+
+/** Mixed mode: regular anime with the adult catalog woven in — one adult title after every four. */
+function mixCatalogs(anime: AnimeSearchResult, adult: AnimeSearchResult): AnimeSearchResult {
+    const results: Anime[] = [];
+    const extra = [...adult.results];
+    anime.results.forEach((item, i) => {
+        results.push(item);
+        if ((i + 1) % 4 === 0 && extra.length) results.push(extra.shift()!);
+    });
+    results.push(...extra);
+    return {
+        results,
+        totalPages: Math.max(anime.totalPages, adult.totalPages),
+        currentPage: anime.currentPage,
+        hasNextPage: anime.hasNextPage || adult.hasNextPage,
+        totalResults: (anime.totalResults ?? anime.results.length) + (adult.totalResults ?? adult.results.length),
+    };
+}
+
 export function useSearch(query: string, page: number = 1, source?: string, enabled: boolean = true, mode: 'safe' | 'mixed' | 'adult' = 'safe') {
     return useQuery<AnimeSearchResult, Error>({
         queryKey: queryKeys.search(query, page, source, mode),
-        queryFn: () => searchAniList(query, page, mode),
+        queryFn: async () => {
+            if (mode === 'adult') return hentaiApi.search(query, page);
+
+            // Mixed: regular results, with the adult catalog woven in (never AniList's adult flag).
+            const result = await apiClient.search(query, page, source, mode === 'mixed' ? 'safe' : mode);
+            if (mode === 'mixed') {
+                const adult = await hentaiApi.search(query, page).catch(() => EMPTY_RESULT);
+                return mixCatalogs(result, adult);
+            }
+            return result;
+        },
         enabled: enabled && query.trim().length >= 2,
         staleTime: 30 * 1000,
         gcTime: 5 * 60 * 1000,
@@ -109,6 +203,19 @@ export function useBrowse(filters: BrowseFilters, page: number = 1, enabled: boo
     return useQuery<AnimeSearchResult, Error>({
         queryKey: ['browse', filterKey, page, bypassCache, limit],
         queryFn: async () => {
+            // The adult site lists one genre per page; the first selected genre leads.
+            const adultGenre = filters.genre?.split(',')[0]?.trim() || undefined;
+
+            if (filters.mode === 'adult') return hentaiApi.browse(adultGenre, page, ADULT_SORT[filters.sort ?? ''] ?? 'popular');
+
+            if (filters.mode === 'mixed') {
+                const [anime, adult] = await Promise.all([
+                    browseAniList({ ...filters, mode: 'safe' }, page, limit),
+                    hentaiApi.browse(adultGenre, page).catch(() => EMPTY_RESULT),
+                ]);
+                return mixCatalogs(anime, adult);
+            }
+
             // Query AniList directly for browse data
             const result = await browseAniList(filters, page, limit);
             return result;
@@ -358,20 +465,7 @@ export function useSources() {
 export function useSourceHealth(options?: { autoRefresh?: boolean; refreshInterval?: number }) {
     const { autoRefresh = true, refreshInterval = 30000 } = options || {};
     
-    return useQuery<Array<{
-        name: string;
-        status: string;
-        lastCheck: string;
-        capabilities?: {
-            supportsDub: boolean;
-            supportsSub: boolean;
-            hasScheduleData: boolean;
-            hasGenreFiltering: boolean;
-            quality: 'high' | 'medium' | 'low';
-        };
-        successRate?: number;
-        avgLatency?: number;
-    }>, Error>({
+    return useQuery<import('@/lib/api-client').EnhancedSourceHealth[], Error>({
         queryKey: ['sourceHealthEnhanced', options],
         queryFn: () => apiClient.getSourceHealthEnhanced(),
         staleTime: refreshInterval,

@@ -3,63 +3,45 @@ import { cn } from '@/lib/utils';
 interface LogoProps {
   className?: string;
   size?: 'sm' | 'md' | 'lg';
+  /** Hides the wordmark — for tight bars where the mark alone must carry it. */
+  markOnly?: boolean;
 }
 
-export const Logo = ({ className, size = 'md' }: LogoProps) => {
-  const sizes = {
-    sm: 'text-xl',
-    md: 'text-2xl',
-    lg: 'text-4xl',
-  };
+const MARK_SIZE = { sm: 'h-6 w-6', md: 'h-7 w-7', lg: 'h-10 w-10' };
+const WORD_SIZE = { sm: 'text-lg', md: 'text-xl', lg: 'text-3xl' };
 
-  return (
-    <div className={cn('flex items-center gap-2', className)}>
-      <div className="relative">
-        <svg
-          viewBox="0 0 32 32"
-          className={cn(
-            'drop-shadow-md',
-            size === 'sm' && 'w-7 h-7',
-            size === 'md' && 'w-9 h-9',
-            size === 'lg' && 'w-12 h-12'
-          )}
-        >
-          <defs>
-            <linearGradient id="logoTailGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#ff8c42" />
-              <stop offset="50%" stopColor="#ff6b35" />
-              <stop offset="100%" stopColor="#e85d04" />
-            </linearGradient>
-            <linearGradient id="logoTipGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#ffffff" />
-              <stop offset="100%" stopColor="#f8f8f8" />
-            </linearGradient>
-          </defs>
+/**
+ * A fox tail curled into a crescent — drawn as one ember-lit stroke rather
+ * than the old multi-layer illustration, so it stays legible at 24px.
+ */
+export const Logo = ({ className, size = 'md', markOnly = false }: LogoProps) => (
+  <span className={cn('inline-flex items-center gap-2.5', className)}>
+    <svg viewBox="0 0 32 32" className={cn(MARK_SIZE[size], 'shrink-0')} aria-hidden>
+      <defs>
+        <linearGradient id="foxEmber" x1="10%" y1="0%" x2="90%" y2="100%">
+          <stop offset="0%" stopColor="hsl(38 96% 68%)" />
+          <stop offset="100%" stopColor="hsl(20 88% 54%)" />
+        </linearGradient>
+      </defs>
+      {/* Tail sweep */}
+      <path
+        d="M26 5c-7.4.6-12.9 4-15.6 9.4C7.7 19.7 9.2 25 14 27"
+        fill="none"
+        stroke="url(#foxEmber)"
+        strokeWidth="3.4"
+        strokeLinecap="round"
+      />
+      {/* Lit tip */}
+      <circle cx="26" cy="5" r="2.6" fill="hsl(40 100% 86%)" />
+      {/* Ember at rest */}
+      <circle cx="14" cy="27" r="2" fill="hsl(24 88% 56%)" opacity="0.85" />
+    </svg>
 
-          {/* Main fluffy tail body */}
-          <path
-            d="M8 26 C4 22 2 16 4 10 C6 6 10 4 14 5 C18 6 20 4 24 3 C28 2 30 6 29 10 C28 14 26 18 22 22 C18 26 12 28 8 26 Z"
-            fill="url(#logoTailGrad)"
-          />
-
-          {/* White tip of tail */}
-          <path
-            d="M24 3 C28 2 30 5 29 8 C28 10 26 11 24 10 C22 9 22 6 24 3 Z"
-            fill="url(#logoTipGrad)"
-          />
-
-          {/* Fur texture lines */}
-          <path d="M10 20 Q14 18 18 19" stroke="#d35400" strokeWidth="1.2" fill="none" opacity="0.4" strokeLinecap="round" />
-          <path d="M8 16 Q12 14 16 15" stroke="#d35400" strokeWidth="1.2" fill="none" opacity="0.3" strokeLinecap="round" />
-
-          {/* Highlight on tail */}
-          <path d="M14 8 Q18 7 22 8" stroke="#ffb380" strokeWidth="1.5" fill="none" opacity="0.5" strokeLinecap="round" />
-        </svg>
-      </div>
-      <span className={cn('font-bold tracking-tight', sizes[size])}>
-        <span className="text-gradient-orange">Ani</span>
+    {!markOnly && (
+      <span className={cn('font-display font-semibold tracking-tight', WORD_SIZE[size])}>
+        <span className="text-gradient-ember">Ani</span>
         <span className="text-foreground">Fox</span>
       </span>
-    </div>
-  );
-};
+    )}
+  </span>
+);

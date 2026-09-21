@@ -1,3 +1,4 @@
+import { isBlockedEpisodeId } from '../services/hentai-index.js';
 import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
 
@@ -232,6 +233,47 @@ async function isDomainResolvable(hostname: string): Promise<boolean> {
         dnsCache.set(hostname, { resolvable: !unresolvable, checkedAt: Date.now() });
         return !unresolvable;
     }
+}
+
+/**
+ * `ISP_BLOCKED_DOMAINS` records hosts that some networks block — but on a network
+ * where they're reachable, bouncing every segment through the remote proxy costs
+ * a 15s timeout per fragment and the player starves. So probe each listed host
+ * once and remember the answer: reachable hosts are served locally, genuinely
+ * blocked ones keep the remote proxy.
+ */
+const ISP_PROBE_TTL = 10 * 60 * 1000; // 10 minutes
+const ISP_PROBE_TIMEOUT = 4000;
+const ispReachability = new Map<string, { reachable: boolean; checkedAt: number }>();
+
+async function isLocallyReachable(url: string, domain: string, referer?: string): Promise<boolean> {
+    const cached = ispReachability.get(domain);
+    if (cached && Date.now() - cached.checkedAt < ISP_PROBE_TTL) return cached.reachable;
+
+    let reachable = false;
+    try {
+        const probe = await axios({
+            method: 'get',
+            url,
+            responseType: 'stream',
+            timeout: ISP_PROBE_TIMEOUT,
+            maxRedirects: 3,
+            validateStatus: () => true,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                ...(referer ? { Referer: referer, Origin: new URL(referer).origin } : {}),
+                Range: 'bytes=0-0',
+            },
+        });
+        probe.data?.destroy?.();
+        reachable = probe.status < 400;
+    } catch {
+        reachable = false;
+    }
+
+    ispReachability.set(domain, { reachable, checkedAt: Date.now() });
+    logger.info(`[PROXY] ISP probe: ${domain} is ${reachable ? 'reachable locally' : 'blocked — using remote proxy'}`);
+    return reachable;
 }
 
 /** Remembers domains that failed TLS so we can skip straight to HTTP fallback. */
@@ -510,6 +552,44 @@ const rewriteM3u8Content = (
 };
 
 /**
+ * HentaiHaven's CDN serves real fMP4 fragments under image or page names to dodge scrapers
+ * (video `ha1.jpg`/`ha1.html`, audio `snd1.jpg`, init `i.mp4`) and even labels them
+ * `application/x-mpegURL`. Its hosts rotate per episode, so it is recognised by shape, not name:
+ * playlists come from octopusmanifest.org and every segment sits under `/s/<the playlist's uuid>/`.
+ */
+const HAVEN_UUID = '[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}';
+const HAVEN_SEGMENT_PATH = new RegExp(String.raw`/s/${HAVEN_UUID}/(?:[a-z0-9]+/)?(?:(?:ha|snd)\d+\.[a-z0-9]+|i\.mp4)$`, 'i');
+
+/** A segment request the site's own player would make: right path shape, sent with the site's referer. */
+const isHavenSegmentUrl = (url: string, referer?: string): boolean => {
+    try {
+        return /(^|\.)hentaihaven\.xxx$/i.test(new URL(referer || '').hostname) && HAVEN_SEGMENT_PATH.test(new URL(url).pathname);
+    } catch {
+        return false;
+    }
+};
+
+/** A playlist from the site's manifest host whose segments all belong to that same playlist. */
+const isHavenManifest = (manifestUrl: string, segmentUrls: string[]): boolean => {
+    const uuid = manifestUrl.match(new RegExp(String.raw`^https?://octopusmanifest\.org/(${HAVEN_UUID})/`, 'i'))?.[1];
+    return !!uuid && segmentUrls.every((u) => u.toLowerCase().includes(`/s/${uuid.toLowerCase()}/`));
+};
+
+/**
+ * A master playlist can declare subtitle renditions whose URI is a bare .vtt file rather than a
+ * playlist. hls.js loads each as a playlist, can't parse it, and fails the whole stream. Those
+ * renditions are dropped (a source that wants them shown returns them as `subtitles` instead).
+ */
+function stripRawVttRenditions(content: string): string {
+    if (!/TYPE=SUBTITLES/i.test(content)) return content;
+    const lines = content
+        .split(/\r?\n/)
+        .filter((l) => !(/^#EXT-X-MEDIA:/.test(l) && /TYPE=SUBTITLES/i.test(l) && /URI="[^"]*\.vtt(?:\?[^"]*)?"/i.test(l)));
+    const out = lines.join('\n');
+    return /TYPE=SUBTITLES/i.test(out) ? out : out.replace(/,SUBTITLES="[^"]*"/g, '');
+}
+
+/**
  * Validate an m3u8 manifest: reject playlists whose segments point to
  * known ad CDNs (e.g. ibyteimg.com). Returns `true` when the manifest
  * is poisoned and should be rejected.
@@ -535,6 +615,8 @@ function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
     // Also check if segments themselves are from megaup CDN
     const hasMegaupSegments = segmentUrls.some(u => /megaup|pro25zone|net22lab|code29wave|lab27core|web24code|tech20hub|hub26link|hub27link|shop21pro|burntburst|xm8|rrr\.|rrr\d+|dev\d*app/i.test(u));
     if (hasMegaupSegments) return false;
+
+    if (isHavenManifest(originalUrl, segmentUrls)) return false;
 
     // Use common ad extensions for segment-level detection
     // Use common non-video extensions for segment-level detection
@@ -649,7 +731,29 @@ async function forwardToRemoteProxy(
     const remoteProxy = process.env.REMOTE_PROXY_URL || DEFAULT_REMOTE_STREAM_PROXY;
     const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
     try {
-        const remoteResp = await axios({ method: 'get', url: remoteTarget, responseType: 'stream', timeout: 15000, maxRedirects: 5 });
+        const remoteResp = await axios({
+            method: 'get',
+            url: remoteTarget,
+            responseType: 'stream',
+            timeout: 15000,
+            maxRedirects: 5,
+            // Judge the response ourselves so an error page can fall back to a local fetch.
+            validateStatus: () => true,
+        });
+
+        // A remote proxy that answers 204/4xx/5xx, or 200 with an empty body, has
+        // nothing to play. Report failure so the caller retries the origin locally
+        // — piping it through would strand the player on an empty playlist.
+        const emptyBody = remoteResp.headers['content-length'] === '0';
+        if (remoteResp.status === 204 || remoteResp.status >= 400 || emptyBody) {
+            remoteResp.data?.destroy?.();
+            logger.warn(
+                `[PROXY] ${label} unusable for ${domain} (status ${remoteResp.status}${emptyBody ? ', empty body' : ''})`,
+                { requestId }
+            );
+            return false;
+        }
+
         const ct = remoteResp.headers['content-type'] || 'application/vnd.apple.mpegurl';
         res.setHeader('Content-Type', ct);
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -790,6 +894,12 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
     let episodeId = decodeURIComponent(req.params.episodeId as string);
     episodeId = reconstructEpisodeId(episodeId, req.query);
 
+    // Titles the adult catalog excludes are not playable, however the episode id was arrived at.
+    if (isBlockedEpisodeId(episodeId)) {
+        res.status(404).json({ error: 'Not available', episodeId });
+        return;
+    }
+
     // Compound AnimeKai IDs that arrive with $ delimiters intact
     if (/^[^$]+\$/.test(episodeId) && !episodeId.startsWith('animekai-')) {
         episodeId = `animekai-${episodeId}`;
@@ -920,6 +1030,8 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
             else if (sourceName.includes('gogo')) streamReferer = 'https://gogoanime.run/';
             else if (sourceName.includes('pahe')) streamReferer = 'https://animepahe.ru/';
             else if (sourceName.includes('watchhentai')) streamReferer = 'https://watchhentai.net/';
+            else if (sourceName.includes('hentaimama')) streamReferer = 'https://hentaimama.io/';
+            else if (sourceName.includes('hentaihaven')) streamReferer = 'https://hentaihaven.xxx/';
             else streamReferer = 'https://megacloud.blog/'; // Generic fallback
         }
         const isLocalDev = !req.get('x-forwarded-proto');
@@ -1026,7 +1138,16 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const hasObfuscatedExt = /\.(gif|jpg|jpeg|png|webp)$/i.test(urlObj.pathname);
     // Echovideo CDN segments don't have extensions - they're just CDN URLs
     const isEchovideoSegment = /echovideo\.(to|ru)/.test(domain) && !url.includes('.m3u8');
-    const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt) || isEchovideoSegment;
+
+    // Several CDNs (echovideo, roburnt10, …) serve HLS playlists from extensionless
+    // paths, so the URL alone can't say whether the body is a manifest or a segment.
+    // When there's no recognisable media extension, sniff the first bytes instead —
+    // a manifest that slips through unrewritten leaves the player with segment paths
+    // pointing at our own origin, which is the classic "loads then stalls" failure.
+    const hasKnownMediaExt = /\.(m3u8|ts|m4s|mp4|webm|mpd|key|vtt|jpe?g|png|webp)(\?|$|&)/i.test(url);
+    const mayBeExtensionlessManifest = !hasKnownMediaExt;
+    const isHavenSegment = isHavenSegmentUrl(url, refererParam);
+    const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt) || isEchovideoSegment || isHavenSegment;
     // Better MP4 detection - check for .mp4 anywhere in URL, not just at the end (handles query parameters)
     const isVideo = url.includes('.mp4');
 
@@ -1069,12 +1190,17 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         return;
     }
 
-    // Fast-path for ISP-blocked domains
+    // Fast-path for ISP-blocked domains — but only when this host really is
+    // unreachable from here (see `isLocallyReachable`).
     if (process.env.IS_REMOTE_PROXY !== 'true' && isIspBlockedDomain(domain)) {
-        logger.info(`[PROXY] ISP-blocked ${domain} — routing to remote proxy`, { domain, requestId });
-        const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'ISP fast-path');
-        if (ok) return;
-        logger.warn(`[PROXY] Remote proxy failed for ISP-blocked ${domain} — falling back to local rotation`, { requestId });
+        if (await isLocallyReachable(url, domain, refererParam)) {
+            logger.info(`[PROXY] ${domain} listed as ISP-blocked but reachable here — serving locally`, { domain, requestId });
+        } else {
+            logger.info(`[PROXY] ISP-blocked ${domain} — routing to remote proxy`, { domain, requestId });
+            const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'ISP fast-path');
+            if (ok) return;
+            logger.warn(`[PROXY] Remote proxy failed for ISP-blocked ${domain} — falling back to local rotation`, { requestId });
+        }
     }
 
     // Process media requests locally with persistent keepAlive agent.
@@ -1191,7 +1317,11 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // directly without holding the full response in memory. This avoids the 20s
     // axios timeout that fires before the large file starts streaming.
     if (isVideo && !isM3u8 && !isSegment) {
-        const bestReferer = refererCombos[0]?.referer || 'https://watchhentai.net/';
+        const bestReferer =
+            refererParam ||
+            (matchedProxyConfig ? matchedProxyConfig[1].referer : undefined) ||
+            refererCombos[0]?.referer ||
+            'https://watchhentai.net/';
         const requestHeaders: Record<string, string> = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': '*/*',
@@ -1542,15 +1672,16 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // ---------- M3U8 manifest handling ----------
     const upstreamCt = proxyResponse!.headers['content-type'] || '';
     const isUpstreamM3u8 =
-        upstreamCt.includes('x-mpegurl') ||
-        upstreamCt.includes('vnd.apple.mpegurl') ||
-        url.includes('.m3u8') ||
-        (domain.includes('shop21pro.site') && !url.includes('.ts') && !url.includes('.m4s'));
+        !isHavenSegment &&
+        (upstreamCt.includes('x-mpegurl') ||
+            upstreamCt.includes('vnd.apple.mpegurl') ||
+            url.includes('.m3u8') ||
+            (domain.includes('shop21pro.site') && !url.includes('.ts') && !url.includes('.m4s')));
 
     // For echovideo, we need to check the actual content to distinguish between manifests and segments
     // Echovideo segment manifests don't have .m3u8 extension but contain HLS playlist content
     let isEchovideoManifest = false;
-    if (isEchovideoSegment && !isUpstreamM3u8) {
+    if ((isEchovideoSegment || mayBeExtensionlessManifest) && !isUpstreamM3u8) {
         try {
             const check = await checkEchovideoManifest(proxyResponse!);
             if (check.isManifest && check.content) {
@@ -1614,7 +1745,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
-            const rewritten = rewriteM3u8Content(content, url, proxyBase, refererParam || refererCombos[0]?.referer);
+            const rewritten = rewriteM3u8Content(stripRawVttRenditions(content), url, proxyBase, refererParam || refererCombos[0]?.referer);
             res.set('Content-Type', 'application/vnd.apple.mpegurl');
             res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
             res.set('Pragma', 'no-cache');
@@ -1654,12 +1785,16 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
       const head: Buffer[] = [];
       let headBytes = 0;
       let poisoned = false;
+      let sniffDone = false;
       const MAX_HEAD = 16;
       const sniff = (chunk: Buffer): boolean => {
+        if (sniffDone) return false; // one look at the first bytes is all we ever need
         head.push(chunk);
         headBytes += chunk.length;
         if (headBytes >= MAX_HEAD) {
+          sniffDone = true;
           const joined = Buffer.concat(head);
+          head.length = 0;
           const first = joined[0];
           const second = joined[1];
           // HTML/XML starts with '<'
@@ -1707,7 +1842,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
       origStream.on('data', (chunk: Buffer) => {
         if (aborted) return;
-        if (!sniffer.write(chunk)) { /* backpressure */ }
+        if (!sniffer.write(chunk)) {
+          origStream.pause();
+          sniffer.once('drain', () => origStream.resume());
+        }
         if (sniff(chunk)) {
           if (poisoned) {
             rejectPoison(looksLikeManifest ? 'manifest_html_or_json' : 'segment_html_or_json');
@@ -1758,7 +1896,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
         // Image handling: allow if from known video CDN (obfuscation), block if from ad CDN
         if (IMAGE_CONTENT_TYPES.some(img => ctLower.includes(img))) {
-            const isKnownCdn = Object.keys(proxyCdnConfig).some(key => domain.includes(key));
+            const isKnownCdn = isHavenSegment || Object.keys(proxyCdnConfig).some(key => domain.includes(key));
             const isAdDomain = isAdCdnUrl(url);
 
             if (isAdDomain) {

@@ -75,7 +75,7 @@ const ADULT_GENRES = [
   'Censored', 'Cosplay', 'Creampie', 'Dark Skin', 'Deepthroat', 'Double Penetration',
   'Facesitting', 'Facial', 'Femdom', 'Footjob', 'Futanari', 'Gangbang',
   'Gyaru', 'Horny Slut', 'Housewife', 'Humiliation', 'Incest', 'Inflation',
-  'Internal Cumshot', 'Lactation', 'Large Breasts', 'Lolicon', 'Magical Girls',
+  'Internal Cumshot', 'Lactation', 'Large Breasts', 'Magical Girls',
   'Maid', 'Megane', 'MILF', 'Mind Break', 'Molestation', 'NTR', 'Nuns', 'Nurses',
   'Office Ladies', 'POV', 'Pregnant', 'Princess', 'Public Sex', 'Rape',
   'Rim Job', 'Scat', 'School Girls', 'Shimapan', 'Shoutacon', 'Slaves',
@@ -86,7 +86,7 @@ const ADULT_GENRES = [
   // Hanime specific genres
   'Blow Job', 'Boob Job', 'Glasses', 'Hand Job', 'Horror', 'Loli',
   'Masturbation', 'Mind Control', 'Monster', 'Nekomimi', 'Orgy', 'Plot',
-  'Reverse Rape', 'Shota', 'Softcore', 'Teacher', 'Threesome', 'Trap',
+  'Reverse Rape', 'Softcore', 'Teacher', 'Threesome', 'Trap',
   'Ugly Bastard',
 
   // Shared genres that appear in both
@@ -745,8 +745,8 @@ const Search = () => {
                 <div className={cn(
                   "grid gap-4",
                   gridSize === 'compact'
-                    ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-6"
-                    : "grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4"
+                    ? "grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8"
+                    : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
                 )}>
                   {Array.from({ length: 24 }).map((_, i) => (
                     <div key={i} className="space-y-2">
@@ -787,7 +787,7 @@ const Search = () => {
                 <>
                   <AnimeGrid
                     anime={processedData.results}
-                    columns={gridSize === 'compact' ? 6 : 4}
+                    columns={gridSize === 'compact' ? 8 : 6}
                   />
 
                   {/* Pagination */}

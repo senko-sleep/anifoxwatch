@@ -250,6 +250,8 @@ export const VideoPlayer = ({
 
   // Mobile settings panel state
   const [showMobileSettings, setShowMobileSettings] = useState(false);
+  // Which section of the mobile settings sheet is open.
+  const [mobileSettingsTab, setMobileSettingsTab] = useState<'quality' | 'speed' | 'subtitles'>('quality');
 
   // Landscape lock state
   const [isLandscapeLocked, setIsLandscapeLocked] = useState(false);
