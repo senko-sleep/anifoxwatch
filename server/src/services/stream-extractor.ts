@@ -173,13 +173,25 @@ class StreamExtractor {
 
     private activePages = 0;
     private readonly MAX_CONCURRENT_PAGES = process.env.NODE_ENV === 'production' ? 2 : 4;
+    /** How long to wait for a page slot before giving the caller its time back. */
+    private readonly PAGE_SLOT_WAIT_MS = Number(process.env.PAGE_SLOT_WAIT_MS) || 12_000;
 
     /**
      * Create a new page with proper settings
      */
     private async createPage(): Promise<any> {
-        // Simple concurrency limit - reduced delay from 500ms to 100ms
+        // Simple concurrency limit - reduced delay from 500ms to 100ms.
+        // Bounded, because this loop has no other exit: if pages are ever leaked, an unbounded
+        // wait turns "some extractions are slow" into "every later request hangs forever", and
+        // the request that finally notices is one that did nothing wrong. Failing here instead
+        // lets the caller fall back to a source that needs no browser.
+        const waitStarted = Date.now();
         while (this.activePages >= this.MAX_CONCURRENT_PAGES) {
+            if (Date.now() - waitStarted > this.PAGE_SLOT_WAIT_MS) {
+                throw new Error(
+                    `No page slot after ${this.PAGE_SLOT_WAIT_MS}ms (${this.activePages}/${this.MAX_CONCURRENT_PAGES} busy)`
+                );
+            }
             await this.delay(100);
         }
         this.activePages++;
@@ -398,7 +410,7 @@ class StreamExtractor {
      * Uses in-flight deduplication: concurrent calls for the same URL share one Puppeteer session.
      * Enhanced for adult content compatibility.
      */
-    async extractFromEmbed(embedUrl: string): Promise<ExtractionResult> {
+    async extractFromEmbed(embedUrl: string, timeoutMs?: number): Promise<ExtractionResult> {
         const cached = this.resultCache.get(embedUrl);
         if (cached && Date.now() - cached.timestamp < this.RESULT_CACHE_TTL_MS && cached.result.success) {
             logger.info(`[StreamExtractor] Cache hit for embed: ${embedUrl.substring(0, 80)}...`);
@@ -420,7 +432,7 @@ class StreamExtractor {
 
         logger.info(`[StreamExtractor] Extracting from embed: ${embedUrl.substring(0, 80)}...`);
 
-        const extractionPromise = this._extractFromEmbedImpl(embedUrl)
+        const extractionPromise = this._extractFromEmbedImpl(embedUrl, timeoutMs)
             .then((result) => {
                 if (result.success && result.streams.length > 0) {
                     this.resultCache.set(embedUrl, { result, timestamp: Date.now() });
@@ -436,13 +448,32 @@ class StreamExtractor {
         }
     }
 
-    private async _extractFromEmbedImpl(embedUrl: string): Promise<ExtractionResult> {
+    private async _extractFromEmbedImpl(embedUrl: string, timeoutMs?: number): Promise<ExtractionResult> {
         let page: any = null;
+        // A caller that only has a few seconds to spend must not simply walk away from this:
+        // the page would stay open until its own navigation timeout, holding one of very few
+        // slots. So the deadline is enforced here, where the `finally` below still closes it.
+        let deadline: NodeJS.Timeout | undefined;
+        let timedOut = false;
         const streams: ExtractedStream[] = [];
         const subtitles: { url: string; lang: string }[] = [];
 
         try {
             page = await this.createPage();
+
+            // Closing the page is what actually stops the work: every await inside this method
+            // is a page operation, so they reject as soon as it goes, and control reaches the
+            // `finally` that releases the slot. Whatever the player already requested by then is
+            // still in `streams`, so a deadline can still produce a usable result.
+            if (timeoutMs && timeoutMs > 0) {
+                deadline = setTimeout(() => {
+                    timedOut = true;
+                    logger.warn(`[StreamExtractor] Deadline ${timeoutMs}ms reached, closing page for ${embedUrl.substring(0, 60)}`);
+                    page?.close().catch(() => {});
+                }, timeoutMs);
+                deadline.unref?.();
+            }
+
             await page.setRequestInterception(true);
 
             const capturedM3u8s = new Set<string>();
@@ -529,6 +560,17 @@ class StreamExtractor {
             };
 
         } catch (error: any) {
+            // When the deadline closed the page, the rejection is the closure, not the cause.
+            // Anything the player already requested is still worth returning.
+            if (timedOut) {
+                logger.warn(`[StreamExtractor] Deadline hit with ${streams.length} stream(s) captured`);
+                return {
+                    success: streams.length > 0,
+                    streams,
+                    subtitles,
+                    error: streams.length === 0 ? `Extraction deadline (${timeoutMs}ms)` : undefined
+                };
+            }
             logger.error(`[StreamExtractor] Embed extraction failed: ${error.message}`);
             return {
                 success: false,
@@ -537,9 +579,12 @@ class StreamExtractor {
                 error: error.message
             };
         } finally {
+            if (deadline) clearTimeout(deadline);
             if (page) {
                 this.activePages--;
-                await page.close();
+                // Already closed by the deadline, or closed with the browser; either way the
+                // slot above is what mattered and it is released regardless.
+                await page.close().catch(() => {});
             }
         }
     }

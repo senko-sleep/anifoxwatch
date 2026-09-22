@@ -79,6 +79,8 @@ export class AniwavesSource extends BaseAnimeSource {
      * to try somewhere else rather than the whole request being cut off mid-flight.
      */
     private readonly SERVER_BUDGET_MS = Number(process.env.ANIWAVES_BUDGET_MS) || 17_000;
+    /** Providers tried together per wave. Matches the extractor's concurrent page limit. */
+    private readonly SERVER_WAVE_SIZE = Number(process.env.ANIWAVES_WAVE) || 2;
 
     // Proxy list (stable — update here if proxies change)
     private readonly PROXIES = [
@@ -647,26 +649,30 @@ export class AniwavesSource extends BaseAnimeSource {
                 const servers = await this.getEpisodeServers(episodeId, options);
                 const filtered = servers.filter(s => s.type === category);
 
+                const pool = filtered.length > 0 ? filtered : servers;
+                if (pool.length === 0) return { sources: [], subtitles: [] };
+
+                let ordered = this.orderServersByHealth(pool);
+
+                // A named server goes to the front, but does not become the only option.
+                //
+                // It is a preference rather than an instruction because of where the name
+                // usually comes from: after a failure the player picks a server itself and then
+                // asks for it by name on every retry. It picks the list's first entry, which is
+                // exactly the provider most likely to be the dead one. Treating that as binding
+                // means one bad guess pins the session to a provider that can never work, and
+                // the response says which server actually answered anyway.
                 if (serverId) {
-                    const match = filtered.find(s =>
+                    const match = ordered.find(s =>
                         s.name.toLowerCase() === serverId.toLowerCase() ||
                         s.url === serverId
                     );
-                    // An explicitly named server is an instruction, not a preference: if the
-                    // caller asked for one, trying a different one behind their back would
-                    // silently ignore the request.
-                    if (match) {
-                        candidates = [{ name: match.name, linkId: match.url, type: match.type === 'dub' ? 'dub' : 'sub' }];
-                    }
+                    if (match) ordered = [match, ...ordered.filter(s => s !== match)];
                 }
 
-                if (candidates.length === 0) {
-                    const pool = filtered.length > 0 ? filtered : servers;
-                    if (pool.length === 0) return { sources: [], subtitles: [] };
-                    candidates = this.orderServersByHealth(pool)
-                        .slice(0, this.MAX_SERVER_ATTEMPTS)
-                        .map(srv => ({ name: srv.name, linkId: srv.url, type: srv.type === 'dub' ? 'dub' : 'sub' }));
-                }
+                candidates = ordered
+                    .slice(0, this.MAX_SERVER_ATTEMPTS)
+                    .map(srv => ({ name: srv.name, linkId: srv.url, type: srv.type === 'dub' ? 'dub' : 'sub' }));
             }
 
             let extractedSources: VideoSource[] = [];
@@ -678,78 +684,113 @@ export class AniwavesSource extends BaseAnimeSource {
             // that embed and capture what the player requests. The loop stops at the first one
             // that yields a stream, so a healthy provider costs one attempt.
             const loopStarted = Date.now();
-            for (const candidate of candidates) {
+            const remainingMs = () => this.SERVER_BUDGET_MS - (Date.now() - loopStarted);
+
+            /** Resolve one provider's embed URL and extract from it. Never throws. */
+            const attempt = async (candidate: { name: string; linkId: string; type: 'sub' | 'dub' }, budgetMs: number) => {
+                try {
+                    const response = await this.fetchWithProxyFallback('/ajax/sources', {
+                        params: { id: candidate.linkId },
+                        signal: options?.signal
+                    });
+
+                    const embedUrl = response.data?.status === 200 ? response.data?.result?.url : undefined;
+                    if (!embedUrl) {
+                        logger.warn(`[Aniwaves] ${candidate.name}: no embed URL`, undefined, this.name);
+                        return null;
+                    }
+
+                    // The deadline is passed *into* the extractor rather than raced against it
+                    // out here. Racing only abandons the promise: the page stays open until its
+                    // own timeout, holding one of the two slots this process allows, and after
+                    // two abandoned attempts every later request queues behind them. Given the
+                    // deadline, the extractor closes its own page and releases the slot.
+                    const extraction = await streamExtractor.extractFromEmbed(embedUrl, budgetMs);
+                    if (!extraction.success || extraction.streams.length === 0) return null;
+
+                    const sources = extraction.streams
+                        .filter(s => {
+                            const u = s.url.toLowerCase();
+                            return !u.includes('ping.gif') && !u.includes('analytics') && !u.includes('jwplayer') && !u.includes('/ping');
+                        })
+                        .map(s => ({
+                            url: s.url,
+                            quality: (s.quality || 'auto') as '360p' | '480p' | '720p' | '1080p' | 'auto' | 'default',
+                            isM3U8: s.url.includes('.m3u8') || s.type === 'hls',
+                            isEmbed: false,
+                            isDirect: false,
+                            server: candidate.name,
+                        }));
+                    if (sources.length === 0) return null;
+
+                    let embedOrigin = this.baseUrl;
+                    try { embedOrigin = new URL(embedUrl).origin; } catch { /* keep default */ }
+                    return { candidate, sources, subtitles: extraction.subtitles || [], origin: embedOrigin };
+                } catch (error: any) {
+                    logger.error(`[Aniwaves] ${candidate.name}: ${error.message}`, error, undefined, this.name);
+                    return null;
+                }
+            };
+
+            /**
+             * Run a wave of providers together and take the first that produces streams.
+             *
+             * Serially, a dead provider spends its whole deadline before a live one is even
+             * started, and the live one then inherits whatever is left. That is what failed
+             * here: DatSaV used 9s of the budget and Vidplay was cut off at 5512ms needing
+             * about 7s — the working provider was reached and then not given time to work.
+             * Run together they both get the full deadline, and the wave costs what the
+             * slowest member costs rather than their sum. The width matches the extractor's
+             * own page limit, so this uses the concurrency already budgeted for rather than
+             * adding more pressure to a small container.
+             */
+            const runWave = async (wave: typeof candidates, budgetMs: number) => {
+                let outstanding = wave.length;
+                return new Promise<Awaited<ReturnType<typeof attempt>>>((resolve) => {
+                    for (const c of wave) {
+                        void attempt(c, budgetMs).then((result) => {
+                            this.recordServerOutcome(c.name, result !== null);
+                            // First success ends the wave. Waiting for the rest would hand the
+                            // caller the slowest member's time when an answer is already in
+                            // hand, and the losers stop on their own deadline and free their
+                            // pages either way.
+                            if (result) resolve(result);
+                            else if (--outstanding === 0) resolve(null);
+                        });
+                    }
+                });
+            };
+
+            let winner: Awaited<ReturnType<typeof attempt>> = null;
+            for (let i = 0; i < candidates.length && !winner; ) {
                 if (options?.signal?.aborted) break;
 
-                // Starting an attempt that cannot finish inside the budget only delays the empty
-                // answer the caller is going to get anyway.
-                const remaining = this.SERVER_BUDGET_MS - (Date.now() - loopStarted);
-                if (remaining < 4_000) {
-                    logger.warn(`[Aniwaves] budget spent, not trying ${candidate.name}`, undefined, this.name);
+                const budgetMs = Math.min(this.SERVER_ATTEMPT_MS, remainingMs());
+                // Starting a wave that cannot finish only delays the empty answer the caller is
+                // going to get anyway.
+                if (budgetMs < 4_000) {
+                    logger.warn(`[Aniwaves] budget spent after ${i} provider(s)`, undefined, this.name);
                     break;
                 }
 
-                const response = await this.fetchWithProxyFallback('/ajax/sources', {
-                    params: { id: candidate.linkId },
-                    signal: options?.signal
-                });
+                // Widen the wave only while it is unclear which provider works. Two pages at
+                // once contend for a fraction of a CPU and each then runs slower than it would
+                // alone, so once one is known good it is worth more to give it the whole
+                // machine than to hedge against it.
+                const top = this.serverScore.get(candidates[i].name);
+                const knownGood = !!top && Date.now() - top.at < this.SERVER_MEMORY_TTL && top.ok > top.fail;
+                const wave = candidates.slice(i, i + (knownGood ? 1 : this.SERVER_WAVE_SIZE));
+                logger.info(`[Aniwaves] trying ${wave.map(c => c.name).join(' + ')} (${budgetMs}ms)`, undefined, this.name);
+                winner = await runWave(wave, budgetMs);
+                i += wave.length;
+            }
 
-                if (response.data?.status !== 200 || !response.data?.result?.url) {
-                    logger.warn(`[Aniwaves] ${candidate.name}: no embed URL`, undefined, this.name);
-                    this.recordServerOutcome(candidate.name, false);
-                    continue;
-                }
-
-                const embedUrl = response.data.result.url;
-                logger.info(`[Aniwaves] ${candidate.name}: extracting from ${embedUrl.slice(0, 80)}`, undefined, this.name);
-
-                try {
-                    // The extractor's own navigation timeouts are measured in minutes, which is
-                    // the right ceiling for it alone and far too long for one of several tries.
-                    const attemptMs = Math.min(this.SERVER_ATTEMPT_MS, remaining);
-                    const extraction = await Promise.race([
-                        streamExtractor.extractFromEmbed(embedUrl),
-                        new Promise<{ success: false; streams: []; subtitles: []; error: string }>((resolve) =>
-                            setTimeout(
-                                () => resolve({ success: false, streams: [], subtitles: [], error: `attempt timeout (${attemptMs}ms)` }),
-                                attemptMs
-                            )
-                        ),
-                    ]);
-                    if (extraction.success && extraction.streams.length > 0) {
-                        extractedSources = extraction.streams
-                            .filter(s => {
-                                const u = s.url.toLowerCase();
-                                return !u.includes('ping.gif') && !u.includes('analytics') && !u.includes('jwplayer') && !u.includes('/ping');
-                            })
-                            .map(s => ({
-                                url: s.url,
-                                quality: (s.quality || 'auto') as '360p' | '480p' | '720p' | '1080p' | 'auto' | 'default',
-                                isM3U8: s.url.includes('.m3u8') || s.type === 'hls',
-                                isEmbed: false,
-                                isDirect: false,
-                                server: candidate.name,
-                            }));
-                        extractedSubtitles = extraction.subtitles || [];
-                        resolvedCategory = candidate.type;
-                        try {
-                            origin = new URL(embedUrl).origin;
-                        } catch {
-                            origin = this.baseUrl;
-                        }
-                    }
-                } catch (extError: any) {
-                    logger.error(`[Aniwaves] ${candidate.name}: extraction error: ${extError.message}`, extError, undefined, this.name);
-                }
-
-                if (extractedSources.length > 0) {
-                    this.recordServerOutcome(candidate.name, true);
-                    logger.info(`[Aniwaves] ${candidate.name}: ${extractedSources.length} streams`, undefined, this.name);
-                    break;
-                }
-
-                this.recordServerOutcome(candidate.name, false);
-                logger.warn(`[Aniwaves] ${candidate.name}: no streams, trying next provider`, undefined, this.name);
+            if (winner) {
+                extractedSources = winner.sources;
+                extractedSubtitles = winner.subtitles;
+                origin = winner.origin;
+                resolvedCategory = winner.candidate.type;
+                logger.info(`[Aniwaves] ${winner.candidate.name}: ${extractedSources.length} streams`, undefined, this.name);
             }
 
             // Aniwaves' embed URL is domain-locked — it only renders on aniwaves.ru
