@@ -4,7 +4,6 @@ import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer, VideoSubtitle } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
-import { streamExtractor } from '../services/stream-extractor.js';
 
 export class ReAnimeSource extends BaseAnimeSource {
     name = 'ReAnime';
@@ -228,38 +227,18 @@ export class ReAnimeSource extends BaseAnimeSource {
 
             for (const s of matchedServers) {
                 if (s.dataLink) {
-
-                    try {
-                        const extracted = await streamExtractor.extractFromEmbed(s.dataLink);
-                        if (extracted && extracted.streams && extracted.streams.length > 0) {
-                            sources.push(...extracted.streams.map(src => ({
-                                url: src.url,
-                                quality: (src.quality || 'auto') as VideoSource['quality'],
-                                isM3U8: src.type === 'hls' || src.url.includes('.m3u8'),
-                                category: s.dataType || category,
-                                server: s.serverName || 'HD-1'
-                            })));
-                            if (extracted.subtitles) {
-                                subtitles.push(...extracted.subtitles.map(sub => ({ url: sub.url, lang: sub.lang })));
-                            }
-                        } else {
-                            sources.push({
-                                url: s.dataLink,
-                                quality: 'auto',
-                                isM3U8: s.dataLink.includes('.m3u8'),
-                                category: s.dataType || category,
-                                server: s.serverName || 'HD-1'
-                            });
-                        }
-                    } catch {
-                        sources.push({
-                            url: s.dataLink,
-                            quality: 'auto',
-                            isM3U8: false,
-                            category: s.dataType || category,
-                            server: s.serverName || 'HD-1'
-                        });
-                    }
+                    // FlixCloud is an HTML player, not a media file.  Do not drive it
+                    // through Puppeteer here: on Render that is the failure mode we are
+                    // escaping, and the client can load the provider's player directly.
+                    sources.push({
+                        url: s.dataLink,
+                        originalUrl: s.dataLink,
+                        quality: 'auto',
+                        isM3U8: false,
+                        isEmbed: true,
+                        category: s.dataType || category,
+                        server: s.serverName || 'HD-1'
+                    });
                 }
             }
 

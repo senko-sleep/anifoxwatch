@@ -152,16 +152,24 @@ export async function withTimeout<T>(
         parentSignal.addEventListener('abort', onAbort, { once: true });
     }
 
-    const timeoutId = setTimeout(() => {
-        const error = new Error(`${context?.operation || 'Operation'} timed out after ${timeoutMs}ms`);
-        logger.requestTimeout(context?.operation || 'unknown', timeoutMs, context);
-        controller.abort();
-    }, timeoutMs);
+    // AbortSignal is cooperative: browser launches and a few upstream clients do
+    // not observe it. Race with a rejecting timer too, otherwise a logged timeout
+    // can still leave the request pending forever.
+    let timeoutId: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+            const error = new Error(`${context?.operation || 'Operation'} timed out after ${timeoutMs}ms`);
+            logger.requestTimeout(context?.operation || 'unknown', timeoutMs, context);
+            controller.abort();
+            reject(error);
+        }, timeoutMs);
+        timeoutId.unref?.();
+    });
 
     try {
-        return await fn(signal);
+        return await Promise.race([fn(signal), timeout]);
     } finally {
-        clearTimeout(timeoutId);
+        if (timeoutId) clearTimeout(timeoutId);
         if (parentSignal) {
             parentSignal.removeEventListener('abort', onAbort);
         }

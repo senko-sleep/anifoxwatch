@@ -3500,7 +3500,12 @@ export class SourceManager {
                 const hasProxyableStream = (r: RaceResult) =>
                     r.data.sources.some((s) => this.isProxyablePlayableSource(s));
                 const hasNonBlockedSource = (r: RaceResult) =>
-                    r.data.sources.some((s) => !this.isBlockedStreamUrl(this.getStreamUrl(s)));
+                    r.data.sources.some((s) =>
+                        // An iframe is deliberately not byte-proxyable, but the watch page can
+                        // still play it. Do not discard it solely because its host is blocked
+                        // for direct media proxying.
+                        s.isEmbed || !this.isBlockedStreamUrl(this.getStreamUrl(s))
+                    );
                 const proxyableOk = ok.filter(hasProxyableStream);
 
                 if (!force && proxyableOk.length === 0 && pending > 0) {
@@ -3634,7 +3639,14 @@ export class SourceManager {
 
             for (const source of finalSources) {
                 if (resolved) break;
-                const idToUse = this.resolveStreamingEpisodeId(resolvedEpisodeId, source, primarySource, hasSourcePrefix, rawId);
+                // Aniwaves' `&eps=` token is provider-specific. ReAnime can instead use the
+                // canonical AniList ID supplied by the watch request, giving us a fallback that
+                // does not need the stalled Aniwaves Chromium extraction.
+                let idToUse = this.resolveStreamingEpisodeId(resolvedEpisodeId, source, primarySource, hasSourcePrefix, rawId);
+                if (!idToUse && source.name === 'ReAnime' && anilistId) {
+                    idToUse = `anilist-${anilistId}`;
+                    console.log(`   🔁 ReAnime fallback using AniList ID: ${idToUse}`);
+                }
                 if (!idToUse) {
                     console.log(`   ⏭️ Skipping ${source.name} (ID format incompatible)`);
                     allResults.push({ source: source.name, data: { sources: [], subtitles: [] } as StreamingData, success: false });

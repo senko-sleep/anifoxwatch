@@ -13,11 +13,9 @@ The frontend is a static build hosted separately (Firebase Hosting) and reaches 
 5. Point the frontend at it: set `VITE_API_URL` in `.env.production` (and `.env.firebase`) to the
    service URL, then `npm run deploy:hosting`.
 
-The URL Render assigns depends on the service name and may get a random suffix. **Two services of this
-API currently exist** — `anifoxwatch.onrender.com` and `anifoxwatch-dko2.onrender.com` — and
-`.env.production` / `.env.firebase` point the frontend at the `-dko2` one. Redeploy the one the frontend
-uses (or point `VITE_API_URL` at the other), and delete whichever you don't need: each free service uses
-the same 750 monthly hours.
+The canonical API is `https://anifoxwatch.onrender.com`. Keep `VITE_API_URL` in both
+`.env.production` and `.env.firebase` pointed there before building the Firebase frontend. Do not use the
+retired `anifoxwatch-dko2` service: it can return rate-limit or stale-source failures.
 
 Environment set in `render.yaml` only applies to a service created from the Blueprint. A service created
 by hand (which these look like — `PORT` is Render's own 10000, not the 8080 in the file) needs
