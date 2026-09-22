@@ -10,6 +10,7 @@ declare module 'express' {
 }
 
 import { logger } from '../utils/logger.js';
+import { streamExtractor } from '../services/stream-extractor.js';
 import axios, { type AxiosResponse } from 'axios';
 import https from 'node:https';
 import { lookup } from 'dns/promises';
@@ -881,6 +882,98 @@ router.get('/diag/animekai', async (_req: Request, res: Response): Promise<void>
  * @route GET /api/stream/servers/:episodeId
  * @description Get available streaming servers for an episode.
  */
+/**
+ * Why did this episode not resolve?
+ *
+ * Anime and adult episodes fail differently, and from outside the box they look the same: a 404
+ * after twenty seconds. The adult sources scrape a page and read a direct file URL out of it,
+ * which is a few hundred milliseconds of HTTP. The mainstream sources have to drive a real
+ * browser through a domain-locked embed and wait for its player to request the stream, and every
+ * stage of that can fail on its own. This walks the stages one at a time and reports each with
+ * its own timing and error, so the failing one names itself instead of being inferred.
+ *
+ *   GET /api/stream/diag?episodeId=aniwaves-81553%26eps%3D1
+ */
+router.get('/diag', async (req: Request, res: Response): Promise<void> => {
+    const episodeId = String(req.query.episodeId || '');
+    if (!episodeId) {
+        res.status(400).json({ error: 'episodeId query parameter is required' });
+        return;
+    }
+
+    type Stage = { stage: string; ok: boolean; ms: number; detail?: unknown; error?: string };
+    const stages: Stage[] = [];
+
+    const run = async <T>(stage: string, fn: () => Promise<T>): Promise<T | null> => {
+        const started = Date.now();
+        try {
+            const value = await fn();
+            stages.push({ stage, ok: true, ms: Date.now() - started });
+            return value;
+        } catch (error) {
+            stages.push({ stage, ok: false, ms: Date.now() - started, error: (error as Error)?.message ?? String(error) });
+            return null;
+        }
+    };
+
+    const { AniwavesSource } = await import('../sources/aniwaves-source.js');
+    const aniwaves = new AniwavesSource();
+
+    // 1. Can this host reach the site at all, and does the episode have servers?
+    const servers = await run('aniwaves.getEpisodeServers', () => aniwaves.getEpisodeServers(episodeId));
+    if (servers) {
+        stages[stages.length - 1].detail = { count: servers.length, names: servers.slice(0, 4).map((s) => s.name) };
+    }
+
+    // 2. Does the site hand back an embed URL for the first server?
+    let embedUrl: string | null = null;
+    if (servers?.length) {
+        embedUrl = await run('aniwaves./ajax/sources -> embed URL', async () => {
+            const response = await axios.get('https://aniwaves.ru/ajax/sources', {
+                params: { id: servers[0].url },
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                    Referer: 'https://aniwaves.ru/',
+                },
+                timeout: 15_000,
+            });
+            const url = (response.data as { result?: { url?: string } })?.result?.url;
+            if (!url) throw new Error(`no embed url in response: ${JSON.stringify(response.data).slice(0, 200)}`);
+            return url;
+        });
+        if (embedUrl) stages[stages.length - 1].detail = { embedUrl };
+    }
+
+    // 3. Can Chromium start here, and how long does it take from cold?
+    const probe = await run('chromium launch probe', () => streamExtractor.probe());
+    if (probe) stages[stages.length - 1].detail = probe;
+
+    // 4. The stage that actually decides it: driving the embed and capturing the stream.
+    if (embedUrl) {
+        const extraction = await run('streamExtractor.extractFromEmbed', () => streamExtractor.extractFromEmbed(embedUrl!));
+        if (extraction) {
+            stages[stages.length - 1].ok = extraction.success && extraction.streams.length > 0;
+            stages[stages.length - 1].detail = {
+                success: extraction.success,
+                streams: extraction.streams.length,
+                subtitles: extraction.subtitles.length,
+                firstUrl: extraction.streams[0]?.url?.slice(0, 110),
+                error: extraction.error,
+            };
+        }
+    }
+
+    const failed = stages.find((s) => !s.ok);
+    res.set('Cache-Control', 'no-cache');
+    res.json({
+        episodeId,
+        verdict: failed ? `fails at: ${failed.stage}` : 'all stages succeeded',
+        totalMs: stages.reduce((sum, s) => sum + s.ms, 0),
+        stages,
+    });
+});
+
 router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<void> => {
     let episodeId = decodeURIComponent(req.params.episodeId as string);
     episodeId = reconstructEpisodeId(episodeId, req.query);
