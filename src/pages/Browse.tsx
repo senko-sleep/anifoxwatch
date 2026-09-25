@@ -215,8 +215,13 @@ const Browse = () => {
     const urlYear = parseInt(searchParams.get('year') || '0', 10);
     const urlSort = (searchParams.get('sort') as BrowseSortOption) || 'popularity';
     const urlMode = (searchParams.get('mode') as 'safe' | 'mixed' | 'adult') || 'safe';
+    const urlQuery = searchParams.get('q') || '';
     const urlGenres = searchParams.get('genres')?.split(',').filter(Boolean) || searchParams.get('genre')?.split(',').filter(Boolean) || [];
 
+    // Browse stays mounted when a header search navigates to another /browse URL.
+    // Keep both values in sync here (rather than waiting for the input debounce),
+    // otherwise a URL such as ?q=boku+no&mode=adult can keep showing the prior search.
+    const needsQuerySync = urlQuery !== query || urlQuery !== debouncedQuery;
     const needsPageSync = urlPage !== page;
     const needsTypeSync = urlType !== typeFilter;
     const needsStatusSync = urlStatus !== statusFilter;
@@ -237,8 +242,12 @@ const Browse = () => {
     const urlGenresStr = validUrlGenres.sort().join(',');
     const needsGenresSync = currentGenresStr !== urlGenresStr;
 
-    if (needsPageSync || needsTypeSync || needsStatusSync || needsYearSync || needsSortSync || needsModeSync || needsGenresSync) {
+    if (needsQuerySync || needsPageSync || needsTypeSync || needsStatusSync || needsYearSync || needsSortSync || needsModeSync || needsGenresSync) {
       isUpdatingFromUrl.current = true;
+      if (needsQuerySync) {
+        setQuery(urlQuery);
+        setDebouncedQuery(urlQuery);
+      }
       if (needsPageSync) setPage(urlPage);
       if (needsTypeSync) setTypeFilter(urlType);
       if (needsStatusSync) setStatusFilter(urlStatus);
@@ -318,8 +327,9 @@ const Browse = () => {
   const [shuffleBypass, setShuffleBypass] = useState(0);
   const hasSearchQuery = debouncedQuery.length >= 2;
 
-  // Load fewer items per page but fetch earlier for truly instant endless feel without buffering
-  const resultsPerPage = scrollMode === 'infinite' ? 60 : 25;
+  // Smaller batches in infinite mode so a page-load doesn't burst-fetch dozens of images at once
+  // and starve the posters actually entering the viewport (was the cause of a dark flash on scroll).
+  const resultsPerPage = scrollMode === 'infinite' ? 30 : 25;
 
   // In infinite mode, use infinitePage for API calls; in paginated mode, use page
   const apiPage = scrollMode === 'infinite' ? infinitePage : page;
@@ -460,8 +470,11 @@ const Browse = () => {
     // Don't observe if not in infinite mode or no node
     if (scrollMode !== 'infinite' || !node) return;
 
-    // Create new observer for buttery smooth infinite scroll with quick buffer
-    // threshold: 0 triggers immediately, 2500px rootMargin preloads content WAY before scroll reaches bottom
+    // Create new observer for smooth infinite scroll with a modest buffer.
+    // threshold: 0 triggers immediately. rootMargin was 2500px, which fired a fresh batch of
+    // image fetches well before the user got there — those requests then competed for bandwidth
+    // with posters already on screen, showing up as a dark flash on scroll. 1000px still loads
+    // the next page well ahead of the fold without that burst.
     observerRef.current = new IntersectionObserver(
       (entries) => {
         const [entry] = entries;
@@ -473,7 +486,7 @@ const Browse = () => {
           });
         }
       },
-      { rootMargin: '2500px', threshold: 0 }
+      { rootMargin: '1000px', threshold: 0 }
     );
 
     observerRef.current.observe(node);

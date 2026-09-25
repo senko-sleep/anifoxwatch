@@ -70,10 +70,10 @@ export function useTopRated(page: number = 1, limit: number = 10, source?: strin
 }
 
 /** Stills + synopses for each episode, keyed by episode number. Empty when Kitsu has none. */
-export function useEpisodeDetails(animeId: string | undefined, enabled: boolean = true) {
+export function useEpisodeDetails(animeId: string | undefined, enabled: boolean = true, title?: string) {
     return useQuery<Map<number, EpisodeDetail>, Error>({
-        queryKey: ['episode-details', animeId],
-        queryFn: async () => new Map((await fetchKitsuEpisodeDetails(animeId!)).map((d) => [d.number, d])),
+        queryKey: ['episode-details', animeId, title],
+        queryFn: async () => new Map((await fetchKitsuEpisodeDetails(animeId!, title)).map((d) => [d.number, d])),
         enabled: enabled && Boolean(animeId),
         staleTime: 6 * 60 * 60 * 1000,
         gcTime: 12 * 60 * 60 * 1000,

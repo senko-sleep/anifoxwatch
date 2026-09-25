@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Info, Play, RefreshCw } from 'lucide-react';
 import { AnimeSlider } from '@/components/home/AnimeSlider';
+import { ContinueWatching } from '@/components/home/ContinueWatching';
 import { SectionHeader } from '@/components/shared/SectionHeader';
 import { useHentaiHome } from '@/hooks/useHentai';
+import { useWatchHistory } from '@/hooks/useWatchHistory';
 import { animePath, watchPath } from '@/lib/routes';
 import { atmosphereStyle, cn, ensureHttps } from '@/lib/utils';
 import type { Anime } from '@/types/anime';
@@ -18,6 +20,8 @@ const browseGenre = (name: string) => `/browse?mode=adult&genres=${encodeURIComp
  */
 export const HentaiHome = () => {
   const { data, isLoading, error, refetch, isFetching } = useHentaiHome();
+  const { history, removeFromHistory } = useWatchHistory();
+  const adultHistory = useMemo(() => history.filter((item) => item.isAdult), [history]);
 
   if (isLoading) {
     return (
@@ -55,23 +59,50 @@ export const HentaiHome = () => {
   }
 
   const nameForSlug = (slug: string, fallback: string) => data.genres.find((g) => g.slug === slug)?.name ?? fallback;
+  // Keep the home surface intentionally edited; the complete taxonomy belongs
+  // to Browse's persistent Filters panel rather than competing with the hero.
+  const curatedGenreNames = ['Action', 'Comedy', 'Ecchi', 'Fantasy', 'Harem', 'Romance', 'School', 'Supernatural'];
+  const curatedGenres = [
+    ...curatedGenreNames
+      .map((name) => data.genres.find((genre) => genre.name.toLowerCase() === name.toLowerCase()))
+      .filter((genre): genre is (typeof data.genres)[number] => Boolean(genre)),
+    ...data.genres.filter((genre) => !curatedGenreNames.some((name) => genre.name.toLowerCase() === name.toLowerCase())),
+  ].slice(0, 8);
 
   return (
     <div className="space-y-12">
+      {adultHistory.length > 0 && (
+        <section>
+          <SectionHeader title="Pick up where you left off" />
+          <ContinueWatching items={adultHistory} onRemove={removeFromHistory} />
+        </section>
+      )}
+
       {data.featured.length > 0 && <Featured items={data.featured} />}
 
       {data.genres.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {data.genres.slice(0, 32).map((g) => (
-            <Link
-              key={g.slug}
-              to={browseGenre(g.name)}
-              className="rounded-full px-3 py-1 text-[12px] text-muted-foreground ring-1 ring-white/[0.08] transition-colors hover:text-foreground hover:ring-white/[0.2]"
-            >
-              {g.name}
-            </Link>
-          ))}
-        </div>
+        <section aria-label="Discover by genre" className="border-y border-white/[0.06] py-4 sm:py-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/65">Browse by mood</p>
+              <p className="mt-1 text-sm text-foreground/75">A few starting points from the catalog.</p>
+            </div>
+            <p className="text-xs text-muted-foreground/60">More genres are in Filters.</p>
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-x-1 gap-y-1.5">
+            {curatedGenres.map((genre) => (
+              <Link
+                key={genre.slug}
+                to={browseGenre(genre.name)}
+                className="rounded-md px-2.5 py-1 text-[12px] text-muted-foreground ring-1 ring-white/[0.08] transition-colors hover:bg-white/[0.04] hover:text-foreground hover:ring-white/[0.16] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--primary))]"
+              >
+                {genre.name}
+              </Link>
+            ))}
+          </div>
+
+        </section>
       )}
 
       {data.sections.map((section) => (

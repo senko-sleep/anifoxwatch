@@ -53,7 +53,7 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
         }
 
         // Check cache first for instant response
-        const cacheKey = `resolve-slug:${slug}:${mode}`;
+        const cacheKey = `resolve-slug:v4:${slug}:${mode}`;
         const cached = searchCache.get(cacheKey);
         if (cached) {
             logger.debug(`[AnimeRoutes] Cache hit for slug resolution: ${slug}`);
@@ -80,6 +80,31 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
         // Auto-detect hentai and set mode to adult if needed
         const effectiveMode = (likelyHentai || mode === 'adult') ? 'adult' : mode;
 
+        // Clean URLs carry a title only (for example `/anime/yani-neko`). Ask
+        // the provider directly before broad/fuzzy discovery, keeping source
+        // selection in the backend rather than exposing it in the URL.
+        if (effectiveMode === 'safe') {
+            const spokenTitle = slug.replace(/-/g, ' ');
+            try {
+                const sourceSearch = await Promise.race([
+                    sourceManager.search(spokenTitle, 1, 'Aniwaves'),
+                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Source title probe timeout')), 8_000)),
+                ]);
+                const sourcePrefix = `aniwaves-${slug.toLowerCase()}-`;
+                const sourceMatch = sourceSearch.results.find((item) =>
+                    titleMatchesSlug(item, spokenTitle) || item.id.toLowerCase().startsWith(sourcePrefix)
+                );
+                if (sourceMatch) {
+                    const result = { id: sourceMatch.id, title: sourceMatch.title, image: sourceMatch.image, source: sourceMatch.source };
+                    searchCache.set(cacheKey, result, 60 * 60 * 1000);
+                    res.json(result);
+                    return;
+                }
+            } catch {
+                // Continue through the normal multi-source resolver.
+            }
+        }
+
         // ── Fast path: slug ends with a numeric AniList ID ────────────────────
         // Slugs built here look like "chainsaw-man-127230". The trailing number is only
         // an AniList id when the slug was built from one — a streaming source's own id
@@ -88,8 +113,28 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
         // the entry is looked up and only kept when it goes by the name the slug spells.
         const trailingNumMatch = slug.match(/-(\d{4,9})$/);
         if (trailingNumMatch) {
-            const anilistId = `anilist-${trailingNumMatch[1]}`;
+            const sourceId = `aniwaves-${trailingNumMatch[1]}`;
             const spokenTitle = slug.replace(/-\d+$/, '').replace(/-/g, ' ');
+
+            // Check the provider that issued this old URL before asking AniList.
+            // This avoids spending an AniList request on source IDs such as the
+            // `82684` in `yani-neko-82684`.
+            try {
+                const sourceSearch = await Promise.race([
+                    sourceManager.search(spokenTitle, 1, 'Aniwaves'),
+                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Source slug probe timeout')), 8_000)),
+                ]);
+                if (sourceSearch.results.some((item) => item.id === sourceId)) {
+                    const result = { id: sourceId, title: spokenTitle, source: 'Aniwaves' };
+                    searchCache.set(cacheKey, result, 60 * 60 * 1000);
+                    res.json(result);
+                    return;
+                }
+            } catch {
+                // Fall through to the verified AniList path and other sources.
+            }
+
+            const anilistId = `anilist-${trailingNumMatch[1]}`;
 
             let media: AnimeBase | null = null;
             let lookupFailed = false;
@@ -102,7 +147,7 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
 
             // No match means this number belongs to some source, not AniList: let the
             // search below find the real entry by name instead of serving the wrong one.
-            if (lookupFailed || (media && titleMatchesSlug(media, spokenTitle))) {
+            if (media && titleMatchesSlug(media, spokenTitle)) {
                 logger.debug(`[AnimeRoutes] AniList ID fast-path: ${slug} → ${anilistId}`);
                 const isMature = media?.isMature === true;
                 const result = {
@@ -116,6 +161,28 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
                 return;
             }
             logger.debug(`[AnimeRoutes] ${trailingNumMatch[1]} is not this title's AniList id (${slug}) — searching by name`);
+        }
+
+        // Older readable links can end in a provider's numeric ID rather than
+        // an AniList ID. Verify that source-native ID before fuzzy searching,
+        // so an unrelated AniList title cannot replace it.
+        if (trailingNumMatch) {
+            const spokenTitle = slug.replace(/-\d+$/, '').replace(/-/g, ' ');
+            const sourceId = `aniwaves-${trailingNumMatch[1]}`;
+            try {
+                const episodes = await Promise.race([
+                    sourceManager.getEpisodes(sourceId),
+                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Source id probe timeout')), 8_000)),
+                ]);
+                if (episodes.length > 0) {
+                    const result = { id: sourceId, title: spokenTitle, source: 'Aniwaves' };
+                    searchCache.set(cacheKey, result, 60 * 60 * 1000);
+                    res.json(result);
+                    return;
+                }
+            } catch {
+                // A source being down must not prevent the normal title search.
+            }
         }
 
         // Use hentai resolver for likely hentai content (with timeout protection)

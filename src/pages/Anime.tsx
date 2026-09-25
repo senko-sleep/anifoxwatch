@@ -15,7 +15,7 @@ import { useHentaiTitle } from '@/hooks/useHentai';
 import { useResolvedAnimeId } from '@/hooks/useResolvedAnimeId';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { WatchHistory } from '@/lib/watch-history';
-import { animePath, watchPathForSlug } from '@/lib/routes';
+import { animePath, animeSlug, watchPathForSlug } from '@/lib/routes';
 import { apiUrl } from '@/lib/api-config';
 import {
   atmosphereStyle,
@@ -70,10 +70,14 @@ const AnimePage = ({ adult = false }: { adult?: boolean }) => {
   const episodesLoading = isAdultPage ? hentaiTitle.isLoading : episodesQuery.isLoading;
   const fetchedEpisodes = (isAdultPage ? hentaiTitle.data?.episodes : episodesQuery.data) ?? NO_EPISODES;
 
-  const { data: details } = useEpisodeDetails(animeId, !isResolving && animeId.length > 0 && !isAdultPage);
+  const { data: details } = useEpisodeDetails(animeId, !isResolving && animeId.length > 0 && !isAdultPage, anime?.title);
   // Wide artwork for titles whose episodes have no stills (movies, brand-new shows).
   const { data: artwork } = useAnimeArtwork(animeId, !isResolving && !isAdultPage);
   const fallbackStill = artwork?.banner || artwork?.trailerThumb;
+  // Some providers expose an episode list but no per-episode thumbnails. Keep
+  // the shelf visual by falling back to the title artwork; Kitsu/source stills
+  // remain preferred by EpisodeRow whenever they exist.
+  const episodeStillFallback = fallbackStill || anime?.banner || anime?.cover || anime?.image;
 
   // When the source returns no list, Kitsu (or the known episode count) still tells us what exists.
   const episodes = useMemo<Episode[]>(() => {
@@ -95,13 +99,12 @@ const AnimePage = ({ adult = false }: { adult?: boolean }) => {
 
   // Rich rows (a still per episode) whenever we have pictures — from Kitsu, from the source, or,
   // for a lone episode (a movie), the title's own banner.
-  const soleEpisodeStill = episodes.length === 1 ? fallbackStill : undefined;
   const hasDetails = useMemo(
     () =>
       Boolean(details && [...details.values()].some((d) => d.thumbnail || d.synopsis)) ||
       episodes.some((e) => e.thumbnail) ||
-      Boolean(soleEpisodeStill),
-    [details, episodes, soleEpisodeStill]
+      Boolean(episodeStillFallback),
+    [details, episodes, episodeStillFallback]
   );
 
   const navigate = useNavigate();
@@ -189,8 +192,11 @@ const AnimePage = ({ adult = false }: { adult?: boolean }) => {
   }, [episodes, episodeQuery, ranges.length, rangeStart]);
 
 
+  // Build player links from the resolved title, not the incoming legacy URL.
+  // That drops stale AniList/source identifiers while the backend retains the
+  // source mapping needed to fetch episodes.
   const watchHref = (episode: number) =>
-    watchPathForSlug(slug ?? '', episode, '', null, mode === 'adult');
+    watchPathForSlug(anime ? animeSlug(anime) : slug ?? '', episode, '', null, mode === 'adult');
 
   const firstEpisode = episodes[0]?.number ?? 1;
 
@@ -517,7 +523,7 @@ const AnimePage = ({ adult = false }: { adult?: boolean }) => {
                   key={ep.id || ep.number}
                   episode={ep}
                   detail={details?.get(ep.number)}
-                  stillFallback={soleEpisodeStill}
+                  stillFallback={episodeStillFallback}
                   rich={hasDetails}
                   href={watchHref(ep.number)}
                   watched={lastNumber != null && (ep.number < lastNumber || (finished && ep.number === lastNumber))}

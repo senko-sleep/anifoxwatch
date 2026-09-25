@@ -90,9 +90,10 @@ const PosterImage = ({ src, alt, priority }: { src: string; alt: string; priorit
         decoding="async"
         referrerPolicy="no-referrer"
         className={cn(
-          'absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ease-glide',
+          'absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ease-glide',
           loaded ? 'opacity-100' : 'opacity-0'
         )}
+        fetchPriority={priority ? 'high' : 'low'}
         onLoad={() => setLoaded(true)}
         onError={() => {
           if (!triedProxy.current) {

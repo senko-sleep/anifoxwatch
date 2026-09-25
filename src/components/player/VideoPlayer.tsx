@@ -37,6 +37,7 @@ import {
 import { cn } from '@/lib/utils';
 import { PostProxyLoader } from '@/lib/hls-post-loader';
 import { apiUrl } from '@/lib/api-config';
+import { WatchHistory } from '@/lib/watch-history';
 
 interface VideoSubtitle {
   url: string;
@@ -60,6 +61,7 @@ interface VideoPlayerProps {
   animeTitle?: string;
   animeImage?: string;
   animeSeason?: string;
+  isAdult?: boolean;
   onBack?: () => void;
   onEpisodes?: () => void;
   onShowSettings?: () => void;
@@ -100,6 +102,7 @@ export const VideoPlayer = ({
   animeTitle,
   animeImage,
   animeSeason,
+  isAdult,
   onBack,
   onEpisodes,
   onShowSettings,
@@ -1088,6 +1091,35 @@ export const VideoPlayer = ({
     const video = videoRef.current;
     if (!video) return;
 
+    const saveWatchHistory = (time: number) => {
+      if (!animeId || !animeTitle || !animeImage || !selectedEpisodeNum) return;
+
+      let frameThumbnail: string | undefined;
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 320;
+        canvas.height = 180;
+        const ctx = canvas.getContext('2d');
+        if (ctx && video.videoWidth > 0) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          frameThumbnail = canvas.toDataURL('image/jpeg', 0.7);
+        }
+      } catch {
+        // Some hosts taint the video canvas. WatchHistory preserves the last
+        // successful still in that case.
+      }
+
+      WatchHistory.save(
+        { id: animeId, title: animeTitle, image: animeImage, season: animeSeason } as any,
+        selectedEpisodeNum.toString(),
+        selectedEpisodeNum,
+        time,
+        video.duration,
+        frameThumbnail,
+        isAdult
+      );
+    };
+
     const handlePlay = () => {
       setIsPlaying(true);
       
@@ -1130,6 +1162,7 @@ export const VideoPlayer = ({
       setIsPlaying(false);
       if (video.currentTime > 5 && video.duration - video.currentTime > 10) {
         savePosition(video.currentTime);
+        saveWatchHistory(video.currentTime);
       }
     };
 
@@ -1169,37 +1202,7 @@ export const VideoPlayer = ({
       // ── Position save & watch-history — fires at most every 2s ───────────
       if (Math.floor(time) % 2 === 0 && time > 5 && video.duration - time > 10) {
         savePosition(time);
-
-        if (animeId && animeTitle && animeImage && selectedEpisodeNum) {
-          // Only capture a thumbnail frame if enough time has passed (re-use throttle window)
-          const canCapture = nowMs - lastThumbnailCaptureRef.current < THUMBNAIL_CAPTURE_INTERVAL * 2;
-          let frameThumbnail: string | undefined;
-          if (canCapture) {
-            try {
-              const canvas = document.createElement('canvas');
-              canvas.width = 320;
-              canvas.height = 180;
-              const ctx = canvas.getContext('2d');
-              if (ctx && video.videoWidth > 0) {
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                frameThumbnail = canvas.toDataURL('image/jpeg', 0.7);
-              }
-            } catch {
-              // Frame capture may fail due to CORS, ignore
-            }
-          }
-
-          import('@/lib/watch-history').then(({ WatchHistory }) => {
-            WatchHistory.save(
-              { id: animeId, title: animeTitle, image: animeImage, season: animeSeason } as any,
-              selectedEpisodeNum.toString(),
-              selectedEpisodeNum,
-              time,
-              video.duration,
-              frameThumbnail
-            );
-          });
-        }
+        saveWatchHistory(time);
       }
 
       if (intro && time >= intro.start && time < intro.end) {
@@ -1275,6 +1278,7 @@ export const VideoPlayer = ({
       if (document.visibilityState === 'hidden') {
         if (video.currentTime > 5) {
           savePosition(video.currentTime);
+          saveWatchHistory(video.currentTime);
         }
         // Pause HLS segment loading so backgrounded tabs don't accumulate
         // ERR_NETWORK_IO_SUSPENDED errors that block the scheduler long enough
@@ -1311,8 +1315,13 @@ export const VideoPlayer = ({
     video.addEventListener('canplaythrough', handleCanPlay);
     video.addEventListener('playing', handleCanPlay);
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handleVisibilityChange);
 
     return () => {
+      if (video.currentTime > 5 && video.duration - video.currentTime > 10) {
+        savePosition(video.currentTime);
+        saveWatchHistory(video.currentTime);
+      }
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
       video.removeEventListener('timeupdate', handleTimeUpdate);
@@ -1324,8 +1333,9 @@ export const VideoPlayer = ({
       video.removeEventListener('canplaythrough', handleCanPlay);
       video.removeEventListener('playing', handleCanPlay);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handleVisibilityChange);
     };
-  }, [intro, outro, onEnded, hasNextEpisode, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, autoFullscreen, isMobile]);
+  }, [intro, outro, onEnded, hasNextEpisode, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, animeSeason, isAdult, autoFullscreen, isMobile]);
 
   // Fullscreen change handler
   useEffect(() => {

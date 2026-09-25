@@ -280,7 +280,9 @@ async function buildHome(): Promise<HentaiHome> {
 
 // ── Browse & search ──────────────────────────────────────────────────────────
 
-const PER_PAGE = 30;
+// Match AniList's maximum page size. Returning a smaller page here made precise title
+// searches feel artificially shallow even though AniList had more matches available.
+const PER_PAGE = 50;
 
 export async function browse(opts: { genre?: string; sort?: AdultSort; page?: number; watchable?: boolean }): Promise<CatalogPage> {
     const page = Math.max(1, opts.page ?? 1);
@@ -312,8 +314,8 @@ export async function browse(opts: { genre?: string; sort?: AdultSort; page?: nu
 /**
  * Search the whole field: the catalog (AniList — synonyms included) plus every title the
  * sites carry that the catalog doesn't know by that name. Results are ranked by how well
- * the *query* fits a title, so what shows first is what was typed, and loose fuzzy matches
- * are left out once real ones exist. A show on both sites is one card.
+ * the *query* fits a title, but no AniList matches are discarded: search is a discovery
+ * API as well as an exact-title lookup. A show on both sites is one card.
  */
 export async function search(query: string, page = 1): Promise<CatalogPage> {
     const q = query.trim();
@@ -361,10 +363,10 @@ export async function search(query: string, page = 1): Promise<CatalogPage> {
     // Best fit first; among equals, what can be played. Array.sort is stable, so ties keep source order.
     ranked.sort((a, b) => a.rel - b.rel || Number(b.playable) - Number(a.playable));
 
-    // AniList's fuzzy search returns loosely related titles ("My Sexual Harassment" for "boku no").
-    // Keep them only if there is little else.
-    const solid = ranked.filter((r) => r.rel < 3);
-    const results = (solid.length >= 3 ? solid : ranked).map((r) => r.item);
+    // Do not trim AniList's fuzzy tail. The caller may be searching by an alias, a translated
+    // name, or a partial title; hiding those records made the catalog materially less capable
+    // than querying AniList directly.
+    const results = ranked.map((r) => r.item);
 
     if (!catalog) {
         const start = (page - 1) * PER_PAGE;

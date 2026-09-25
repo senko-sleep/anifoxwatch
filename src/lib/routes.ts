@@ -102,6 +102,8 @@ export function animeSlug(ref: AnimeRef): string {
   }
 
   // Adult catalog title: `hentai-<anilistId>` ↔ `<title>-al<anilistId>`.
+  // Source-native identifiers are authoritative. Keeping the prefix in the URL
+  // prevents a provider's numeric id from being mistaken for an AniList id.
   const catalog = id.match(/^hentai-(\d+)$/i);
   if (catalog) {
     const base = generateAnimeSlug(title, id);
@@ -120,7 +122,10 @@ export function animeSlug(ref: AnimeRef): string {
   }
 
   const bare = stripSourcePrefix(id).replace(/\//g, '-');
-  return bare || generateAnimeSlug(title, id);
+  // Keep URLs human-readable. The backend resolves the title to its provider
+  // ID; provider names and numeric IDs do not belong in the public URL.
+  const readable = generateAnimeSlug(title, id);
+  return readable !== 'unknown' ? readable : bare;
 }
 
 function extraOnly(extra = ''): string {

@@ -41,6 +41,19 @@ async function kitsuIdFromAniList(anilistId: string): Promise<string | null> {
   return item?.type === 'anime' ? item.id : null;
 }
 
+/** Source-native pages do not carry an AniList id, so ask Kitsu for its own id. */
+async function kitsuIdFromTitle(title: string): Promise<string | null> {
+  const query = title.trim();
+  if (!query) return null;
+  const json = await getJson<{ data: Array<{ id: string; attributes?: { canonicalTitle?: string | null } }> }>(
+    `${KITSU}/anime?filter[text]=${encodeURIComponent(query)}&page[limit]=5`
+  );
+  const normalise = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const wanted = normalise(query);
+  const exact = json.data?.find((item) => normalise(item.attributes?.canonicalTitle || '') === wanted);
+  return exact?.id || json.data?.[0]?.id || null;
+}
+
 const toDetail = (e: KitsuEpisode): EpisodeDetail | null => {
   const a = e.attributes;
   if (!a.number) return null;
@@ -54,11 +67,11 @@ const toDetail = (e: KitsuEpisode): EpisodeDetail | null => {
   };
 };
 
-export async function fetchKitsuEpisodeDetails(animeId: string): Promise<EpisodeDetail[]> {
+export async function fetchKitsuEpisodeDetails(animeId: string, title?: string): Promise<EpisodeDetail[]> {
   const anilistId = animeId.match(/^anilist-(\d+)$/)?.[1];
-  if (!anilistId) return [];
-
-  const kitsuId = await kitsuIdFromAniList(anilistId);
+  const kitsuId = anilistId
+    ? await kitsuIdFromAniList(anilistId)
+    : await kitsuIdFromTitle(title || '');
   if (!kitsuId) return [];
 
   const url = (offset: number) =>

@@ -82,16 +82,6 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     const resolveSlug = async () => {
       if (adult) return; // /watch/hentai/<slug> maps to its id directly — see cleanAnimeId
       if (isSlugBased && animeId) {
-        // Fast path: if the slug ends in a numeric ID (e.g. "chainsaw-man-127230" or "naruto-20"),
-        // it's an AniList slug — resolve directly without hitting the search API.
-        const trailingNumMatch = animeId.match(/-(\d{1,9})$/);
-        if (trailingNumMatch) {
-          const anilistId = `anilist-${trailingNumMatch[1]}`;
-          console.log(`[Watch] Extracted AniList ID from slug: ${animeId} → ${anilistId}`);
-          setResolvedId(anilistId);
-          return;
-        }
-
         setIsResolving(true);
         try {
           // Adult mode comes from ?mode=adult (or an adult source param)
@@ -1213,6 +1203,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                   animeTitle={anime.title}
                   animeImage={anime.image}
                   animeSeason={anime.season}
+                  isAdult={adult}
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center bg-black px-6">

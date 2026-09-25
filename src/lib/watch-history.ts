@@ -13,6 +13,7 @@ export interface WatchHistoryItem {
     progress: number; // 0 to 1
     frameThumbnail?: string; // Base64 or URL of video frame at timestamp
     source?: string; // API source the anime came from (e.g. 'hanime', 'aki-h')
+    isAdult?: boolean; // Watched from the +18 catalog — lets adult-only shelves filter history
 }
 
 const HISTORY_KEY = 'anistream_watch_history';
@@ -25,11 +26,18 @@ export const WatchHistory = {
         episodeNumber: number,
         timestamp: number,
         duration: number,
-        frameThumbnail?: string
+        frameThumbnail?: string,
+        isAdult?: boolean
     ) => {
         try {
             const historyJSON = localStorage.getItem(HISTORY_KEY);
             let history: WatchHistoryItem[] = historyJSON ? JSON.parse(historyJSON) : [];
+
+            // Keep the prior frame when the current source cannot be read by a
+            // canvas (a common restriction on adult streaming hosts). A failed
+            // capture must not replace an otherwise useful Continue Watching
+            // still with the poster.
+            const existingItem = history.find(item => item.animeId === anime.id);
 
             // Remove existing entry for this anime
             history = history.filter(item => item.animeId !== anime.id);
@@ -46,8 +54,9 @@ export const WatchHistory = {
                 duration,
                 lastWatched: Date.now(),
                 progress: duration > 0 ? timestamp / duration : 0,
-                frameThumbnail,
+                frameThumbnail: frameThumbnail ?? existingItem?.frameThumbnail,
                 source: anime.source,
+                isAdult,
             };
 
             // Add to beginning
