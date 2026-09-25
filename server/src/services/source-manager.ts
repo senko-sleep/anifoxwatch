@@ -3212,8 +3212,29 @@ export class SourceManager {
         let resolvedEpisodeId = episodeId;
         let isAnilistId = episodeId.toLowerCase().startsWith('anilist-');
         const hasExplicitServer = !!server;
+
+        // Resolve anilistId from episode ID or title if not provided directly
+        if (!anilistId && isAnilistId) {
+            const m = /^anilist-(\d+)/i.exec(episodeId);
+            if (m) anilistId = parseInt(m[1], 10);
+        }
+        if (!anilistId && forcedTitle) {
+            const isAdult = /^(watchhentai|hentaimama|hentaihaven|hanime|akih|hentai)-/i.test(episodeId);
+            if (!isAdult) {
+                try {
+                    const searchRes = await anilistService.searchByTitle(forcedTitle);
+                    if (searchRes?.id) {
+                        const m = /^anilist-(\d+)/i.exec(searchRes.id);
+                        if (m) {
+                            anilistId = parseInt(m[1], 10);
+                            console.log(`   🎯 Resolved AniList ID ${anilistId} from title "${forcedTitle}"`);
+                        }
+                    }
+                } catch { /* ignore */ }
+            }
+        }
         
-        console.log(`   🔍 DEBUG: episodeId=${episodeId}, isAnilistId=${isAnilistId}, hasExplicitServer=${hasExplicitServer}`);
+        console.log(`   🔍 DEBUG: episodeId=${episodeId}, isAnilistId=${isAnilistId}, anilistId=${anilistId || 'none'}, hasExplicitServer=${hasExplicitServer}`);
         
         if (hasExplicitServer && isAnilistId) {
             const explicitSource = this.sources.get(server) as StreamingSource;
@@ -3459,8 +3480,8 @@ export class SourceManager {
         const GRACE_PERIOD = 500;
         // 15s for cross-source fallback — needs AniList API + search + episodes + streaming
         const CROSS_SOURCE_FALLBACK_MAX_MS = 15_000;
-        // 20s global safety net — allows cross-source fallback to complete before resolving empty
-        const STREAM_GLOBAL_MAX_MS = 20_000;
+        // 25s global safety net — allows cross-source fallback to complete before resolving empty
+        const STREAM_GLOBAL_MAX_MS = 25_000;
         const ONLY_IP_LOCKED_WAIT_MS = category === 'dub' ? 12_000 : 2_000;
 
         // Use existing priority from above
@@ -3643,9 +3664,9 @@ export class SourceManager {
                 // canonical AniList ID supplied by the watch request, giving us a fallback that
                 // does not need the stalled Aniwaves Chromium extraction.
                 let idToUse = this.resolveStreamingEpisodeId(resolvedEpisodeId, source, primarySource, hasSourcePrefix, rawId);
-                if (!idToUse && source.name === 'ReAnime' && anilistId) {
+                if (!idToUse && (source.name === 'ReAnime' || source.name === 'Yomi') && anilistId) {
                     idToUse = `anilist-${anilistId}`;
-                    console.log(`   🔁 ReAnime fallback using AniList ID: ${idToUse}`);
+                    console.log(`   🔁 ${source.name} fallback using AniList ID: ${idToUse}`);
                 }
                 if (!idToUse) {
                     console.log(`   ⏭️ Skipping ${source.name} (ID format incompatible)`);
@@ -3660,9 +3681,9 @@ export class SourceManager {
                 // is 17s — this must stay above that or the caller abandons a wave that was
                 // about to succeed. Local dev rarely hits the second wave (fast launch/network),
                 // which is why this mismatch only showed up on the slower hosted instance.
-                // Stays under STREAM_GLOBAL_MAX_MS (20s) so the global safety net still wins.
+                // Stays under STREAM_GLOBAL_MAX_MS (25s) so the global safety net still wins.
                 const isSlowSource = source.name === 'Aniwaves' || source.name === 'Anichi';
-                const sourceTimeout = isSlowSource ? 19_000 : 11_000;
+                const sourceTimeout = isSlowSource ? 22_000 : 12_000;
                 const streamReliabilityOpts = { timeout: sourceTimeout, maxAttempts: 1 };
                 const sourceStart = Date.now();
                 this.executeReliablyStream(source.name, 'getStreamingLinks',
@@ -3820,6 +3841,27 @@ export class SourceManager {
             if (m) anilistId = parseInt(m[1], 10);
         }
 
+        // Check if title or episodeId or anilistId indicates adult/hentai content
+        const isHentaiQuery =
+            (category as string) === 'hentai' ||
+            (title && isLikelyHentai(title)) ||
+            (episodeId && (episodeId.includes('watchhentai') || episodeId.includes('hentaimama') || episodeId.includes('hentaihaven') || episodeId.includes('hanime') || episodeId.includes('akih'))) ||
+            (anilistId != null && anilistId === 1639);
+
+        if (!anilistId && title && !isHentaiQuery) {
+            try {
+                const searchRes = await anilistService.searchByTitle(title);
+                if (searchRes?.id) {
+                    const m = /^anilist-(\d+)/i.exec(searchRes.id);
+                    if (m) {
+                        anilistId = parseInt(m[1], 10);
+                        if (searchRes.title) title = searchRes.title;
+                        console.log(`   🎯 Cross-source resolved AniList ID ${anilistId} from "${title}"`);
+                    }
+                }
+            } catch { /* use existing title */ }
+        }
+
         if (!title && !anilistId) return null;
 
         // Use AniList API to get the canonical title (romaji/english) for better search
@@ -3898,13 +3940,6 @@ export class SourceManager {
 
         console.log(`   🔢 Target episode number: ${targetEpNum}`);
 
-        // Check if title or episodeId or anilistId indicates adult/hentai content
-        const isHentaiQuery =
-            (category as string) === 'hentai' ||
-            (title && isLikelyHentai(title)) ||
-            (episodeId && (episodeId.includes('watchhentai') || episodeId.includes('hentaimama') || episodeId.includes('hentaihaven') || episodeId.includes('hanime') || episodeId.includes('akih'))) ||
-            (anilistId != null && anilistId === 1639);
-
         // Registered, currently enabled sources to try for cross-source fallback.
         const normalSources = ['Aniwaves', 'Yomi', 'ReAnime', 'Anichi'];
         const hentaiSources = ['WatchHentai'];
@@ -3939,6 +3974,28 @@ export class SourceManager {
 
                         let searchResult: AnimeSearchResult | null = null;
                         let bestMatch: AnimeBase | null = null;
+
+                        // Fast path: if AniList ID is known, sources that support direct AniList ID (Yomi, ReAnime) can fetch directly
+                        if (anilistId && (srcName === 'Yomi' || srcName === 'ReAnime') && !resolved) {
+                            console.log(`   ⚡ ${srcName} fast-path using direct AniList ID: anilist-${anilistId} ep ${targetEpNum}`);
+                            try {
+                                const directStream = await Promise.race([
+                                    src.getStreamingLinks!(`anilist-${anilistId}`, undefined, category, {
+                                        timeout: 10000,
+                                        episodeNum: targetEpNum,
+                                        anilistId
+                                    }),
+                                    new Promise<StreamingData>((_, r) => setTimeout(() => r(new Error('timeout')), 10000))
+                                ]);
+                                if (directStream?.sources?.length > 0 && !resolved) {
+                                    console.log(`   ✅ ${srcName}: ${directStream.sources.length} direct streaming sources (${category})`);
+                                    resolved = true;
+                                    directStream.source = srcName;
+                                    resolve(directStream);
+                                    return;
+                                }
+                            } catch { /* fall through to search */ }
+                        }
 
                         for (const searchTitle of searchTitles) {
                             if (bestMatch || resolved) break;
@@ -4014,7 +4071,7 @@ export class SourceManager {
                         ]);
 
                         if (streamData?.sources?.length > 0 && !resolved) {
-                            const hasPlayable = streamData.sources.some(s => this.isProxyablePlayableSource(s));
+                            const hasPlayable = streamData.sources.some(s => this.isProxyablePlayableSource(s) || s.isEmbed);
                             if (hasPlayable) {
                                 console.log(`   ✅ ${srcName}: ${streamData.sources.length} playable streaming sources (${category})`);
                                 resolved = true;

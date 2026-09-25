@@ -110,6 +110,7 @@ class StreamExtractor {
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
                     '--disable-gpu',
+                    '--disable-blink-features=AutomationControlled',
                     // 1920x1080 buys nothing here — nothing is ever rendered for a human, and the
                     // backing store is paid for in the memory the launch is already short of.
                     '--window-size=1280,720',
@@ -209,6 +210,14 @@ class StreamExtractor {
             await page.setExtraHTTPHeaders({
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+            });
+
+            await page.evaluateOnNewDocument(() => {
+                try {
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                } catch {}
             });
 
             return page;
