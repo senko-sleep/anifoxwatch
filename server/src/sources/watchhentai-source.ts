@@ -1,6 +1,7 @@
 /**
  * WatchHentai Source - Direct HTML scraping for adult anime content from watchhentai.net
- * Uses axios for fast HTTP requests with cheerio for HTML parsing
+ * Uses curlGet (TLS-fingerprint bypass) with axios fallback so the source works from
+ * datacenter IPs that Cloudflare blocks against Node's native TLS stack.
  */
 
 import axios from 'axios';
@@ -9,7 +10,7 @@ import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
-import { getHentaiProxyConfig } from '../utils/proxy-config.js';
+import { curlGet } from '../utils/curl-fetch.js';
 import {
     hasNextPage as pageHasNext,
     isBlockedGenre,
@@ -48,14 +49,8 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const proxyConfig = getHentaiProxyConfig();
-            const response = await axios.get(this.baseUrl, {
-                timeout: options?.timeout || 30000,
-                signal: options?.signal,
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                proxy: proxyConfig || options?.proxy
-            });
-            this.isAvailable = response.status === 200;
+            const html = await this.fetchHtml(this.baseUrl, options);
+            this.isAvailable = html.length > 100;
             return this.isAvailable;
         } catch {
             return false;
@@ -67,18 +62,35 @@ export class WatchHentaiSource extends BaseAnimeSource {
         return parseCards($);
     }
 
+    /**
+     * Fetch a WatchHentai page. Uses curlGet first (curl's TLS fingerprint bypasses the bot
+     * check that gives Node/axios a 403 from a datacenter IP), falling back to axios when
+     * curl is not installed (local dev on Windows).
+     */
     private async fetchHtml(url: string, options?: SourceRequestOptions, timeout = 20000): Promise<string> {
-        const proxyConfig = getHentaiProxyConfig();
-        const response = await axios.get<string>(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            },
-            signal: options?.signal,
-            timeout: options?.timeout || timeout,
-            proxy: proxyConfig || options?.proxy,
-        });
-        return response.data;
+        const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+        try {
+            return await curlGet(url, {
+                headers: {
+                    'User-Agent': UA,
+                    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    Referer: `${this.baseUrl}/`,
+                },
+                timeoutMs: options?.timeout || timeout,
+                signal: options?.signal,
+            });
+        } catch (curlErr: any) {
+            // curl not installed or ENOENT → try axios directly (works on local dev)
+            if (/not installed|ENOENT/i.test(String(curlErr?.message))) {
+                const response = await axios.get<string>(url, {
+                    headers: { 'User-Agent': UA, Accept: 'text/html,*/*;q=0.8' },
+                    signal: options?.signal,
+                    timeout: options?.timeout || timeout,
+                });
+                return response.data;
+            }
+            throw curlErr;
+        }
     }
 
     /** `watchhentai-series/foo` | `series/foo` | `foo` → `foo`. Null for anything that isn't a series id. */
@@ -249,16 +261,10 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
         for (const route of ['player', 'player-alt']) {
             try {
-                const res = await axios.get(`${this.baseUrl}/${route}/${post}/${nume}/${kind}/`, {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        Referer: videoUrl,
-                    },
-                    timeout: 10000,
-                    signal,
-                });
-                const body = String(res.data);
+                const playerUrl = `${this.baseUrl}/${route}/${post}/${nume}/${kind}/`;
+                const body = await this.fetchHtml(playerUrl, { signal } as SourceRequestOptions, 10000);
                 const list = body.match(/(?:whJwSources|\bSources)\s*=\s*(\[[\s\S]*?\])\s*;/);
+
                 if (!list) continue;
 
                 const found: VideoSource[] = [];
@@ -325,17 +331,9 @@ export class WatchHentaiSource extends BaseAnimeSource {
 
             logger.info(`[WatchHentai] Fetching video page: ${videoUrl}`);
 
-            const response = await axios.get(videoUrl, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                },
-                signal: options?.signal,
-                timeout: 15000,
-            });
-
-            const html = response.data;
+            const html = await this.fetchHtml(videoUrl, { ...options, timeout: 15000 });
             const $ = cheerio.load(html);
+
             const sources: VideoSource[] = [];
 
             // Step 1: the site's own player page — full-quality files, several sizes.

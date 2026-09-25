@@ -3655,9 +3655,14 @@ export class SourceManager {
                 }
 
                 console.log(`   📡 ${source.name} trying with ID: ${idToUse}`);
-                // Aniwaves uses a headless browser and needs more time to extract real HLS
+                // Aniwaves uses a headless browser and needs more time to extract real HLS.
+                // Its own internal wave-fallback budget (SERVER_BUDGET_MS in aniwaves-source.ts)
+                // is 17s — this must stay above that or the caller abandons a wave that was
+                // about to succeed. Local dev rarely hits the second wave (fast launch/network),
+                // which is why this mismatch only showed up on the slower hosted instance.
+                // Stays under STREAM_GLOBAL_MAX_MS (20s) so the global safety net still wins.
                 const isSlowSource = source.name === 'Aniwaves' || source.name === 'Anichi';
-                const sourceTimeout = isSlowSource ? 14_000 : 11_000;
+                const sourceTimeout = isSlowSource ? 19_000 : 11_000;
                 const streamReliabilityOpts = { timeout: sourceTimeout, maxAttempts: 1 };
                 const sourceStart = Date.now();
                 this.executeReliablyStream(source.name, 'getStreamingLinks',
