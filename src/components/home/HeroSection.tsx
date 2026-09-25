@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Info, Pause, Play, Star } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Info, Pause, Play, Star, Volume2, VolumeX } from 'lucide-react';
 import {
   atmosphereStyle,
   cn,
@@ -14,6 +14,7 @@ import {
   getHeroTitle,
   getSeasonLabel,
   getStudioName,
+  getTrailerUrl,
   type HeroAnime,
 } from '@/hooks/useHeroAnimeMultiSource';
 
@@ -22,7 +23,9 @@ interface HeroSectionProps {
 }
 
 const SLIDE_MS = 12000;
-const FADE_MS = 600;
+const FADE_MS = 1200;
+/** How long a slide has to sit still (hovered on desktop, or simply active on touch) before its trailer takes over. */
+const TRAILER_DWELL_MS = 2800;
 
 /**
  * The spotlight, in two quiet parts. The frame holds one title — its own
@@ -44,10 +47,13 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const [paused, setPaused] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [trailerReady, setTrailerReady] = useState(false);
+  const [muted, setMuted] = useState(true);
 
   const rafRef = useRef(0);
   const startedRef = useRef(0);
   const rowRef = useRef<HTMLUListElement>(null);
+  const dwellTimerRef = useRef(0);
 
   const safeIndex = count ? ((index % count) + count) % count : 0;
   const anime = slides[safeIndex];
@@ -106,6 +112,20 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
     rowRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
   }, [safeIndex]);
 
+  // Trailer takes over the still poster once a slide has settled — hovered on a mouse,
+  // or simply active for a beat on touch, where there's no hover to wait for.
+  useEffect(() => {
+    setTrailerReady(false);
+    window.clearTimeout(dwellTimerRef.current);
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const hoverCapable = window.matchMedia('(hover: hover)').matches;
+    if (hoverCapable && !paused) return; // desktop: wait for the hover that sets `paused`
+
+    dwellTimerRef.current = window.setTimeout(() => setTrailerReady(true), TRAILER_DWELL_MS);
+    return () => window.clearTimeout(dwellTimerRef.current);
+  }, [safeIndex, paused]);
+
   if (!anime || !count) {
     return (
       <section className="page-x pt-4">
@@ -145,6 +165,8 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
     return { slide: slides[slideIndex], slideIndex };
   });
 
+  const trailerUrl = trailerReady ? getTrailerUrl(anime) : null;
+
   const controlBtn =
     'grid h-7 w-7 place-items-center rounded-full text-foreground/55 transition-colors hover:bg-white/10 hover:text-foreground';
 
@@ -158,25 +180,49 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
       onMouseLeave={() => setPaused(false)}
     >
       <div
-        className="relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[hsl(234_28%_7%)]"
-        style={{ boxShadow: 'var(--shadow-lifted)' }}
+        className="home-hero home-hero-letterbox group relative overflow-hidden rounded-[1.35rem] border border-white/[0.1] bg-[hsl(236_36%_4%)] transition-shadow duration-700"
+        style={{ boxShadow: '0 28px 80px -38px hsl(var(--atmos) / 0.7), var(--shadow-lifted)' }}
       >
-        <div className="relative lg:h-[460px]">
+        <div className="relative lg:h-[500px]">
           {slides.map((slide, i) =>
             i === safeIndex || i === prev ? (
               <HeroBackdrop key={`${slide.id}-${i}`} anime={slide} active={i === safeIndex} />
             ) : null
           )}
 
-          {/* One scrim for the text column, one low; the blurred cover stays soft behind them. */}
+          {trailerUrl && (
+            <div key={trailerUrl} className="animate-fade absolute inset-0 z-[2] overflow-hidden" aria-hidden>
+              <iframe
+                src={`${trailerUrl}?autoplay=1&mute=${muted ? 1 : 0}&controls=0&loop=1&playlist=${anime.trailer?.id}&modestbranding=1&rel=0&iv_load_policy=3&playsinline=1&disablekb=1`}
+                title=""
+                allow="autoplay; encrypted-media"
+                className="pointer-events-none absolute left-1/2 top-1/2 h-[100vh] w-[177.78vh] min-h-full min-w-full -translate-x-1/2 -translate-y-1/2 border-0"
+              />
+            </div>
+          )}
+
+          {/* One scrim for the text column, one low; the blurred cover stays soft behind them. Both ease back a touch on hover so a settled trailer gets to breathe. */}
           <div className="pointer-events-none absolute inset-0 z-[3]">
-            <div className="absolute inset-0 bg-gradient-to-r from-[hsl(234_32%_5%_/_0.92)] via-[hsl(234_32%_5%_/_0.6)] to-[hsl(234_32%_5%_/_0.25)]" />
-            <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-[hsl(234_32%_5%_/_0.85)] to-transparent" />
-            <div className="atmos-wash absolute inset-0 opacity-60 mix-blend-screen" />
+            <div className="absolute inset-0 bg-gradient-to-r from-[hsl(236_40%_3%_/_0.98)] via-[hsl(236_38%_4%_/_0.88)] to-[hsl(236_38%_4%_/_0.18)]" />
+            <div className="absolute inset-x-0 bottom-0 h-[58%] bg-gradient-to-t from-[hsl(236_40%_3%_/_0.96)] via-[hsl(236_40%_3%_/_0.48)] to-transparent" />
+            <div className="home-hero-vignette absolute inset-0" />
+            <div className="home-hero-ember absolute inset-0" />
+            <div className="home-hero-grain absolute inset-0" />
           </div>
 
-          <div key={safeIndex} className="animate-fade relative z-[4] flex flex-col justify-end sm:min-h-[27.5rem] sm:flex-row sm:items-end sm:justify-between sm:gap-8 lg:absolute lg:inset-0 lg:min-h-0 lg:gap-10">
-            <div className="w-full max-w-2xl px-4 pb-4 pt-4 sm:p-8 lg:p-10">
+          {trailerUrl && (
+            <button
+              type="button"
+              onClick={() => setMuted((v) => !v)}
+              aria-label={muted ? 'Unmute trailer' : 'Mute trailer'}
+              className="glass-chip absolute right-4 top-4 z-[5] grid h-8 w-8 place-items-center rounded-full text-foreground/80 transition-colors hover:text-foreground"
+            >
+              {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            </button>
+          )}
+
+          <div key={safeIndex} className="animate-fade relative z-[4] flex flex-col justify-end sm:min-h-[29.5rem] sm:flex-row sm:items-end sm:justify-between sm:gap-8 lg:absolute lg:inset-0 lg:min-h-0 lg:gap-10">
+            <div className="w-full max-w-2xl px-4 pb-5 pt-5 sm:p-9 lg:p-12">
               <div className="flex items-end gap-3 sm:block">
               <Link
                 to={animePath(ref)}
@@ -192,7 +238,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                 {season && <span className="text-muted-foreground">· {season}</span>}
               </p>
 
-              <h1 className="mt-1.5 font-display text-[1.1rem] font-medium leading-[1.2] sm:mt-2.5 text-foreground sm:text-4xl lg:text-[2.5rem]">
+              <h1 className="mt-1.5 font-display text-[1.35rem] font-semibold leading-[1.08] tracking-[-0.035em] sm:mt-2.5 text-foreground sm:text-[2.8rem] lg:text-[3.35rem]">
                 {title}
               </h1>
 
@@ -212,7 +258,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
               </div>
               </div>
 
-              <p className="mt-3 line-clamp-2 max-w-xl text-[12px] leading-relaxed text-foreground/60 sm:mt-3.5 sm:line-clamp-3 sm:text-sm sm:text-foreground/65">
+              <p className="mt-4 line-clamp-2 max-w-xl text-[12px] leading-relaxed text-foreground/70 sm:mt-4 sm:line-clamp-3 sm:text-[15px] sm:text-foreground/75">
                 {synopsis}
               </p>
 
@@ -255,7 +301,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
               to={animePath(ref)}
               tabIndex={-1}
               aria-hidden
-              className="art-frame relative mb-8 mr-8 hidden aspect-[2/3] w-36 shrink-0 sm:block lg:mb-10 lg:mr-10 lg:w-[184px] xl:w-[200px]"
+            className="home-hero-poster art-frame relative mb-8 mr-8 hidden aspect-[2/3] w-36 shrink-0 sm:block lg:mb-12 lg:mr-12 lg:w-[190px] xl:w-[214px]"
             >
               <Thumb anime={anime} eager />
             </Link>
@@ -265,7 +311,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
 
       {/* Up next — its own section, outside the frame. */}
       {count > 1 && (
-        <div className="mt-4">
+        <div className="mt-5">
           <div className="mb-2 flex items-center justify-between px-0.5">
             <span className="eyebrow">Up next</span>
             <div className="flex items-center gap-0.5">
@@ -296,7 +342,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                   type="button"
                   onClick={() => goTo(slideIndex)}
                   style={atmosphereStyle(slide.coverImage?.color)}
-                  className="glass-button relative flex w-full items-center gap-3 overflow-hidden rounded-xl p-2 text-left"
+                  className="home-upnext-card relative flex w-full items-center gap-3 overflow-hidden rounded-xl p-2.5 text-left"
                 >
                   <div className="art-frame relative aspect-[2/3] w-11 shrink-0 !rounded-md">
                     <Thumb anime={slide} />
@@ -397,8 +443,12 @@ function HeroBackdrop({ anime, active }: { anime: HeroAnime; active: boolean }) 
         <img
           src={src}
           alt=""
-          className="h-full w-full scale-125 object-cover opacity-80 blur-3xl saturate-150"
-          style={{ objectPosition: 'center 30%' }}
+          className="h-full w-full origin-center object-cover opacity-80 blur-3xl saturate-150"
+          style={{
+            objectPosition: 'center 30%',
+            transform: active ? 'scale(1.32)' : 'scale(1.25)',
+            transition: active ? `transform ${SLIDE_MS}ms linear` : undefined,
+          }}
           decoding="async"
           referrerPolicy="no-referrer"
           onError={() => setSrcIndex((i) => (i + 1 < candidates.length ? i + 1 : i))}

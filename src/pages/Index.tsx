@@ -185,9 +185,9 @@ const Index = () => {
         </div>
       )}
 
-      <main className="page-x page-bottom space-y-12 pt-10 sm:space-y-14">
+      <main className="home-main page-x page-bottom space-y-12 pt-11 sm:space-y-16">
         {history.length > 0 && (
-          <section>
+          <section className="home-featured-shelf">
             <SectionHeader title="Pick up where you left off" link="/browse" linkText="Find something new" />
             <ContinueWatching items={history} onRemove={removeFromHistory} />
           </section>
@@ -195,7 +195,7 @@ const Index = () => {
 
         {rows.map((row) =>
           row.loading || row.items.length > 0 ? (
-            <section key={row.key}>
+            <section key={row.key} className="home-shelf">
               <SectionHeader title={row.title} subtitle={row.subtitle} link={row.link} linkText={row.linkText} />
               <AnimeSlider anime={row.items.slice(0, 20)} loading={row.loading} />
             </section>
