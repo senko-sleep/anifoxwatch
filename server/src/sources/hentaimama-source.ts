@@ -3,9 +3,6 @@
  * returns nothing to a plain request, so title discovery goes through the full listing
  * (`/tvshows/`, 60+ pages) which the hentai index crawls; this class serves details,
  * episodes and streams.
- *
- * Uses curlGet (TLS-fingerprint bypass) with axios fallback so the source works from
- * datacenter IPs that Cloudflare blocks against Node's native TLS stack.
  */
 
 import axios from 'axios';
@@ -14,7 +11,6 @@ import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
-import { curlGet } from '../utils/curl-fetch.js';
 import {
     HM_BASE,
     parseCards,
@@ -45,33 +41,16 @@ export class HentaiMamaSource extends BaseAnimeSource {
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
-    /**
-     * Fetch a HentaiMama page. Uses curlGet first (curl's TLS fingerprint bypasses the bot
-     * check that gives Node/axios a 403 from a datacenter IP), falling back to axios when
-     * curl is not installed (local dev on Windows).
-     */
     private async html(url: string, options?: SourceRequestOptions, headers: Record<string, string> = {}): Promise<string> {
-        try {
-            return await curlGet(url, {
-                headers: { 'User-Agent': UA, Accept: 'text/html,*/*;q=0.8', Referer: `${this.baseUrl}/`, ...headers },
-                timeoutMs: options?.timeout || 25000,
-                signal: options?.signal,
-            });
-        } catch (curlErr: any) {
-            if (/not installed|ENOENT/i.test(String(curlErr?.message))) {
-                const res = await axios.get<string>(url, {
-                    headers: { 'User-Agent': UA, Accept: 'text/html,*/*;q=0.8', ...headers },
-                    signal: options?.signal,
-                    timeout: options?.timeout || 25000,
-                });
-                return res.data;
-            }
-            throw curlErr;
-        }
+        const res = await axios.get<string>(url, {
+            headers: { 'User-Agent': UA, Accept: 'text/html,*/*;q=0.8', ...headers },
+            signal: options?.signal,
+            timeout: options?.timeout || 25000,
+        });
+        return res.data;
     }
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
-
         try {
             const $ = cheerio.load(await this.html(`${this.baseUrl}/tvshows/`, options, {}));
             return parseCards($).length > 0;
