@@ -111,7 +111,7 @@ RUN chmod +x /usr/local/bin/start.sh
 ENV PORT=8080
 ENV NODE_PORT=3001
 ENV MEDIA_ACCEL=1
-EXPOSE 8080
+EXPOSE 8080 
 
 # dumb-init reaps the zombies Chromium leaves behind and forwards signals to the whole group.
 ENTRYPOINT ["dumb-init", "--"]
