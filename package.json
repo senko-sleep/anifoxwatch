@@ -33,7 +33,9 @@
     "build:functions": "cd functions && npm install",
     "firebase:init": "npx firebase init",
     "firebase:serve": "npx firebase serve",
-    "firebase:emulators": "npx firebase emulators:start"
+    "firebase:emulators": "npx firebase emulators:start",
+    "test:e2e": "node --test --test-concurrency=1 tests/e2e/watch.e2e.mjs",
+    "test:e2e:stream": "node tests/e2e/streaming-live.e2e.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

@@ -20,6 +20,10 @@ services:
         value: 8080
       - key: ENABLE_ADULT_CONTENT
         value: "true"
+      # Browser-backed sources launch Chromium and can OOM a low-memory web service. Direct
+      # resolvers remain enabled and are the production-safe default on the free plan.
+      - key: DISABLE_BROWSER_SOURCES
+        value: "true"
       # Render's router sits in front of the app: without this every visitor looks like one
       # address (the router's), which breaks per-client logging and limits.
       - key: TRUST_PROXY

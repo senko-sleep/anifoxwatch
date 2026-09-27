@@ -29,24 +29,11 @@ import {
 
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { WatchHistory } from '@/lib/watch-history';
+import { EMBED_DOMAINS, embedUrlFor } from '@/lib/embed-source';
 import { toast } from 'sonner';
 
 type AudioType = 'sub' | 'dub';
 
-const EMBED_DOMAINS = ['streamwish', 'mega.nz', 'hqq.tv', 'streamtape', 'doodstream', 'mp4upload', 'sendvid', 'ok.ru', 'flixcloud', 'megacloud', 'rabbitstream', 'dokicloud'];
-// Aniwaves / EchoVideo embeds are domain-locked — loading them in our iframe yields
-// "Embedding blocked on this site". Treat them as non-embeddable so the player never
-// tries to render them (and instead fails over to a real stream source).
-const DOMAIN_LOCKED_EMBED = /aniwaves\.ru|echovideo|burntburst|play\.echovideo/i;
-const isEmbedUrl = (url: string) => {
-  const lower = url.toLowerCase();
-  if (!lower) return false;
-  if (DOMAIN_LOCKED_EMBED.test(lower)) return false;
-  if (lower.includes('.m3u8') || lower.includes('.mp4')) return false;
-  // Streamtape /get_video? and tapecontent CDN are direct video links, not embed pages
-  if ((lower.includes('streamtape') || lower.includes('tapecontent')) && lower.includes('get_video')) return false;
-  return EMBED_DOMAINS.some((d) => lower.includes(d));
-};
 type QualityType = '1080p' | '720p' | '480p' | '360p' | 'auto';
 
 function plainDescription(raw: string | undefined): string {
@@ -313,6 +300,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   const streamServer = userPickedServer && selectedServer && selectedServer.toLowerCase() !== 'default'
     ? selectedServer
     : undefined;
+  const [failedProviders, setFailedProviders] = useState<string[]>([]);
   const [bypassCache, setBypassCache] = useState(false);
   const {
     data: streamData,
@@ -320,7 +308,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     error: streamError,
     refetch: refetchStream
   } = useStreamingLinks(getEpisodeIdForStreaming(), streamServer, audioType, isStreamEnabled, selectedEpisodeNum,
-    cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined, anime?.title, bypassCache);
+    cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined, anime?.title, bypassCache, failedProviders);
 
   // Get best quality source - skip sources that previously failed
   // IMPORTANT: implemented as useMemo (not useCallback + call-in-render) so that Watch re-renders
@@ -405,6 +393,30 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     lastVideoSourceObjRef.current = candidate;
     return candidate;
   }, [streamData, sourceRetryIndex, audioType]);
+
+  // Embed-page sources (FlixCloud, etc.) play inside a cross-origin iframe we
+  // don't control, so VideoPlayer — and its position/history tracking — never
+  // mounts for them. Without this, resuming an episode that fell back to an
+  // embed silently lost all progress: it wouldn't appear in Continue Watching,
+  // and reopening the anime would restart at episode 1.
+  const isEmbedSource = useMemo(() => embedUrlFor(videoSource) !== null, [videoSource]);
+
+  useEffect(() => {
+    if (!isEmbedSource || !anime?.id || !anime.title || !selectedEpisodeNum) return;
+    // We can't read an embed's currentTime cross-origin, so there's no real
+    // timestamp to track — but recording the episode itself is what lets
+    // Continue Watching, and reopening the anime, land back on it instead of
+    // episode 1. `duration: 0` keeps progress at 0% rather than a fake number.
+    WatchHistory.save(
+      { id: cleanAnimeId, title: anime.title, image: anime.image, season: anime.season } as any,
+      selectedEpisodeNum.toString(),
+      selectedEpisodeNum,
+      0,
+      0,
+      undefined,
+      adult,
+    );
+  }, [isEmbedSource, cleanAnimeId, anime?.id, anime?.title, anime?.image, anime?.season, selectedEpisodeNum, adult]);
 
   // Debug: log the video source details
   useEffect(() => {
@@ -544,9 +556,11 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       console.log('[Watch] ⏭️ Skipping failover - stream fetch aborted (normal during server change)');
       return;
     }
-    // Don't failover on 404 - might be episode-specific
-    if ((streamError as any).status === 404) {
-      console.log('[Watch] ⏭️ Skipping failover - 404 error (episode not available)');
+    // Only the API may declare an episode absent. A resolver outage used to be a generic
+    // 404 too, which stranded playback on the first failed provider even though the next
+    // server could work. `NO_STREAMING_SOURCES` is retryable and must continue failover.
+    if ((streamError as any).code === 'EPISODE_NOT_FOUND') {
+      console.log('[Watch] ⏭️ Skipping failover - API confirmed that the episode does not exist');
       return;
     }
     const realServers = servers;
@@ -637,6 +651,14 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       return;
     }
 
+    // Ask the backend to resume across providers after a late playback failure.
+    if (streamData?.source && !failedProviders.includes(streamData.source)) {
+      setFailedProviders(previous => [...previous, streamData.source]);
+      setBypassCache(true);
+      setSourceRetryIndex(0);
+      return;
+    }
+
     // If we've exhausted sources, fail over to next server
     const realServers = servers || [];
     if (realServers.length && serverRetryCount < realServers.length) {
@@ -647,12 +669,13 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       setUserPickedServer(true);
       setServerRetryCount(prev => prev + 1);
     }
-  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType, refetchStream]);
+  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType, refetchStream, failedProviders]);
 
   // Reset retry count when episode or audio changes (new stream fetch)
   useEffect(() => {
     setServerRetryCount(0);
     setBypassCache(false);
+    setFailedProviders([]);
   }, [selectedEpisode, audioType]);
 
   // Reset server selection when audioType changes to allow auto-selecting the best server for the new audio type
@@ -1117,24 +1140,9 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   }
 
   // If the best available source is an embed page (HTML), show an iframe instead of VideoPlayer
-  const embedFallbackUrl = (() => {
-    if (!videoSource) return null;
-    // Server-side flagged as embed fallback — use raw originalUrl so iframe JS works.
-    // Skip domain-locked embeds (aniwaves/echovideo) — rendering them in our iframe
-    // triggers "Embedding blocked on this site", so let the caller fail over instead.
-    if ((videoSource as { isEmbed?: boolean }).isEmbed) {
-      const raw = (videoSource as { originalUrl?: string }).originalUrl || videoSource.url || '';
-      if (DOMAIN_LOCKED_EMBED.test(raw)) return null;
-      return raw || null;
-    }
-    const raw = (videoSource as { originalUrl?: string }).originalUrl || videoSource.url || '';
-    if (isEmbedUrl(raw)) return raw;
-    if (videoSource.url?.includes('/api/stream/proxy?url=')) {
-      const inner = decodeURIComponent(videoSource.url.split('/api/stream/proxy?url=')[1]?.split('&')[0] || '');
-      if (isEmbedUrl(inner)) return inner;
-    }
-    return null;
-  })();
+  // Server-flagged embeds use the raw originalUrl so the iframe's JS works; domain-locked
+  // embeds (aniwaves/echovideo) return null so the caller fails over instead.
+  const embedFallbackUrl = embedUrlFor(videoSource);
 
 
   // One responsive layout for every screen — phones get the same stage, edge to edge.

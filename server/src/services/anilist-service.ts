@@ -427,9 +427,12 @@ export class AniListService {
     async searchByTitle(title: string, isAdult: boolean = false): Promise<AnimeBase | null> {
         const query = `
             query ($search: String, $isAdult: Boolean) {
-                Media(search: $search, type: ANIME, isAdult: $isAdult) {
+                Page(perPage: 8) {
+                media(search: $search, type: ANIME, isAdult: $isAdult, sort: SEARCH_MATCH) {
                     id
                     idMal
+                    popularity
+                    synonyms
                     title {
                         romaji
                         english
@@ -474,15 +477,30 @@ export class AniListService {
                     bannerImage
                     isAdult
                 }
+                }
             }
         `;
 
-        const response = await this.query<AniListResponse>(query, { search: title, isAdult });
-        const media = response?.data?.Media;
+        const response = await this.query<{ data?: { Page?: { media?: AniListMedia[] } } }>(query, { search: title, isAdult });
+        const candidates = response?.data?.Page?.media ?? [];
+        if (!candidates.length) return null;
 
-        if (!media) return null;
+        // AniList's top search hit is often a tie-in (e.g. "Your Name." → a Suntory
+        // commercial), which has no streams. Prefer an exact title match, skip
+        // promo formats, and let popularity break ties.
+        const norm = (t?: string | null) => (t ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+        const wanted = norm(title);
+        const promo = new Set(['MUSIC', 'CM', 'PV']);
+        const score = (m: AniListMedia & { popularity?: number; synonyms?: string[] }) => {
+            const names = [m.title?.english, m.title?.romaji, m.title?.native, ...(m.synonyms ?? [])].map(norm);
+            let s = 0;
+            if (names.includes(wanted)) s += 1000;
+            if (m.format && promo.has(m.format)) s -= 2000;
+            return s + Math.log10((m.popularity ?? 0) + 1) * 10;
+        };
+        const best = [...candidates].sort((a, b) => score(b) - score(a))[0];
 
-        return this.mapToAnimeBase(media);
+        return this.mapToAnimeBase(best);
     }
 
     /**

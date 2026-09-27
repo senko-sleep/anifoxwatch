@@ -36,6 +36,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
+# Koyeb's small instances cannot safely race Chromium-backed providers with the direct
+# resolvers. Set this to false only on an instance deliberately sized for Chromium.
+ENV DISABLE_BROWSER_SOURCES=true
 # Koyeb injects PORT automatically; default to 8000 to match free tier expectations
 ENV PORT=8000
 

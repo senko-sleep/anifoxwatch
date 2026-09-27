@@ -396,12 +396,12 @@ export function useEpisodeServers(episodeId: string, enabled: boolean = true) {
     });
 }
 
-export function useStreamingLinks(episodeId: string, server?: string, category?: string, enabled: boolean = true, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean) {
+export function useStreamingLinks(episodeId: string, server?: string, category?: string, enabled: boolean = true, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean, excludedProviders: string[] = []) {
     return useQuery<StreamingData, Error>({
-        queryKey: queryKeys.stream(episodeId, server, category),
+        queryKey: [...queryKeys.stream(episodeId, server, category), episodeNum, anilistId, excludedProviders.join(',')],
         queryFn: async () => {
             console.log('[useStreamingLinks] Fetching stream:', { episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache });
-            const result = await apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache);
+            const result = await apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache, excludedProviders);
             console.log('[useStreamingLinks] Stream result:', {
                 sourceCount: result.sources?.length || 0,
                 source: result.source,

@@ -26,6 +26,11 @@ const STATUS_MAP: Record<string, Anime['status']> = {
 // In-memory cache for fast metadata lookup
 const animeDetailCache = new Map<string, Anime>();
 
+const matchesTitle = (a: string, b: string) => {
+  const normalize = (s: string) => s.toLowerCase().replace(/[×✕]/g, 'x').replace(/[^\p{L}\p{N}]/gu, '');
+  return normalize(a) === normalize(b);
+};
+
 /**
  * Extract a clean human-readable search title from any anime ID or slug.
  * Examples:
@@ -55,8 +60,7 @@ export function extractNumericId(idOrSlug: string): number | null {
   const directMatch = /^anilist-(\d+)$/i.exec(idOrSlug.trim());
   if (directMatch) return parseInt(directMatch[1], 10);
   if (/^\d+$/.test(idOrSlug.trim())) return parseInt(idOrSlug.trim(), 10);
-  const trailingMatch = idOrSlug.match(/-(\d{1,9})$/);
-  if (trailingMatch) return parseInt(trailingMatch[1], 10);
+  // Provider IDs and season numbers are not AniList IDs.
   return null;
 }
 
@@ -171,6 +175,7 @@ export async function fetchJikanAnimeDetails(queryOrMalId: string | number): Pro
     if (!item) return null;
 
     const title = item.title_english || item.title || 'Unknown';
+    if (!isId && ![title, item.title, ...(item.title_synonyms || [])].some(t => t && matchesTitle(String(queryOrMalId), t))) return null;
     const desc = (item.synopsis || '').replace(/<[^>]+>/g, '').trim() || 'No description available.';
     const coverUrl = item.images?.jpg?.large_image_url || item.images?.jpg?.image_url || item.images?.webp?.large_image_url || '';
 
@@ -226,6 +231,7 @@ export async function fetchKitsuAnimeDetails(queryOrKitsuId: string): Promise<An
 
     const attr = item.attributes;
     const title = attr.titles?.en || attr.titles?.en_jp || attr.canonicalTitle || 'Unknown';
+    if (!isId && ![title, ...Object.values(attr.titles || {})].some(t => typeof t === 'string' && matchesTitle(queryOrKitsuId, t))) return null;
     const desc = (attr.synopsis || '').replace(/<[^>]+>/g, '').trim() || 'No description available.';
     const coverUrl = attr.posterImage?.large || attr.posterImage?.original || attr.coverImage?.large || '';
     const bannerUrl = attr.coverImage?.original || attr.coverImage?.large || undefined;

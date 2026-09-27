@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
@@ -265,10 +266,11 @@ async function executeAnilistRequest(request: any, retryCount = 0): Promise<any>
 }
 
 app.post('/api/anilist/graphql', async (req: Request, res: Response): Promise<void> => {
-    // Generate better cache key based on query hash (more efficient than full body)
+    // Key on the whole query: home rows share a long common prefix, so a truncated
+    // key served one row's results for another (Action showed Films).
     const query = req.body.query || '';
     const variables = req.body.variables || {};
-    const cacheKey = `${query.substring(0, 100)}:${JSON.stringify(variables)}`;
+    const cacheKey = createHash('sha1').update(query).update('\0').update(JSON.stringify(variables)).digest('hex');
 
     try {
         const { value, state, ageMs } = await anilistProxyCache.getWithState(cacheKey, () =>
@@ -411,7 +413,10 @@ const startServer = async (port: number) => {
         // Not on Render's free tier: there it competes with boot for a fraction of a CPU and
         // ~512 MB, times out, and — worse — holds Chromium's memory for sources that mostly
         // don't need it. The browser starts on demand instead. PUPPETEER_WARMUP=true forces it.
-        if (process.env.PUPPETEER_WARMUP === 'true' || !(process.env.RENDER === 'true' || process.env.RENDER_EXTERNAL_URL)) {
+        // Do not warm Chromium in the low-memory profile: warming alone can OOM-kill a small
+        // Koyeb/Render instance before a direct resolver gets a chance to handle a request.
+        if (process.env.DISABLE_BROWSER_SOURCES !== 'true' &&
+            (process.env.PUPPETEER_WARMUP === 'true' || !(process.env.RENDER === 'true' || process.env.RENDER_EXTERNAL_URL))) {
             void streamExtractor.warmBrowser();
         }
     };

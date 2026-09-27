@@ -3,6 +3,7 @@
  */
 
 export interface VideoSource {
+    headers?: Record<string, string>;
     url: string;
     quality: '360p' | '480p' | '720p' | '1080p' | 'auto' | 'default';
     isM3U8: boolean;
@@ -28,6 +29,7 @@ export interface VideoSubtitle {
 }
 
 export interface StreamingData {
+    attempts?: { provider: string; episodeId?: string; status: string; error?: string }[];
     sources: VideoSource[];
     subtitles: VideoSubtitle[];
     headers?: Record<string, string>;

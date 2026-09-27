@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo } from 'react';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, ArrowRight, RefreshCw } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
 import { HeroSection } from '@/components/home/HeroSection';
@@ -159,7 +160,11 @@ const Index = () => {
       title: 'Coming soon',
       subtitle: 'Worth remembering',
       link: '/browse?status=Upcoming',
-      items: safe(upcomingData?.results ?? []),
+      // This season's not-yet-aired shows already lead the season row; repeating
+      // them here made two adjacent shelves open identically.
+      items: safe(upcomingData?.results ?? []).filter(
+        (a) => !seasonalData?.results?.some((s) => s.id === a.id || s.title === a.title),
+      ),
       loading: false,
       retry: () => {},
     },
@@ -185,17 +190,23 @@ const Index = () => {
         </div>
       )}
 
-      <main className="page-x page-bottom space-y-12 pt-10 sm:space-y-14">
+      <main className="home-main page-x page-bottom space-y-12 pt-11 sm:space-y-16">
         {history.length > 0 && (
-          <section>
-            <SectionHeader title="Pick up where you left off" link="/browse" linkText="Find something new" />
+          <section className="home-featured-shelf">
+            <div className="resume-heading">
+              <div>
+                <p className="eyebrow">Continue your story <span>•</span> {history.length} active</p>
+                <h2>Pick up where you left off</h2>
+              </div>
+              <Link to="/browse" className="resume-discover" aria-label="Find something new"><span>Find something new</span> <ArrowRight className="h-3.5 w-3.5" /></Link>
+            </div>
             <ContinueWatching items={history} onRemove={removeFromHistory} />
           </section>
         )}
 
         {rows.map((row) =>
           row.loading || row.items.length > 0 ? (
-            <section key={row.key}>
+            <section key={row.key} className="home-shelf">
               <SectionHeader title={row.title} subtitle={row.subtitle} link={row.link} linkText={row.linkText} />
               <AnimeSlider anime={row.items.slice(0, 20)} loading={row.loading} />
             </section>

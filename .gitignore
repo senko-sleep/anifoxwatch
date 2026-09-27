@@ -28,3 +28,4 @@ dist-ssr
 
 # hentai source index (rebuilt from the sites)
 server/.cache/
+.stream-diagnostics/

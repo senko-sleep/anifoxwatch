@@ -1,3 +1,5 @@
+import { saveMediaContext, getMediaContext, childMediaHeaders } from '../services/media-context.js';
+import { isMedia } from '../services/playable-stream.js';
 import { isBlockedEpisodeId } from '../services/hentai-index.js';
 import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
@@ -522,10 +524,11 @@ const getProxyBaseUrl = (req: Request): string => {
     return 'http://localhost:3001/api/stream/proxy';
 };
 
-const proxyUrl = (url: string, proxyBase: string, referer?: string): string => {
+const proxyUrl = (url: string, proxyBase: string, referer?: string, headers?: Record<string, string>): string => {
     const target = unwrapProxyTarget(url);
     let out = `${proxyBase}?url=${encodeURIComponent(target)}`;
     if (referer) out += `&referer=${encodeURIComponent(referer)}`;
+    if (headers && Object.keys(headers).length) out += `&context=${saveMediaContext(target, headers)}`;
     return out;
 };
 
@@ -544,6 +547,7 @@ const rewriteM3u8Content = (
     originalUrl: string,
     proxyBase: string,
     referer?: string,
+    headers?: Record<string, string>,
 ): string => {
     const urlNoQuery = originalUrl.split('?')[0].split('#')[0];
     const baseUrl = urlNoQuery.substring(0, urlNoQuery.lastIndexOf('/') + 1);
@@ -556,7 +560,7 @@ const rewriteM3u8Content = (
                 const abs = uri.startsWith('http') ? uri : uri.startsWith('/')
                     ? `${origin}${uri}`
                     : `${baseUrl}${uri}`;
-                return `URI="${proxyUrl(abs, proxyBase, referer)}"`;
+                return `URI="${proxyUrl(abs, proxyBase, referer, headers ? childMediaHeaders(headers, originalUrl, abs) : undefined)}"`;
             });
         }
         if (!t || t.startsWith('#')) return line;
@@ -565,7 +569,7 @@ const rewriteM3u8Content = (
         const abs = t.startsWith('http') ? t : t.startsWith('/')
             ? `${origin}${t}`
             : `${baseUrl}${t}`;
-        return proxyUrl(abs, proxyBase, referer);
+        return proxyUrl(abs, proxyBase, referer, headers ? childMediaHeaders(headers, originalUrl, abs) : undefined);
     }).join('\n');
 };
 
@@ -1006,7 +1010,12 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
 
     // Titles the adult catalog excludes are not playable, however the episode id was arrived at.
     if (isBlockedEpisodeId(episodeId)) {
-        res.status(404).json({ error: 'Not available', episodeId });
+        res.status(404).json({
+            error: 'Episode is unavailable',
+            code: 'EPISODE_UNAVAILABLE',
+            retryable: false,
+            episodeId,
+        });
         return;
     }
 
@@ -1033,17 +1042,8 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
     const categoryStr = String(category || 'sub');
     const isDubRequested = categoryStr === 'dub';
     const cat = isDubRequested ? 'dub' : 'sub';
-    const noCache = req.query.nocache === 'true';
-
-    const cacheKey = streamCacheKey(episodeId, explicitServer, categoryStr);
-    const cached = streamCacheGet(cacheKey);
-    if (cached && !noCache) {
-        logger.info(`[STREAM] Cache hit for ${episodeId}`, { requestId });
-        res.set('Cache-Control', 'private, max-age=300');
-        res.set('X-Stream-Cache', 'HIT');
-        res.json(cached);
-        return;
-    }
+    const excludedProviders = String(req.query.exclude_providers || '').split(',').filter(Boolean);
+    const noCache = req.query.nocache === 'true' || excludedProviders.length > 0;
 
     logger.info(`[STREAM] Fetching stream for episode: ${episodeId}`, {
         episodeId, server: explicitServer ?? 'auto', category: categoryStr, episodeNum, shouldProxy, requestId,
@@ -1068,7 +1068,7 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
         const sourcesCount = (sourceManager as any).sources?.size || 0;
         logger.info(`[STREAM] sourceManager has ${sourcesCount} sources registered`);
 
-        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string, noCache);
+        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string, noCache, excludedProviders);
         logger.info(`[STREAM] getStreamingLinks returned:`, {
             hasSources: streamData?.sources?.length > 0,
             sourcesCount: streamData?.sources?.length,
@@ -1082,7 +1082,7 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
     if (!streamData?.sources?.length && isDubRequested) {
         try {
             logger.info(`[STREAM] Sequential sub fallback for dub request ${episodeId}`, { requestId });
-            const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string, noCache);
+            const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string, noCache, excludedProviders);
             if (subFallback?.sources?.length) {
                 streamData = { ...subFallback, category: 'sub', dubFallback: true };
                 logger.info(`[STREAM] Sequential sub fallback succeeded for ${episodeId}`, { requestId });
@@ -1097,16 +1097,22 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
     }
 
     const winningSource = typeof streamData?.source === 'string' ? streamData.source : undefined;
-    const successServer = explicitServer || winningSource || 'auto';
+    const successServer = winningSource || 'auto';
 
     if (!streamData.sources?.length) {
         logger.error(`[STREAM] No sources found for ${episodeId}`, undefined, {
             episodeId, triedServers: explicitServer ?? 'auto', category: categoryStr, lastError, requestId,
         });
-        res.status(404).json({
+        // A source outage is not evidence that the episode does not exist. Returning a
+        // retryable 503 lets clients continue through their available servers instead of
+        // treating a temporary resolver failure as a permanently missing episode.
+        res.status(503).json({
             error: 'No streaming sources found',
+            code: 'NO_STREAMING_SOURCES',
+            retryable: true,
             episodeId,
-            triedServers: explicitServer ? [explicitServer] : ['auto'],
+            triedServers: streamData.attempts?.map((a: any) => a.provider) || [],
+            attempts: streamData.attempts,
             lastError,
             suggestion: 'All streaming sources failed. Please try again later.',
         });
@@ -1167,7 +1173,7 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
                 try { hostname = new URL(rawUrl).hostname; } catch { return null; }
 
 
-                return { ...source, url: proxyUrl(rawUrl, proxyBase, streamReferer), originalUrl: rawUrl };
+                return { ...source, headers: undefined, url: proxyUrl(rawUrl, proxyBase, source.headers?.referer || source.headers?.Referer || streamReferer, source.headers || streamData.headers), originalUrl: rawUrl };
             })
             .filter((s): s is VideoSource => s !== null);
 
@@ -1175,19 +1181,19 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
             response.subtitles = (streamData.subtitles as VideoSubtitle[])
                 .map((sub): VideoSubtitle => {
                     if (isDirectPlay(sub.url)) return sub;
-                    return { ...sub, url: proxyUrl(sub.url, proxyBase, streamReferer) };
+                    return { ...sub, url: proxyUrl(sub.url, proxyBase, streamReferer, streamData.headers) };
                 });
         }
 
         logger.info(`[STREAM] Proxied ${response.sources.length} sources (direct: ${response.sources.filter(s => s.isDirect).length})`, { episodeId, requestId });
     }
 
+    if (shouldProxy) response.headers = undefined;
     response.server = successServer;
-    response.triedServers = explicitServer ? [explicitServer] : ['auto'];
+    response.triedServers = streamData.attempts?.map((a: any) => a.provider) || [successServer];
 
     const isFallback = response.dubFallback === true || response.sources.some(s => s.isEmbed);
-    streamCacheSet(cacheKey, response, isFallback ? 10000 : undefined);
-    res.set('Cache-Control', isFallback ? 'private, no-cache, no-store, must-revalidate' : 'private, max-age=900');
+    res.set('Cache-Control', 'private, no-store');
     res.set('X-Stream-Cache', 'MISS');
     res.json(response);
 });
@@ -1209,6 +1215,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         }
     }
 
+    const contextId = typeof req.query.context === 'string' ? req.query.context : undefined;
+    const providerHeaders = contextId ? getMediaContext(contextId, url || '') : undefined;
+    if (contextId && !providerHeaders) { res.status(410).json({ error: 'Media context expired; resolve again' }); return; }
     if (url) logger.info(`[PROXY] Request: ${url.substring(0, 100)}${url.length > 100 ? '...' : ''} (Referer: ${refererParam})`, { requestId });
 
     if (!url || typeof url !== 'string') {
@@ -1262,7 +1271,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const isVideo = url.includes('.mp4');
 
     // Serve cached manifests without hitting upstream
-    if (isM3u8 && !req.headers.range) {
+    if (isM3u8 && !req.headers.range && !contextId) {
         const cachedManifest = manifestCacheGet(url);
         if (cachedManifest) {
             res.set('Content-Type', 'application/vnd.apple.mpegurl');
@@ -1277,7 +1286,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     // Serve cached segments without hitting upstream
-    if (isSegment && !req.headers.range) {
+    if (isSegment && !req.headers.range && !contextId) {
         const cachedData = segmentCacheGet(url);
         if (cachedData) {
             const entry = segmentCache.get(url)!;
@@ -1348,6 +1357,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         addCombo(refererParam, paramOrigin);
     }
 
+    if (refererParam) addCombo(refererParam, new URL(refererParam).origin);
     for (const c of cdnConfigs) addCombo(c.referer, c.origin);
     if (refererParam) {
         try { addCombo(refererParam, new URL(refererParam).origin); } catch { /* ignore */ }
@@ -1526,6 +1536,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             'Origin': combo.origin || combo.referer.replace(/\/$/, ''),
             'Connection': 'keep-alive',
         };
+        if (providerHeaders) {
+            for (const key of Object.keys(headers)) if (Object.keys(providerHeaders).some(k => k.toLowerCase() === key.toLowerCase())) delete headers[key];
+            Object.assign(headers, providerHeaders);
+        }
         if (req.headers.range) headers['Range'] = req.headers.range as string;
 
         const agentOptions = relaxedTls
@@ -1799,7 +1813,24 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
 
     // ---------- M3U8 manifest handling ----------
-    const upstreamCt = proxyResponse!.headers['content-type'] || '';
+    let upstreamCt = proxyResponse!.headers['content-type'] || '';
+    // Some CDNs label MPEG-TS as HTML or an image. Inspect bytes, not the label.
+    if (providerHeaders && !isM3u8 && /text\/|image\/|javascript|json|xml/i.test(upstreamCt) && !/\.(vtt|srt)(?:\?|$)/i.test(url)) {
+        const upstream = proxyResponse!.data as Readable;
+        const head = await new Promise<Buffer>((resolve, reject) => {
+            upstream.once('error', reject);
+            upstream.once('data', (chunk: Buffer) => {
+                upstream.pause();
+                upstream.removeListener('error', reject);
+                upstream.unshift(chunk);
+                resolve(chunk);
+            });
+            upstream.once('end', () => resolve(Buffer.alloc(0)));
+        });
+        if (!isMedia(head)) { upstream.destroy(); res.status(502).json({ error: 'Invalid media body' }); return; }
+        upstreamCt = 'video/mp2t';
+        req._normalizedCt = upstreamCt;
+    }
     const isUpstreamM3u8 =
         !isHavenSegment &&
         (upstreamCt.includes('x-mpegurl') ||
@@ -1810,14 +1841,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // For echovideo, we need to check the actual content to distinguish between manifests and segments
     // Echovideo segment manifests don't have .m3u8 extension but contain HLS playlist content
     let isEchovideoManifest = false;
-    if ((isEchovideoSegment || mayBeExtensionlessManifest) && !isUpstreamM3u8) {
+    if ((isEchovideoSegment || mayBeExtensionlessManifest) && !isUpstreamM3u8 && !req._normalizedCt) {
         try {
             const check = await checkEchovideoManifest(proxyResponse!);
             if (check.isManifest && check.content) {
                 isEchovideoManifest = true;
                 const content = check.content;
                 // Reject manifests whose segments resolve to known ad CDNs
-                if (isAdPoisonedManifest(content, url)) {
+                if (!providerHeaders && isAdPoisonedManifest(content, url)) {
                     logger.warn(`⚠️ [MANIFEST AD-POISONED] Manifest from ${domain} contains ad CDN segments instead of real video data. Rejecting stream.`, { url: url.substring(0, 200), requestId });
                     res.set('Access-Control-Allow-Origin', '*').status(502).json({
                         error: 'Ad-poisoned manifest',
@@ -1828,7 +1859,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                     return;
                 }
 
-                const rewritten = rewriteM3u8Content(content, url, proxyBase, refererParam || refererCombos[0]?.referer);
+                const rewritten = rewriteM3u8Content(content, url, proxyBase, refererParam || refererCombos[0]?.referer, providerHeaders);
                 res.set('Content-Type', 'application/vnd.apple.mpegurl');
                 res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
                 res.set('Pragma', 'no-cache');
@@ -1863,7 +1894,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             }
 
             // Reject manifests whose segments resolve to known ad CDNs
-            if (isAdPoisonedManifest(content, url)) {
+            if (!providerHeaders && isAdPoisonedManifest(content, url)) {
                 logger.warn(`⚠️ [MANIFEST AD-POISONED] Manifest from ${domain} contains ad CDN segments instead of real video data. Rejecting stream.`, { url: url.substring(0, 200), requestId });
                 res.set('Access-Control-Allow-Origin', '*').status(502).json({
                     error: 'Ad-poisoned manifest',
@@ -1874,7 +1905,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 return;
             }
 
-            const rewritten = rewriteM3u8Content(stripRawVttRenditions(content), url, proxyBase, refererParam || refererCombos[0]?.referer);
+            const rewritten = rewriteM3u8Content(stripRawVttRenditions(content), url, proxyBase, refererParam || refererCombos[0]?.referer, providerHeaders);
             res.set('Content-Type', 'application/vnd.apple.mpegurl');
             res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
             res.set('Pragma', 'no-cache');
@@ -2003,7 +2034,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // ---------- Video/binary content ----------
 
     // Guard: reject responses from ad CDN domains (ad blobs disguised as segments)
-    if (isAdCdnUrl(url)) {
+    if (!providerHeaders && isAdCdnUrl(url)) {
         proxyResponse!.data?.resume?.();
         logger.warn(`[PROXY] Blocked ad CDN segment: ${domain}`, { url: url.substring(0, 200), requestId });
         res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Ad CDN content blocked', reason: 'ad_cdn', domain });
@@ -2028,14 +2059,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             const isKnownCdn = isHavenSegment || Object.keys(proxyCdnConfig).some(key => domain.includes(key));
             const isAdDomain = isAdCdnUrl(url);
 
-            if (isAdDomain) {
+            if (!providerHeaders && isAdDomain) {
                 proxyResponse!.data?.resume?.();
                 logger.warn(`[PROXY] Blocked ad image segment: ${domain}`, { url: url.substring(0, 100), requestId });
                 res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Ad image segment blocked', domain });
                 return;
             }
 
-            if (!isKnownCdn) {
+            if (!providerHeaders && !isKnownCdn) {
                 // Potential ad disguised as image on unknown domain - check size
                 const size = parseInt(proxyResponse!.headers['content-length'] || '0', 10);
                 if (size > 0 && size < 100 * 1024) { // < 100KB on unknown domain

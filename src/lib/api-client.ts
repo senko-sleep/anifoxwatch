@@ -596,7 +596,7 @@ class AnimeApiClient {
         return response.servers || [];
     }
 
-    async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean, excludedProviders: string[] = []): Promise<StreamingData> {
         // Simple ID normalization - just handle basic episode ID formats
         let slugPart = episodeId;
         let epPart = '';
@@ -628,14 +628,15 @@ class AnimeApiClient {
         if (animeTitle) params.append('title', animeTitle);
         if (bypassCache) params.append('nocache', 'true');
 
+        if (excludedProviders.length) params.set('exclude_providers', excludedProviders.join(','));
         const queryString = params.toString() ? `?${params.toString()}` : '';
         const streamPath = `/api/stream/watch/${encodeURIComponent(slugPart)}${queryString}`;
 
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            // 45s timeout per host — cross-source fallback & cold-start containers (e.g. Render)
-            const streamTimeoutMs = 45_000;
+            // 90s timeout per host — cross-source fallback & cold-start containers (e.g. Render)
+            const streamTimeoutMs = 90_000;
             const maxAttempts = 1;
             let lastErr: Error | null = null;
 
@@ -651,8 +652,19 @@ class AnimeApiClient {
                     if (!response.ok) {
                         const errorText = await response.text();
                         let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-                        try { errorMessage = JSON.parse(errorText).error || errorMessage; } catch {}
-                        const err = Object.assign(new Error(errorMessage), { status: response.status });
+                        let errorCode: string | undefined;
+                        let retryable: boolean | undefined;
+                        try {
+                            const errorBody = JSON.parse(errorText);
+                            errorMessage = errorBody.error || errorMessage;
+                            errorCode = errorBody.code;
+                            retryable = errorBody.retryable;
+                        } catch {}
+                        const err = Object.assign(new Error(errorMessage), {
+                            status: response.status,
+                            code: errorCode,
+                            retryable,
+                        });
                         // Don't retry 4xx client errors (except 408/429)
                         if (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429) {
                             throw err;

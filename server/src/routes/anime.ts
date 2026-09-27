@@ -53,7 +53,12 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
         }
 
         // Check cache first for instant response
-        const cacheKey = `resolve-slug:v4:${slug}:${mode}`;
+        const cacheKey = `resolve-slug:v6:${slug}:${mode}`;
+        // Set when AniList couldn't be asked. Anything resolved after that is a best guess,
+        // so it's kept for a minute rather than an hour — a rate-limit blip must not pin
+        // "kaguya-sama-love-is-war-112641" to the wrong Kaguya entry for the next hour.
+        let degraded = false;
+        const remember = (value: unknown, ttlMs: number) => searchCache.set(cacheKey, value, degraded ? 60_000 : ttlMs);
         const cached = searchCache.get(cacheKey);
         if (cached) {
             logger.debug(`[AnimeRoutes] Cache hit for slug resolution: ${slug}`);
@@ -67,7 +72,7 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
         const ownPrefix = sourcePrefixOf(slug);
         if (ownPrefix && ownPrefix !== 'anilist-') {
             const result = { id: slug, title: slug.slice(ownPrefix.length).replace(/-\d+$/, '').replace(/-/g, ' '), source: ownPrefix.slice(0, -1) };
-            searchCache.set(cacheKey, result, 60 * 60 * 1000);
+            remember(result, 60 * 60 * 1000);
             res.json(result);
             return;
         }
@@ -80,38 +85,15 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
         // Auto-detect hentai and set mode to adult if needed
         const effectiveMode = (likelyHentai || mode === 'adult') ? 'adult' : mode;
 
-        // Clean URLs carry a title only (for example `/anime/yani-neko`). Ask
-        // the provider directly before broad/fuzzy discovery, keeping source
-        // selection in the backend rather than exposing it in the URL.
-        if (effectiveMode === 'safe') {
-            const spokenTitle = slug.replace(/-/g, ' ');
-            try {
-                const sourceSearch = await Promise.race([
-                    sourceManager.search(spokenTitle, 1, 'Aniwaves'),
-                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Source title probe timeout')), 8_000)),
-                ]);
-                const sourcePrefix = `aniwaves-${slug.toLowerCase()}-`;
-                const sourceMatch = sourceSearch.results.find((item) =>
-                    titleMatchesSlug(item, spokenTitle) || item.id.toLowerCase().startsWith(sourcePrefix)
-                );
-                if (sourceMatch) {
-                    const result = { id: sourceMatch.id, title: sourceMatch.title, image: sourceMatch.image, source: sourceMatch.source };
-                    searchCache.set(cacheKey, result, 60 * 60 * 1000);
-                    res.json(result);
-                    return;
-                }
-            } catch {
-                // Continue through the normal multi-source resolver.
-            }
-        }
-
         // ── Fast path: slug ends with a numeric AniList ID ────────────────────
         // Slugs built here look like "chainsaw-man-127230". The trailing number is only
         // an AniList id when the slug was built from one — a streaming source's own id
         // can end in digits too ("spy-x-family-season-3-82391"), and reading those as an
         // AniList id serves a completely unrelated entry under a right-looking name. So
         // the entry is looked up and only kept when it goes by the name the slug spells.
-        const trailingNumMatch = slug.match(/-(\d{4,9})$/);
+        // Short ids are real (One Piece 21, Naruto 20, Cowboy Bebop 1); titles that end in a
+        // number ("mob-psycho-100") fail the name check below and fall through to search.
+        const trailingNumMatch = slug.match(/-(\d{1,9})$/);
         if (trailingNumMatch) {
             const sourceId = `aniwaves-${trailingNumMatch[1]}`;
             const spokenTitle = slug.replace(/-\d+$/, '').replace(/-/g, ' ');
@@ -126,7 +108,7 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
                 ]);
                 if (sourceSearch.results.some((item) => item.id === sourceId)) {
                     const result = { id: sourceId, title: spokenTitle, source: 'Aniwaves' };
-                    searchCache.set(cacheKey, result, 60 * 60 * 1000);
+                    remember(result, 60 * 60 * 1000);
                     res.json(result);
                     return;
                 }
@@ -141,8 +123,19 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
             try {
                 media = await anilistService.getAnimeById(parseInt(trailingNumMatch[1], 10));
             } catch (error) {
-                lookupFailed = true; // AniList unreachable — trust the id rather than stall the page
+                lookupFailed = true;
+                degraded = true;
                 logger.warn(`Failed to verify AniList id for slug: ${(error as Error).message}`, undefined, 'AnimeRoutes');
+            }
+
+            // AniList unreachable: an AniList-shaped id (4+ digits) is trusted rather than
+            // handed to a name search that would guess. Short numbers are as likely to be
+            // part of the title ("mob-psycho-100"), so those fall through to the search.
+            if (lookupFailed && trailingNumMatch[1].length >= 4) {
+                const result = { id: anilistId, title: spokenTitle, source: 'anilist' };
+                remember(result, 0);
+                res.json(result);
+                return;
             }
 
             // No match means this number belongs to some source, not AniList: let the
@@ -156,17 +149,47 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
                     source: 'anilist',
                     ...(isMature ? { isMature: true } : {}),
                 };
-                searchCache.set(cacheKey, result, isMature ? 15 * 60 * 1000 : 60 * 60 * 1000);
+                remember(result, isMature ? 15 * 60 * 1000 : 60 * 60 * 1000);
                 res.json(result);
                 return;
             }
             logger.debug(`[AnimeRoutes] ${trailingNumMatch[1]} is not this title's AniList id (${slug}) — searching by name`);
         }
 
+        // Clean URLs carry a title only (for example `/anime/yani-neko`). Ask
+        // the provider directly before broad/fuzzy discovery, keeping source
+        // selection in the backend rather than exposing it in the URL.
+        // Runs after the verified AniList id path above: "spy x family 140960" fuzzy-matches
+        // "Spy x Family Season 3" and "one piece 21" the "Episode of Merry" special, so an
+        // id in the slug has to win before a name search gets a say.
+        if (effectiveMode === 'safe') {
+            const spokenTitle = slug.replace(/-/g, ' ');
+            try {
+                const sourceSearch = await Promise.race([
+                    sourceManager.search(spokenTitle, 1, 'Aniwaves'),
+                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Source title probe timeout')), 8_000)),
+                ]);
+                const sourcePrefix = `aniwaves-${slug.toLowerCase()}-`;
+                const sourceMatch = sourceSearch.results.find((item) =>
+                    titleMatchesSlug(item, spokenTitle) || item.id.toLowerCase().startsWith(sourcePrefix)
+                );
+                if (sourceMatch) {
+                    const result = { id: sourceMatch.id, title: sourceMatch.title, image: sourceMatch.image, source: sourceMatch.source };
+                    remember(result, 60 * 60 * 1000);
+                    res.json(result);
+                    return;
+                }
+            } catch {
+                // Continue through the normal multi-source resolver.
+            }
+        }
+
         // Older readable links can end in a provider's numeric ID rather than
         // an AniList ID. Verify that source-native ID before fuzzy searching,
-        // so an unrelated AniList title cannot replace it.
-        if (trailingNumMatch) {
+        // so an unrelated AniList title cannot replace it. Aniwaves ids are 5 digits;
+        // a short number ("mob-psycho-100") is part of the title, and every small
+        // number is *some* Aniwaves show.
+        if (trailingNumMatch && trailingNumMatch[1].length >= 4) {
             const spokenTitle = slug.replace(/-\d+$/, '').replace(/-/g, ' ');
             const sourceId = `aniwaves-${trailingNumMatch[1]}`;
             try {
@@ -176,7 +199,7 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
                 ]);
                 if (episodes.length > 0) {
                     const result = { id: sourceId, title: spokenTitle, source: 'Aniwaves' };
-                    searchCache.set(cacheKey, result, 60 * 60 * 1000);
+                    remember(result, 60 * 60 * 1000);
                     res.json(result);
                     return;
                 }
@@ -203,7 +226,7 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
                     };
                     
                     // Cache the hentai result
-                    searchCache.set(cacheKey, result, 15 * 60 * 1000); // 15 minutes
+                    remember(result, 15 * 60 * 1000); // 15 minutes
                     
                     res.json(result);
                     return;
@@ -335,7 +358,7 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
                 };
                 
                 // Cache the result for future requests
-                searchCache.set(cacheKey, result, 15 * 60 * 1000); // 15 minutes
+                remember(result, 15 * 60 * 1000); // 15 minutes
                 
                 res.json(result);
                 return;
@@ -351,7 +374,7 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
         };
         
         // Cache even fallback results (shorter TTL)
-        searchCache.set(cacheKey, fallbackResult, 5 * 60 * 1000); // 5 minutes
+        remember(fallbackResult, 5 * 60 * 1000); // 5 minutes
         
         res.json(fallbackResult);
     } catch (error) {

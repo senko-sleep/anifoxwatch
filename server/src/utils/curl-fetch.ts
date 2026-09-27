@@ -45,6 +45,14 @@ export function curlGet(url: string, { headers = {}, timeoutMs = 25000, signal }
     });
 }
 
+/**
+ * Fetch JSON through system curl with status validation and JSON parsing.
+ */
+export async function curlJson<T>(url: string, options: CurlOptions = {}): Promise<T> {
+    const body = await curlGet(url, options);
+    return JSON.parse(body) as T;
+}
+
 /** First line of `curl --version`, for diagnostics. */
 export function curlVersion(): Promise<string> {
     return new Promise((resolve) => {

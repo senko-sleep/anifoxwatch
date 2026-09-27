@@ -635,7 +635,7 @@ export class AniwavesSource extends BaseAnimeSource {
 
         const cacheKey = `stream:${episodeId}:${serverId || 'default'}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
-        if (cached) return cached;
+        if (cached && !options?.bypassCache) return cached;
 
         try {
             // Candidates to try, best-first. More than one, because a provider that returns no
@@ -705,7 +705,7 @@ export class AniwavesSource extends BaseAnimeSource {
                     // own timeout, holding one of the two slots this process allows, and after
                     // two abandoned attempts every later request queues behind them. Given the
                     // deadline, the extractor closes its own page and releases the slot.
-                    const extraction = await streamExtractor.extractFromEmbed(embedUrl, budgetMs);
+                    const extraction = await streamExtractor.extractFromEmbed(embedUrl, budgetMs, false, options?.bypassCache);
                     if (!extraction.success || extraction.streams.length === 0) return null;
 
                     const sources = extraction.streams
@@ -715,6 +715,7 @@ export class AniwavesSource extends BaseAnimeSource {
                         })
                         .map(s => ({
                             url: s.url,
+                            headers: s.headers,
                             quality: (s.quality || 'auto') as '360p' | '480p' | '720p' | '1080p' | 'auto' | 'default',
                             isM3U8: s.url.includes('.m3u8') || s.type === 'hls',
                             isEmbed: false,

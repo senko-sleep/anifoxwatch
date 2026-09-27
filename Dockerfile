@@ -8,7 +8,7 @@
 #   node        (API)   :3001    loopback only; all the policy and scraping
 #
 # Setting MEDIA_ACCEL=0 leaves Node serving media itself, exactly as before the split.
-
+ 
 # ── Rust data plane ────────────────────────────────────────────────────────────
 # Tracks the latest stable toolchain on purpose. There is no Cargo.lock yet, so cargo resolves every
 # dependency to its newest release, and those routinely demand a newer compiler than any pin chosen
@@ -84,6 +84,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
+# The Render blueprint sets this as well. Keep direct image deployments on the safe path;
+# operators with adequate RAM may override it to false.
+ENV DISABLE_BROWSER_SOURCES=true
 # Node no longer carries media bytes, so its heap is sized for the API alone. The headroom this
 # frees on a 512MB box goes to Chromium, whose launch is the thing that actually runs out of it.
 ENV NODE_OPTIONS="--max-old-space-size=256"

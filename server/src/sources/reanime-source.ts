@@ -4,8 +4,10 @@ import { BaseAnimeSource, SourceRequestOptions } from './base-source.js';
 import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import { StreamingData, VideoSource, EpisodeServer, VideoSubtitle } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
+import { curlJson } from '../utils/curl-fetch.js';
 
 export class ReAnimeSource extends BaseAnimeSource {
+    acceptsAniListId = true;
     name = 'ReAnime';
     baseUrl = 'https://reanime.to';
     private client: AxiosInstance;
@@ -34,6 +36,34 @@ export class ReAnimeSource extends BaseAnimeSource {
         });
     }
 
+    /**
+     * Fetch JSON through curlJson first (curl's TLS fingerprint bypasses the Cloudflare
+     * bot check that gives Node/axios a 403 status from a datacenter IP), falling back
+     * to axios when curl is not installed or errors.
+     */
+    private async fetchJson<T>(path: string, options?: SourceRequestOptions): Promise<T> {
+        const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
+        const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+        try {
+            return await curlJson<T>(url, {
+                headers: {
+                    'Accept': 'application/json, text/plain, */*',
+                    'User-Agent': UA,
+                    'Referer': `${this.baseUrl}/`,
+                },
+                timeoutMs: options?.timeout || 12000,
+                signal: options?.signal,
+            });
+        } catch (curlErr: any) {
+            try {
+                const resp = await this.client.get<T>(path, { signal: options?.signal });
+                return resp.data;
+            } catch (axiosErr) {
+                throw curlErr || axiosErr;
+            }
+        }
+    }
+
     private getCached<T>(key: string): T | null {
         const entry = this.cache.get(key);
         if (entry && entry.expires > Date.now()) return entry.data as T;
@@ -47,8 +77,8 @@ export class ReAnimeSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const resp = await this.client.get('/api/v1/search?q=cat', { signal: options?.signal });
-            return resp.status === 200;
+            const data = await this.fetchJson<any>('/api/v1/search?q=cat', options);
+            return !!data;
         } catch {
             return false;
         }
@@ -57,11 +87,10 @@ export class ReAnimeSource extends BaseAnimeSource {
     async search(query: string, page: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `search:${query}:${page}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
-        if (cached) return cached;
+        if (cached && !options?.bypassCache) return cached;
 
         try {
-            const resp = await this.client.get(`/api/v1/search?q=${encodeURIComponent(query)}`, { signal: options?.signal });
-            const data = resp.data;
+            const data = await this.fetchJson<any>(`/api/v1/search?q=${encodeURIComponent(query)}`, options);
             const items = Array.isArray(data) ? data : (data.results || data.data || []);
             const results: AnimeBase[] = items.map((item: any) => {
                 const slug = item.anime_id || String(item.anilist_id);
@@ -131,8 +160,8 @@ export class ReAnimeSource extends BaseAnimeSource {
         if (cached) return cached;
 
         try {
-            const resp = await this.client.get(`/api/v1/anime/${cleanId}/episodes?limit=2000`, { signal: options?.signal });
-            const epList = resp.data?.data || [];
+            const data = await this.fetchJson<any>(`/api/v1/anime/${cleanId}/episodes?limit=2000`, options);
+            const epList = data?.data || [];
             const episodes: Episode[] = epList.map((ep: any) => ({
                 id: `reanime-${cleanId}$ep=${ep.episode_number}`,
                 number: ep.episode_number,
@@ -210,12 +239,12 @@ export class ReAnimeSource extends BaseAnimeSource {
 
         const cacheKey = `stream:${anilistId}:${epNum}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
-        if (cached) return cached;
+        if (cached && !options?.bypassCache) return cached;
 
         try {
             const flixUrl = `/api/flix/${anilistId}/${epNum}`;
-            const resp = await this.client.get(flixUrl, { signal: options?.signal });
-            const servers: any[] = resp.data?.servers || [];
+            const data = await this.fetchJson<any>(flixUrl, options);
+            const servers: any[] = data?.servers || [];
 
             const matchedServers = servers.filter((s: any) => {
                 if (category === 'dub') return s.dataType === 'dub';
@@ -263,8 +292,8 @@ export class ReAnimeSource extends BaseAnimeSource {
 
         try {
             const flixUrl = `/api/flix/${anilistId}/${epNum}`;
-            const resp = await this.client.get(flixUrl, { signal: options?.signal });
-            const servers: any[] = resp.data?.servers || [];
+            const data = await this.fetchJson<any>(flixUrl, options);
+            const servers: any[] = data?.servers || [];
 
             return servers.map((s: any) => ({
                 name: `${s.serverName || 'HD'} (${(s.dataType || 'sub').toUpperCase()})`,

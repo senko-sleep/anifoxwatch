@@ -16,6 +16,7 @@ import { logger } from '../utils/logger.js';
  *   → parse HTML/JS for .m3u8 URLs → return HLS stream
  */
 export class YomiSource extends BaseAnimeSource {
+    acceptsAniListId = true;
     name = 'Yomi';
     baseUrl = 'https://yomi.to';
     private client: AxiosInstance;
@@ -178,7 +179,7 @@ export class YomiSource extends BaseAnimeSource {
         const episodeNum = this.extractEpisodeNum(episodeId, options);
         const cacheKey = `stream:${anilistId}:${episodeNum}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
-        if (cached) return cached;
+        if (cached && !options?.bypassCache) return cached;
 
         const embedUrls = this.buildEmbedUrls(anilistId, episodeNum, category);
         logger.info(

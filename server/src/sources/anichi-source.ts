@@ -226,7 +226,7 @@ export class AnichiSource extends BaseAnimeSource {
 
         const cacheKey = `stream:${cleanSlug}:${epNum}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
-        if (cached) return cached;
+        if (cached && !options?.bypassCache) return cached;
 
         let browser;
         try {

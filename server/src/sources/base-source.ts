@@ -24,6 +24,7 @@ export function isValidAnimeTitle(title: string | undefined | null): boolean {
  * Common options for all source requests
  */
 export interface SourceRequestOptions {
+    bypassCache?: boolean;
     signal?: AbortSignal;
     timeout?: number;
     priority?: 'high' | 'normal' | 'low';

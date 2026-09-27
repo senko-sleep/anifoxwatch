@@ -90,7 +90,7 @@ const PosterImage = ({ src, alt, priority }: { src: string; alt: string; priorit
         decoding="async"
         referrerPolicy="no-referrer"
         className={cn(
-          'absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ease-glide',
+          'absolute inset-0 h-full w-full object-cover transition-[opacity,transform] duration-200 ease-glide group-hover:scale-[1.06]',
           loaded ? 'opacity-100' : 'opacity-0'
         )}
         fetchPriority={priority ? 'high' : 'low'}

@@ -17,6 +17,7 @@ interface ExtractedStream {
 }
 
 interface ExtractionResult {
+    playbackVerified?: boolean;
     success: boolean;
     streams: ExtractedStream[];
     subtitles: { url: string; lang: string }[];
@@ -110,6 +111,7 @@ class StreamExtractor {
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
                     '--disable-gpu',
+                    '--disable-blink-features=AutomationControlled',
                     // 1920x1080 buys nothing here — nothing is ever rendered for a human, and the
                     // backing store is paid for in the memory the launch is already short of.
                     '--window-size=1280,720',
@@ -211,6 +213,14 @@ class StreamExtractor {
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
             });
 
+            await page.evaluateOnNewDocument(() => {
+                try {
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                } catch {}
+            });
+
             return page;
         } catch (error) {
             this.activePages--;
@@ -235,6 +245,7 @@ class StreamExtractor {
             await page.setRequestInterception(true);
 
             const capturedM3u8s = new Set<string>();
+            const capturedHeaders = new Map<string, Record<string, string>>();
             const capturedSubtitles = new Set<string>();
 
             const looksLikeHls = (reqUrl: string) => {
@@ -253,6 +264,9 @@ class StreamExtractor {
 
                 if (looksLikeHls(reqUrl)) {
                     capturedM3u8s.add(reqUrl);
+                    const raw = request.headers();
+                    capturedHeaders.set(reqUrl, Object.fromEntries(Object.entries(raw).filter(([key]) =>
+                        /^(referer|origin|user-agent|cookie|authorization)$/i.test(key))) as Record<string, string>);
                     logger.info(`[StreamExtractor] Captured m3u8: ${reqUrl.substring(0, 100)}...`);
                 }
 
@@ -323,6 +337,9 @@ class StreamExtractor {
                     const reqUrl = request.url();
                     if (looksLikeHls(reqUrl)) {
                         capturedM3u8s.add(reqUrl);
+                    const raw = request.headers();
+                    capturedHeaders.set(reqUrl, Object.fromEntries(Object.entries(raw).filter(([key]) =>
+                        /^(referer|origin|user-agent|cookie|authorization)$/i.test(key))) as Record<string, string>);
                         logger.info(`[StreamExtractor] Captured from embed: ${reqUrl.substring(0, 100)}...`);
                     }
                     request.continue();
@@ -364,7 +381,8 @@ class StreamExtractor {
                 streams.push({
                     url: m3u8Url,
                     quality: this.detectQuality(m3u8Url),
-                    type: 'hls'
+                    type: 'hls',
+                    headers: capturedHeaders.get(m3u8Url)
                 });
             }
 
@@ -410,9 +428,10 @@ class StreamExtractor {
      * Uses in-flight deduplication: concurrent calls for the same URL share one Puppeteer session.
      * Enhanced for adult content compatibility.
      */
-    async extractFromEmbed(embedUrl: string, timeoutMs?: number): Promise<ExtractionResult> {
-        const cached = this.resultCache.get(embedUrl);
-        if (cached && Date.now() - cached.timestamp < this.RESULT_CACHE_TTL_MS && cached.result.success) {
+    async extractFromEmbed(embedUrl: string, timeoutMs?: number, verifyPlayback = false, bypassCache = false): Promise<ExtractionResult> {
+        const cacheId = `${embedUrl}:${verifyPlayback}`;
+        const cached = this.resultCache.get(cacheId);
+        if (cached && Date.now() - cached.timestamp < (verifyPlayback ? 30000 : this.RESULT_CACHE_TTL_MS) && cached.result.success && !bypassCache) {
             logger.info(`[StreamExtractor] Cache hit for embed: ${embedUrl.substring(0, 80)}...`);
             return cached.result;
         }
@@ -424,7 +443,7 @@ class StreamExtractor {
         }
 
         // Dedup: return an existing in-flight extraction for the same URL
-        const existing = this.inFlight.get(embedUrl);
+        const existing = this.inFlight.get(cacheId);
         if (existing) {
             logger.info(`[StreamExtractor] Reusing in-flight extraction for: ${embedUrl.substring(0, 80)}...`);
             return existing;
@@ -432,23 +451,23 @@ class StreamExtractor {
 
         logger.info(`[StreamExtractor] Extracting from embed: ${embedUrl.substring(0, 80)}...`);
 
-        const extractionPromise = this._extractFromEmbedImpl(embedUrl, timeoutMs)
+        const extractionPromise = this._extractFromEmbedImpl(embedUrl, timeoutMs, verifyPlayback)
             .then((result) => {
                 if (result.success && result.streams.length > 0) {
-                    this.resultCache.set(embedUrl, { result, timestamp: Date.now() });
+                    this.resultCache.set(cacheId, { result, timestamp: Date.now() });
                 }
                 return result;
             });
-        this.inFlight.set(embedUrl, extractionPromise);
+        this.inFlight.set(cacheId, extractionPromise);
 
         try {
             return await extractionPromise;
         } finally {
-            this.inFlight.delete(embedUrl);
+            this.inFlight.delete(cacheId);
         }
     }
 
-    private async _extractFromEmbedImpl(embedUrl: string, timeoutMs?: number): Promise<ExtractionResult> {
+    private async _extractFromEmbedImpl(embedUrl: string, timeoutMs?: number, verifyPlayback = false): Promise<ExtractionResult> {
         let page: any = null;
         // A caller that only has a few seconds to spend must not simply walk away from this:
         // the page would stay open until its own navigation timeout, holding one of very few
@@ -477,11 +496,15 @@ class StreamExtractor {
             await page.setRequestInterception(true);
 
             const capturedM3u8s = new Set<string>();
+            const capturedHeaders = new Map<string, Record<string, string>>();
 
             page.on('request', (request: any) => {
                 const reqUrl = request.url();
                 if (reqUrl.includes('.m3u8') && !reqUrl.includes('subtitles')) {
                     capturedM3u8s.add(reqUrl);
+                    const raw = request.headers();
+                    capturedHeaders.set(reqUrl, Object.fromEntries(Object.entries(raw).filter(([key]) =>
+                        /^(referer|origin|user-agent|cookie|authorization)$/i.test(key))) as Record<string, string>);
                     logger.info(`[StreamExtractor] Captured: ${reqUrl.substring(0, 100)}...`);
                 }
                 request.continue();
@@ -523,6 +546,26 @@ class StreamExtractor {
             }
 
 
+            let playbackVerified = false;
+            if (verifyPlayback) {
+                // Some providers use a custom manifest loader. A URL alone cannot validate
+                // those players: require decoded frames and a progressing media clock.
+                try {
+                    await page.waitForFunction(() => !!document.querySelector('video'), { timeout: 6000 });
+                    await page.evaluate(async () => {
+                        const video = document.querySelector('video')!;
+                        video.muted = true;
+                        await video.play();
+                    });
+                    await page.waitForFunction(() => {
+                        const video = document.querySelector('video');
+                        return video && video.currentTime > 1 && video.readyState >= 2 &&
+                            video.getVideoPlaybackQuality().totalVideoFrames > 0;
+                    }, { timeout: 8000 });
+                    playbackVerified = true;
+                } catch { /* An unverified embed must not mask a working provider. */ }
+            }
+
             // Get video src
             const videoSrc = await page.evaluate(() => {
                 const video = document.querySelector('video');
@@ -548,12 +591,14 @@ class StreamExtractor {
                 streams.push({
                     url: m3u8Url,
                     quality: this.detectQuality(m3u8Url),
-                    type: 'hls'
+                    type: 'hls',
+                    headers: capturedHeaders.get(m3u8Url)
                 });
             }
 
             return {
                 success: streams.length > 0,
+                playbackVerified,
                 streams,
                 subtitles,
                 error: streams.length === 0 ? 'No streams found from embed' : undefined
