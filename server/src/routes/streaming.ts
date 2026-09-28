@@ -922,11 +922,25 @@ router.get('/diag', async (req: Request, res: Response): Promise<void> => {
 
     const { AniwavesSource } = await import('../sources/aniwaves-source.js');
     const aniwaves = new AniwavesSource();
+    const { ReAnimeSource } = await import('../sources/reanime-source.js');
+    const reanime = new ReAnimeSource();
+    await run('reanime.getStreamingLinks', () => reanime.getStreamingLinks('anilist-21', undefined, 'sub', { episodeNum: 1, anilistId: 21 }));
+
+    const { curlGet, curlVersion } = await import('../utils/curl-fetch.js');
+    await run('curlVersion', () => curlVersion());
+    await run('curl reanime flix', () => curlGet('https://reanime.to/api/flix/21/1', {
+        headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer': 'https://reanime.to/'
+        },
+        timeoutMs: 10000
+    }));
 
     // 1. Can this host reach the site at all, and does the episode have servers?
-    const servers = await run('aniwaves.getEpisodeServers', () => aniwaves.getEpisodeServers(episodeId));
-    if (servers) {
-        stages[stages.length - 1].detail = { count: servers.length, names: servers.slice(0, 4).map((s) => s.name) };
+    const servers: any = await run('aniwaves.getEpisodeServers', () => aniwaves.getEpisodeServers(episodeId));
+    if (servers && Array.isArray(servers)) {
+        stages[stages.length - 1].detail = { count: servers.length, names: servers.slice(0, 4).map((s: any) => s.name) };
     }
 
     // 2. Does the site hand back an embed URL for the first server?
@@ -950,21 +964,23 @@ router.get('/diag', async (req: Request, res: Response): Promise<void> => {
     }
 
     // 3. Can Chromium start here, and how long does it take from cold?
-    const probe = await run('chromium launch probe', () => streamExtractor.probe());
-    if (probe) stages[stages.length - 1].detail = probe;
+    if (process.env.DISABLE_BROWSER_SOURCES !== 'true') {
+        const probe = await run('chromium launch probe', () => streamExtractor.probe());
+        if (probe) stages[stages.length - 1].detail = probe;
 
-    // 4. The stage that actually decides it: driving the embed and capturing the stream.
-    if (embedUrl) {
-        const extraction = await run('streamExtractor.extractFromEmbed', () => streamExtractor.extractFromEmbed(embedUrl!));
-        if (extraction) {
-            stages[stages.length - 1].ok = extraction.success && extraction.streams.length > 0;
-            stages[stages.length - 1].detail = {
-                success: extraction.success,
-                streams: extraction.streams.length,
-                subtitles: extraction.subtitles.length,
-                firstUrl: extraction.streams[0]?.url?.slice(0, 110),
-                error: extraction.error,
-            };
+        // 4. The stage that actually decides it: driving the embed and capturing the stream.
+        if (embedUrl) {
+            const extraction = await run('streamExtractor.extractFromEmbed', () => streamExtractor.extractFromEmbed(embedUrl!));
+            if (extraction) {
+                stages[stages.length - 1].ok = extraction.success && extraction.streams.length > 0;
+                stages[stages.length - 1].detail = {
+                    success: extraction.success,
+                    streams: extraction.streams.length,
+                    subtitles: extraction.subtitles.length,
+                    firstUrl: extraction.streams[0]?.url?.slice(0, 110),
+                    error: extraction.error,
+                };
+            }
         }
     }
 
