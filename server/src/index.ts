@@ -25,6 +25,13 @@ interface ExtendedRequest extends Request {
     withCircuitBreaker?: any;
 }
 
+// Ensure browser sources (Aniwaves/Chromium) are enabled for streaming.
+// Platform dashboard settings (e.g. Koyeb) may have legacy DISABLE_BROWSER_SOURCES=true, which breaks mainstream streaming.
+if (process.env.DISABLE_BROWSER_SOURCES === 'true' && process.env.FORCE_DISABLE_BROWSER_SOURCES !== 'true') {
+    console.log('[Init] Overriding DISABLE_BROWSER_SOURCES=true -> false (Chromium is available for Aniwaves)');
+    process.env.DISABLE_BROWSER_SOURCES = 'false';
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 

@@ -76,8 +76,8 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
             let candidates = [source];
             let verifiedEmbed = false;
             if (source.isEmbed) {
-                if (process.env.DISABLE_BROWSER_SOURCES === 'true') {
-                    // Browser sources are disabled on this server — we can't extract streams
+                if (process.env.DISABLE_BROWSER_SOURCES === 'true' && process.env.FORCE_DISABLE_BROWSER_SOURCES === 'true') {
+                    // Browser sources are explicitly forced off on this server — we can't extract streams
                     // with Chromium, but we can still hand the embed URL to the client player
                     // which will render it as an iframe.
                     return [{ ...source }];
