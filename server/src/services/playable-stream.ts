@@ -76,22 +76,36 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
             let candidates = [source];
             let verifiedEmbed = false;
             if (source.isEmbed) {
-                if (process.env.DISABLE_BROWSER_SOURCES === 'true' && process.env.FORCE_DISABLE_BROWSER_SOURCES === 'true') {
-                    // Browser sources are explicitly forced off on this server — we can't extract streams
-                    // with Chromium, but we can still hand the embed URL to the client player
-                    // which will render it as an iframe.
+                // If browser sources are disabled on this host (e.g. low-memory Koyeb/Render container),
+                // or if the embed is an iframe player (FlixCloud, etc.), pass it directly to the client.
+                const isIframeTarget = source.url && /flixcloud|megacloud|rabbitstream|streamtape|streamwish/i.test(source.url);
+                if (process.env.DISABLE_BROWSER_SOURCES === 'true' || isIframeTarget) {
                     return [{ ...source }];
                 }
-                const extracted = await streamExtractor.extractFromEmbed(source.url, 18000, true, bypassCache);
-                verifiedEmbed = extracted.playbackVerified === true;
-                candidates = extracted.streams.map(stream => ({
-                    ...source, url: stream.url, originalUrl: stream.url, isEmbed: false,
-                    isM3U8: stream.type === 'hls', headers: stream.headers || { Referer: new URL(source.url).origin + '/' },
-                }));
+                try {
+                    const extracted = await streamExtractor.extractFromEmbed(source.url, 18000, true, bypassCache);
+                    verifiedEmbed = extracted.playbackVerified === true;
+                    if (extracted.streams && extracted.streams.length > 0) {
+                        candidates = extracted.streams.map(stream => ({
+                            ...source, url: stream.url, originalUrl: stream.url, isEmbed: false,
+                            isM3U8: stream.type === 'hls', headers: stream.headers || { Referer: new URL(source.url).origin + '/' },
+                        }));
+                    } else {
+                        return [{ ...source }];
+                    }
+                } catch {
+                    return [{ ...source }];
+                }
             }
             const valid: VideoSource[] = [];
             for (const candidate of candidates) {
                 try {
+                    // Embed pages are HTML iframe targets, not raw video media.
+                    // Do not run probeMedia on them.
+                    if (candidate.isEmbed) {
+                        valid.push(candidate);
+                        continue;
+                    }
                     // skipProbe: source has already validated the URL (e.g. by scraping
                     // the embed page) but the CDN may block the server's datacenter IP.
                     // The stream proxy or browser player can fetch the segments fine.
@@ -106,10 +120,10 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
             }
             // Custom loaders (e.g. encrypted manifests) must stay in their own player.
             // Only accept that player after observing real decoded playback above.
-            return valid.length ? valid : verifiedEmbed ? [source] : [];
+            return valid.length ? valid : (verifiedEmbed || source.isEmbed) ? [source] : [];
         } catch (error) {
             console.warn(`[StreamValidation] ${data.source}: ${(error as Error).message}`);
-            return [];
+            return source.isEmbed ? [source] : [];
         }
     }));
     return { ...data, sources: results.flat() };

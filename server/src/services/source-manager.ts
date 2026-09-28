@@ -27,11 +27,7 @@ import { reconstructAnimeKaiCompoundFromWatchUrl } from '../utils/animekai-compo
 // answer back. This is an explicit deployment switch so operators can opt in when they provision
 // sufficient memory.
 const BROWSER_BACKED_STREAM_SOURCES = new Set(['Aniwaves', 'Anichi']);
-const browserBackedSourcesDisabled = () => {
-    if (process.env.FORCE_DISABLE_BROWSER_SOURCES === 'true') return true;
-    if (process.env.PUPPETEER_EXECUTABLE_PATH) return false;
-    return process.env.DISABLE_BROWSER_SOURCES === 'true';
-};
+const browserBackedSourcesDisabled = () => process.env.DISABLE_BROWSER_SOURCES === 'true';
 import { isLikelyHentai } from './hentai-resolver-service.js';
 
 export { REGISTERED_SOURCE_NAMES };
