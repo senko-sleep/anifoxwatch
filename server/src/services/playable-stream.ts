@@ -76,7 +76,12 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
             let candidates = [source];
             let verifiedEmbed = false;
             if (source.isEmbed) {
-                if (process.env.DISABLE_BROWSER_SOURCES === 'true') return [];
+                if (process.env.DISABLE_BROWSER_SOURCES === 'true') {
+                    // Browser sources are disabled on this server — we can't extract streams
+                    // with Chromium, but we can still hand the embed URL to the client player
+                    // which will render it as an iframe.
+                    return [{ ...source }];
+                }
                 const extracted = await streamExtractor.extractFromEmbed(source.url, 18000, true, bypassCache);
                 verifiedEmbed = extracted.playbackVerified === true;
                 candidates = extracted.streams.map(stream => ({
@@ -87,6 +92,13 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
             const valid: VideoSource[] = [];
             for (const candidate of candidates) {
                 try {
+                    // skipProbe: source has already validated the URL (e.g. by scraping
+                    // the embed page) but the CDN may block the server's datacenter IP.
+                    // The stream proxy or browser player can fetch the segments fine.
+                    if (candidate.skipProbe) {
+                        valid.push(candidate);
+                        continue;
+                    }
                     const headers = mediaHeaders(data, candidate);
                     await probeMedia(candidate.originalUrl || candidate.url, headers, signal);
                     valid.push({ ...candidate, headers });

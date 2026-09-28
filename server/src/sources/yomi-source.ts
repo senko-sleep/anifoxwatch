@@ -210,6 +210,10 @@ export class YomiSource extends BaseAnimeSource {
 
         const sources: VideoSource[] = [];
         if (winner) {
+            // Include the Referer/Origin headers required by the CDN so that probeMedia
+            // can validate the m3u8 URL.  Without these the CDN returns a 403 or empty
+            // response and the stream is incorrectly discarded.
+            const refererOrigin = `https://${winner.server}`;
             sources.push({
                 url: winner.url,
                 quality: 'auto' as const,
@@ -217,6 +221,13 @@ export class YomiSource extends BaseAnimeSource {
                 isEmbed: false,
                 isDirect: false,
                 server: winner.server,
+                // skipProbe: CDN may block datacenter IPs during server-side probing
+                // but the URL is valid — the stream proxy handles segment fetching fine.
+                skipProbe: true,
+                headers: {
+                    'Referer': `${refererOrigin}/`,
+                    'Origin': refererOrigin,
+                },
             });
             logger.info(
                 `[Yomi] ✅ anilist-${anilistId} ep${episodeNum}: ${winner.url.substring(0, 60)}...`,

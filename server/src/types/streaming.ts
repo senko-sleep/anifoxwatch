@@ -20,6 +20,12 @@ export interface VideoSource {
     category?: 'sub' | 'dub' | 'raw';
     /** A teaser clip, not the episode. Some sources only ever publish a preview for new releases. */
     isPreview?: boolean;
+    /**
+     * Skip server-side probeMedia validation for this source.
+     * Use when the URL was successfully extracted by a scraper but the CDN
+     * blocks datacenter IPs — the stream proxy or client player will fetch it fine.
+     */
+    skipProbe?: boolean;
 }
 
 export interface VideoSubtitle {
