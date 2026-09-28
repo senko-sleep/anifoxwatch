@@ -26,6 +26,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
         chromium \
+        ca-certificates \
+        curl \
         fonts-ipafont-gothic \
         fonts-wqy-zenhei \
         fonts-freefont-ttf \
@@ -36,9 +38,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
-# Koyeb's small instances cannot safely race Chromium-backed providers with the direct
-# resolvers. Set this to false only on an instance deliberately sized for Chromium.
-ENV DISABLE_BROWSER_SOURCES=true
+# Mainstream streams require Chromium, including validation of ReAnime embeds.
+# Size the service for browser extraction; disabling it removes those playback paths.
+ENV DISABLE_BROWSER_SOURCES=false
+ENV NODE_OPTIONS="--max-old-space-size=220"
 # Koyeb injects PORT automatically; default to 8000 to match free tier expectations
 ENV PORT=8000
 

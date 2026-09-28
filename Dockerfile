@@ -84,12 +84,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
-# The Render blueprint sets this as well. Keep direct image deployments on the safe path;
-# operators with adequate RAM may override it to false.
-ENV DISABLE_BROWSER_SOURCES=true
+# Mainstream streams require Chromium, including validation of ReAnime embeds.
+# Size the service for browser extraction; disabling it removes those playback paths.
+ENV DISABLE_BROWSER_SOURCES=false
 # Node no longer carries media bytes, so its heap is sized for the API alone. The headroom this
 # frees on a 512MB box goes to Chromium, whose launch is the thing that actually runs out of it.
-ENV NODE_OPTIONS="--max-old-space-size=256"
+ENV NODE_OPTIONS="--max-old-space-size=220"
 
 WORKDIR /app
 

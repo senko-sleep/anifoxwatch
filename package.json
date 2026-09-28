@@ -23,7 +23,7 @@
     "deploy": "npm run deploy:hosting",
     "deploy:frontend": "npm run deploy:hosting",
     "deploy:hosting": "npm run build && npx firebase deploy --only hosting",
-    "deploy:api": "echo 'Push to GitHub - Vercel auto-deploys the API'",
+    "deploy:api": "node -e \"console.log('API deployment is separate from Firebase Hosting. Follow deploy/KOYEB.md: deploy the current commit to Koyeb, set DISABLE_BROWSER_SOURCES=false, and verify One Piece playback. This command does not deploy.')\"",
     "deploy:firebase": "npx firebase deploy",
     "deploy:firebase:hosting": "npx firebase deploy --only hosting",
     "deploy:firebase:functions": "npx firebase deploy --only functions",

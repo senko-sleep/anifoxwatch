@@ -103,6 +103,9 @@ anistream-hub/
 
 ### Backend Server
 
+For the current Koyeb API and Firebase frontend, follow the [Koyeb deployment guide](deploy/KOYEB.md).
+The API must be deployed separately; `npm run deploy:hosting` updates only the frontend.
+
 1. Deploy the `server/` directory to any Node.js host (Fly.io, Railway, Koyeb, Cloud Run, etc.)
 2. Set build command: `npm install && npm run build`
 3. Set start command: `npm run start:prod`

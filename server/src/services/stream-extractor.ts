@@ -111,15 +111,14 @@ class StreamExtractor {
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
                     '--disable-gpu',
+                    '--disable-software-rasterizer',
+                    '--single-process',
+                    '--renderer-process-limit=1',
                     '--disable-blink-features=AutomationControlled',
-                    // 1920x1080 buys nothing here — nothing is ever rendered for a human, and the
-                    // backing store is paid for in the memory the launch is already short of.
-                    '--window-size=1280,720',
+                    '--window-size=800,600',
                     '--disable-web-security',
-                    '--js-flags="--max-old-space-size=256"',
+                    '--js-flags="--max-old-space-size=64"',
                     '--no-zygote',
-                    // Startup work that only pays off for an interactive browser. On a shared
-                    // core each of these is a slice of the launch budget spent on nothing.
                     '--disable-extensions',
                     '--disable-background-networking',
                     '--disable-background-timer-throttling',

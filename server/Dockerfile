@@ -51,10 +51,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
-# This image is also selected directly by some Koyeb/Render configurations. Keep Chromium-backed
-# sources off unless an operator explicitly overrides the low-memory profile.
-ENV DISABLE_BROWSER_SOURCES=true
-ENV NODE_OPTIONS="--max-old-space-size=320"
+# Mainstream streams require Chromium, including validation of ReAnime embeds.
+# Size the service for browser extraction; disabling it removes those playback paths.
+ENV DISABLE_BROWSER_SOURCES=false
+ENV NODE_OPTIONS="--max-old-space-size=220"
 
 WORKDIR /app
 

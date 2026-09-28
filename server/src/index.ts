@@ -25,6 +25,12 @@ interface ExtendedRequest extends Request {
     withCircuitBreaker?: any;
 }
 
+// In containerized deployments with Chromium installed (PUPPETEER_EXECUTABLE_PATH),
+// ensure Aniwaves is enabled for mainstream streaming.
+if (process.env.PUPPETEER_EXECUTABLE_PATH && process.env.FORCE_DISABLE_BROWSER_SOURCES !== 'true') {
+    process.env.DISABLE_BROWSER_SOURCES = 'false';
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -415,8 +421,8 @@ const startServer = async (port: number) => {
         // don't need it. The browser starts on demand instead. PUPPETEER_WARMUP=true forces it.
         // Do not warm Chromium in the low-memory profile: warming alone can OOM-kill a small
         // Koyeb/Render instance before a direct resolver gets a chance to handle a request.
-        if (process.env.DISABLE_BROWSER_SOURCES !== 'true' &&
-            (process.env.PUPPETEER_WARMUP === 'true' || !(process.env.RENDER === 'true' || process.env.RENDER_EXTERNAL_URL))) {
+        // Only warm Puppeteer if explicitly configured to avoid RAM spikes on boot
+        if (process.env.DISABLE_BROWSER_SOURCES !== 'true' && process.env.PUPPETEER_WARMUP === 'true') {
             void streamExtractor.warmBrowser();
         }
     };
