@@ -162,6 +162,8 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   }, [seasons, urlSeason, currentSeason, urlEpNum]);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(initialEpisodeNum);
   const [audioType, setAudioType] = useState<AudioType>(() => {
+    const requestedLanguage = searchParams.get('lang');
+    if (requestedLanguage === 'sub' || requestedLanguage === 'dub') return requestedLanguage;
     // Restore stored preference; default to dub — auto-falls back to sub if dub has no sources
     try {
       const raw = animeId || '';
@@ -173,7 +175,12 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     } catch { /* ignore */ }
     return 'sub';
   });
-  const [audioManuallySet, setAudioManuallySet] = useState(false);
+  const [audioManuallySet, setAudioManuallySet] = useState(() => {
+    const requestedLanguage = searchParams.get('lang');
+    return requestedLanguage === 'sub' || requestedLanguage === 'dub';
+  });
+  const embedFrameRef = useRef<HTMLIFrameElement>(null);
+  const embedResumeSentRef = useRef(false);
   const [quality, setQuality] = useState<QualityType>('auto');
   const [selectedServer, setSelectedServer] = useState<string>('');
   const [autoPlay, setAutoPlay] = useState(true);
@@ -395,29 +402,49 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     return candidate;
   }, [streamData, sourceRetryIndex, audioType]);
 
-  // Embed-page sources (FlixCloud, etc.) play inside a cross-origin iframe we
-  // don't control, so VideoPlayer — and its position/history tracking — never
-  // mounts for them. Without this, resuming an episode that fell back to an
-  // embed silently lost all progress: it wouldn't appear in Continue Watching,
-  // and reopening the anime would restart at episode 1.
+  // Embedded players are cross-origin, so progress uses their message API.
   const isEmbedSource = useMemo(() => embedUrlFor(videoSource) !== null, [videoSource]);
+  const embedFallbackUrl = embedUrlFor(videoSource);
 
   useEffect(() => {
-    if (!isEmbedSource || !anime?.id || !anime.title || !selectedEpisodeNum) return;
-    // We can't read an embed's currentTime cross-origin, so there's no real
-    // timestamp to track — but recording the episode itself is what lets
-    // Continue Watching, and reopening the anime, land back on it instead of
-    // episode 1. `duration: 0` keeps progress at 0% rather than a fake number.
-    WatchHistory.save(
-      { id: cleanAnimeId, title: anime.title, image: anime.image, season: anime.season } as any,
-      selectedEpisodeNum.toString(),
-      selectedEpisodeNum,
-      0,
-      0,
-      undefined,
-      adult,
+    if (!isEmbedSource || !embedFallbackUrl) return;
+    embedResumeSentRef.current = false;
+    const frame = embedFrameRef.current;
+    if (!frame) return;
+    let origin: string;
+    try { origin = new URL(embedFallbackUrl).origin; } catch { return; }
+    const historyEntry = WatchHistory.get().find((item) =>
+      (item.animeId === cleanAnimeId || item.animeId === anime?.id) && item.episodeNumber === selectedEpisodeNum
     );
-  }, [isEmbedSource, cleanAnimeId, anime?.id, anime?.title, anime?.image, anime?.season, selectedEpisodeNum, adult]);
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== origin || event.source !== frame.contentWindow) return;
+      let data = event.data;
+      if (typeof data === 'string') { try { data = JSON.parse(data); } catch { return; } }
+      if (!data || typeof data !== 'object') return;
+      const currentTime = Number(data.currentTime ?? data.time);
+      const duration = Number(data.duration);
+      if (!Number.isFinite(currentTime) || currentTime < 0) return;
+      if (!embedResumeSentRef.current && historyEntry?.timestamp > 0) {
+        frame.contentWindow?.postMessage({ type: 'seek', time: historyEntry.timestamp }, origin);
+        embedResumeSentRef.current = true;
+      }
+      if (anime?.title) WatchHistory.save(
+        { id: cleanAnimeId, title: anime.title, image: anime.image, season: anime.season } as any,
+        selectedEpisodeNum.toString(), selectedEpisodeNum, currentTime,
+        Number.isFinite(duration) && duration > 0 ? duration : 0, undefined, adult,
+      );
+    };
+    const requestTime = () => frame.contentWindow?.postMessage({ type: 'getTime' }, origin);
+    window.addEventListener('message', onMessage);
+    frame.addEventListener('load', requestTime);
+    const interval = window.setInterval(requestTime, 5000);
+    requestTime();
+    return () => {
+      window.removeEventListener('message', onMessage);
+      frame.removeEventListener('load', requestTime);
+      window.clearInterval(interval);
+    };
+  }, [isEmbedSource, embedFallbackUrl, cleanAnimeId, anime?.id, anime?.title, anime?.image, anime?.season, selectedEpisodeNum, adult]);
 
   // Debug: log the video source details
   useEffect(() => {
@@ -629,6 +656,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
         console.log('[Watch] ❌ All dub servers exhausted, falling back to sub');
         toast.info('Dub unavailable — switching to Sub');
         setAudioType('sub');
+        setSearchParams((previous) => { const next = new URLSearchParams(previous); next.set('lang', 'sub'); return next; }, { replace: true });
       }
       return;
     }
@@ -712,6 +740,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       console.log('[Watch] Dub not available for this episode, falling back to sub');
       toast.info('Dub not available for this episode — switching to Sub');
       setAudioType('sub');
+      setSearchParams((previous) => { const next = new URLSearchParams(previous); next.set('lang', 'sub'); return next; }, { replace: true });
     }
   }, [audioType, streamLoading, streamData, audioManuallySet]);
 
@@ -1143,7 +1172,6 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   // If the best available source is an embed page (HTML), show an iframe instead of VideoPlayer
   // Server-flagged embeds use the raw originalUrl so the iframe's JS works; domain-locked
   // embeds (aniwaves/echovideo) return null so the caller fails over instead.
-  const embedFallbackUrl = embedUrlFor(videoSource);
   const embedDubTrackHint = Boolean(
     embedFallbackUrl &&
     audioType === 'dub' &&
@@ -1195,6 +1223,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                 </div>
               ) : embedFallbackUrl ? (
                 <iframe
+                  ref={embedFrameRef}
                   src={embedFallbackUrl}
                   className="absolute inset-0 h-full w-full border-0"
                   allowFullScreen
@@ -1336,6 +1365,11 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
               onAudioTypeChange={(type) => {
                 setAudioManuallySet(true);
                 setAudioType(type);
+                setSearchParams((previous) => {
+                  const next = new URLSearchParams(previous);
+                  next.set('lang', type);
+                  return next;
+                }, { replace: true });
               }}
               quality={quality}
               onQualityChange={setQuality}
