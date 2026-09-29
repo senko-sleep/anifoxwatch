@@ -17,6 +17,25 @@ export const isEmbedUrl = (url: string) => {
 
 interface SourceLike { url?: string; originalUrl?: string; isEmbed?: boolean }
 
+/** Apply FlixCloud's native audio-track and start-position embed parameters. */
+export function embedPlaybackUrlFor(
+  embedUrl: string | null,
+  source: string | undefined,
+  audioType: 'sub' | 'dub',
+  startAt = 0,
+): string | null {
+  if (!embedUrl || source !== 'ReAnime') return embedUrl;
+  try {
+    const url = new URL(embedUrl);
+    if (!url.hostname.toLowerCase().includes('flixcloud')) return embedUrl;
+    url.searchParams.set('a', audioType === 'dub' ? '1' : '0');
+    if (Number.isFinite(startAt) && startAt > 0) url.searchParams.set('start_at', String(Math.floor(startAt)));
+    return url.toString();
+  } catch {
+    return embedUrl;
+  }
+}
+
 /** The iframe URL for a source that must play as an embed page, or null for a real stream. */
 export function embedUrlFor(source: SourceLike | null | undefined): string | null {
   if (!source) return null;

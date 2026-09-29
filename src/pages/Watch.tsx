@@ -30,7 +30,7 @@ import {
 
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { WatchHistory } from '@/lib/watch-history';
-import { EMBED_DOMAINS, embedUrlFor } from '@/lib/embed-source';
+import { EMBED_DOMAINS, embedPlaybackUrlFor, embedUrlFor } from '@/lib/embed-source';
 import { toast } from 'sonner';
 
 type AudioType = 'sub' | 'dub';
@@ -180,7 +180,6 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     return requestedLanguage === 'sub' || requestedLanguage === 'dub';
   });
   const embedFrameRef = useRef<HTMLIFrameElement>(null);
-  const embedResumeSentRef = useRef(false);
   const [quality, setQuality] = useState<QualityType>('auto');
   const [selectedServer, setSelectedServer] = useState<string>('');
   const [autoPlay, setAutoPlay] = useState(true);
@@ -405,14 +404,19 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   // Embedded players are cross-origin, so progress uses their message API.
   const isEmbedSource = useMemo(() => embedUrlFor(videoSource) !== null, [videoSource]);
   const embedFallbackUrl = embedUrlFor(videoSource);
+  const embedPlaybackUrl = useMemo(() => {
+    const saved = WatchHistory.get().find((item) =>
+      (item.animeId === cleanAnimeId || item.animeId === anime?.id) && item.episodeNumber === selectedEpisodeNum
+    );
+    return embedPlaybackUrlFor(embedFallbackUrl, streamData?.source, audioType, saved?.timestamp ?? 0);
+  }, [embedFallbackUrl, streamData?.source, audioType, cleanAnimeId, anime?.id, selectedEpisodeNum]);
 
   useEffect(() => {
-    if (!isEmbedSource || !embedFallbackUrl) return;
-    embedResumeSentRef.current = false;
+    if (!isEmbedSource || !embedPlaybackUrl) return;
     const frame = embedFrameRef.current;
     if (!frame) return;
     let origin: string;
-    try { origin = new URL(embedFallbackUrl).origin; } catch { return; }
+    try { origin = new URL(embedPlaybackUrl).origin; } catch { return; }
     const historyEntry = WatchHistory.get().find((item) =>
       (item.animeId === cleanAnimeId || item.animeId === anime?.id) && item.episodeNumber === selectedEpisodeNum
     );
@@ -424,17 +428,15 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       const currentTime = Number(data.currentTime ?? data.time);
       const duration = Number(data.duration);
       if (!Number.isFinite(currentTime) || currentTime < 0) return;
-      if (!embedResumeSentRef.current && historyEntry?.timestamp > 0) {
-        frame.contentWindow?.postMessage({ type: 'seek', time: historyEntry.timestamp }, origin);
-        embedResumeSentRef.current = true;
-      }
+      // Ignore the provider's pre-seek zero while start_at is being applied.
+      if (historyEntry && currentTime + 2 < historyEntry.timestamp) return;
       if (anime?.title) WatchHistory.save(
         { id: cleanAnimeId, title: anime.title, image: anime.image, season: anime.season } as any,
         selectedEpisodeNum.toString(), selectedEpisodeNum, currentTime,
         Number.isFinite(duration) && duration > 0 ? duration : 0, undefined, adult,
       );
     };
-    const requestTime = () => frame.contentWindow?.postMessage({ type: 'getTime' }, origin);
+    const requestTime = () => frame.contentWindow?.postMessage({ command: 'getTime' }, origin);
     window.addEventListener('message', onMessage);
     frame.addEventListener('load', requestTime);
     const interval = window.setInterval(requestTime, 5000);
@@ -444,7 +446,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       frame.removeEventListener('load', requestTime);
       window.clearInterval(interval);
     };
-  }, [isEmbedSource, embedFallbackUrl, cleanAnimeId, anime?.id, anime?.title, anime?.image, anime?.season, selectedEpisodeNum, adult]);
+  }, [isEmbedSource, embedPlaybackUrl, cleanAnimeId, anime?.id, anime?.title, anime?.image, anime?.season, selectedEpisodeNum, adult]);
 
   // Debug: log the video source details
   useEffect(() => {
@@ -1224,7 +1226,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
               ) : embedFallbackUrl ? (
                 <iframe
                   ref={embedFrameRef}
-                  src={embedFallbackUrl}
+                  src={embedPlaybackUrl}
                   className="absolute inset-0 h-full w-full border-0"
                   allowFullScreen
                   allow="autoplay; encrypted-media; picture-in-picture"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { embedUrlFor, isEmbedUrl } from '../embed-source';
+import { embedPlaybackUrlFor, embedUrlFor, isEmbedUrl } from '../embed-source';
 
 describe('isEmbedUrl', () => {
   it('treats embed-page hosts as embeds', () => {
@@ -53,5 +53,22 @@ describe('embedUrlFor', () => {
     const inner = 'https://flixcloud.cc/e/abc';
     const src = { url: `http://localhost:3001/api/stream/proxy?url=${encodeURIComponent(inner)}&referer=x` };
     expect(embedUrlFor(src)).toBe(inner);
+  });
+});
+
+describe('embedPlaybackUrlFor', () => {
+  const sourceUrl = 'https://flixcloud.cc/e/episode?v=1';
+
+  it('selects FlixCloud English audio for ReAnime dub playback', () => {
+    expect(embedPlaybackUrlFor(sourceUrl, 'ReAnime', 'dub')).toBe(`${sourceUrl}&a=1`);
+  });
+
+  it('selects the Japanese audio track and adds a saved resume position', () => {
+    expect(embedPlaybackUrlFor(sourceUrl, 'ReAnime', 'sub', 128.9)).toBe(`${sourceUrl}&a=0&start_at=128`);
+  });
+
+  it('does not change non-FlixCloud providers or unrelated source categories', () => {
+    expect(embedPlaybackUrlFor('https://megacloud.blog/e/episode', 'ReAnime', 'dub')).toBe('https://megacloud.blog/e/episode');
+    expect(embedPlaybackUrlFor(sourceUrl, 'Other', 'dub')).toBe(sourceUrl);
   });
 });
