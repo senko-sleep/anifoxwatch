@@ -30,10 +30,9 @@ import {
 
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { WatchHistory } from '@/lib/watch-history';
+import { audioTypeFromQuery, type AudioType } from '@/lib/audio-type';
 import { EMBED_DOMAINS, embedPlaybackUrlFor, embedUrlFor } from '@/lib/embed-source';
 import { toast } from 'sonner';
-
-type AudioType = 'sub' | 'dub';
 
 type QualityType = '1080p' | '720p' | '480p' | '360p' | 'auto';
 
@@ -161,20 +160,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seasons, urlSeason, currentSeason, urlEpNum]);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(initialEpisodeNum);
-  const [audioType, setAudioType] = useState<AudioType>(() => {
-    const requestedLanguage = searchParams.get('lang');
-    if (requestedLanguage === 'sub' || requestedLanguage === 'dub') return requestedLanguage;
-    // Restore stored preference; default to dub — auto-falls back to sub if dub has no sources
-    try {
-      const raw = animeId || '';
-      const trailing = raw.match(/-(\d{1,9})$/);
-      const prefKey = raw.startsWith('anilist-') || !trailing ? raw : `anilist-${trailing[1]}`;
-      const prefs = JSON.parse(localStorage.getItem('anime_audio_prefs') || '{}');
-      if (prefs[prefKey] === 'dub') return 'dub';
-      if (prefs[prefKey] === 'sub') return 'sub';
-    } catch { /* ignore */ }
-    return 'sub';
-  });
+  const [audioType, setAudioType] = useState<AudioType>(() => audioTypeFromQuery(searchParams.get('lang')));
   const [audioManuallySet, setAudioManuallySet] = useState(() => {
     const requestedLanguage = searchParams.get('lang');
     return requestedLanguage === 'sub' || requestedLanguage === 'dub';
@@ -852,81 +838,6 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       return () => window.clearTimeout(timeoutId);
     }
   }, [episodes, selectedEpisode, cleanAnimeId, audioType, prefetchNext, anilistIdForPrefetch, streamLoading, streamData, anime?.title]);
-
-  // Helper: get/set per-anime audio preference
-  const getAnimeAudioPref = useCallback((animeId: string): AudioType | null => {
-    try {
-      const prefs = JSON.parse(localStorage.getItem('anime_audio_prefs') || '{}');
-      return prefs[animeId] || null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const setAnimeAudioPref = useCallback((animeId: string, type: AudioType) => {
-    try {
-      const prefs = JSON.parse(localStorage.getItem('anime_audio_prefs') || '{}');
-      prefs[animeId] = type;
-      localStorage.setItem('anime_audio_prefs', JSON.stringify(prefs));
-    } catch {
-      // Ignore storage errors
-    }
-  }, []);
-
-  // Auto-switch to dub when available, unless user manually chose sub for this anime
-  useEffect(() => {
-    if (!currentEpisode || !anime || streamLoading) return;
-    if (audioManuallySet) return;
-    
-    // Don't switch once a stream is already loaded or is currently loading — 
-    // late-resolving metadata (dubCount) would otherwise destroy a working 
-    // stream or cause infinite toggle loops during fallback transitions.
-    if ((streamData?.sources?.length ?? 0) > 0) return;
-
-    const animeId = cleanAnimeId || anime.id;
-    const storedPref = getAnimeAudioPref(animeId);
-
-    // Only trust confirmed dub signals — serversHaveDub is NOT used here because streaming
-    // sources (e.g. AnimeKai) return a 'dub' server entry for every anime even when no dubbed
-    // content exists, which causes a 404 → error loop on sub-only titles.
-    const currentHasDub =
-      currentEpisode.hasDub ||
-      (anime.dubCount != null && anime.dubCount > 0 && currentEpisode.number <= anime.dubCount) ||
-      dubProbeHasSources;
-
-    // If user explicitly chose sub for this anime, respect it
-    if (storedPref === 'sub') {
-      if (audioType !== 'sub') setAudioType('sub');
-      return;
-    }
-
-    // If user explicitly chose dub for this anime, respect it
-    if (storedPref === 'dub') {
-      if (audioType !== 'dub') setAudioType('dub');
-      return;
-    }
-
-    // No stored preference: keep sub for fast first playback (dub is prefetched in background).
-  }, [
-    currentEpisode, 
-    anime, 
-    audioManuallySet, 
-    streamData, 
-    streamLoading, 
-    audioType,
-    anime?.dubCount, 
-    dubProbeHasSources, 
-    cleanAnimeId, 
-    getAnimeAudioPref
-  ]);
-
-  // Store user's manual audio choice when they change it
-  useEffect(() => {
-    if (audioManuallySet && anime) {
-      const animeId = cleanAnimeId || anime.id;
-      setAnimeAudioPref(animeId, audioType);
-    }
-  }, [audioManuallySet, audioType, anime, cleanAnimeId, setAnimeAudioPref]);
 
   // Reset manual audio choice when switching episodes
   useEffect(() => {
