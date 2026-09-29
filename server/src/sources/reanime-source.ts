@@ -66,14 +66,19 @@ export class ReAnimeSource extends BaseAnimeSource {
                 const challenge = status === 403 || axiosErr?.response?.headers?.['cf-mitigated'] === 'challenge';
                 if (challenge) {
                     logger.info('[ReAnime] Cloudflare challenge detected; retrying with shared Chromium', undefined, this.name);
-                    return streamExtractor.fetchJsonInBrowser<T>(url, {
-                        timeoutMs: Math.min(options?.timeout || 20_000, 20_000),
-                        signal: options?.signal,
-                        headers: {
-                            'Accept': 'application/json, text/plain, */*',
-                            'Referer': `${this.baseUrl}/`,
-                        },
-                    });
+                    try {
+                        return await streamExtractor.fetchJsonInBrowser<T>(url, {
+                            timeoutMs: Math.min(options?.timeout || 20_000, 20_000),
+                            signal: options?.signal,
+                            headers: {
+                                'Accept': 'application/json, text/plain, */*',
+                                'Referer': `${this.baseUrl}/`,
+                            },
+                        });
+                    } catch (browserErr) {
+                        logger.warn(`[ReAnime] Chromium challenge retry failed: ${String(browserErr)}`, undefined, this.name);
+                        throw browserErr;
+                    }
                 }
                 throw curlErr || axiosErr;
             }

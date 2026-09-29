@@ -276,6 +276,17 @@ class StreamExtractor {
             page = await this.createPage(true);
             options.signal?.addEventListener('abort', abortPage, { once: true });
             options.signal?.throwIfAborted();
+            // This path only needs the rendered JSON body. Avoid loading media and visual
+            // assets so Cloudflare's JS check fits within small production containers.
+            await page.setRequestInterception(true);
+            page.on('request', (request: any) => {
+                if (['image', 'media', 'font'].includes(request.resourceType())) {
+                    void request.abort().catch(() => {});
+                } else {
+                    void request.continue().catch(() => {});
+                }
+            });
+            await page.setViewport({ width: 800, height: 600 });
             await page.setUserAgent(
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
             );
