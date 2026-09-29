@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  Languages,
   Play,
   RefreshCw,
   RotateCw,
@@ -1143,6 +1144,12 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   // Server-flagged embeds use the raw originalUrl so the iframe's JS works; domain-locked
   // embeds (aniwaves/echovideo) return null so the caller fails over instead.
   const embedFallbackUrl = embedUrlFor(videoSource);
+  const embedDubTrackHint = Boolean(
+    embedFallbackUrl &&
+    audioType === 'dub' &&
+    streamData?.source === 'ReAnime' &&
+    streamData.category === 'dub'
+  );
 
 
   // One responsive layout for every screen — phones get the same stage, edge to edge.
@@ -1266,6 +1273,15 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
         </div>
 
         {/* ── Now playing ───────────────────────────────────────────────── */}
+        {embedDubTrackHint && (
+          <div className="page-x pt-3" role="status" aria-live="polite">
+            <p className="inline-flex items-center gap-2 text-[12px] text-foreground/60">
+              <Languages className="h-3.5 w-3.5 shrink-0" />
+              English audio is available in the embedded player&apos;s Audio Tracks settings.
+            </p>
+          </div>
+        )}
+
         <div className="page-x pt-7">
           <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-5">
             <div className="min-w-0">
