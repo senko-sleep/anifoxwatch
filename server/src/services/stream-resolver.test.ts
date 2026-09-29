@@ -65,6 +65,28 @@ describe('provider fallback and identity', () => {
         const exhausted = await resolveProviders([provider('Hung', { getStreamingLinks: () => new Promise(() => {}) })], { ...request, timeoutMs: 30 });
         expect(exhausted.attempts?.[0].status).toBe('timeout');
     });
+    it('does not hold healthy providers behind a hung ReAnime request', async () => {
+        const started: string[] = [];
+        const hungReAnime = provider('ReAnime', {
+            acceptsAniListId: true,
+            getStreamingLinks: () => { started.push('ReAnime'); return new Promise(() => {}); },
+        });
+        const healthy = provider('Healthy', {
+            search: async () => {
+                started.push('Healthy');
+                return { results: [{ id: 'healthy-id', title: 'Example Season 3', image: '', type: 'TV',
+                    status: 'Ongoing', episodes: 2, genres: [] }], totalPages: 1,
+                    currentPage: 1, hasNextPage: false, source: 'Healthy' };
+            },
+        });
+
+        const result = await resolveProviders([hungReAnime, healthy], {
+            ...request, anilistId: 123, timeoutMs: 500,
+        });
+
+        expect(result.source).toBe('Healthy');
+        expect(started).toContain('Healthy');
+    });
     it('uses canonical IDs only for providers that explicitly support them', async () => {
         const canonical = provider('Canonical', { acceptsAniListId: true });
         await resolveProviders([canonical], { ...request, anilistId: 123456 });
