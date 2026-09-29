@@ -22,8 +22,21 @@ export async function resolveProviders(providers: StreamProvider[], request: {
     timeoutMs?: number; excludedProviders?: string[];
 }): Promise<StreamingData> {
     const attempts: NonNullable<StreamingData['attempts']> = [];
-    const tasks = providers.filter(provider => provider.getStreamingLinks &&
-        !request.excludedProviders?.includes(provider.name)).map(async provider => {
+    const eligibleProviders = providers.filter(provider => provider.getStreamingLinks &&
+        !request.excludedProviders?.includes(provider.name));
+    const orderedProviders = [...eligibleProviders].sort((a, b) =>
+        Number(b.name === 'ReAnime') - Number(a.name === 'ReAnime'));
+    let reAnimeTask: Promise<StreamingData> | null = null;
+    const tasks = orderedProviders.map(async provider => {
+        await Promise.resolve();
+        if (provider.name !== 'ReAnime' && reAnimeTask) {
+            try {
+                await reAnimeTask;
+                throw new Error('ReAnime resolved successfully');
+            } catch (error) {
+                if ((error as Error).message === 'ReAnime resolved successfully') throw error;
+            }
+        }
         const attempt: typeof attempts[number] = { provider: provider.name, status: 'pending' };
         attempts.push(attempt);
         const controller = new AbortController();
@@ -78,6 +91,8 @@ export async function resolveProviders(providers: StreamProvider[], request: {
             throw error;
         } finally { clearTimeout(timeout!); }
     });
+    const reAnimeIndex = orderedProviders.findIndex(provider => provider.name === 'ReAnime');
+    if (reAnimeIndex >= 0) reAnimeTask = tasks[reAnimeIndex];
     try {
         // Each promise only fulfills after mapping, extraction AND media validation.
         const winner = await Promise.any(tasks);
