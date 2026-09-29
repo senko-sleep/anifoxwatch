@@ -433,7 +433,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       if (anime?.title) WatchHistory.save(
         { id: cleanAnimeId, title: anime.title, image: anime.image, season: anime.season } as any,
         selectedEpisodeNum.toString(), selectedEpisodeNum, currentTime,
-        Number.isFinite(duration) && duration > 0 ? duration : 0, undefined, adult,
+        Number.isFinite(duration) && duration > 0 ? duration : 0, undefined, adult, audioType,
       );
     };
     const requestTime = () => frame.contentWindow?.postMessage({ command: 'getTime' }, origin);

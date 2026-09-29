@@ -12,6 +12,7 @@ export interface WatchHistoryItem {
     lastWatched: number; // Date.now()
     progress: number; // 0 to 1
     frameThumbnail?: string; // Base64 or URL of video frame at timestamp
+    audioType?: 'sub' | 'dub';
     source?: string; // API source the anime came from (e.g. 'hanime', 'aki-h')
     isAdult?: boolean; // Watched from the +18 catalog — lets adult-only shelves filter history
 }
@@ -27,7 +28,8 @@ export const WatchHistory = {
         timestamp: number,
         duration: number,
         frameThumbnail?: string,
-        isAdult?: boolean
+        isAdult?: boolean,
+        audioType?: 'sub' | 'dub'
     ) => {
         try {
             const historyJSON = localStorage.getItem(HISTORY_KEY);
@@ -55,6 +57,7 @@ export const WatchHistory = {
                 lastWatched: Date.now(),
                 progress: duration > 0 ? timestamp / duration : 0,
                 frameThumbnail: frameThumbnail ?? existingItem?.frameThumbnail,
+                audioType: audioType ?? existingItem?.audioType,
                 source: anime.source,
                 isAdult,
             };

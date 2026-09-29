@@ -53,6 +53,7 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
   const routeFor = (item: WatchHistoryItem) => watchPath(
     { id: item.animeId, title: item.animeTitle, source: item.source },
     item.episodeNumber,
+    item.audioType ? new URLSearchParams({ lang: item.audioType }).toString() : '',
   );
   const state = { from: location.pathname + location.search };
 

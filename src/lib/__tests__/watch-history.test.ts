@@ -23,6 +23,13 @@ describe('WatchHistory', () => {
     expect(WatchHistory.get()[0].progress).toBeCloseTo(600 / 1440);
   });
 
+  it('persists audio mode and retains it across later progress updates', () => {
+    WatchHistory.save(cat, '3', 3, 600, 1440, undefined, false, 'dub');
+    WatchHistory.save(cat, '3', 3, 660, 1440);
+    expect(WatchHistory.get()[0].audioType).toBe('dub');
+    expect(WatchHistory.get()[0].timestamp).toBe(660);
+  });
+
   it('keeps one entry per anime, pointing at the latest episode', () => {
     WatchHistory.save(cat, '1', 1, 900, 1440);
     WatchHistory.save(cat, '2', 2, 0, 0);
