@@ -41,6 +41,10 @@ export class ReAnimeSource extends BaseAnimeSource {
     private async fetchJson<T>(path: string, options?: SourceRequestOptions): Promise<T> {
         const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
         const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+        // Leave enough of the provider budget for Chromium to clear the JS challenge.
+        // A slow curl timeout equal to the whole provider deadline prevents later transports
+        // from ever running (the resolver aborts this call at that same deadline).
+        const transportTimeout = Math.min(options?.timeout || 12_000, 5_000);
         try {
             return await curlJson<T>(url, {
                 headers: {
@@ -48,12 +52,15 @@ export class ReAnimeSource extends BaseAnimeSource {
                     'User-Agent': UA,
                     'Referer': `${this.baseUrl}/`,
                 },
-                timeoutMs: options?.timeout || 12000,
+                timeoutMs: transportTimeout,
                 signal: options?.signal,
             });
         } catch (curlErr: any) {
             try {
-                const resp = await this.client.get<T>(path, { signal: options?.signal });
+                const resp = await this.client.get<T>(path, {
+                    signal: options?.signal,
+                    timeout: Math.min(options?.timeout || 12_000, 5_000),
+                });
                 const body = typeof resp.data === 'string' ? resp.data : '';
                 if (/Just a moment|cf-chl-|challenge-platform/i.test(body)) {
                     throw Object.assign(new Error('Cloudflare JavaScript challenge'), {
