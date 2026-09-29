@@ -96,11 +96,12 @@ class StreamExtractor {
         }
 
         try {
-            if (!puppeteer) {
-                const puppeteerModuleName = 'puppeteer';
-                puppeteer = (await import(puppeteerModuleName)).default;
-            }
-            const launchPromise = puppeteer.launch({
+            const launchPromise = (async () => {
+                if (!puppeteer) {
+                    const puppeteerModuleName = 'puppeteer';
+                    puppeteer = (await import(puppeteerModuleName)).default;
+                }
+                return puppeteer.launch({
                 headless: true,
                 // Puppeteer's own limit is 30s and would fire before ours, so it is set to match.
                 timeout: LAUNCH_TIMEOUT_MS,
@@ -131,7 +132,8 @@ class StreamExtractor {
                     '--metrics-recording-only',
                     '--mute-audio'
                 ]
-            });
+                });
+            })();
 
             let timedOut = false;
             this.browserLaunchPromise = Promise.race([
