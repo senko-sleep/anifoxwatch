@@ -177,17 +177,18 @@ class StreamExtractor {
     /**
      * Create a new page with proper settings
      */
-    private async createPage(): Promise<any> {
+    private async createPage(priority = false): Promise<any> {
+        const pageLimit = this.MAX_CONCURRENT_PAGES + (priority ? 1 : 0);
         // Simple concurrency limit - reduced delay from 500ms to 100ms.
         // Bounded, because this loop has no other exit: if pages are ever leaked, an unbounded
         // wait turns "some extractions are slow" into "every later request hangs forever", and
         // the request that finally notices is one that did nothing wrong. Failing here instead
         // lets the caller fall back to a source that needs no browser.
         const waitStarted = Date.now();
-        while (this.activePages >= this.MAX_CONCURRENT_PAGES) {
+        while (this.activePages >= pageLimit) {
             if (Date.now() - waitStarted > this.PAGE_SLOT_WAIT_MS) {
                 throw new Error(
-                    `No page slot after ${this.PAGE_SLOT_WAIT_MS}ms (${this.activePages}/${this.MAX_CONCURRENT_PAGES} busy)`
+                    `No page slot after ${this.PAGE_SLOT_WAIT_MS}ms (${this.activePages}/${pageLimit} busy)`
                 );
             }
             await this.delay(100);
@@ -224,18 +225,55 @@ class StreamExtractor {
         }
     }
 
+    private browserJsonQueue: Promise<void> = Promise.resolve();
+    private browserJsonInFlight = new Map<string, Promise<unknown>>();
+
     async fetchJsonInBrowser<T>(url: string, options: {
         timeoutMs?: number;
         headers?: Record<string, string>;
         signal?: AbortSignal;
     } = {}): Promise<T> {
+        const existing = this.browserJsonInFlight.get(url);
+        if (existing) return existing as Promise<T>;
+
+        const request = this.enqueueBrowserJson<T>(url, options);
+        this.browserJsonInFlight.set(url, request);
+        try {
+            return await request;
+        } finally {
+            if (this.browserJsonInFlight.get(url) === request) this.browserJsonInFlight.delete(url);
+        }
+    }
+
+    private async enqueueBrowserJson<T>(url: string, options: {
+        timeoutMs?: number;
+        headers?: Record<string, string>;
+        signal?: AbortSignal;
+    }): Promise<T> {
+        const previous = this.browserJsonQueue;
+        let release!: () => void;
+        this.browserJsonQueue = new Promise<void>(resolve => { release = resolve; });
+        await previous;
+
+        try {
+            return await this.fetchJsonInBrowserPage<T>(url, options);
+        } finally {
+            release();
+        }
+    }
+
+    private async fetchJsonInBrowserPage<T>(url: string, options: {
+        timeoutMs?: number;
+        headers?: Record<string, string>;
+        signal?: AbortSignal;
+    }): Promise<T> {
         const timeoutMs = options.timeoutMs ?? 20_000;
         const deadline = Date.now() + timeoutMs;
         let page: any = null;
         const abortPage = () => { if (page) void page.close().catch(() => {}); };
 
         try {
-            page = await this.createPage();
+            page = await this.createPage(true);
             options.signal?.addEventListener('abort', abortPage, { once: true });
             options.signal?.throwIfAborted();
             await page.setUserAgent(
