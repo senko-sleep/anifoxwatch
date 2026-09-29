@@ -1308,7 +1308,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
           <div className="page-x pt-3" role="status" aria-live="polite">
             <p className="inline-flex items-center gap-2 text-[12px] text-foreground/60">
               <Languages className="h-3.5 w-3.5 shrink-0" />
-              English audio is available in the embedded player&apos;s Audio Tracks settings.
+              English audio is selected in the embedded player.
             </p>
           </div>
         )}
