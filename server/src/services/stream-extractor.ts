@@ -224,6 +224,57 @@ class StreamExtractor {
         }
     }
 
+    async fetchJsonInBrowser<T>(url: string, options: {
+        timeoutMs?: number;
+        headers?: Record<string, string>;
+        signal?: AbortSignal;
+    } = {}): Promise<T> {
+        const timeoutMs = options.timeoutMs ?? 20_000;
+        const deadline = Date.now() + timeoutMs;
+        let page: any = null;
+        const abortPage = () => { if (page) void page.close().catch(() => {}); };
+
+        try {
+            page = await this.createPage();
+            options.signal?.addEventListener('abort', abortPage, { once: true });
+            options.signal?.throwIfAborted();
+            await page.setUserAgent(
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+            );
+            await page.setExtraHTTPHeaders({
+                'Accept': 'application/json, text/plain, */*',
+                ...options.headers,
+            });
+
+            try {
+                await page.goto(url, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: Math.min(timeoutMs, 15_000),
+                });
+            } catch (error) {
+                options.signal?.throwIfAborted();
+                if (Date.now() >= deadline) throw error;
+            }
+
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) throw new Error(`Browser JSON request timed out after ${timeoutMs}ms`);
+            await page.waitForFunction(() => {
+                const text = document.body?.innerText?.trim();
+                if (!text) return false;
+                try { JSON.parse(text); return true; } catch { return false; }
+            }, { timeout: remaining });
+
+            const text = await page.evaluate(() => document.body.innerText.trim());
+            return JSON.parse(text) as T;
+        } finally {
+            options.signal?.removeEventListener('abort', abortPage);
+            if (page) {
+                this.activePages--;
+                await page.close().catch(() => {});
+            }
+        }
+    }
+
     /**
      * Extract streams from a Zoro-style watch site (9anime, Kaido, etc.)
      */

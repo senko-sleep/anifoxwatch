@@ -5,6 +5,7 @@ import { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.
 import { StreamingData, VideoSource, EpisodeServer, VideoSubtitle } from '../types/streaming.js';
 import { logger } from '../utils/logger.js';
 import { curlJson } from '../utils/curl-fetch.js';
+import { streamExtractor } from '../services/stream-extractor.js';
 
 export class ReAnimeSource extends BaseAnimeSource {
     acceptsAniListId = true;
@@ -36,11 +37,7 @@ export class ReAnimeSource extends BaseAnimeSource {
         });
     }
 
-    /**
-     * Fetch JSON through curlJson first (curl's TLS fingerprint bypasses the Cloudflare
-     * bot check that gives Node/axios a 403 status from a datacenter IP), falling back
-     * to axios when curl is not installed or errors.
-     */
+    /** Prefer curl/axios; use the shared browser only when Cloudflare requires JavaScript. */
     private async fetchJson<T>(path: string, options?: SourceRequestOptions): Promise<T> {
         const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
         const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -57,8 +54,27 @@ export class ReAnimeSource extends BaseAnimeSource {
         } catch (curlErr: any) {
             try {
                 const resp = await this.client.get<T>(path, { signal: options?.signal });
+                const body = typeof resp.data === 'string' ? resp.data : '';
+                if (/Just a moment|cf-chl-|challenge-platform/i.test(body)) {
+                    throw Object.assign(new Error('Cloudflare JavaScript challenge'), {
+                        response: { status: 403, data: body },
+                    });
+                }
                 return resp.data;
-            } catch (axiosErr) {
+            } catch (axiosErr: any) {
+                const status = axiosErr?.response?.status;
+                const challenge = status === 403 || axiosErr?.response?.headers?.['cf-mitigated'] === 'challenge';
+                if (challenge) {
+                    logger.info('[ReAnime] Cloudflare challenge detected; retrying with shared Chromium', undefined, this.name);
+                    return streamExtractor.fetchJsonInBrowser<T>(url, {
+                        timeoutMs: Math.min(options?.timeout || 20_000, 20_000),
+                        signal: options?.signal,
+                        headers: {
+                            'Accept': 'application/json, text/plain, */*',
+                            'Referer': `${this.baseUrl}/`,
+                        },
+                    });
+                }
                 throw curlErr || axiosErr;
             }
         }
