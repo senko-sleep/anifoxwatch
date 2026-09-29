@@ -87,6 +87,15 @@ describe('provider fallback and identity', () => {
         expect(result.source).toBe('Healthy');
         expect(started).toContain('Healthy');
     });
+    it('does not start browser-backed providers when a direct provider succeeds', async () => {
+        const browserProvider = provider('Aniwaves');
+        const directProvider = provider('Yomi');
+
+        const result = await resolveProviders([browserProvider, directProvider], request);
+
+        expect(result.source).toBe('Yomi');
+        expect(browserProvider.getStreamingLinks).not.toHaveBeenCalled();
+    });
     it('uses canonical IDs only for providers that explicitly support them', async () => {
         const canonical = provider('Canonical', { acceptsAniListId: true });
         await resolveProviders([canonical], { ...request, anilistId: 123456 });

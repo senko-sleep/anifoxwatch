@@ -26,7 +26,11 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         !request.excludedProviders?.includes(provider.name));
     const orderedProviders = [...eligibleProviders].sort((a, b) =>
         Number(b.name === 'ReAnime') - Number(a.name === 'ReAnime'));
-    const tasks = orderedProviders.map(async provider => {
+    const batches = [
+        orderedProviders.filter(provider => !['Aniwaves', 'Anichi'].includes(provider.name)),
+        orderedProviders.filter(provider => ['Aniwaves', 'Anichi'].includes(provider.name)),
+    ].filter(batch => batch.length > 0);
+    const tasksFor = (batch: StreamProvider[]) => batch.map(async provider => {
         await Promise.resolve();
         const attempt: typeof attempts[number] = { provider: provider.name, status: 'pending' };
         attempts.push(attempt);
@@ -82,12 +86,13 @@ export async function resolveProviders(providers: StreamProvider[], request: {
             throw error;
         } finally { clearTimeout(timeout!); }
     });
-    try {
-        // Each promise only fulfills after mapping, extraction AND media validation.
-        const winner = await Promise.any(tasks);
-        console.log(`[StreamResolver] Selected ${winner.source}`);
-        return { ...winner, attempts: attempts.map(attempt => ({ ...attempt })) };
-    } catch {
-        return { sources: [], subtitles: [], attempts };
+    for (const batch of batches) {
+        try {
+            // Avoid competing Chromium sessions: try direct providers before browser-backed ones.
+            const winner = await Promise.any(tasksFor(batch));
+            console.log(`[StreamResolver] Selected ${winner.source}`);
+            return { ...winner, attempts: attempts.map(attempt => ({ ...attempt })) };
+        } catch { /* Continue to the next provider group. */ }
     }
+    return { sources: [], subtitles: [], attempts };
 }
