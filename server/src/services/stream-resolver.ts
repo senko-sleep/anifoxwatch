@@ -26,11 +26,20 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         !request.excludedProviders?.includes(provider.name));
     const orderedProviders = [...eligibleProviders].sort((a, b) =>
         Number(b.name === 'ReAnime') - Number(a.name === 'ReAnime'));
-    const nativeBatch = request.nativeProvider
-        ? orderedProviders.filter(provider => provider.name === request.nativeProvider)
+    // ReAnime returns a FlixCloud player with a native English audio selector.
+    // Prefer that iframe for dub requests when we have an exact AniList identity,
+    // but keep the native catalog provider as the immediate fallback.
+    const dubEmbedBatch = request.category === 'dub' && request.anilistId
+        ? orderedProviders.filter(provider => provider.name === 'ReAnime')
         : [];
-    const remainingProviders = orderedProviders.filter(provider => provider.name !== request.nativeProvider);
+    const nativeBatch = request.nativeProvider
+        ? orderedProviders.filter(provider =>
+            provider.name === request.nativeProvider && !dubEmbedBatch.includes(provider))
+        : [];
+    const prioritized = new Set([...dubEmbedBatch, ...nativeBatch]);
+    const remainingProviders = orderedProviders.filter(provider => !prioritized.has(provider));
     const batches = [
+        dubEmbedBatch,
         nativeBatch,
         remainingProviders.filter(provider => !['Aniwaves', 'Anichi'].includes(provider.name)),
         remainingProviders.filter(provider => ['Aniwaves', 'Anichi'].includes(provider.name)),
@@ -44,8 +53,11 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         if (batchSignal.aborted) controller.abort();
         else batchSignal.addEventListener('abort', cancelWithBatch, { once: true });
         let timeout: ReturnType<typeof setTimeout>;
+        const providerTimeout = provider.name === 'ReAnime' && request.category === 'dub'
+            ? Math.min(request.timeoutMs || 38000, 10_000)
+            : request.timeoutMs || 38000;
         const options: SourceRequestOptions = {
-            signal: controller.signal, timeout: request.timeoutMs || 38000,
+            signal: controller.signal, timeout: providerTimeout,
             episodeNum: request.episodeNum, anilistId: request.anilistId, bypassCache: request.bypassCache,
         };
         const work = async () => {

@@ -125,6 +125,58 @@ describe('provider fallback and identity', () => {
             'aniwaves-75790&eps=1', undefined, 'sub', expect.objectContaining({ episodeNum: 2 })
         );
     });
+    it('prefers the ReAnime iframe for dub and does not start the native provider', async () => {
+        const started: string[] = [];
+        const reAnime = provider('ReAnime', {
+            acceptsAniListId: true,
+            getStreamingLinks: vi.fn(() => {
+                started.push('ReAnime');
+                return Promise.resolve({
+                    sources: [{ url: 'https://flixcloud.cc/e/episode?v=1', isEmbed: true, isM3U8: false, quality: 'auto' }],
+                    subtitles: [],
+                });
+            }),
+        });
+        const nativeAniwaves = provider('Aniwaves', {
+            getStreamingLinks: vi.fn(() => { started.push('Aniwaves'); return Promise.resolve(data('/master.m3u8')); }),
+        });
+
+        const result = await resolveProviders([nativeAniwaves, reAnime], {
+            ...request,
+            episodeId: 'aniwaves-82570&eps=14',
+            episodeNum: 14,
+            nativeProvider: 'Aniwaves',
+            anilistId: 189046,
+            category: 'dub',
+        });
+
+        expect(result.source).toBe('ReAnime');
+        expect(result.sources[0]).toMatchObject({ isEmbed: true });
+        expect(started).toEqual(['ReAnime']);
+    });
+    it('falls back to the native provider when the dub iframe is unavailable', async () => {
+        const started: string[] = [];
+        const reAnime = provider('ReAnime', {
+            acceptsAniListId: true,
+            getStreamingLinks: vi.fn(() => { started.push('ReAnime'); return Promise.resolve({ sources: [], subtitles: [] }); }),
+        });
+        const nativeAniwaves = provider('Aniwaves', {
+            getStreamingLinks: vi.fn(() => { started.push('Aniwaves'); return Promise.resolve(data('/master.m3u8')); }),
+        });
+
+        const result = await resolveProviders([nativeAniwaves, reAnime], {
+            ...request,
+            episodeId: 'aniwaves-82570&eps=14',
+            episodeNum: 14,
+            nativeProvider: 'Aniwaves',
+            anilistId: 189046,
+            category: 'dub',
+        });
+
+        expect(result.source).toBe('Aniwaves');
+        // Empty results get one cache-bypassing retry before provider fallback.
+        expect(started).toEqual(['ReAnime', 'ReAnime', 'Aniwaves']);
+    });
     it('does not start browser-backed providers when a direct provider succeeds', async () => {
         const browserProvider = provider('Aniwaves');
         const directProvider = provider('Yomi');
