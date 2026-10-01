@@ -179,7 +179,7 @@ class StreamExtractor {
     /**
      * Create a new page with proper settings
      */
-    private async createPage(priority = false): Promise<any> {
+    private async createPage(priority = false, signal?: AbortSignal): Promise<any> {
         const pageLimit = this.MAX_CONCURRENT_PAGES + (priority ? 1 : 0);
         // Simple concurrency limit - reduced delay from 500ms to 100ms.
         // Bounded, because this loop has no other exit: if pages are ever leaked, an unbounded
@@ -188,6 +188,7 @@ class StreamExtractor {
         // lets the caller fall back to a source that needs no browser.
         const waitStarted = Date.now();
         while (this.activePages >= pageLimit) {
+            signal?.throwIfAborted();
             if (Date.now() - waitStarted > this.PAGE_SLOT_WAIT_MS) {
                 throw new Error(
                     `No page slot after ${this.PAGE_SLOT_WAIT_MS}ms (${this.activePages}/${pageLimit} busy)`
@@ -195,6 +196,7 @@ class StreamExtractor {
             }
             await this.delay(100);
         }
+        signal?.throwIfAborted();
         this.activePages++;
 
         try {
@@ -526,7 +528,7 @@ class StreamExtractor {
      * Uses in-flight deduplication: concurrent calls for the same URL share one Puppeteer session.
      * Enhanced for adult content compatibility.
      */
-    async extractFromEmbed(embedUrl: string, timeoutMs?: number, verifyPlayback = false, bypassCache = false): Promise<ExtractionResult> {
+    async extractFromEmbed(embedUrl: string, timeoutMs?: number, verifyPlayback = false, bypassCache = false, signal?: AbortSignal): Promise<ExtractionResult> {
         const cacheId = `${embedUrl}:${verifyPlayback}`;
         const cached = this.resultCache.get(cacheId);
         if (cached && Date.now() - cached.timestamp < (verifyPlayback ? 30000 : this.RESULT_CACHE_TTL_MS) && cached.result.success && !bypassCache) {
@@ -549,7 +551,7 @@ class StreamExtractor {
 
         logger.info(`[StreamExtractor] Extracting from embed: ${embedUrl.substring(0, 80)}...`);
 
-        const extractionPromise = this._extractFromEmbedImpl(embedUrl, timeoutMs, verifyPlayback)
+        const extractionPromise = this._extractFromEmbedImpl(embedUrl, timeoutMs, verifyPlayback, signal)
             .then((result) => {
                 if (result.success && result.streams.length > 0) {
                     this.resultCache.set(cacheId, { result, timestamp: Date.now() });
@@ -565,8 +567,9 @@ class StreamExtractor {
         }
     }
 
-    private async _extractFromEmbedImpl(embedUrl: string, timeoutMs?: number, verifyPlayback = false): Promise<ExtractionResult> {
+    private async _extractFromEmbedImpl(embedUrl: string, timeoutMs?: number, verifyPlayback = false, signal?: AbortSignal): Promise<ExtractionResult> {
         let page: any = null;
+        let abortPage: (() => void) | undefined;
         // A caller that only has a few seconds to spend must not simply walk away from this:
         // the page would stay open until its own navigation timeout, holding one of very few
         // slots. So the deadline is enforced here, where the `finally` below still closes it.
@@ -576,7 +579,11 @@ class StreamExtractor {
         const subtitles: { url: string; lang: string }[] = [];
 
         try {
-            page = await this.createPage();
+            signal?.throwIfAborted();
+            page = await this.createPage(false, signal);
+            signal?.throwIfAborted();
+            abortPage = () => { void page?.close().catch(() => {}); };
+            signal?.addEventListener('abort', abortPage, { once: true });
 
             // Closing the page is what actually stops the work: every await inside this method
             // is a page operation, so they reject as soon as it goes, and control reaches the
@@ -723,6 +730,7 @@ class StreamExtractor {
             };
         } finally {
             if (deadline) clearTimeout(deadline);
+            if (abortPage) signal?.removeEventListener('abort', abortPage);
             if (page) {
                 this.activePages--;
                 // Already closed by the deadline, or closed with the browser; either way the

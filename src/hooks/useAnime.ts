@@ -281,6 +281,18 @@ export function useEpisodes(animeId: string, enabled: boolean = true, source?: s
                     if (resolved?.streamingId) {
                         setCachedResolve(animeId, resolved.streamingId);
                         fetchId = resolved.streamingId;
+                    } else {
+                        // Some older titles have no exact provider-search result even though
+                        // the anime details endpoint already carries a verified streamingId.
+                        // Shin Chan is one: slug resolution gives anilist-966, while details
+                        // maps it to the Aniwaves series ID. Use that mapping for episodes.
+                        const details = await apiClient.getAnime(animeId, source).catch(() => null);
+                        const streamingId = details?.streamingId ||
+                            (details?.id && !details.id.startsWith('anilist-') ? details.id : undefined);
+                        if (streamingId) {
+                            setCachedResolve(animeId, streamingId);
+                            fetchId = streamingId;
+                        }
                     }
                 }
             }

@@ -1843,9 +1843,18 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             });
             upstream.once('end', () => resolve(Buffer.alloc(0)));
         });
-        if (!isMedia(head)) { upstream.destroy(); res.status(502).json({ error: 'Invalid media body' }); return; }
-        upstreamCt = 'video/mp2t';
-        req._normalizedCt = upstreamCt;
+        // Echovideo's quality playlist URLs are extensionless and its CDN labels
+        // them image/jpeg. Detect those playlists before treating the body as a
+        // disguised video segment; otherwise valid #EXTM3U bodies get rejected.
+        const playlistHead = head.toString('utf8').trimStart().startsWith('#EXTM3U');
+        if (playlistHead) {
+            upstreamCt = 'application/vnd.apple.mpegurl';
+            req._normalizedCt = upstreamCt;
+        } else {
+            if (!isMedia(head)) { upstream.destroy(); res.status(502).json({ error: 'Invalid media body' }); return; }
+            upstreamCt = 'video/mp2t';
+            req._normalizedCt = upstreamCt;
+        }
     }
     const isUpstreamM3u8 =
         !isHavenSegment &&

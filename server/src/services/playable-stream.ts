@@ -83,7 +83,7 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
                     return [{ ...source }];
                 }
                 try {
-                    const extracted = await streamExtractor.extractFromEmbed(source.url, 18000, true, bypassCache);
+                    const extracted = await streamExtractor.extractFromEmbed(source.url, 18000, true, bypassCache, signal);
                     verifiedEmbed = extracted.playbackVerified === true;
                     if (extracted.streams && extracted.streams.length > 0) {
                         candidates = extracted.streams.map(stream => ({

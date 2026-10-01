@@ -12,6 +12,8 @@ interface WatchEpisodeGridProps {
   currentEpisodeNum: number;
   onEpisodeSelect: (episodeId: string, episodeNum: number) => void;
   isLoading?: boolean;
+  /** Keep missing Kitsu stills in a loading state until the metadata lookup settles. */
+  isDetailsLoading?: boolean;
   /** Progress 0–1 for the episode the viewer is partway through. */
   progressByEpisode?: Map<number, number>;
 }
@@ -27,6 +29,7 @@ export function WatchEpisodeGrid({
   currentEpisodeNum,
   onEpisodeSelect,
   isLoading = false,
+  isDetailsLoading = false,
   progressByEpisode,
 }: WatchEpisodeGridProps) {
   const [query, setQuery] = useState('');
@@ -167,6 +170,8 @@ export function WatchEpisodeGrid({
                           watched && 'opacity-40'
                         )}
                       />
+                    ) : isDetailsLoading ? (
+                      <span className="skeleton absolute inset-0" aria-label="Loading episode image" />
                     ) : (
                       <span className="absolute inset-0 grid place-items-center bg-white/[0.03] text-lg tabular-nums text-foreground/25">
                         {ep.number}

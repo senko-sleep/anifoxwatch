@@ -687,11 +687,14 @@ export class AniwavesSource extends BaseAnimeSource {
             const remainingMs = () => this.SERVER_BUDGET_MS - (Date.now() - loopStarted);
 
             /** Resolve one provider's embed URL and extract from it. Never throws. */
-            const attempt = async (candidate: { name: string; linkId: string; type: 'sub' | 'dub' }, budgetMs: number) => {
+            const attempt = async (candidate: { name: string; linkId: string; type: 'sub' | 'dub' }, budgetMs: number, waveSignal: AbortSignal) => {
                 try {
+                    const signal = options?.signal
+                        ? AbortSignal.any([options.signal, waveSignal])
+                        : waveSignal;
                     const response = await this.fetchWithProxyFallback('/ajax/sources', {
                         params: { id: candidate.linkId },
-                        signal: options?.signal
+                        signal
                     });
 
                     const embedUrl = response.data?.status === 200 ? response.data?.result?.url : undefined;
@@ -705,7 +708,7 @@ export class AniwavesSource extends BaseAnimeSource {
                     // own timeout, holding one of the two slots this process allows, and after
                     // two abandoned attempts every later request queues behind them. Given the
                     // deadline, the extractor closes its own page and releases the slot.
-                    const extraction = await streamExtractor.extractFromEmbed(embedUrl, budgetMs, false, options?.bypassCache);
+                    const extraction = await streamExtractor.extractFromEmbed(embedUrl, budgetMs, false, options?.bypassCache, signal);
                     if (!extraction.success || extraction.streams.length === 0) return null;
 
                     const sources = extraction.streams
@@ -747,15 +750,19 @@ export class AniwavesSource extends BaseAnimeSource {
              */
             const runWave = async (wave: typeof candidates, budgetMs: number) => {
                 let outstanding = wave.length;
+                const controllers = wave.map(() => new AbortController());
                 return new Promise<Awaited<ReturnType<typeof attempt>>>((resolve) => {
-                    for (const c of wave) {
-                        void attempt(c, budgetMs).then((result) => {
+                    for (const [index, c] of wave.entries()) {
+                        void attempt(c, budgetMs, controllers[index].signal).then((result) => {
                             this.recordServerOutcome(c.name, result !== null);
                             // First success ends the wave. Waiting for the rest would hand the
                             // caller the slowest member's time when an answer is already in
                             // hand, and the losers stop on their own deadline and free their
                             // pages either way.
-                            if (result) resolve(result);
+                            if (result) {
+                                controllers.forEach((controller, loser) => { if (loser !== index) controller.abort(); });
+                                resolve(result);
+                            }
                             else if (--outstanding === 0) resolve(null);
                         });
                     }

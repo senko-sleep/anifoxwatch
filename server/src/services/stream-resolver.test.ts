@@ -87,6 +87,21 @@ describe('provider fallback and identity', () => {
         expect(result.source).toBe('Healthy');
         expect(started).toContain('Healthy');
     });
+    it('aborts losing providers as soon as a browser-backed provider wins', async () => {
+        let loserSignal: AbortSignal | undefined;
+        const winner = provider('ReAnime', { acceptsAniListId: true });
+        const loser = provider('Other', {
+            getStreamingLinks: (_id, _server, _category, options) => {
+                loserSignal = options?.signal;
+                return new Promise(() => {});
+            },
+        });
+
+        const result = await resolveProviders([winner, loser], { ...request, anilistId: 123, timeoutMs: 5000 });
+
+        expect(result.source).toBe('ReAnime');
+        expect(loserSignal?.aborted).toBe(true);
+    });
     it('does not start browser-backed providers when a direct provider succeeds', async () => {
         const browserProvider = provider('Aniwaves');
         const directProvider = provider('Yomi');

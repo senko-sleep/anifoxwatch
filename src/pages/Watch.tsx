@@ -108,7 +108,8 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   const { data: artwork } = useAnimeArtwork(cleanAnimeId, cleanAnimeId.length > 0 && !adult);
 
   // Stills and titles for the shelf below the player.
-  const { data: episodeDetails } = useEpisodeDetails(cleanAnimeId, cleanAnimeId.length > 0 && !adult);
+  const episodeDetailsQuery = useEpisodeDetails(cleanAnimeId, cleanAnimeId.length > 0 && !adult);
+  const episodeDetails = episodeDetailsQuery.data;
 
   // Every season of this franchise, in watch order — the same chain the title page uses.
   const { data: seasons = [] } = useSeasons(cleanAnimeId, cleanAnimeId.length > 0 && !adult);
@@ -1310,6 +1311,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
           <WatchEpisodeGrid
             episodes={episodes || []}
             details={episodeDetails}
+            isDetailsLoading={episodeDetailsQuery.isLoading}
             currentEpisodeNum={selectedEpisodeNum}
             onEpisodeSelect={handleEpisodeSelect}
             isLoading={episodesLoading}

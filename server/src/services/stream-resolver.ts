@@ -30,11 +30,14 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         orderedProviders.filter(provider => !['Aniwaves', 'Anichi'].includes(provider.name)),
         orderedProviders.filter(provider => ['Aniwaves', 'Anichi'].includes(provider.name)),
     ].filter(batch => batch.length > 0);
-    const tasksFor = (batch: StreamProvider[]) => batch.map(async provider => {
+    const tasksFor = (batch: StreamProvider[], batchSignal: AbortSignal) => batch.map(async provider => {
         await Promise.resolve();
         const attempt: typeof attempts[number] = { provider: provider.name, status: 'pending' };
         attempts.push(attempt);
         const controller = new AbortController();
+        const cancelWithBatch = () => controller.abort();
+        if (batchSignal.aborted) controller.abort();
+        else batchSignal.addEventListener('abort', cancelWithBatch, { once: true });
         let timeout: ReturnType<typeof setTimeout>;
         const options: SourceRequestOptions = {
             signal: controller.signal, timeout: request.timeoutMs || 38000,
@@ -84,15 +87,24 @@ export async function resolveProviders(providers: StreamProvider[], request: {
             attempt.error = (error as Error).message;
             console.warn(`[StreamResolver] ${provider.name}: ${attempt.status}: ${attempt.error}`);
             throw error;
-        } finally { clearTimeout(timeout!); }
+        } finally {
+            clearTimeout(timeout!);
+            batchSignal.removeEventListener('abort', cancelWithBatch);
+        }
     });
     for (const batch of batches) {
+        const batchController = new AbortController();
         try {
             // Avoid competing Chromium sessions: try direct providers before browser-backed ones.
-            const winner = await Promise.any(tasksFor(batch));
+            const winner = await Promise.any(tasksFor(batch, batchController.signal));
             console.log(`[StreamResolver] Selected ${winner.source}`);
             return { ...winner, attempts: attempts.map(attempt => ({ ...attempt })) };
         } catch { /* Continue to the next provider group. */ }
+        finally {
+            // A provider race is over as soon as it has a winner (or every provider failed).
+            // Abort losers so their fetches and Chromium pages cannot starve the next request.
+            batchController.abort();
+        }
     }
     return { sources: [], subtitles: [], attempts };
 }
