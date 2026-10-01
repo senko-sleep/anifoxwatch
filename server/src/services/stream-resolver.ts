@@ -26,9 +26,14 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         !request.excludedProviders?.includes(provider.name));
     const orderedProviders = [...eligibleProviders].sort((a, b) =>
         Number(b.name === 'ReAnime') - Number(a.name === 'ReAnime'));
+    const nativeBatch = request.nativeProvider
+        ? orderedProviders.filter(provider => provider.name === request.nativeProvider)
+        : [];
+    const remainingProviders = orderedProviders.filter(provider => provider.name !== request.nativeProvider);
     const batches = [
-        orderedProviders.filter(provider => !['Aniwaves', 'Anichi'].includes(provider.name)),
-        orderedProviders.filter(provider => ['Aniwaves', 'Anichi'].includes(provider.name)),
+        nativeBatch,
+        remainingProviders.filter(provider => !['Aniwaves', 'Anichi'].includes(provider.name)),
+        remainingProviders.filter(provider => ['Aniwaves', 'Anichi'].includes(provider.name)),
     ].filter(batch => batch.length > 0);
     const tasksFor = (batch: StreamProvider[], batchSignal: AbortSignal) => batch.map(async provider => {
         await Promise.resolve();
@@ -95,7 +100,8 @@ export async function resolveProviders(providers: StreamProvider[], request: {
     for (const batch of batches) {
         const batchController = new AbortController();
         try {
-            // Avoid competing Chromium sessions: try direct providers before browser-backed ones.
+            // If the episode ID identifies its provider, try that exact native route first.
+            // Only fall through to cross-provider search if the native provider cannot play it.
             const winner = await Promise.any(tasksFor(batch, batchController.signal));
             console.log(`[StreamResolver] Selected ${winner.source}`);
             return { ...winner, attempts: attempts.map(attempt => ({ ...attempt })) };

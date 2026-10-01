@@ -259,14 +259,20 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     [servers]
   );
   
-  // For AniList IDs, construct episode ID directly when episodes are not available yet
-  // This allows streaming to start immediately without waiting for episode list to load
+  // Prefer the source-native ID once the episode list resolves. Sending a parallel
+  // AniList placeholder request first can start a slow browser-backed search and
+  // occupy the extractor slots needed by the source-native request.
   const getEpisodeIdForStreaming = useCallback(() => {
     // If we have a selected episode for the current anime, use it
     if (selectedEpisodeForCurrentAnime) {
       return selectedEpisodeForCurrentAnime;
     }
-    // For AniList IDs, construct the episode ID from the AniList ID and episode number
+    // Don't issue a placeholder stream request while the native episode ID is loading
+    // or while an episode result exists and the selection effect is about to run.
+    if (cleanAnimeId.startsWith('anilist-') && (episodesLoading || (episodes?.length ?? 0) > 0)) {
+      return '';
+    }
+    // If the title has no source episode list, let the backend try canonical providers.
     if (cleanAnimeId.startsWith('anilist-') && selectedEpisodeNum > 0) {
       const constructedId = `${cleanAnimeId}?ep=${selectedEpisodeNum}`;
       console.log(`[Watch] Using constructed episode ID: ${constructedId}`);
@@ -274,7 +280,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     }
     // Fallback to empty string to disable streaming
     return '';
-  }, [cleanAnimeId, selectedEpisodeForCurrentAnime, selectedEpisodeNum]);
+  }, [cleanAnimeId, selectedEpisodeForCurrentAnime, selectedEpisodeNum, episodesLoading, episodes]);
   
   // Enable streaming if we have an episode ID (either from episodes or constructed)
   const isStreamEnabled = useMemo(() => {

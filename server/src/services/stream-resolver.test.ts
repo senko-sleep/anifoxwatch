@@ -102,6 +102,29 @@ describe('provider fallback and identity', () => {
         expect(result.source).toBe('ReAnime');
         expect(loserSignal?.aborted).toBe(true);
     });
+    it('tries the episode ID native provider before unrelated browser-backed searches', async () => {
+        const started: string[] = [];
+        const slowReAnime = provider('ReAnime', {
+            acceptsAniListId: true,
+            getStreamingLinks: vi.fn(() => { started.push('ReAnime'); return new Promise(() => {}); }),
+        });
+        const nativeAniwaves = provider('Aniwaves', {
+            getStreamingLinks: vi.fn(() => { started.push('Aniwaves'); return Promise.resolve(data('/master.m3u8')); }),
+        });
+
+        const result = await resolveProviders([slowReAnime, nativeAniwaves], {
+            ...request,
+            episodeId: 'aniwaves-75790&eps=1',
+            nativeProvider: 'Aniwaves',
+            timeoutMs: 5000,
+        });
+
+        expect(result.source).toBe('Aniwaves');
+        expect(started).toEqual(['Aniwaves']);
+        expect(nativeAniwaves.getStreamingLinks).toHaveBeenCalledWith(
+            'aniwaves-75790&eps=1', undefined, 'sub', expect.objectContaining({ episodeNum: 2 })
+        );
+    });
     it('does not start browser-backed providers when a direct provider succeeds', async () => {
         const browserProvider = provider('Aniwaves');
         const directProvider = provider('Yomi');
