@@ -257,12 +257,31 @@ class StreamExtractor {
         const previous = this.browserJsonQueue;
         let release!: () => void;
         this.browserJsonQueue = new Promise<void>(resolve => { release = resolve; });
-        await previous;
-
+        let acquired = false;
+        const signal = options.signal;
+        let abortListener: (() => void) | undefined;
         try {
+            if (signal) {
+                const aborted = new Promise<never>((_, reject) => {
+                    abortListener = () => reject(signal.reason || new Error('Browser JSON request aborted'));
+                    if (signal.aborted) abortListener();
+                    else signal.addEventListener('abort', abortListener, { once: true });
+                });
+                await Promise.race([previous, aborted]);
+                signal.throwIfAborted();
+            } else {
+                await previous;
+            }
+            acquired = true;
             return await this.fetchJsonInBrowserPage<T>(url, options);
+        } catch (error) {
+            // Keep later work serialized behind the active request even when this
+            // waiter is cancelled before it acquires the browser JSON slot.
+            if (!acquired) void previous.finally(release);
+            throw error;
         } finally {
-            release();
+            if (abortListener) signal?.removeEventListener('abort', abortListener);
+            if (acquired) release();
         }
     }
 
@@ -277,7 +296,7 @@ class StreamExtractor {
         const abortPage = () => { if (page) void page.close().catch(() => {}); };
 
         try {
-            page = await this.createPage(true);
+            page = await this.createPage(true, options.signal);
             options.signal?.addEventListener('abort', abortPage, { once: true });
             options.signal?.throwIfAborted();
             // This path only needs the rendered JSON body. Avoid loading media and visual

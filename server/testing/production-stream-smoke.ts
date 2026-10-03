@@ -85,23 +85,32 @@ for (let round = 1; round <= rounds; round++) for (const testCase of cases) {
   const row: Record<string, unknown> = { round, animeId: testCase.id, episode: testCase.episode, frontend };
   let memoryBefore: any;
   try {
+    row.stage = 'frontend_document';
     const watchPath = watchPaths[testCase.id]?.(testCase.episode) || `/watch/anime/anilist-${testCase.id}?ep=${testCase.episode}`;
     const pageResponse = await fetch(`${frontend}${watchPath}`, { signal: AbortSignal.timeout(8_000) });
     const html = await pageResponse.text();
     if (!pageResponse.ok || !html.includes('id="root"')) throw new Error(`production frontend returned ${pageResponse.status} or no app root`);
     const scriptPath = html.match(/<script[^>]+src="([^"]+\.js)"/)?.[1];
     if (!scriptPath) throw new Error('production frontend entry script was missing');
+    row.stage = 'frontend_script';
     const scriptResponse = await fetch(new URL(scriptPath, frontend), { signal: AbortSignal.timeout(8_000) });
     if (!scriptResponse.ok) throw new Error(`production frontend script returned ${scriptResponse.status}`);
     row.frontendStatus = pageResponse.status;
     row.frontendScriptStatus = scriptResponse.status;
+    row.stage = 'api_health_before';
     memoryBefore = await getJson('/api/health', 5_000);
     row.serverMemoryBefore = memoryBefore.memory;
-    const identity = await getJson(`/api/anime/resolve?id=anilist-${testCase.id}`, 20_000);
+    row.stage = 'anilist_episodes';
     let episodes = await getJson(`/api/anime/episodes?id=anilist-${testCase.id}`, 20_000);
-    if ((!Array.isArray(episodes.episodes) || episodes.episodes.length === 0) && identity.streamingId) {
-      episodes = await getJson(`/api/anime/episodes?id=${encodeURIComponent(identity.streamingId)}`, 20_000);
-      row.episodeMetadataFallback = identity.streamingId;
+    let identity: any = {};
+    if (!Array.isArray(episodes.episodes) || episodes.episodes.length === 0) {
+      row.stage = 'native_identity_lookup';
+      identity = await getJson(`/api/anime/resolve?id=anilist-${testCase.id}`, 20_000);
+      if (identity.streamingId) {
+        row.stage = 'native_episode_list';
+        episodes = await getJson(`/api/anime/episodes?id=${encodeURIComponent(identity.streamingId)}`, 20_000);
+        row.episodeMetadataFallback = identity.streamingId;
+      }
     }
     if (!Array.isArray(episodes.episodes) || episodes.episodes.length < testCase.episode)
       throw new Error(`episode metadata did not include episode ${testCase.episode}`);
@@ -113,6 +122,7 @@ for (let round = 1; round <= rounds; round++) for (const testCase of cases) {
     const params = new URLSearchParams({ ep_num: String(testCase.episode), anilist_id: String(testCase.id),
       title: identity.title || `anilist-${testCase.id}`, category: 'sub', ...(round > 1 ? { nocache: 'true' } : {}) });
     const streamStarted = performance.now();
+    row.stage = 'stream_resolve';
     const streamResponse = await fetch(`${api}/api/stream/watch/${encodeURIComponent(episodeId)}?${params}`, {
       signal: AbortSignal.timeout(timeoutMs), headers: { Accept: 'application/json' },
     });
@@ -124,6 +134,7 @@ for (let round = 1; round <= rounds; round++) for (const testCase of cases) {
     if (!streamResponse.ok) throw new Error(`stream API returned ${streamResponse.status}: ${stream.error || 'no source'}`);
     if (row.resolveMs > maxResolutionMs) throw new Error(`resolution exceeded ${maxResolutionMs}ms reliability threshold`);
     if (!stream.sources?.length) throw new Error('resolver returned no sources');
+    row.stage = 'stream_validation';
     let validationError: unknown;
     for (const source of stream.sources) {
       try { row.validation = await validateSource(source); validationError = undefined; break; }
@@ -133,10 +144,12 @@ for (let round = 1; round <= rounds; round++) for (const testCase of cases) {
     row.ok = true;
   } catch (error) {
     row.ok = false;
+    row.failedStage = row.stage;
     row.failure = error instanceof Error ? error.message : String(error);
     failures++;
   }
   try {
+    row.stage = 'api_health_after';
     const memoryAfter = await getJson('/api/health', 5_000);
     row.serverMemoryAfter = memoryAfter.memory;
     if (memoryBefore && memoryAfter.memory?.rss && memoryBefore.memory?.rss)
