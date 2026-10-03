@@ -31,7 +31,12 @@ export async function resolveProviders(providers: StreamProvider[], request: {
     const abortFromCaller = () => requestController.abort(request.signal?.reason);
     if (request.signal?.aborted) abortFromCaller();
     else request.signal?.addEventListener('abort', abortFromCaller, { once: true });
-    const totalTimer = setTimeout(() => requestController.abort(new Error('Resolver deadline exceeded')), totalBudgetMs);
+    let signalDeadline!: () => void;
+    const deadlineReached = new Promise<void>(resolve => { signalDeadline = resolve; });
+    const totalTimer = setTimeout(() => {
+        requestController.abort(new Error('Resolver deadline exceeded'));
+        signalDeadline();
+    }, totalBudgetMs);
     console.log(JSON.stringify({ type: 'stream_resolver_request', status: 'start', startedAt: new Date(requestStarted).toISOString(),
         episodeId: request.episodeId, episodeNum: request.episodeNum, nativeProvider: request.nativeProvider,
         excludedProviders: request.excludedProviders }));
@@ -205,12 +210,20 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         try {
             // If the episode ID identifies its provider, try that exact native route first.
             // Only fall through to cross-provider search if the native provider cannot play it.
-            const winner = await Promise.any(tasksFor(batch, batchController.signal));
-            console.log(JSON.stringify({ type: 'stream_resolver_result', source: winner.source, status: 'playable',
-                startedAt: new Date(requestStarted).toISOString(), endedAt: new Date().toISOString(),
-                durationMs: Date.now() - requestStarted, providersAttempted: attempts.map(a => a.provider) }));
-            return { ...winner, attempts: attempts.map(attempt => ({ ...attempt })) };
-        } catch { /* Continue to the next provider group. */ }
+            const batchResult = await Promise.race([
+                Promise.any(tasksFor(batch, batchController.signal))
+                    .then(winner => ({ winner }), () => ({ winner: null })),
+                deadlineReached.then(() => ({ winner: null, deadline: true as const })),
+            ]);
+            if ('deadline' in batchResult) break;
+            if (batchResult.winner) {
+                const winner = batchResult.winner;
+                console.log(JSON.stringify({ type: 'stream_resolver_result', source: winner.source, status: 'playable',
+                    startedAt: new Date(requestStarted).toISOString(), endedAt: new Date().toISOString(),
+                    durationMs: Date.now() - requestStarted, providersAttempted: attempts.map(a => a.provider) }));
+                return { ...winner, attempts: attempts.map(attempt => ({ ...attempt })) };
+            }
+        }
         finally {
             // A provider race is over as soon as it has a winner (or every provider failed).
             // Abort losers so their fetches and Chromium pages cannot starve the next request.
