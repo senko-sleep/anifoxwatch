@@ -9,6 +9,8 @@ const cases = (process.env.SMOKE_CASES || '195516:1,210031:1,210031:2')
   });
 const timeoutMs = Number(process.env.SMOKE_TIMEOUT_MS || 45_000);
 const maxResolutionMs = Number(process.env.SMOKE_MAX_RESOLUTION_MS || 43_000);
+const mediaTimeoutMs = Number(process.env.SMOKE_MEDIA_TIMEOUT_MS || 20_000);
+const requestedServer = process.env.SMOKE_SERVER?.trim();
 const rounds = Math.max(1, Math.min(3, Number(process.env.SMOKE_ROUNDS || 2)));
 
 const watchPaths: Record<number, (ep: number) => string> = {
@@ -24,7 +26,7 @@ async function getJson(path: string, timeout = timeoutMs) {
 }
 
 async function readPrefix(url: string, maxBytes = 64 * 1024) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(8_000), headers: { Range: `bytes=0-${maxBytes - 1}` } });
+  const response = await fetch(url, { signal: AbortSignal.timeout(mediaTimeoutMs), headers: { Range: `bytes=0-${maxBytes - 1}` } });
   if (!response.ok) throw new Error(`media returned ${response.status}`);
   const reader = response.body?.getReader();
   if (!reader) throw new Error('media response has no body');
@@ -82,7 +84,7 @@ let failures = 0;
 const reports: Record<string, unknown>[] = [];
 for (let round = 1; round <= rounds; round++) for (const testCase of cases) {
   const started = performance.now();
-  const row: Record<string, unknown> = { round, animeId: testCase.id, episode: testCase.episode, frontend };
+  const row: Record<string, unknown> = { round, animeId: testCase.id, episode: testCase.episode, server: requestedServer, frontend };
   let memoryBefore: any;
   try {
     row.stage = 'frontend_document';
@@ -121,6 +123,7 @@ for (let round = 1; round <= rounds; round++) for (const testCase of cases) {
     row.episodeId = episodeId;
     const params = new URLSearchParams({ ep_num: String(testCase.episode), anilist_id: String(testCase.id),
       title: identity.title || `anilist-${testCase.id}`, category: 'sub', ...(round > 1 ? { nocache: 'true' } : {}) });
+    if (requestedServer) params.set('server', requestedServer);
     const streamStarted = performance.now();
     row.stage = 'stream_resolve';
     const streamResponse = await fetch(`${api}/api/stream/watch/${encodeURIComponent(episodeId)}?${params}`, {

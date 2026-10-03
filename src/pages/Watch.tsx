@@ -30,6 +30,7 @@ import {
 
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { WatchHistory } from '@/lib/watch-history';
+import { nextAniwavesServer } from '@/lib/stream-failover';
 import { audioTypeFromQuery, type AudioType } from '@/lib/audio-type';
 import { EMBED_DOMAINS, embedPlaybackUrlFor, embedUrlFor } from '@/lib/embed-source';
 import { toast } from 'sonner';
@@ -302,6 +303,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     ? selectedServer
     : undefined;
   const [failedProviders, setFailedProviders] = useState<string[]>([]);
+  const [failedAniwavesServers, setFailedAniwavesServers] = useState<string[]>([]);
   const [bypassCache, setBypassCache] = useState(false);
   const {
     data: streamData,
@@ -658,13 +660,11 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     const maxServerRetries = servers?.length || 1;
 
     // Check if we've exhausted ALL retry options (all sources on all servers)
-    if (serverRetryCount >= maxServerRetries) {
-      if (audioType === 'dub') {
-        console.log('[Watch] ❌ All dub servers exhausted, falling back to sub');
-        toast.info('Dub unavailable — switching to Sub');
-        setAudioType('sub');
-        setSearchParams((previous) => { const next = new URLSearchParams(previous); next.set('lang', 'sub'); return next; }, { replace: true });
-      }
+    if (serverRetryCount >= maxServerRetries && audioType === 'dub') {
+      console.log('[Watch] ❌ All dub servers exhausted, falling back to sub');
+      toast.info('Dub unavailable — switching to Sub');
+      setAudioType('sub');
+      setSearchParams((previous) => { const next = new URLSearchParams(previous); next.set('lang', 'sub'); return next; }, { replace: true });
       return;
     }
 
@@ -687,6 +687,29 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       return;
     }
 
+    // A fragment failure means the embed's CDN is dead; it does not mean every
+    // server belonging to that provider is dead. Ask Aniwaves for the next
+    // embed before excluding the whole provider, otherwise all listed servers
+    // inherit the failed-provider exclusion and can never be tried.
+    if (error === 'frag_load_error' && streamData?.source === 'Aniwaves') {
+      const failedServer = sources[sourceRetryIndex]?.server || selectedServer;
+      const nextServer = nextAniwavesServer(servers || [], audioType, failedServer, failedAniwavesServers);
+
+      if (nextServer) {
+        console.log(`[Watch] 🔄 Fragment failed on ${failedServer || 'default'}; trying Aniwaves ${nextServer}`);
+        setFailedAniwavesServers(previous => failedServer && !previous.includes(failedServer)
+          ? [...previous, failedServer]
+          : previous);
+        setFailedProviders(previous => previous.filter(provider => provider !== streamData.source));
+        setBypassCache(true);
+        setSourceRetryIndex(0);
+        setSelectedServer(nextServer);
+        setUserPickedServer(true);
+        setServerRetryCount(previous => previous + 1);
+        return;
+      }
+    }
+
     // Ask the backend to resume across providers after a late playback failure.
     if (streamData?.source && !failedProviders.includes(streamData.source)) {
       setFailedProviders(previous => [...previous, streamData.source]);
@@ -705,7 +728,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       setUserPickedServer(true);
       setServerRetryCount(prev => prev + 1);
     }
-  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType, refetchStream, failedProviders]);
+  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType, refetchStream, failedProviders, failedAniwavesServers]);
   playerErrorHandlerRef.current = handlePlayerError;
 
   // Reset retry count when episode or audio changes (new stream fetch)
@@ -713,6 +736,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     setServerRetryCount(0);
     setBypassCache(false);
     setFailedProviders([]);
+    setFailedAniwavesServers([]);
   }, [selectedEpisode, audioType]);
 
   // Reset server selection when audioType changes to allow auto-selecting the best server for the new audio type
