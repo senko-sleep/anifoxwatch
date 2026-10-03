@@ -85,7 +85,7 @@ export class YomiSource extends BaseAnimeSource {
      * Lightweight HTTP fetch + regex extraction — no Puppeteer, no cold-start.
      * Fetches embed page HTML, scans for M3U8 URLs, and follows one iframe level.
      */
-    private async extractM3u8FromUrl(embedUrl: string): Promise<string | null> {
+    private async extractM3u8FromUrl(embedUrl: string, options?: SourceRequestOptions): Promise<string | null> {
         const origin = new URL(embedUrl).origin;
         const scanForM3u8 = (text: string): string | null => {
             // Direct .m3u8 link in page/response
@@ -104,6 +104,9 @@ export class YomiSource extends BaseAnimeSource {
             const resp = await this.client.get(embedUrl, {
                 headers: { Referer: origin, Origin: origin },
                 maxRedirects: 5,
+                timeout: Math.min(options?.timeout || 8_000, 8_000),
+                signal: options?.signal,
+                maxContentLength: 2 * 1024 * 1024,
             });
             const html: string =
                 typeof resp.data === 'string' ? resp.data : JSON.stringify(resp.data);
@@ -119,6 +122,9 @@ export class YomiSource extends BaseAnimeSource {
                 const iResp = await this.client.get(iframeSrc, {
                     headers: { Referer: embedUrl, Origin: iframeOrigin },
                     maxRedirects: 3,
+                    timeout: Math.min(options?.timeout || 8_000, 8_000),
+                    signal: options?.signal,
+                    maxContentLength: 2 * 1024 * 1024,
                 });
                 const iHtml: string =
                     typeof iResp.data === 'string' ? iResp.data : JSON.stringify(iResp.data);
@@ -126,7 +132,7 @@ export class YomiSource extends BaseAnimeSource {
                 if (iframe) return iframe;
             }
         } catch (e: any) {
-            logger.warn(`[Yomi] HTTP extract failed for ${embedUrl}: ${e.message}`, undefined, 'Yomi');
+            if (!options?.signal?.aborted) logger.warn(`[Yomi] HTTP extract failed for ${embedUrl}: ${e.message}`, undefined, 'Yomi');
         }
         return null;
     }
@@ -188,24 +194,25 @@ export class YomiSource extends BaseAnimeSource {
             'Yomi'
         );
 
-        // Race all embed URLs simultaneously — first M3U8 wins
-        const racePromises = embedUrls.map(async (url) => {
-            const m3u8 = await this.extractM3u8FromUrl(url);
-            return m3u8 ? { url: m3u8, server: new URL(url).hostname } : null;
+        // Race both independent hosts. Abort losing HTTP requests as soon as one
+        // host yields a URL; otherwise they continue consuming sockets after the
+        // resolver has already returned a source.
+        const controllers = embedUrls.map(() => new AbortController());
+        const racePromises = embedUrls.map(async (url, index) => {
+            const signal = options?.signal
+                ? AbortSignal.any([options.signal, controllers[index].signal])
+                : controllers[index].signal;
+            const m3u8 = await this.extractM3u8FromUrl(url, { ...options, signal });
+            if (!m3u8) throw new Error(`No HLS URL in ${new URL(url).hostname}`);
+            return { url: m3u8, server: new URL(url).hostname };
         });
-
         let winner: { url: string; server: string } | null = null;
         try {
-            winner = await Promise.any(
-                racePromises.map((p) =>
-                    p.then((r) => {
-                        if (!r) throw new Error('no stream');
-                        return r;
-                    })
-                )
-            );
+            winner = await Promise.any(racePromises);
         } catch {
             // Promise.any rejected (all null) — already resolved via map
+        } finally {
+            controllers.forEach(controller => controller.abort(new Error('Another Yomi host won or failed')));
         }
 
         const sources: VideoSource[] = [];

@@ -9,6 +9,8 @@ ts[0] = ts[188] = ts[376] = 0x47;
 let base: string;
 const http = createServer((req, res) => {
     if (req.url === '/forbidden.m3u8') { res.writeHead(403).end(); return; }
+    if (req.url === '/missing.m3u8') { res.writeHead(404).end(); return; }
+    if (req.url === '/server-error.m3u8') { res.writeHead(500).end(); return; }
     if (req.url === '/empty.m3u8') { res.end('#EXTM3U\n'); return; }
     if (req.url === '/fake.mp4') { res.end('<html>Error</html>'); return; }
     if (req.url === '/master.m3u8') { res.end('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=100\nmedia.m3u8'); return; }
@@ -50,6 +52,19 @@ describe('provider fallback and identity', () => {
         expect(good.getStreamingLinks).toHaveBeenCalledWith('Other-internal-999', undefined, 'sub', expect.anything());
         expect(result.sources).toHaveLength(1);
     });
+    it('falls through 403, 404, 500, invalid media, and an unreachable provider', async () => {
+        const healthy = provider('HealthyAfterFailures');
+        const result = await resolveProviders([
+            provider('Forbidden403', { getStreamingLinks: async () => data('/forbidden.m3u8') }),
+            provider('Missing404', { getStreamingLinks: async () => data('/missing.m3u8') }),
+            provider('ServerError500', { getStreamingLinks: async () => data('/server-error.m3u8') }),
+            provider('InvalidHTML', { getStreamingLinks: async () => data('/fake.mp4') }),
+            provider('Unreachable', { getStreamingLinks: async () => data('http://127.0.0.1:1/dead.m3u8') }),
+            healthy,
+        ], request);
+        expect(result.source).toBe('HealthyAfterFailures');
+        expect(result.sources).toHaveLength(1);
+    });
     it('does not clamp a missing episode to the last episode', async () => {
         const missing = provider('Missing', { getEpisodes: async () => [{ id: 'last', number: 1 }] as any });
         const result = await resolveProviders([missing], request);
@@ -65,7 +80,18 @@ describe('provider fallback and identity', () => {
         const exhausted = await resolveProviders([provider('Hung', { getStreamingLinks: () => new Promise(() => {}) })], { ...request, timeoutMs: 30 });
         expect(exhausted.attempts?.[0].status).toBe('timeout');
     });
-    it('caps cross-provider timeouts while preserving the native provider budget', async () => {
+    it('aborts provider I/O when its deadline expires', async () => {
+        let signal: AbortSignal | undefined;
+        const hung = provider('SignalAwareHung', {
+            getStreamingLinks: (_id, _server, _category, options) => {
+                signal = options?.signal;
+                return new Promise(() => {});
+            },
+        });
+        await resolveProviders([hung], { ...request, timeoutMs: 100 });
+        expect(signal?.aborted).toBe(true);
+    });
+    it('caps cross-provider timeouts while preserving a separately bounded native budget', async () => {
         let fallbackTimeout: number | undefined;
         const native = provider('Native', { getStreamingLinks: async () => ({ sources: [], subtitles: [] }) });
         const fallback = provider('Fallback', {
@@ -80,7 +106,24 @@ describe('provider fallback and identity', () => {
         });
 
         expect(result.source).toBe('Fallback');
-        expect(fallbackTimeout).toBe(20_000);
+        expect(fallbackTimeout).toBe(9_000);
+    });
+    it('opens a provider circuit after repeated invalid streams and skips provider work during cooldown', async () => {
+        const unstable = provider('CircuitUnstable', { getStreamingLinks: vi.fn(async () => data('/missing.m3u8')) });
+        let now = Date.now();
+        const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+        try {
+            for (let i = 0; i < 3; i++) await resolveProviders([unstable], request);
+            const blocked = await resolveProviders([unstable], request);
+            expect(blocked.sources).toEqual([]);
+            expect(blocked.attempts?.[0].status).toBe('circuit_open');
+            expect(unstable.getStreamingLinks).toHaveBeenCalledTimes(6);
+
+            now += 60_001;
+            vi.mocked(unstable.getStreamingLinks!).mockImplementation(async () => data('/master.m3u8'));
+            const recovered = await resolveProviders([unstable], request);
+            expect(recovered.source).toBe('CircuitUnstable');
+        } finally { nowSpy.mockRestore(); }
     });
     it('does not hold healthy providers behind a hung ReAnime request', async () => {
         const started: string[] = [];
@@ -106,8 +149,8 @@ describe('provider fallback and identity', () => {
     });
     it('aborts losing providers as soon as a browser-backed provider wins', async () => {
         let loserSignal: AbortSignal | undefined;
-        const winner = provider('ReAnime', { acceptsAniListId: true });
-        const loser = provider('Other', {
+        const winner = provider('Aniwaves', { acceptsAniListId: true });
+        const loser = provider('Anichi', {
             getStreamingLinks: (_id, _server, _category, options) => {
                 loserSignal = options?.signal;
                 return new Promise(() => {});
@@ -116,7 +159,7 @@ describe('provider fallback and identity', () => {
 
         const result = await resolveProviders([winner, loser], { ...request, anilistId: 123, timeoutMs: 5000 });
 
-        expect(result.source).toBe('ReAnime');
+        expect(result.source).toBe('Aniwaves');
         expect(loserSignal?.aborted).toBe(true);
     });
     it('tries the episode ID native provider before unrelated browser-backed searches', async () => {

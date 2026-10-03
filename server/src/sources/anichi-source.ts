@@ -24,12 +24,13 @@ export class AnichiSource extends BaseAnimeSource {
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
-    private async getBrowser() {
+    private async getBrowser(timeoutMs = 10_000) {
         if (!puppeteer) {
             const puppeteerModuleName = 'puppeteer';
             puppeteer = (await import(puppeteerModuleName)).default;
         }
         return await puppeteer.launch({
+            timeout: Math.min(timeoutMs, 10_000),
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
             args: [
@@ -43,10 +44,20 @@ export class AnichiSource extends BaseAnimeSource {
         });
     }
 
+    private bindBrowserAbort(browser: any, signal?: AbortSignal): () => void {
+        const close = () => { void browser.close().catch(() => {}); };
+        if (signal?.aborted) close();
+        else signal?.addEventListener('abort', close, { once: true });
+        return () => signal?.removeEventListener('abort', close);
+    }
+
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         let browser;
+        let unbindAbort = () => {};
         try {
-            browser = await this.getBrowser();
+            browser = await this.getBrowser(options?.timeout);
+            unbindAbort = this.bindBrowserAbort(browser, options?.signal);
+            options?.signal?.throwIfAborted();
             const page = await browser.newPage();
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
             const resp = await page.goto('https://anichi.to', { waitUntil: 'domcontentloaded', timeout: 10000 });
@@ -55,6 +66,7 @@ export class AnichiSource extends BaseAnimeSource {
         } catch {
             return false;
         } finally {
+            unbindAbort();
             if (browser) await browser.close().catch(() => {});
         }
     }
@@ -65,13 +77,16 @@ export class AnichiSource extends BaseAnimeSource {
         if (cached) return cached;
 
         let browser;
+        let unbindAbort = () => {};
         try {
-            browser = await this.getBrowser();
+            browser = await this.getBrowser(options?.timeout);
+            unbindAbort = this.bindBrowserAbort(browser, options?.signal);
+            options?.signal?.throwIfAborted();
             const page = await browser.newPage();
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
 
             const searchUrl = `${this.baseUrl}/search?keyword=${encodeURIComponent(query)}`;
-            await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 20000 });
+            await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: Math.min(options?.timeout || 8_000, 8_000) });
 
             const content = await page.content();
             await page.close();
@@ -116,9 +131,10 @@ export class AnichiSource extends BaseAnimeSource {
             return result;
 
         } catch (error) {
-            this.handleError(error, 'search');
+            if (!options?.signal?.aborted) this.handleError(error, 'search');
             return { results: [], currentPage: pageNum, totalPages: 1, hasNextPage: false, totalResults: 0, source: this.name };
         } finally {
+            unbindAbort();
             if (browser) await browser.close().catch(() => {});
         }
     }
@@ -146,13 +162,16 @@ export class AnichiSource extends BaseAnimeSource {
         if (cached) return cached;
 
         let browser;
+        let unbindAbort = () => {};
         try {
-            browser = await this.getBrowser();
+            browser = await this.getBrowser(options?.timeout);
+            unbindAbort = this.bindBrowserAbort(browser, options?.signal);
+            options?.signal?.throwIfAborted();
             const page = await browser.newPage();
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
 
             const watchUrl = `${this.baseUrl}/watch/${cleanId}/ep-1`;
-            await page.goto(watchUrl, { waitUntil: 'networkidle2', timeout: 25000 });
+            await page.goto(watchUrl, { waitUntil: 'networkidle2', timeout: Math.min(options?.timeout || 8_000, 8_000) });
 
             const content = await page.content();
             await page.close();
@@ -192,9 +211,10 @@ export class AnichiSource extends BaseAnimeSource {
             return episodes;
 
         } catch (error) {
-            this.handleError(error, 'getEpisodes');
+            if (!options?.signal?.aborted) this.handleError(error, 'getEpisodes');
             return [{ id: `anichi-${cleanId}$ep=1`, number: 1, title: 'Episode 1', hasSub: true, hasDub: true }];
         } finally {
+            unbindAbort();
             if (browser) await browser.close().catch(() => {});
         }
     }
@@ -229,8 +249,11 @@ export class AnichiSource extends BaseAnimeSource {
         if (cached && !options?.bypassCache) return cached;
 
         let browser;
+        let unbindAbort = () => {};
         try {
-            browser = await this.getBrowser();
+            browser = await this.getBrowser(options?.timeout);
+            unbindAbort = this.bindBrowserAbort(browser, options?.signal);
+            options?.signal?.throwIfAborted();
             const page = await browser.newPage();
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
 
@@ -279,8 +302,7 @@ export class AnichiSource extends BaseAnimeSource {
 
             const watchUrl = `${this.baseUrl}/watch/${cleanSlug}/ep-${epNum}`;
             logger.info(`[Anichi] Navigating Puppeteer page to ${watchUrl}`);
-            await page.goto(watchUrl, { waitUntil: 'networkidle2', timeout: 25000 });
-            await new Promise(r => setTimeout(r, 2000));
+            await page.goto(watchUrl, { waitUntil: 'networkidle2', timeout: Math.min(options?.timeout || 8_000, 8_000) });
 
             if (sources.length === 0) {
                 const iframes = await page.$$eval('iframe', (els: any[]) => els.map((e: any) => e.src));
@@ -306,9 +328,10 @@ export class AnichiSource extends BaseAnimeSource {
             return streamData;
 
         } catch (error) {
-            this.handleError(error, 'getStreamingLinks');
+            if (!options?.signal?.aborted) this.handleError(error, 'getStreamingLinks');
             return { sources: [], subtitles: [] };
         } finally {
+            unbindAbort();
             if (browser) await browser.close().catch(() => {});
         }
     }

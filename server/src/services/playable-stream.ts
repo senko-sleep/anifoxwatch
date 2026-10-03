@@ -71,7 +71,19 @@ export async function probeMedia(url: string, headers: Record<string, string>, s
 
 /** Embeds are extraction inputs, never proof that playback works. */
 export async function playableStreams(data: StreamingData, signal: AbortSignal, bypassCache = false): Promise<StreamingData> {
-    const results = await Promise.all((data.sources || []).map(async source => {
+    const seen = new Set<string>();
+    const candidates = (data.sources || []).filter(source => {
+        const url = source.originalUrl || source.url;
+        if (seen.has(url)) {
+            console.log(JSON.stringify({ type: 'stream_source_duplicate', provider: data.source, urlHost: (() => {
+                try { return new URL(url).hostname; } catch { return 'invalid'; }
+            })() }));
+            return false;
+        }
+        seen.add(url);
+        return true;
+    });
+    const results = await Promise.all(candidates.map(async source => {
         try {
             let candidates = [source];
             let verifiedEmbed = false;

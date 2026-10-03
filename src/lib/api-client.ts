@@ -635,8 +635,9 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
-            // 90s timeout per host — cross-source fallback & cold-start containers (e.g. Render)
-            const streamTimeoutMs = 90_000;
+            // Resolver requests have a 38s server-side hard deadline. Keep a small
+            // transport margin, so the UI can surface a real failure promptly.
+            const streamTimeoutMs = 45_000;
             const maxAttempts = 1;
             let lastErr: Error | null = null;
 

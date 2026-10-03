@@ -3188,7 +3188,7 @@ export class SourceManager {
      * Uses PARALLEL multi-source querying for maximum reliability
      * Queries multiple sources simultaneously and returns the first successful result
      */
-    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', episodeNum?: number, anilistId?: number, forcedTitle?: string, bypassCache = false, excludedProviders: string[] = []): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', episodeNum?: number, anilistId?: number, forcedTitle?: string, bypassCache = false, excludedProviders: string[] = [], signal?: AbortSignal): Promise<StreamingData> {
         const number = episodeNum ?? Number(episodeId.match(/(?:\$ep=|[?&]eps?=|ep-)(\d+)/i)?.[1] || 1);
         if (!Number.isFinite(number) || number < 1) return { sources: [], subtitles: [] };
         anilistId ||= Number(episodeId.match(/^anilist-(\d+)/i)?.[1]) || undefined;
@@ -3197,13 +3197,21 @@ export class SourceManager {
         const adult = /^(watchhentai|hentaimama|hentaihaven|hanime|akih|hentai)-/i.test(episodeId) || (!!title && isLikelyHentai(title));
         // Canonical identity is resolved once, never inferred from another provider's numeric ID.
         if (!adult) {
+            const identityStarted = Date.now();
+            console.log(JSON.stringify({ type: 'stream_identity_lookup', status: 'start', startedAt: new Date(identityStarted).toISOString(),
+                animeId: anilistId || episodeId, hasTitle: !!title }));
             try {
                 const info = await withTimeout(() => anilistId ? anilistService.getAnimeById(anilistId) : anilistService.searchByTitle(title), 5000);
                 if (info && (anilistId || [info.title, info.titleEnglish, info.titleRomaji, info.titleJapanese].some(alias => alias && sameTitle(title, alias)))) {
                     anilistId ||= Number(info.id.match(/^anilist-(\d+)/)?.[1]) || undefined;
                     if (info.title) titles.push(info.title);
                 }
-            } catch { /* Native IDs and title mapping remain available during metadata outages. */ }
+                console.log(JSON.stringify({ type: 'stream_identity_lookup', status: 'complete', endedAt: new Date().toISOString(),
+                    durationMs: Date.now() - identityStarted, anilistId, titleCount: titles.length }));
+            } catch (error) {
+                console.warn(JSON.stringify({ type: 'stream_identity_lookup', status: 'failed', endedAt: new Date().toISOString(),
+                    durationMs: Date.now() - identityStarted, reason: (error as Error).message }));
+            }
         }
         const disabled = new Set((process.env.STREAM_DISABLED_PROVIDERS || '').split(',').map(s => s.trim().toLowerCase()));
         const providers = [...this.sources.values()].filter(source =>
@@ -3214,7 +3222,7 @@ export class SourceManager {
         return resolveProviders(providers, {
             episodeId, episodeNum: number, nativeProvider: native?.name, anilistId,
             titles: [...new Set(titles.flatMap(t => this.titleSearchVariants(t)))],
-            category, server, bypassCache, excludedProviders,
+            category, server, bypassCache, excludedProviders, signal,
         });
     }
 

@@ -1021,6 +1021,11 @@ router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<v
  *   parallel and returns the best available result.
  */
 router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<void> => {
+    const requestController = new AbortController();
+    const abortIfDisconnected = () => {
+        if (!res.writableEnded && !requestController.signal.aborted) requestController.abort(new Error('Client disconnected'));
+    };
+    res.on('close', abortIfDisconnected);
     let episodeId = decodeURIComponent(req.params.episodeId as string);
     episodeId = reconstructEpisodeId(episodeId, req.query);
 
@@ -1084,7 +1089,7 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
         const sourcesCount = (sourceManager as any).sources?.size || 0;
         logger.info(`[STREAM] sourceManager has ${sourcesCount} sources registered`);
 
-        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string, noCache, excludedProviders);
+        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, requestController.signal);
         logger.info(`[STREAM] getStreamingLinks returned:`, {
             hasSources: streamData?.sources?.length > 0,
             sourcesCount: streamData?.sources?.length,
@@ -1098,7 +1103,7 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
     if (!streamData?.sources?.length && isDubRequested) {
         try {
             logger.info(`[STREAM] Sequential sub fallback for dub request ${episodeId}`, { requestId });
-            const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string, noCache, excludedProviders);
+            const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, requestController.signal);
             if (subFallback?.sources?.length) {
                 streamData = { ...subFallback, category: 'sub', dubFallback: true };
                 logger.info(`[STREAM] Sequential sub fallback succeeded for ${episodeId}`, { requestId });

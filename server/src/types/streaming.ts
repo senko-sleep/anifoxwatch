@@ -35,7 +35,7 @@ export interface VideoSubtitle {
 }
 
 export interface StreamingData {
-    attempts?: { provider: string; episodeId?: string; status: string; error?: string }[];
+    attempts?: { provider: string; episodeId?: string; status: string; error?: string; startedAt?: string; endedAt?: string; durationMs?: number }[];
     sources: VideoSource[];
     subtitles: VideoSubtitle[];
     headers?: Record<string, string>;
