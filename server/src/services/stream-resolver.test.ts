@@ -65,6 +65,23 @@ describe('provider fallback and identity', () => {
         const exhausted = await resolveProviders([provider('Hung', { getStreamingLinks: () => new Promise(() => {}) })], { ...request, timeoutMs: 30 });
         expect(exhausted.attempts?.[0].status).toBe('timeout');
     });
+    it('caps cross-provider timeouts while preserving the native provider budget', async () => {
+        let fallbackTimeout: number | undefined;
+        const native = provider('Native', { getStreamingLinks: async () => ({ sources: [], subtitles: [] }) });
+        const fallback = provider('Fallback', {
+            getStreamingLinks: async (_id, _server, _category, options) => {
+                fallbackTimeout = options?.timeout;
+                return data('/master.m3u8');
+            },
+        });
+
+        const result = await resolveProviders([native, fallback], {
+            ...request, nativeProvider: 'Native', timeoutMs: 50_000,
+        });
+
+        expect(result.source).toBe('Fallback');
+        expect(fallbackTimeout).toBe(20_000);
+    });
     it('does not hold healthy providers behind a hung ReAnime request', async () => {
         const started: string[] = [];
         const hungReAnime = provider('ReAnime', {

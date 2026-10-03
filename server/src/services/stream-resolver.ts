@@ -55,7 +55,9 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         let timeout: ReturnType<typeof setTimeout>;
         const providerTimeout = provider.name === 'ReAnime' && request.category === 'dub'
             ? Math.min(request.timeoutMs || 38000, 10_000)
-            : request.timeoutMs || 38000;
+            : provider.name === request.nativeProvider
+                ? request.timeoutMs || 38000
+                : Math.min(request.timeoutMs || 20_000, 20_000);
         const options: SourceRequestOptions = {
             signal: controller.signal, timeout: providerTimeout,
             episodeNum: request.episodeNum, anilistId: request.anilistId, bypassCache: request.bypassCache,
