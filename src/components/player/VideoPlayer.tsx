@@ -408,7 +408,9 @@ export const VideoPlayer = ({
         startLevel: 0,
         abrEwmaDefaultEstimate: onMobile ? 800_000 : 1_500_000,
         // ── Timeouts ─────────────────────────────────────────────────────
-        fragLoadingTimeOut: 10000,
+        // The media proxy may spend 15s waiting on a stalled CDN segment. Fail over
+        // before that request occupies the player's only startup path for too long.
+        fragLoadingTimeOut: 8000,
         manifestLoadingTimeOut: 20000,
         levelLoadingTimeOut: 15000,
         // ── Prefetch & retries ────────────────────────────────────────────
@@ -485,7 +487,7 @@ export const VideoPlayer = ({
       // dead CDN subdomains like rjp.megaup.cc), escalate to server switch.
       let fragLoadErrorCount = 0;
       let fragParseErrorCount = 0;
-      const FRAG_LOAD_ERROR_THRESHOLD = 2; // Fail over after two consecutive fragment failures
+      const FRAG_LOAD_ERROR_THRESHOLD = 1; // One stalled startup fragment is enough to try another server
       const FRAG_PARSE_ERROR_THRESHOLD = 6; // Back to original threshold
 
       hls.on(Hls.Events.ERROR, (_, data) => {

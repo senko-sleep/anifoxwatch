@@ -7,7 +7,7 @@ import { WatchEpisodeGrid } from '../components/player/WatchEpisodeGrid';
 import { StreamingControls } from '../components/player/StreamingControls';
 import { DownloadManager } from '../components/player/DownloadManager';
 import { useHentaiTitle } from '@/hooks/useHentai';
-import { useAnime, useAnimeArtwork, useEpisodes, useEpisodeDetails, useSeasons, useStreamingLinks, useEpisodeServers, useDubStreamProbe, usePrefetchNextEpisode, usePrefetchDubStream } from '@/hooks/useAnime';
+import { useAnime, useAnimeArtwork, useEpisodes, useEpisodeDetails, useSeasons, useStreamingLinks, useEpisodeServers, useDubStreamProbe } from '@/hooks/useAnime';
 import { ping } from '@/utils/keep-alive';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -855,33 +855,6 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   // For other IDs, check if there are previous/next episodes in the list
   const hasPrev = cleanAnimeId.startsWith('anilist-') ? selectedEpisodeNum > 1 : (episodes?.findIndex(e => e.id === selectedEpisode) ?? -1) > 0;
   const hasNext = cleanAnimeId.startsWith('anilist-') ? true : episodes ? (episodes.findIndex(e => e.id === selectedEpisode) ?? 0) < episodes.length - 1 : false;
-
-  // Prefetch next episode's stream so switching episodes feels instant
-  const prefetchNext = usePrefetchNextEpisode();
-  const anilistIdForPrefetch = cleanAnimeId.startsWith('anilist-')
-    ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined
-    : undefined;
-
-  usePrefetchDubStream(selectedEpisodeForCurrentAnime || '', !!selectedEpisodeForCurrentAnime, {
-    episodeNum: selectedEpisodeNum,
-    anilistId: anilistIdForPrefetch,
-    animeTitle: anime?.title,
-    hasDub: Boolean(currentEpisode?.hasDub || metadataIndicatesDub),
-    subStreamReady: audioType === 'sub' && !streamLoading && (streamData?.sources?.length ?? 0) > 0,
-  });
-
-  useEffect(() => {
-    if (!episodes?.length || !selectedEpisode || !cleanAnimeId) return;
-    if (streamLoading || !(streamData?.sources?.length)) return;
-    const idx = episodes.findIndex(e => e.id === selectedEpisode);
-    if (idx >= 0 && idx < episodes.length - 1) {
-      const next = episodes[idx + 1];
-      const timeoutId = window.setTimeout(() => {
-        prefetchNext(cleanAnimeId, next.id, audioType, next.number, anilistIdForPrefetch, anime?.title);
-      }, 1500);
-      return () => window.clearTimeout(timeoutId);
-    }
-  }, [episodes, selectedEpisode, cleanAnimeId, audioType, prefetchNext, anilistIdForPrefetch, streamLoading, streamData, anime?.title]);
 
   // Reset manual audio choice when switching episodes
   useEffect(() => {
