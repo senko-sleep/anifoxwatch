@@ -182,6 +182,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   // Refs
   const playerRef = useRef<HTMLDivElement>(null);
   const lastPlayerErrorTimeRef = useRef<number>(0);
+  const playerErrorHandlerRef = useRef<(error: string) => void>(() => {});
   const playerErrorDebounceMs = 2000; // Minimum time between retry attempts
 
   // Mobile landscape mode
@@ -413,6 +414,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     const historyEntry = WatchHistory.get().find((item) =>
       (item.animeId === cleanAnimeId || item.animeId === anime?.id) && item.episodeNumber === selectedEpisodeNum
     );
+    let playbackStarted = false;
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== origin || event.source !== frame.contentWindow) return;
       let data = event.data;
@@ -421,6 +423,10 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       const currentTime = Number(data.currentTime ?? data.time);
       const duration = Number(data.duration);
       if (!Number.isFinite(currentTime) || currentTime < 0) return;
+      if (currentTime > 0 || (Number.isFinite(duration) && duration > 0)) {
+        playbackStarted = true;
+        clearTimeout(playbackStartTimer);
+      }
       // Ignore the provider's pre-seek zero while start_at is being applied.
       if (historyEntry && currentTime + 2 < historyEntry.timestamp) return;
       if (anime?.title) WatchHistory.save(
@@ -430,6 +436,9 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       );
     };
     const requestTime = () => frame.contentWindow?.postMessage({ command: 'getTime' }, origin);
+    const playbackStartTimer = window.setTimeout(() => {
+      if (!playbackStarted) playerErrorHandlerRef.current('embed_playback_timeout');
+    }, 30000);
     window.addEventListener('message', onMessage);
     frame.addEventListener('load', requestTime);
     const interval = window.setInterval(requestTime, 5000);
@@ -438,6 +447,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       window.removeEventListener('message', onMessage);
       frame.removeEventListener('load', requestTime);
       window.clearInterval(interval);
+      window.clearTimeout(playbackStartTimer);
     };
   }, [isEmbedSource, embedPlaybackUrl, cleanAnimeId, anime?.id, anime?.title, anime?.image, anime?.season, selectedEpisodeNum, adult]);
 
@@ -669,7 +679,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     }
 
     // Try next source URL (same server) first
-    if (sourceRetryIndex + 1 < sources.length) {
+    if (error !== 'embed_playback_timeout' && sourceRetryIndex + 1 < sources.length) {
       console.log(`[Watch] 🔄 Trying next source (index ${sourceRetryIndex + 1}/${sources.length - 1})`);
       setSourceRetryIndex(prev => prev + 1);
       return;
@@ -694,6 +704,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       setServerRetryCount(prev => prev + 1);
     }
   }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType, refetchStream, failedProviders]);
+  playerErrorHandlerRef.current = handlePlayerError;
 
   // Reset retry count when episode or audio changes (new stream fetch)
   useEffect(() => {

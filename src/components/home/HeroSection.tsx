@@ -22,10 +22,10 @@ interface HeroSectionProps {
   heroAnime: HeroAnime[];
 }
 
-const SLIDE_MS = 12000;
+const SLIDE_MS = 22000;
 const FADE_MS = 1200;
 /** How long a slide has to sit still (hovered on desktop, or simply active on touch) before its trailer takes over. */
-const TRAILER_DWELL_MS = 2800;
+const TRAILER_DWELL_MS = 10000;
 
 /**
  * The spotlight, in two quiet parts. The frame holds one title — its own
@@ -49,6 +49,7 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   const [progress, setProgress] = useState(0);
   const [trailerReady, setTrailerReady] = useState(false);
   const [muted, setMuted] = useState(true);
+  const [pageVisible, setPageVisible] = useState(() => !document.hidden);
 
   const rafRef = useRef(0);
   const startedRef = useRef(0);
@@ -84,7 +85,10 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
   }, [slides]);
 
   useEffect(() => {
-    const onVisibility = () => setPaused(document.hidden);
+    const onVisibility = () => {
+      setPaused(document.hidden);
+      setPageVisible(!document.hidden);
+    };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
@@ -112,19 +116,15 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
     rowRef.current?.scrollTo({ left: 0, behavior: 'smooth' });
   }, [safeIndex]);
 
-  // Trailer takes over the still poster once a slide has settled — hovered on a mouse,
-  // or simply active for a beat on touch, where there's no hover to wait for.
+  // Wait before starting the trailer, even when the visitor is not hovering.
   useEffect(() => {
     setTrailerReady(false);
     window.clearTimeout(dwellTimerRef.current);
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-    const hoverCapable = window.matchMedia('(hover: hover)').matches;
-    if (hoverCapable && !paused) return; // desktop: wait for the hover that sets `paused`
+    if (!pageVisible || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     dwellTimerRef.current = window.setTimeout(() => setTrailerReady(true), TRAILER_DWELL_MS);
     return () => window.clearTimeout(dwellTimerRef.current);
-  }, [safeIndex, paused]);
+  }, [safeIndex, pageVisible]);
 
   if (!anime || !count) {
     return (
