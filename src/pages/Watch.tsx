@@ -423,7 +423,9 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       const currentTime = Number(data.currentTime ?? data.time);
       const duration = Number(data.duration);
       if (!Number.isFinite(currentTime) || currentTime < 0) return;
-      if (currentTime > 0 || (Number.isFinite(duration) && duration > 0)) {
+      // A manifest may report its total duration before any media fragment has
+      // loaded. Only playhead movement proves the embedded player actually started.
+      if (currentTime > 0) {
         playbackStarted = true;
         clearTimeout(playbackStartTimer);
       }
