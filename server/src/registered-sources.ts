@@ -9,6 +9,7 @@ export const REGISTERED_SOURCE_NAMES: readonly string[] = [
     'Yomi',               // ✅ Primary: Yomi.to embedded MegaPlay/AnimePlay/VidNest/etc.
     'Aniwaves',           // ✅ Fallback: EchoVideo → burntburst45.store HLS
     'ReAnime',            // ✅ ReAnime (reanime.to): FlixCloud HD streams
+    'Miruro',             // Miruro: independent episode pages and MegaVid HLS sources
     'Anichi',             // ✅ Anichi (anichi.to): Puppeteer streams (nekostream/pahe/HLS)
 
     // ── HENTAI SOURCES ─────────────────────────────────────────

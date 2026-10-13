@@ -15,7 +15,7 @@ const cache = new Map<string, ImdbRating | null>();
 export async function fetchImdbRating(imdbId: string): Promise<ImdbRating | null> {
   if (cache.has(imdbId)) return cache.get(imdbId)!;
 
-  const key = (import.meta as Record<string, unknown> & { env?: Record<string, string> }).env?.VITE_OMDB_API_KEY;
+  const key = import.meta.env.VITE_OMDB_API_KEY;
   if (!key) { cache.set(imdbId, null); return null; }
 
   try {

@@ -58,20 +58,21 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
   const state = { from: location.pathname + location.search };
 
   return (
-    <div className="resume-row scrollbar-hide">
+    <div className="resume-row scrollbar-hide" style={{ gap: '.9rem', paddingBottom: '.5rem' }}>
       {items.map((item, index) => {
         const src = pickMainSrc(item, imagePhase[item.animeId]);
         const left = timeLeftLabel(item);
         const progress = progressValue(item);
         return (
-          <article key={item.animeId} className="resume-card">
+          <article key={item.animeId} className="resume-card !basis-[42vw] md:!basis-[clamp(220px,25vw,320px)]">
             <Link
               to={routeFor(item)}
               state={state}
               className="resume-card-link group"
               aria-label={`Continue ${item.animeTitle}, episode ${item.episodeNumber}`}
+              style={{ display: 'flex', flexDirection: 'column', aspectRatio: 'auto', overflow: 'visible', borderRadius: 0, boxShadow: 'none', background: 'transparent' }}
             >
-              <div className="resume-card-art">
+              <div className="resume-card-art" style={{ position: 'relative', inset: 'auto', width: '100%', aspectRatio: '16 / 9', overflow: 'hidden', borderRadius: '.55rem', background: 'hsl(234 26% 7%)' }}>
                 {src ? (
                   <img
                     src={src}
@@ -80,16 +81,16 @@ export const ContinueWatching = ({ items, onRemove }: ContinueWatchingProps) => 
                     decoding="async"
                     referrerPolicy="no-referrer"
                     onError={() => onImageError(item)}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 ) : <div className="resume-fallback h-full" />}
+                <div className="resume-card-progress" aria-label={progressLabel(item)} style={{ position: 'absolute', right: 0, bottom: 0, left: 0, width: '100%' }}>
+                  <span style={{ width: `${progress}%` }} />
+                </div>
               </div>
-              <div className="resume-card-scrim" />
-              <div className="resume-card-copy">
+              <div className="resume-card-copy" style={{ position: 'static', padding: 0, marginTop: '.45rem' }}>
                 <h3>{item.animeTitle}</h3>
                 <p>Episode {item.episodeNumber} <i /> {left ?? 'Ready to continue'}</p>
-              </div>
-              <div className="resume-card-progress" aria-label={progressLabel(item)}>
-                <span style={{ width: `${progress}%` }} />
               </div>
             </Link>
             <button

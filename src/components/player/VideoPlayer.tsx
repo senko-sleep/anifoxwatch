@@ -178,6 +178,7 @@ export const VideoPlayer = ({
   // drawImage() + toDataURL() is a GPU→CPU readback costing ~2ms/call.
   // Throttle to 1× every 4 seconds to avoid main-thread frame drops.
   const lastThumbnailCaptureRef = useRef<number>(0);
+  const lastHistorySaveTimeRef = useRef<number>(-Infinity);
   const THUMBNAIL_CAPTURE_INTERVAL = 4000; // ms
 
   // ── Performance: isBuffering change guard ──────────────────────────────────
@@ -379,6 +380,20 @@ export const VideoPlayer = ({
     });
 
     let startupTimer: ReturnType<typeof setTimeout> | null = null;
+    let playbackStarted = false;
+    let autoplayBlocked = false;
+    const onMediaProgress = () => {
+      // Parsing a manifest is only metadata. Keep the startup deadline active
+      // until decoded media really moves the playhead.
+      if (video.readyState >= 2 && video.currentTime > 0.25) {
+        playbackStarted = true;
+        if (startupTimer) {
+          clearTimeout(startupTimer);
+          startupTimer = null;
+        }
+      }
+    };
+    video.addEventListener('timeupdate', onMediaProgress);
     let prefetchInterval: ReturnType<typeof setInterval> | null = null;
 
     // Hoisted here so the cleanup return below can always reference them,
@@ -434,22 +449,17 @@ export const VideoPlayer = ({
       hls.attachMedia(video);
 
       // ── Startup watchdog ─────────────────────────────────────────────────
-      // Give stream 25s to parse manifest before considering it a failure.
-      const manifestParsedRef = { current: false };
+      // A valid manifest can still point at blocked or empty fragments. Bound
+      // the time until actual video playback, not merely manifest parsing.
       startupTimer = setTimeout(() => {
-        if (manifestParsedRef.current) return;
-        playerLog('error', 'Startup timeout — manifest did not parse within 25s. Requesting server switch.');
+        if (playbackStarted || autoplayBlocked) return;
+        playerLog('error', 'Startup timeout — no media playback within 30s. Requesting server switch.');
         try { hls.destroy(); } catch { /* ignore */ }
         setError('Stream took too long to start. Switching to another server…');
         onErrorRef.current?.('startup_timeout_error');
-      }, 25_000);
+      }, 30_000);
 
       hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
-        manifestParsedRef.current = true;
-        if (startupTimer) {
-          clearTimeout(startupTimer);
-          startupTimer = null;
-        }
         playerLog('info', 'Manifest parsed', {
           levels: data.levels.length,
           qualities: data.levels.map(l => `${l.height}p`)
@@ -464,6 +474,7 @@ export const VideoPlayer = ({
         setIsLoading(false);
         video.play().catch((e) => {
           playerLog('warn', 'Autoplay blocked', e);
+          if (e?.name === 'NotAllowedError') autoplayBlocked = true;
         });
 
         if (initialSavedPos > 5) {
@@ -487,18 +498,9 @@ export const VideoPlayer = ({
       // dead CDN subdomains like rjp.megaup.cc), escalate to server switch.
       let fragLoadErrorCount = 0;
       let fragParseErrorCount = 0;
-      const FRAG_LOAD_ERROR_THRESHOLD = 1; // One stalled startup fragment is enough to try another server
       const FRAG_PARSE_ERROR_THRESHOLD = 6; // Back to original threshold
 
       hls.on(Hls.Events.ERROR, (_, data) => {
-        // A fatal/parse error means the manifest parsed but the stream is dead.
-        // Cancel the startup watchdog so it can't later nuke a (re)tried stream
-        // and trigger a spurious failover loop ("stuck on loading").
-        if (startupTimer) {
-          clearTimeout(startupTimer);
-          startupTimer = null;
-        }
-
         // Ignore errors during seeking - they're temporary buffer flushes
         if (isSeekingRef.current && (Date.now() - seekStartTimeRef.current) < 3000) {
           playerLog('warn', 'Ignoring error during seek operation', {
@@ -521,6 +523,16 @@ export const VideoPlayer = ({
           response: data.response
         });
 
+        // Signed manifests and their child media contexts can expire while a
+        // tab is open. Ask the watch page for one fresh resolution before
+        // excluding the provider entirely.
+        if ([401, 403, 410].includes(data.response?.code ?? 0)) {
+          hls.destroy();
+          setError('Stream authorization expired. Refreshing the source…');
+          onErrorRef.current?.('stream_expired');
+          return;
+        }
+
         // Count fragParsingError regardless of fatal flag — ad-poisoned
         // streams produce many non-fatal ones before the fatal one fires.
         if (data.details === 'fragParsingError') {
@@ -540,12 +552,13 @@ export const VideoPlayer = ({
         // Reset counter on successful frag load
         if (data.details === 'fragLoadError' || data.details === 'fragLoadTimeOut') {
           fragLoadErrorCount++;
-          playerLog('warn', `fragLoadError count: ${fragLoadErrorCount}/${FRAG_LOAD_ERROR_THRESHOLD}`, {
+          const fragLoadErrorThreshold = video.currentTime > 5 ? 2 : 1;
+          playerLog('warn', `fragLoadError count: ${fragLoadErrorCount}/${fragLoadErrorThreshold}`, {
             url: data.url?.substring(0, 100),
             response: data.response
           });
 
-          if (fragLoadErrorCount >= FRAG_LOAD_ERROR_THRESHOLD) {
+          if (fragLoadErrorCount >= fragLoadErrorThreshold) {
             playerLog('error', 'Too many fragment load errors — CDN segments unreachable. Requesting source switch.');
             hls.destroy();
             setError('Video segments cannot be loaded (CDN error). Switching to another server…');
@@ -997,6 +1010,7 @@ export const VideoPlayer = ({
         clearTimeout(startupTimer);
         startupTimer = null;
       }
+      video.removeEventListener('timeupdate', onMediaProgress);
       if (prefetchInterval) {
         clearInterval(prefetchInterval);
         prefetchInterval = null;
@@ -1202,7 +1216,10 @@ export const VideoPlayer = ({
       }
 
       // ── Position save & watch-history — fires at most every 2s ───────────
-      if (Math.floor(time) % 2 === 0 && time > 5 && video.duration - time > 10) {
+      // timeupdate fires several times per second; avoid repeatedly encoding
+      // canvas frames and writing localStorage throughout each even second.
+      if (time > 5 && video.duration - time > 10 && Math.abs(time - lastHistorySaveTimeRef.current) >= 10) {
+        lastHistorySaveTimeRef.current = time;
         savePosition(time);
         saveWatchHistory(time);
       }

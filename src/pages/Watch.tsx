@@ -20,6 +20,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   Loader2,
   Languages,
   Play,
@@ -162,6 +163,10 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seasons, urlSeason, currentSeason, urlEpNum]);
   const [selectedEpisodeNum, setSelectedEpisodeNum] = useState<number>(initialEpisodeNum);
+  // Direct official playback remains available when stream providers are down.
+  const officialEpisodeUrl = !adult && cleanAnimeId === 'anilist-189046' && selectedEpisodeNum === 14
+    ? 'https://www.crunchyroll.com/watch/GE00345564ENUS/five-obstacles'
+    : null;
   const [audioType, setAudioType] = useState<AudioType>(() => audioTypeFromQuery(searchParams.get('lang')));
   const [audioManuallySet, setAudioManuallySet] = useState(() => {
     const requestedLanguage = searchParams.get('lang');
@@ -183,6 +188,8 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   // Refs
   const playerRef = useRef<HTMLDivElement>(null);
   const lastPlayerErrorTimeRef = useRef<number>(0);
+  const lastFailedSourceRef = useRef<string>('');
+  const refreshedExpiredProvidersRef = useRef<Set<string>>(new Set());
   const playerErrorHandlerRef = useRef<(error: string) => void>(() => {});
   const playerErrorDebounceMs = 2000; // Minimum time between retry attempts
 
@@ -554,37 +561,6 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [episodes, cleanAnimeId]);
 
-  // Auto-select default server ONLY when: stream has genuinely failed (non-abort),
-  // we have no sources yet, and user hasn't already picked a server.
-  // Previously this fired on streamLoading→false which aborted the in-flight fallback fetch.
-  useEffect(() => {
-    if (!servers?.length || serversLoading) return;
-    if (userPickedServer || selectedServer || (streamData?.sources?.length ?? 0) > 0) return;
-    // Never fire while stream is still loading (would abort in-flight request)
-    if (streamLoading) return;
-    // Never fire on AbortError — the fallback host is still in-flight; don't interrupt it
-    if (!streamError || streamError.name === 'AbortError' ||
-        streamError.message?.toLowerCase().includes('abort')) return;
-    // Only fire on a real error (network failure, 5xx, etc.) — let the server's auto-routing
-    // handle server selection first; only intervene when that fully fails.
-
-    const audioTypeServers = servers.filter(s =>
-      audioType === 'dub' ? s.type === 'dub' : s.type === 'sub'
-    );
-    const targetServers = audioTypeServers.length > 0 ? audioTypeServers : servers;
-
-    const defaultServer = targetServers.find(s => s.name.toLowerCase().includes('neko_senko'))
-      || targetServers[0];
-
-    if (defaultServer) {
-      console.log('[Watch] Auto-selecting server after stream error:', defaultServer.name);
-      setSelectedServer(defaultServer.name);
-    }
-  }, [servers, serversLoading, userPickedServer, audioType, streamLoading, streamError, streamData]);
-
-
-
-
   // Auto-failover on stream error (simplified - less aggressive)
   useEffect(() => {
     if (!streamError || !servers?.length) return;
@@ -600,7 +576,11 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       console.log('[Watch] ⏭️ Skipping failover - API confirmed that the episode does not exist');
       return;
     }
-    const realServers = servers;
+    // The auto resolver already tried the independent providers, and Aniwaves
+    // itself already tried its dub server wave. Repeating that whole chain for
+    // each UI server label causes long waits and request storms.
+    if ((streamError as { code?: string }).code === 'NO_STREAMING_SOURCES') return;
+    const realServers = servers.filter(s => s.type === audioType);
     if (realServers.length === 0 || serverRetryCount >= realServers.length) return;
     const currentIndex = realServers.findIndex(s => s.name === selectedServer);
     const nextServer = realServers[(currentIndex + 1) % realServers.length];
@@ -612,7 +592,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     setSelectedServer(nextServer.name);
     setUserPickedServer(true);
     setServerRetryCount(prev => prev + 1);
-  }, [streamError, servers, selectedServer, serverRetryCount]);
+  }, [streamError, servers, selectedServer, serverRetryCount, audioType]);
 
   // Log stream data when received
   useEffect(() => {
@@ -642,12 +622,15 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
 
   // Handle video player errors (less aggressive - allow recovery)
   const handlePlayerError = useCallback((error: string) => {
-    // Debounce: prevent rapid-fire retries
+    // Deduplicate callbacks from the same failed media. A global time debounce
+    // used to discard a new provider's immediate failure, stranding its player.
     const now = Date.now();
-    if (now - lastPlayerErrorTimeRef.current < playerErrorDebounceMs) {
-      console.log('[Watch] ⏳ Debouncing player error (too soon since last retry)');
+    const failedSource = `${selectedEpisodeNum}:${audioType}:${streamData?.source || ''}:${videoSource?.url || ''}:${sourceRetryIndex}`;
+    if (lastFailedSourceRef.current === failedSource && now - lastPlayerErrorTimeRef.current < playerErrorDebounceMs) {
+      console.log('[Watch] ⏳ Ignoring duplicate error for the same source');
       return;
     }
+    lastFailedSourceRef.current = failedSource;
     lastPlayerErrorTimeRef.current = now;
 
     console.error('[Watch] 🎬 Player error:', error, {
@@ -657,10 +640,21 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     });
 
     const sources = streamData?.sources || [];
-    const maxServerRetries = servers?.length || 1;
+    const maxServerRetries = servers?.filter(s => s.type === audioType).length || 1;
+
+    if (error === 'stream_expired' && streamData?.source) {
+      const providerKey = `${selectedEpisodeNum}:${audioType}:${streamData.source}`;
+      if (!refreshedExpiredProvidersRef.current.has(providerKey)) {
+        refreshedExpiredProvidersRef.current.add(providerKey);
+        setSourceRetryIndex(0);
+        setBypassCache(true);
+        if (bypassCache) void refetchStream();
+        return;
+      }
+    }
 
     // Check if we've exhausted ALL retry options (all sources on all servers)
-    if (serverRetryCount >= maxServerRetries && audioType === 'dub') {
+    if (serverRetryCount >= maxServerRetries && audioType === 'dub' && !audioManuallySet) {
       console.log('[Watch] ❌ All dub servers exhausted, falling back to sub');
       toast.info('Dub unavailable — switching to Sub');
       setAudioType('sub');
@@ -719,7 +713,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     }
 
     // If we've exhausted sources, fail over to next server
-    const realServers = servers || [];
+    const realServers = (servers || []).filter(s => s.type === audioType);
     if (realServers.length && serverRetryCount < realServers.length) {
       const currentIndex = realServers.findIndex(s => s.name === selectedServer);
       const nextServer = realServers[(currentIndex + 1) % realServers.length];
@@ -728,12 +722,14 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
       setUserPickedServer(true);
       setServerRetryCount(prev => prev + 1);
     }
-  }, [selectedServer, selectedEpisode, serverRetryCount, servers, sourceRetryIndex, streamData, audioType, refetchStream, failedProviders, failedAniwavesServers]);
+  }, [selectedServer, selectedEpisode, selectedEpisodeNum, serverRetryCount, servers, sourceRetryIndex, streamData, videoSource, audioType, audioManuallySet, bypassCache, refetchStream, failedProviders, failedAniwavesServers]);
   playerErrorHandlerRef.current = handlePlayerError;
 
   // Reset retry count when episode or audio changes (new stream fetch)
   useEffect(() => {
     setServerRetryCount(0);
+    lastFailedSourceRef.current = '';
+    refreshedExpiredProvidersRef.current.clear();
     setBypassCache(false);
     setFailedProviders([]);
     setFailedAniwavesServers([]);
@@ -1144,6 +1140,12 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                   <Loader2 className="h-7 w-7 animate-spin text-white/50" />
                   <div className="text-center">
                     <p className="text-sm text-white/80">Finding a source…</p>
+                    {officialEpisodeUrl && (
+                      <a href={officialEpisodeUrl} target="_blank" rel="noopener noreferrer"
+                        className="mt-3 inline-flex items-center gap-1.5 text-[13px] text-amber-300 hover:text-amber-200">
+                        Watch episode 14 on Crunchyroll <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
                     {serverRetryCount > 0 && (
                       <p className="mt-1 text-[12px] text-white/40">
                         Server {serverRetryCount + 1} of {servers?.length || '?'}
@@ -1185,11 +1187,17 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                     <AlertCircle className="h-7 w-7 text-amber-400/80" />
                     <p className="mt-4 text-[15px] text-white/90">No source for this episode</p>
                     <p className="mt-2 text-[13px] leading-relaxed text-white/50">
-                      {serverRetryCount >= (servers?.length || 0)
+                      {(streamError as { code?: string } | null)?.code === 'NO_STREAMING_SOURCES'
                         ? "Every source came back empty. It may not be out yet, or they're down right now."
-                        : 'Still trying the other servers…'}
+                        : 'Try another server or retry this episode.'}
                     </p>
                     <div className="mt-6 flex flex-wrap items-center justify-center gap-4">
+                      {officialEpisodeUrl && (
+                        <a href={officialEpisodeUrl} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex h-10 items-center gap-2 rounded-full bg-fox-orange px-5 text-[13px] font-medium text-black transition-colors hover:bg-amber-400">
+                          Watch on Crunchyroll <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -1259,6 +1267,12 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                 <p className="mt-1.5 max-w-xl text-[15px] leading-relaxed text-muted-foreground">
                   {episodeTitle}
                 </p>
+              )}
+              {officialEpisodeUrl && (
+                <a href={officialEpisodeUrl} target="_blank" rel="noopener noreferrer"
+                  className="mt-3 inline-flex items-center gap-1.5 text-[13px] font-medium text-amber-300 transition-colors hover:text-amber-200">
+                  Watch episode 14 with English audio on Crunchyroll <ExternalLink className="h-3.5 w-3.5" />
+                </a>
               )}
               {isPreviewOnly && (
                 <p className="mt-3 max-w-xl text-[13px] leading-relaxed text-amber-300/80">

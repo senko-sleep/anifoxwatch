@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react';
-import { AlertCircle, ArrowRight, RefreshCw } from 'lucide-react';
+import { AlertCircle, ArrowRight, Flag, Flame, Play, RefreshCw, Sparkles, TrendingUp, Trophy } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
@@ -24,6 +24,27 @@ import {
 } from '@/hooks/useHeroAnimeMultiSource';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import type { Anime } from '@/types/anime';
+import { useTrendingInsights, type TrendingInsight } from '@/hooks/useTrendingInsights';
+
+const INSIGHT_ICON: Record<TrendingInsight['kind'], typeof Flame> = {
+  rank: Trophy,
+  episode: Play,
+  premiere: Sparkles,
+  finale: Flag,
+  surge: Flame,
+  steady: TrendingUp,
+};
+
+function TrendCaption({ insight }: { insight: TrendingInsight }) {
+  const Icon = INSIGHT_ICON[insight.kind];
+  return (
+    <p className={`trend-caption trend-caption-${insight.kind}`} title={insight.rangeTitle ?? undefined}>
+      <Icon className="h-3 w-3 shrink-0" aria-hidden />
+      <span className="trend-caption-reason">{insight.reason}</span>
+      {insight.range && <span className="trend-caption-duration">{insight.range}</span>}
+    </p>
+  );
+}
 
 /**
  * Home. A spotlight, then shelves — the shape of a good video shop: what's new,
@@ -109,6 +130,13 @@ const Index = () => {
   const safe = useCallback(<T extends { title?: string | null; id?: string | null; genres?: (string | null)[] | null }>(list: T[]) =>
     list.filter((x) => !isAdultTitle(x)), []);
 
+  const trendingIds = useMemo(() => (trendingAnime ?? []).slice(0, 20).map((a) => a.id), [trendingAnime]);
+  const { data: insights } = useTrendingInsights(trendingIds);
+  const trendCaptions = useMemo(
+    () => Object.fromEntries(Object.entries(insights ?? {}).map(([id, ins]) => [id, <TrendCaption key={id} insight={ins} />])),
+    [insights]
+  );
+
   const rows: { key: string; title: string; subtitle?: string; link: string; linkText?: string; items: Anime[]; loading: boolean; retry: () => void }[] = [
     {
       key: 'trending',
@@ -190,7 +218,7 @@ const Index = () => {
         </div>
       )}
 
-      <main className="home-main page-x page-bottom space-y-12 pt-11 sm:space-y-16">
+      <main className="home-main page-x page-bottom space-y-7 pt-5 sm:space-y-10 sm:pt-7">
         {history.length > 0 && (
           <section className="home-featured-shelf">
             <div className="resume-heading">
@@ -208,7 +236,7 @@ const Index = () => {
           row.loading || row.items.length > 0 ? (
             <section key={row.key} className="home-shelf">
               <SectionHeader title={row.title} subtitle={row.subtitle} link={row.link} linkText={row.linkText} />
-              <AnimeSlider anime={row.items.slice(0, 20)} loading={row.loading} />
+              <AnimeSlider anime={row.items.slice(0, 20)} loading={row.loading} captions={row.key === 'trending' ? trendCaptions : undefined} />
             </section>
           ) : null
         )}

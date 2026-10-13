@@ -1,12 +1,5 @@
-import Hls from 'hls.js';
+import Hls, { type HlsConfig, type LoaderCallbacks, type LoaderConfiguration, type LoaderContext } from 'hls.js';
 import { apiUrl } from './api-config';
-
-interface LoadStats {
-  trequest: number;
-  tfirst?: number;
-  tload?: number;
-  retry: number;
-}
 
 // ── Manifest response cache ─────────────────────────────────────────────────
 // Caches manifest text for 30s. Repeat fetches (ABR level changes, retries)
@@ -26,11 +19,18 @@ function manifestCacheGet(url: string): string | null {
 }
 
 function manifestCacheSet(url: string, data: string): void {
-  // Evict stale entries periodically to prevent unbounded growth
-  if (manifestCache.size > 50) {
+  // Signed manifests can create a new key on every resolution. Keep both the
+  // entry size and count bounded even during a burst of fresh requests.
+  if (data.length > 1024 * 1024) return;
+  if (manifestCache.size >= 50) {
     const now = Date.now();
     for (const [k, v] of manifestCache) {
       if (now - v.ts > MANIFEST_CACHE_TTL) manifestCache.delete(k);
+    }
+    while (manifestCache.size >= 50) {
+      const oldest = manifestCache.keys().next().value;
+      if (!oldest) break;
+      manifestCache.delete(oldest);
     }
   }
   manifestCache.set(url, { data, ts: Date.now() });
@@ -42,35 +42,35 @@ function manifestCacheSet(url: string, data: string): void {
  * Also caches HLS manifests in memory for 30s to avoid redundant round-trips.
  */
 export class PostProxyLoader extends Hls.DefaultConfig.loader {
-  private proxyBaseUrl: string;
-  private xhrRef: XMLHttpRequest | null = null;
-
-  constructor(config: Hls.LoaderConfiguration) {
+  constructor(config: HlsConfig) {
     super(config);
-    this.proxyBaseUrl = '';
   }
 
   load(
-    context: Hls.LoaderContext,
-    config: Hls.LoaderConfiguration,
-    callbacks: Hls.LoaderCallbacks<Hls.LoaderContext>
+    context: LoaderContext,
+    config: LoaderConfiguration,
+    callbacks: LoaderCallbacks<LoaderContext>
   ): void {
-    let url = context.url;
+    const url = context.url;
 
     // Check if this is a proxied URL
     const isProxied = url.includes('/api/stream/proxy?url=');
-    const isManifest = url.includes('.m3u8') || context.type === 'manifest' || context.type === 'level';
+    const contextType = (context as LoaderContext & { type?: string }).type;
+    const isManifest = url.includes('.m3u8') || contextType === 'manifest' || contextType === 'level';
 
     if (isProxied) {
       // Check manifest cache first (skip for segments)
       if (isManifest) {
         const cached = manifestCacheGet(url);
         if (cached) {
-          const stats: LoadStats = { trequest: performance.now(), tfirst: performance.now(), tload: performance.now(), retry: 0 };
+          const stats = this.stats;
+          stats.loading.start = stats.loading.first = stats.loading.end = performance.now();
+          stats.loaded = stats.total = cached.length;
           callbacks.onSuccess(
             { url: context.url, data: cached, code: 200 },
             stats,
-            context
+            context,
+            null,
           );
           return;
         }
@@ -91,14 +91,15 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
       const wrappedCallbacks = {
         ...callbacks,
         onSuccess: (
-          response: { url: string; data: string | ArrayBuffer; code: number },
-          stats: LoadStats,
-          ctx: Hls.LoaderContext
+          response: { url: string; data?: string | ArrayBuffer; code?: number },
+          stats: typeof this.stats,
+          ctx: LoaderContext,
+          networkDetails: unknown,
         ) => {
           if (typeof response.data === 'string' && response.data.includes('#EXTM3U')) {
             manifestCacheSet(url, response.data);
           }
-          originalOnSuccess(response as any, stats as any, ctx);
+          originalOnSuccess(response, stats, ctx, networkDetails);
         },
       };
       super.load(context, config, wrappedCallbacks as any);
@@ -109,83 +110,4 @@ export class PostProxyLoader extends Hls.DefaultConfig.loader {
     super.load(context, config, callbacks);
   }
 
-  private loadViaPost(
-    proxyUrl: string,
-    actualUrl: string,
-    referer: string,
-    context: Hls.LoaderContext,
-    config: Hls.LoaderConfiguration,
-    callbacks: Hls.LoaderCallbacks<Hls.LoaderContext>,
-    isManifest: boolean
-  ): void {
-    const xhr = new XMLHttpRequest();
-    this.xhrRef = xhr;
-    const stats: LoadStats = { trequest: performance.now(), retry: 0 };
-
-    xhr.open('POST', proxyUrl, true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-
-    if (context.rangeEnd) {
-      xhr.setRequestHeader('Range', `bytes=${context.rangeStart}-${context.rangeEnd}`);
-    }
-
-    xhr.timeout = config.timeout || 10000;
-    xhr.responseType = context.responseType || 'text';
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        stats.tfirst = Math.max(performance.now(), stats.trequest);
-        stats.tload = performance.now();
-
-        // Cache manifest responses
-        if (isManifest && typeof xhr.response === 'string' && xhr.response.includes('#EXTM3U')) {
-          const cacheKey = `${proxyUrl}?url=${encodeURIComponent(actualUrl)}`;
-          manifestCacheSet(cacheKey, xhr.response);
-        }
-
-        callbacks.onSuccess(
-          {
-            url: context.url,
-            data: xhr.response,
-            code: xhr.status
-          },
-          stats,
-          context
-        );
-      } else {
-        callbacks.onError(
-          {
-            code: xhr.status,
-            text: xhr.statusText
-          },
-          context
-        );
-      }
-    };
-
-    xhr.onerror = () => {
-      callbacks.onError(
-        {
-          code: xhr.status,
-          text: 'Network error'
-        },
-        context
-      );
-    };
-
-    xhr.ontimeout = () => {
-      callbacks.onTimeout(stats, context);
-    };
-
-    // Send POST request with URL and Referer in body
-    xhr.send(JSON.stringify({ url: actualUrl, referer }));
-  }
-
-  destroy(): void {
-    if (this.xhrRef) {
-      this.xhrRef.abort();
-      this.xhrRef = null;
-    }
-    super.destroy();
-  }
 }

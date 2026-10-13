@@ -28,11 +28,11 @@ export async function resolveProviders(providers: StreamProvider[], request: {
     // full bounded native attempt, then preserve bounded direct/browser fallbacks.
     const totalBudgetMs = Math.min(request.timeoutMs || 38_000, 38_000);
     const requestController = new AbortController();
-    const abortFromCaller = () => requestController.abort(request.signal?.reason);
-    if (request.signal?.aborted) abortFromCaller();
-    else request.signal?.addEventListener('abort', abortFromCaller, { once: true });
     let signalDeadline!: () => void;
     const deadlineReached = new Promise<void>(resolve => { signalDeadline = resolve; });
+    const abortFromCaller = () => { requestController.abort(request.signal?.reason); signalDeadline(); };
+    if (request.signal?.aborted) abortFromCaller();
+    else request.signal?.addEventListener('abort', abortFromCaller, { once: true });
     const totalTimer = setTimeout(() => {
         requestController.abort(new Error('Resolver deadline exceeded'));
         signalDeadline();
@@ -41,28 +41,25 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         episodeId: request.episodeId, episodeNum: request.episodeNum, nativeProvider: request.nativeProvider,
         excludedProviders: request.excludedProviders }));
     const attempts: NonNullable<StreamingData['attempts']> = [];
+    let unverifiedFallback: StreamingData | undefined;
     const eligibleProviders = providers.filter(provider => provider.getStreamingLinks &&
         !request.excludedProviders?.includes(provider.name));
-    const orderedProviders = [...eligibleProviders].sort((a, b) =>
-        Number(b.name === 'ReAnime') - Number(a.name === 'ReAnime'));
-    // ReAnime returns a FlixCloud player with a native English audio selector.
-    // Prefer that iframe for dub requests when we have an exact AniList identity,
-    // but keep the native catalog provider as the immediate fallback.
-    const dubEmbedBatch = request.category === 'dub' && request.anilistId
-        ? orderedProviders.filter(provider => provider.name === 'ReAnime')
-        : [];
-    const nativeBatch = request.nativeProvider
-        ? orderedProviders.filter(provider =>
-            provider.name === request.nativeProvider && !dubEmbedBatch.includes(provider))
-        : [];
-    const prioritized = new Set([...dubEmbedBatch, ...nativeBatch]);
-    const remainingProviders = orderedProviders.filter(provider => !prioritized.has(provider));
+    const orderedProviders = [...eligibleProviders];
     const browserBacked = new Set(['Aniwaves', 'Anichi', 'ReAnime']);
+    // A native browser extractor can exhaust a small production instance
+    // before a direct HLS provider gets a chance. Preserve native priority
+    // only when that provider does not need Chromium.
+    const nativeBatch = request.nativeProvider && !browserBacked.has(request.nativeProvider)
+        ? orderedProviders.filter(provider =>
+            provider.name === request.nativeProvider)
+        : [];
+    const prioritized = new Set(nativeBatch);
+    const remainingProviders = orderedProviders.filter(provider => !prioritized.has(provider));
     const batches = [
-        dubEmbedBatch,
         nativeBatch,
         remainingProviders.filter(provider => !browserBacked.has(provider.name)),
-        remainingProviders.filter(provider => browserBacked.has(provider.name)),
+        remainingProviders.filter(provider => browserBacked.has(provider.name) && provider.name !== 'ReAnime'),
+        remainingProviders.filter(provider => provider.name === 'ReAnime'),
     ].filter(batch => batch.length > 0);
     const tasksFor = (batch: StreamProvider[], batchSignal: AbortSignal) => batch.map(async provider => {
         const providerStarted = Date.now();
@@ -161,22 +158,32 @@ export async function resolveProviders(providers: StreamProvider[], request: {
                 logStage(stage, valid.sources.length ? 'playable' : 'invalid', `sources=${valid.sources.length}`);
             }
             if (!valid.sources.length) throw new Error('No valid playable sources');
-            attempt.status = 'playable';
+            const verified = valid.sources.some(source => source.probeVerified === true);
+            attempt.status = verified ? 'playable' : 'unverified';
             attempt.endedAt = new Date().toISOString();
             attempt.durationMs = Date.now() - providerStarted;
-            health.failures = 0;
-            health.openUntil = 0;
             health.halfOpen = false;
-            console.log(JSON.stringify({ type: 'stream_provider_circuit', provider: provider.name, status: 'closed' }));
-            console.log(JSON.stringify({ type: 'stream_provider_attempt', provider: provider.name, status: 'playable',
+            if (verified) {
+                health.failures = 0;
+                health.openUntil = 0;
+                console.log(JSON.stringify({ type: 'stream_provider_circuit', provider: provider.name, status: 'closed' }));
+            }
+            console.log(JSON.stringify({ type: 'stream_provider_attempt', provider: provider.name, status: attempt.status,
                 startedAt: new Date(providerStarted).toISOString(), endedAt: new Date().toISOString(), durationMs: Date.now() - providerStarted }));
-            return valid;
+            if (!verified) {
+                // An iframe or skipped probe is a candidate for the client, not proof of media.
+                // Keep searching independent providers before handing it to the player.
+                unverifiedFallback ||= valid;
+                throw Object.assign(new Error('Unverified stream candidate'), { unverifiedCandidate: true });
+            }
+            return { ...valid, sources: valid.sources.filter(source => source.probeVerified === true) };
         };
         try {
             return await Promise.race([work(), new Promise<never>((_, reject) => {
                 timeout = setTimeout(() => { controller.abort(new Error('Provider timeout')); reject(new Error('Provider timeout')); }, options.timeout);
             })]);
         } catch (error) {
+            if ((error as { unverifiedCandidate?: boolean }).unverifiedCandidate) throw error;
             attempt.status = controller.signal.aborted && !batchSignal.aborted && !requestController.signal.aborted ? 'timeout'
                 : batchSignal.aborted || requestController.signal.aborted ? 'cancelled' : 'failed';
             attempt.error = (error as Error).message;
@@ -230,6 +237,12 @@ export async function resolveProviders(providers: StreamProvider[], request: {
             batchController.abort();
             requestController.signal.removeEventListener('abort', abortBatch);
         }
+      }
+      if (unverifiedFallback) {
+          console.log(JSON.stringify({ type: 'stream_resolver_result', source: unverifiedFallback.source,
+              status: 'unverified', durationMs: Date.now() - requestStarted,
+              providersAttempted: attempts.map(a => a.provider) }));
+          return { ...unverifiedFallback, attempts: attempts.map(attempt => ({ ...attempt })) };
       }
       console.log(JSON.stringify({ type: 'stream_resolver_result', status: 'failed',
           startedAt: new Date(requestStarted).toISOString(), endedAt: new Date().toISOString(),

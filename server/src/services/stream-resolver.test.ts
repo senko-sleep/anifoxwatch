@@ -91,6 +91,16 @@ describe('provider fallback and identity', () => {
         await resolveProviders([hung], { ...request, timeoutMs: 100 });
         expect(signal?.aborted).toBe(true);
     });
+    it('returns promptly when the caller aborts a hung provider', async () => {
+        const controller = new AbortController();
+        const hung = provider('CallerAbortHung', { getStreamingLinks: () => new Promise(() => {}) });
+        const started = Date.now();
+        const resultPromise = resolveProviders([hung], { ...request, timeoutMs: 10_000, signal: controller.signal });
+        setTimeout(() => controller.abort(), 20);
+        const result = await resultPromise;
+        expect(result.sources).toEqual([]);
+        expect(Date.now() - started).toBeLessThan(500);
+    });
     it('caps cross-provider timeouts while preserving a separately bounded native budget', async () => {
         let fallbackTimeout: number | undefined;
         const native = provider('Native', { getStreamingLinks: async () => ({ sources: [], subtitles: [] }) });
@@ -185,7 +195,7 @@ describe('provider fallback and identity', () => {
             'aniwaves-75790&eps=1', undefined, 'sub', expect.objectContaining({ episodeNum: 2 })
         );
     });
-    it('prefers the ReAnime iframe for dub and does not start the native provider', async () => {
+    it('prefers verified native dub media over an unverified iframe', async () => {
         const started: string[] = [];
         const reAnime = provider('ReAnime', {
             acceptsAniListId: true,
@@ -210,9 +220,9 @@ describe('provider fallback and identity', () => {
             category: 'dub',
         });
 
-        expect(result.source).toBe('ReAnime');
-        expect(result.sources[0]).toMatchObject({ isEmbed: true });
-        expect(started).toEqual(['ReAnime']);
+        expect(result.source).toBe('Aniwaves');
+        expect(result.sources[0]).toMatchObject({ probeVerified: true });
+        expect(started).toEqual(['Aniwaves']);
     });
     it('falls back to the native provider when the dub iframe is unavailable', async () => {
         const started: string[] = [];
@@ -234,8 +244,33 @@ describe('provider fallback and identity', () => {
         });
 
         expect(result.source).toBe('Aniwaves');
-        // Empty results get one cache-bypassing retry before provider fallback.
-        expect(started).toEqual(['ReAnime', 'ReAnime', 'Aniwaves']);
+        expect(started).toEqual(['Aniwaves']);
+    });
+    it('continues past an unverified native iframe to verified media', async () => {
+        const embed = provider('NativeEmbed', {
+            getStreamingLinks: async () => ({ sources: [{ url: 'https://flixcloud.cc/e/test',
+                quality: 'auto', isM3U8: false, isEmbed: true }], subtitles: [] }),
+        });
+        const verified = provider('VerifiedDirect');
+        const result = await resolveProviders([embed, verified], {
+            ...request, nativeProvider: 'NativeEmbed', timeoutMs: 2_000,
+        });
+        expect(result.source).toBe('VerifiedDirect');
+        expect(result.attempts?.[0].status).toBe('unverified');
+        expect(result.sources[0].probeVerified).toBe(true);
+    });
+    it('returns an explicitly unverified iframe only when other providers fail', async () => {
+        const embed = provider('NativeEmbedOnly', {
+            getStreamingLinks: async () => ({ sources: [{ url: 'https://flixcloud.cc/e/test',
+                quality: 'auto', isM3U8: false, isEmbed: true }], subtitles: [] }),
+        });
+        const failed = provider('FailedAfterEmbed', { getStreamingLinks: async () => ({ sources: [], subtitles: [] }) });
+        const result = await resolveProviders([embed, failed], {
+            ...request, nativeProvider: 'NativeEmbedOnly', timeoutMs: 2_000,
+        });
+        expect(result.source).toBe('NativeEmbedOnly');
+        expect(result.sources[0].probeVerified).toBe(false);
+        expect(result.attempts?.map(attempt => attempt.provider)).toEqual(['NativeEmbedOnly', 'FailedAfterEmbed']);
     });
     it('does not start browser-backed providers when a direct provider succeeds', async () => {
         const browserProvider = provider('Aniwaves');

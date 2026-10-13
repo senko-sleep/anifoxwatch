@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { WatchHistory } from '@/lib/watch-history';
 import { PosterCard, PosterCardSkeleton, type PosterCardItem } from '@/components/anime/PosterCard';
@@ -7,10 +7,12 @@ interface AnimeSliderProps {
   anime: PosterCardItem[];
   cardSize?: 'sm' | 'md' | 'lg';
   loading?: boolean;
+  /** Per-title caption keyed by anime id. */
+  captions?: Record<string, ReactNode>;
 }
 
 /**
- * A horizontal shelf of posters. Scroll-snapped so a flick always lands on a
+ * A horizontal shelf of landscape anime artwork. Scroll-snapped so a flick lands on a
  * card edge. No overlays on the ends — the artwork is shown raw.
  */
 const CARD_WIDTH: Record<NonNullable<AnimeSliderProps['cardSize']>, string> = {
@@ -19,7 +21,7 @@ const CARD_WIDTH: Record<NonNullable<AnimeSliderProps['cardSize']>, string> = {
   lg: 'w-[10.5rem] sm:w-[12.5rem] lg:w-[14rem]',
 };
 
-export const AnimeSlider = ({ anime, cardSize = 'md', loading = false }: AnimeSliderProps) => {
+export const AnimeSlider = ({ anime, cardSize = 'md', loading = false, captions }: AnimeSliderProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const history = WatchHistory.get();
 
@@ -27,7 +29,7 @@ export const AnimeSlider = ({ anime, cardSize = 'md', loading = false }: AnimeSl
     return (
       <div className="flex gap-4 overflow-hidden">
         {Array.from({ length: 8 }).map((_, i) => (
-          <PosterCardSkeleton key={i} className={cn('shrink-0', CARD_WIDTH[cardSize])} />
+          <PosterCardSkeleton key={i} landscape className={cn('shrink-0', CARD_WIDTH[cardSize])} />
         ))}
       </div>
     );
@@ -49,8 +51,10 @@ export const AnimeSlider = ({ anime, cardSize = 'md', loading = false }: AnimeSl
               key={`${item.id}-${i}`}
               anime={item}
               priority={i < 5}
+              preferWideArtwork
               progress={entry?.progress}
               resumeEpisode={entry?.episodeNumber}
+              caption={captions?.[item.id]}
               className={cn('shrink-0 snap-start', CARD_WIDTH[cardSize])}
             />
           );

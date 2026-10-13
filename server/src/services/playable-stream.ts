@@ -83,7 +83,7 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
         seen.add(url);
         return true;
     });
-    const results = await Promise.all(candidates.map(async source => {
+    const inspect = async (source: VideoSource): Promise<VideoSource[]> => {
         try {
             let candidates = [source];
             let verifiedEmbed = false;
@@ -92,7 +92,7 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
                 // or if the embed is an iframe player (FlixCloud, etc.), pass it directly to the client.
                 const isIframeTarget = source.url && /flixcloud|megacloud|rabbitstream|streamtape|streamwish/i.test(source.url);
                 if (process.env.DISABLE_BROWSER_SOURCES === 'true' || isIframeTarget) {
-                    return [{ ...source }];
+                    return [{ ...source, probeVerified: false }];
                 }
                 try {
                     const extracted = await streamExtractor.extractFromEmbed(source.url, 18000, true, bypassCache, signal);
@@ -103,10 +103,10 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
                             isM3U8: stream.type === 'hls', headers: stream.headers || { Referer: new URL(source.url).origin + '/' },
                         }));
                     } else {
-                        return [{ ...source }];
+                        return [{ ...source, probeVerified: false }];
                     }
                 } catch {
-                    return [{ ...source }];
+                    return [{ ...source, probeVerified: false }];
                 }
             }
             const valid: VideoSource[] = [];
@@ -115,27 +115,37 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
                     // Embed pages are HTML iframe targets, not raw video media.
                     // Do not run probeMedia on them.
                     if (candidate.isEmbed) {
-                        valid.push(candidate);
+                        valid.push({ ...candidate, probeVerified: false });
                         continue;
                     }
                     // skipProbe: source has already validated the URL (e.g. by scraping
                     // the embed page) but the CDN may block the server's datacenter IP.
                     // The stream proxy or browser player can fetch the segments fine.
                     if (candidate.skipProbe) {
-                        valid.push(candidate);
+                        valid.push({ ...candidate, probeVerified: false });
                         continue;
                     }
                     const headers = mediaHeaders(data, candidate);
                     await probeMedia(candidate.originalUrl || candidate.url, headers, signal);
-                    valid.push({ ...candidate, headers });
+                    valid.push({ ...candidate, headers, probeVerified: true });
                 } catch (error) { console.warn(`[StreamValidation] ${data.source}: ${(error as Error).message}`); }
             }
             // Custom loaders (e.g. encrypted manifests) must stay in their own player.
             // Only accept that player after observing real decoded playback above.
-            return valid.length ? valid : (verifiedEmbed || source.isEmbed) ? [source] : [];
+            return valid.length ? valid : verifiedEmbed ? [{ ...source, probeVerified: true }] : source.isEmbed ? [{ ...source, probeVerified: false }] : [];
         } catch (error) {
             console.warn(`[StreamValidation] ${data.source}: ${(error as Error).message}`);
-            return source.isEmbed ? [source] : [];
+            return source.isEmbed ? [{ ...source, probeVerified: false }] : [];
+        }
+    };
+    // A provider may list many renditions. Bound simultaneous CDN probes so one
+    // resolution cannot fan out into a segment request storm.
+    const results: VideoSource[][] = Array.from({ length: candidates.length }, () => []);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(3, candidates.length) }, async () => {
+        while (next < candidates.length && !signal.aborted) {
+            const index = next++;
+            results[index] = await inspect(candidates[index]);
         }
     }));
     return { ...data, sources: results.flat() };

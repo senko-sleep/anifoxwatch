@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   atmosphereStyle,
@@ -26,6 +26,7 @@ export interface PosterCardItem {
   cover?: string;
   coverImage?: string;
   bannerImage?: string;
+  banner?: string;
   accentColor?: string;
   rating?: number;
   type?: string;
@@ -49,24 +50,34 @@ interface PosterCardProps {
   className?: string;
   style?: CSSProperties;
   priority?: boolean;
+  /** Use banner artwork when available; intended for cinematic home rails. */
+  preferWideArtwork?: boolean;
   onMouseEnter?: (e: React.MouseEvent) => void;
+  /** Replaces the year/episodes line, e.g. with why a title is trending. */
+  caption?: ReactNode;
 }
 
-function posterUrl(a: PosterCardItem): string {
-  return ensureHttps(a.coverImage || a.image || a.cover || a.bannerImage || '');
+function posterUrl(a: PosterCardItem, preferWideArtwork = false): string {
+  return ensureHttps(preferWideArtwork
+    ? a.bannerImage || a.banner || a.coverImage || a.image || a.cover || ''
+    : a.coverImage || a.image || a.cover || a.bannerImage || '');
 }
 
 /** Poster with a proxy retry — hotlink-blocked covers still render. */
-const PosterImage = ({ src, alt, priority }: { src: string; alt: string; priority?: boolean }) => {
+const PosterImage = ({ src, alt, priority, fallbackSrc }: { src: string; alt: string; priority?: boolean; fallbackSrc?: string }) => {
   const [current, setCurrent] = useState(src);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [fallbackActive, setFallbackActive] = useState(false);
   const triedProxy = useRef(false);
+  const attemptedSource = useRef(src);
   const lastSrc = useRef(src);
 
   if (lastSrc.current !== src) {
     lastSrc.current = src;
     triedProxy.current = false;
+    attemptedSource.current = src;
+    setFallbackActive(false);
     setCurrent(src);
     setLoaded(false);
     setFailed(false);
@@ -98,7 +109,13 @@ const PosterImage = ({ src, alt, priority }: { src: string; alt: string; priorit
         onError={() => {
           if (!triedProxy.current) {
             triedProxy.current = true;
-            setCurrent(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(src)}`);
+            const source = attemptedSource.current;
+            setCurrent(`${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(source)}`);
+          } else if (fallbackSrc && !fallbackActive && fallbackSrc !== src) {
+            attemptedSource.current = fallbackSrc;
+            triedProxy.current = false;
+            setFallbackActive(true);
+            setCurrent(fallbackSrc);
           } else {
             setFailed(true);
           }
@@ -115,7 +132,9 @@ export const PosterCard = ({
   className,
   style,
   priority,
+  preferWideArtwork = false,
   onMouseEnter,
+  caption,
 }: PosterCardProps) => {
   const location = useLocation();
   const airing = anime.status === 'Ongoing';
@@ -140,8 +159,13 @@ export const PosterCard = ({
       style={atmosphereStyle(anime.accentColor, style as Record<string, string | number>)}
       className={cn('group flex w-full flex-col focus:outline-none', className)}
     >
-        <div className="art-frame aspect-[2/3] w-full">
-        <PosterImage src={posterUrl(anime)} alt={anime.title} priority={priority} />
+        <div className={cn('art-frame w-full', preferWideArtwork ? 'aspect-video' : 'aspect-[2/3]')}>
+        <PosterImage
+          src={posterUrl(anime, preferWideArtwork)}
+          fallbackSrc={preferWideArtwork ? ensureHttps(anime.coverImage || anime.image || anime.cover || '') : undefined}
+          alt={anime.title}
+          priority={priority}
+        />
 
         {/* Status — one indicator only, top right, never a wall of badges. */}
         {unavailable ? (
@@ -171,18 +195,18 @@ export const PosterCard = ({
          <p className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground/90 sm:text-sm">
            {anime.title}
          </p>
-        {meta.length > 0 && (
+        {caption ?? (meta.length > 0 && (
           <p className="text-[11px] text-muted-foreground">{meta.join(' · ')}</p>
-        )}
+        ))}
       </div>
     </Link>
   );
 };
 
 /** Matching placeholder so loading rows keep the page's rhythm. */
-export const PosterCardSkeleton = ({ className }: { className?: string }) => (
+export const PosterCardSkeleton = ({ className, landscape = false }: { className?: string; landscape?: boolean }) => (
   <div className={cn('flex w-full flex-col', className)}>
-    <div className="skeleton aspect-[2/3] w-full rounded-[0.875rem]" />
+    <div className={cn('skeleton w-full rounded-[0.875rem]', landscape ? 'aspect-video' : 'aspect-[2/3]')} />
     <div className="skeleton mt-2.5 h-3.5 w-4/5" />
     <div className="skeleton mt-1.5 h-3 w-1/3" />
   </div>

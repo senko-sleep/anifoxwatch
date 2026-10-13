@@ -29,6 +29,9 @@ export interface VideoSource {
     isEmbed?: boolean;
     /** 'sub' | 'dub' when the backend knows which audio track this stream is. */
     category?: string;
+    server?: string;
+    /** Media bytes were probed by the API; browser playback is still verified by the player. */
+    probeVerified?: boolean;
     originalUrl?: string;
     /** A teaser clip, not the episode — the source hasn't published the full video. */
     isPreview?: boolean;
@@ -47,6 +50,7 @@ export interface StreamingData {
     intro?: { start: number; end: number };
     outro?: { start: number; end: number };
     source: string;
+    category?: 'sub' | 'dub';
     /** If true, the backend returned a SUB stream because the requested DUB was unavailable. */
     dubFallback?: boolean;
 }

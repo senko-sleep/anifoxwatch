@@ -15,7 +15,7 @@
  *    for the server to respond (up to 90 s) before retrying the original request.
  */
 
-import { buildApiUrl, getApiConfig } from './api-config';
+import { getApiConfig } from './api-config';
 
 const PING_INTERVAL_MS  = 10 * 60 * 1000; // 10 min — well under Render's 15-min sleep threshold
 const WAKE_POLL_MS      = 3_000;           // poll /health every 3 s while waking

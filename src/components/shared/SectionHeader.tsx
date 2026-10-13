@@ -38,7 +38,7 @@ export const SectionHeader = ({
                     {title}
                 </h2>
                 {subtitle && (
-                    <p className="mt-1 truncate text-xs text-muted-foreground sm:text-[13px]">{subtitle}</p>
+                    <p className="section-subtitle mt-1 truncate text-xs text-muted-foreground sm:text-[13px]">{subtitle}</p>
                 )}
             </div>
 

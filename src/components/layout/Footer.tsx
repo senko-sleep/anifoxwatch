@@ -38,8 +38,8 @@ const COLUMNS: { heading: string; links: { to: string; label: string }[] }[] = [
 export const Footer = () => (
   <footer className="mt-16 border-t border-white/[0.06]">
     <div className="page-x py-12 sm:py-16">
-      <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[1.4fr_repeat(3,1fr)]">
-        <div className="max-w-sm">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-9 sm:gap-10 lg:grid-cols-[1.4fr_repeat(3,1fr)]">
+        <div className="col-span-2 max-w-sm lg:col-span-1">
           <Logo size="md" />
           <p className="mt-4 text-[13px] leading-relaxed text-muted-foreground">
             A quiet place to find something to watch. Listings, artwork and scores come from{' '}

@@ -43,4 +43,20 @@ describe('stream failure semantics', () => {
             episodeId: 'aniwaves-82540&eps=1',
         });
     });
+    it('uses a shared bounded budget for dub resolution and sub fallback', async () => {
+        streaming.getStreamingLinks.mockImplementation(async (_id, _server, category) => category === 'dub'
+            ? { sources: [], subtitles: [] }
+            : { sources: [{ url: 'https://media.example/video.mp4', quality: 'auto', isM3U8: false,
+                probeVerified: true }], subtitles: [], source: 'Fallback' });
+
+        const response = await fetch(`${base}/api/stream/watch/aniwaves-82540?eps=1&ep_num=1&category=dub&proxy=false`);
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toMatchObject({ dubFallback: true, category: 'sub', source: 'Fallback' });
+        expect(streaming.getStreamingLinks).toHaveBeenCalledTimes(2);
+        const [dubCall, subCall] = streaming.getStreamingLinks.mock.calls;
+        expect(dubCall[9]).toBe(25_000);
+        expect(subCall[9]).toBeGreaterThan(0);
+        expect(subCall[9]).toBeLessThanOrEqual(12_000);
+        expect(dubCall[8]).toBe(subCall[8]);
+    });
 });

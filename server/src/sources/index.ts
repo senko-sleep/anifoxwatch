@@ -4,6 +4,7 @@ export { BaseAnimeSource, type AnimeSource } from './base-source.js';
 export { AniwavesSource } from './aniwaves-source.js';
 export { YomiSource } from './yomi-source.js';
 export { ReAnimeSource } from './reanime-source.js';
+export { MiruroSource } from './miruro-source.js';
 export { AnichiSource } from './anichi-source.js';
 
 // Adult streaming source

@@ -26,6 +26,8 @@ export interface VideoSource {
      * blocks datacenter IPs — the stream proxy or client player will fetch it fine.
      */
     skipProbe?: boolean;
+    /** True after a media-byte probe or extractor-observed decoded playback. */
+    probeVerified?: boolean;
 }
 
 export interface VideoSubtitle {

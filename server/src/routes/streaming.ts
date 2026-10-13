@@ -57,11 +57,10 @@ const DEFAULT_REMOTE_STREAM_PROXY =
     process.env.DEFAULT_REMOTE_STREAM_PROXY ||
     'https://api.allorigins.win/raw?url=';
 
-/** How long to wait for a dub result before accepting a sub fallback (ms). */
-const DUB_PATIENCE_MS = 10_000; // Reduced to 10s for faster fallback
-
 /** Global per-request timeout safety net (ms). */
-const GLOBAL_TIMEOUT_MS = 25_000; // 25s — allow stream extraction (browser pool) sufficient time
+const GLOBAL_TIMEOUT_MS = 42_000;
+const DUB_RESOLVE_BUDGET_MS = 25_000;
+const SUB_FALLBACK_BUDGET_MS = 12_000;
 
 // ---------------------------------------------------------------------------
 // Helpers — episode ID normalisation
@@ -617,6 +616,13 @@ function stripRawVttRenditions(content: string): string {
  * is poisoned and should be rejected.
  */
 function isAdPoisonedManifest(content: string, originalUrl: string): boolean {
+    // MegaVid's Sora backend serves real HLS under /vid/ with image-like
+    // segment names. The player and media probe validate the returned bytes;
+    // extension-based ad detection would reject this playable provider.
+    try {
+        const target = new URL(originalUrl);
+        if (target.hostname === 'megavid.buzz' && target.pathname.startsWith('/vid/')) return false;
+    } catch { /* keep generic checks for malformed URLs */ }
     const urlNoQuery = originalUrl.split('?')[0].split('#')[0];
     const baseUrl = urlNoQuery.substring(0, urlNoQuery.lastIndexOf('/') + 1);
 
@@ -1022,6 +1028,11 @@ router.get('/servers/:episodeId', async (req: Request, res: Response): Promise<v
  */
 router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<void> => {
     const requestController = new AbortController();
+    const requestStarted = Date.now();
+    const deadline = setTimeout(() => requestController.abort(new Error('Stream request deadline exceeded')), GLOBAL_TIMEOUT_MS);
+    const clearDeadline = () => clearTimeout(deadline);
+    res.once('finish', clearDeadline);
+    res.once('close', clearDeadline);
     const abortIfDisconnected = () => {
         if (!res.writableEnded && !requestController.signal.aborted) requestController.abort(new Error('Client disconnected'));
     };
@@ -1089,7 +1100,8 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
         const sourcesCount = (sourceManager as any).sources?.size || 0;
         logger.info(`[STREAM] sourceManager has ${sourcesCount} sources registered`);
 
-        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, requestController.signal);
+        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, requestController.signal,
+            isDubRequested ? DUB_RESOLVE_BUDGET_MS : GLOBAL_TIMEOUT_MS - 5_000);
         logger.info(`[STREAM] getStreamingLinks returned:`, {
             hasSources: streamData?.sources?.length > 0,
             sourcesCount: streamData?.sources?.length,
@@ -1100,10 +1112,14 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
     }
 
     // If no dub sources found, fall back to sub sequentially
-    if (!streamData?.sources?.length && isDubRequested) {
+    if (!streamData?.sources?.length && isDubRequested && !requestController.signal.aborted) {
         try {
             logger.info(`[STREAM] Sequential sub fallback for dub request ${episodeId}`, { requestId });
-            const subFallback = await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, requestController.signal);
+            const remainingMs = GLOBAL_TIMEOUT_MS - (Date.now() - requestStarted) - 1_000;
+            const subFallback = remainingMs > 0
+                ? await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, requestController.signal,
+                    Math.min(SUB_FALLBACK_BUDGET_MS, remainingMs))
+                : null;
             if (subFallback?.sources?.length) {
                 streamData = { ...subFallback, category: 'sub', dubFallback: true };
                 logger.info(`[STREAM] Sequential sub fallback succeeded for ${episodeId}`, { requestId });
@@ -1194,7 +1210,11 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
                 try { hostname = new URL(rawUrl).hostname; } catch { return null; }
 
 
-                return { ...source, headers: undefined, url: proxyUrl(rawUrl, proxyBase, source.headers?.referer || source.headers?.Referer || streamReferer, source.headers || streamData.headers), originalUrl: rawUrl };
+                // Miruro's MegaVid CDN only requires the public Referer/Origin.
+                // Avoid a process-local context token in its URL: a later HLS
+                // fragment can land on a restarted or different API instance.
+                const contextHeaders = streamData.source === 'Miruro' ? undefined : source.headers || streamData.headers;
+                return { ...source, headers: undefined, url: proxyUrl(rawUrl, proxyBase, source.headers?.referer || source.headers?.Referer || streamReferer, contextHeaders), originalUrl: rawUrl };
             })
             .filter((s): s is VideoSource => s !== null);
 

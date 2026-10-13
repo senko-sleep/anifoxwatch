@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Activity, Calendar, ChevronDown, Compass, FileText, Home,
-  LayoutDashboard, Loader2, Menu, Search, Shuffle, X,
+  Activity, Calendar, ChevronDown, Clapperboard, Compass, FileText, Home,
+  LayoutDashboard, Loader2, Menu, Search, Shuffle, Tv, X,
 } from 'lucide-react';
 import { Logo } from '@/components/ui/Logo';
 import { apiClient } from '@/lib/api-client';
@@ -22,10 +22,14 @@ import {
  * depth is there, it just isn't shouted.
  */
 const PRIMARY_NAV = [
-  { to: '/', label: 'Home', icon: Home, match: ['/'] },
-  { to: '/browse', label: 'Browse', icon: Compass, match: ['/browse', '/search'] },
-  { to: '/schedule', label: 'Schedule', icon: Calendar, match: ['/schedule'] },
+  { to: '/', label: 'Home', icon: Home, isActive: (pathname: string, _search: string) => pathname === '/' },
+  { to: '/browse?type=TV', label: 'Anime', icon: Tv, isActive: (pathname: string, search: string) => pathname === '/browse' && new URLSearchParams(search).get('type') === 'TV' },
+  { to: '/schedule', label: 'Schedule', icon: Calendar, isActive: (pathname: string, _search: string) => pathname.startsWith('/schedule') },
+  { to: '/browse?type=Movie', label: 'Movies', icon: Clapperboard, isActive: (pathname: string, search: string) => pathname === '/browse' && new URLSearchParams(search).get('type') === 'Movie' },
+  { to: '/browse', label: 'Browse', icon: Compass, isActive: (pathname: string, search: string) => (pathname === '/browse' || pathname === '/search') && !new URLSearchParams(search).has('type') },
 ];
+
+const DOCK_NAV = PRIMARY_NAV.filter(({ label }) => ['Home', 'Browse', 'Schedule', 'Movies'].includes(label));
 
 const MORE_NAV = [
   { to: '/docs', label: 'API docs', icon: FileText },
@@ -41,6 +45,7 @@ export const Navbar = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loadingRandom, setLoadingRandom] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [dockHidden, setDockHidden] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const { data: sources } = useSourceHealth({ autoRefresh: true, refreshInterval: 30000 });
@@ -49,7 +54,16 @@ export const Navbar = () => {
   const healthy = total > 0 && online / total >= 0.8;
 
   useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 12);
+    let lastY = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      setScrolled(y > 12);
+      // Tuck the dock away while reading down; any upward scroll brings it back.
+      if (Math.abs(y - lastY) > 6) {
+        setDockHidden(y > lastY && y > 160);
+        lastY = y;
+      }
+    };
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
@@ -96,15 +110,18 @@ export const Navbar = () => {
     }
   };
 
-  const isActive = (match: string[]) =>
-    match.some((m) => (m === '/' ? location.pathname === '/' : location.pathname.startsWith(m)));
+  const isActive = (item: (typeof PRIMARY_NAV)[number]) => item.isActive(location.pathname, location.search);
 
   return (
     <>
       <header
         className={cn(
-          'sticky top-0 z-50 w-full transition-[background-color,border-color,backdrop-filter] duration-300',
-          scrolled
+          location.pathname === '/'
+            ? 'home-floating-header absolute inset-x-0 top-0 z-50 w-full transition-[background-color,border-color,backdrop-filter] duration-300'
+            : 'sticky top-0 z-50 w-full transition-[background-color,border-color,backdrop-filter] duration-300',
+          location.pathname === '/'
+            ? 'border-b border-transparent bg-transparent'
+            : scrolled
             ? 'border-b border-white/[0.07] bg-[hsl(234_32%_5%_/_0.82)] backdrop-blur-xl backdrop-saturate-150'
             : 'border-b border-transparent bg-[hsl(234_32%_5%_/_0.35)] backdrop-blur-md'
         )}
@@ -115,19 +132,19 @@ export const Navbar = () => {
           </Link>
 
           <nav className="ml-3 hidden items-center gap-1 md:flex">
-            {PRIMARY_NAV.map(({ to, label, icon: Icon, match }) => {
-              const active = isActive(match);
+            {PRIMARY_NAV.map((item) => {
+              const { to, label } = item;
+              const active = isActive(item);
               return (
                 <Link
                   key={to}
                   to={to}
                   aria-current={active ? 'page' : undefined}
                   className={cn(
-                    'relative flex items-center gap-2 rounded-full px-3.5 py-2 text-[13px] font-medium transition-colors duration-200',
+                    'relative flex items-center rounded-full px-3.5 py-2 text-[14px] font-medium transition-colors duration-200',
                     active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
                   )}
                 >
-                  <Icon className={cn('h-4 w-4', active ? 'text-[hsl(var(--primary))]' : 'opacity-70')} />
                   {label}
                   {active && (
                     <span className="absolute inset-x-3.5 -bottom-[1px] h-[2px] rounded-full bg-[hsl(var(--primary))]" />
@@ -136,7 +153,7 @@ export const Navbar = () => {
               );
             })}
 
-            <DropdownMenu>
+            {location.pathname !== '/' && <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
@@ -164,21 +181,12 @@ export const Navbar = () => {
                   </div>
                 ))}
               </DropdownMenuContent>
-            </DropdownMenu>
+            </DropdownMenu>}
 
-            <button
-              type="button"
-              onClick={handleRandom}
-              disabled={loadingRandom}
-              className="flex items-center gap-2 rounded-full px-3.5 py-2 text-[13px] font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground disabled:opacity-50"
-            >
-              {loadingRandom ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shuffle className="h-4 w-4 opacity-70" />}
-              Surprise me
-            </button>
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            {total > 0 && (
+            {total > 0 && location.pathname !== '/' && (
               <Link
                 to="/status"
                 title={`${online} of ${total} sources online`}
@@ -218,15 +226,6 @@ export const Navbar = () => {
 
             <button
               type="button"
-              onClick={() => setMobileSearchOpen(true)}
-              aria-label="Search"
-              className="glass-button grid h-10 w-10 place-items-center rounded-full text-foreground/80 md:hidden"
-            >
-              <Search className="h-[18px] w-[18px]" />
-            </button>
-
-            <button
-              type="button"
               onClick={() => setMobileMenuOpen((v) => !v)}
               aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
               aria-expanded={mobileMenuOpen}
@@ -237,9 +236,28 @@ export const Navbar = () => {
           </div>
         </div>
 
+      </header>
+
+      {/* Menu — a bottom sheet, where the thumb already is. */}
         {mobileMenuOpen && (
-          <div className="border-t border-white/[0.06] bg-[hsl(234_32%_5%_/_0.96)] backdrop-blur-xl md:hidden">
-            <div className="page-x space-y-1 py-3">
+          <div className="mobile-sheet-backdrop md:hidden" onClick={() => setMobileMenuOpen(false)}>
+            <div className="mobile-sheet space-y-1" role="dialog" aria-label="Menu" onClick={(e) => e.stopPropagation()}>
+              <div className="mobile-sheet-grip" aria-hidden />
+              <div className="mobile-sheet-grid">
+                {PRIMARY_NAV.map((item) => {
+                  const { to, label, icon: Icon } = item;
+                  const active = isActive(item);
+                  return (
+                    <Link key={to} to={to} aria-current={active ? 'page' : undefined} className={cn('mobile-sheet-tile', active && 'is-active')}>
+                      <Icon className="h-[18px] w-[18px]" />
+                      {label}
+                    </Link>
+                  );
+                })}
+              </div>
+
+              <div className="fox-divider my-1" />
+
               <button
                 type="button"
                 onClick={handleRandom}
@@ -279,7 +297,6 @@ export const Navbar = () => {
             </div>
           </div>
         )}
-      </header>
 
       {/* Mobile search — a full sheet, because typing deserves the whole screen. */}
       {mobileSearchOpen && (
@@ -303,40 +320,25 @@ export const Navbar = () => {
         </div>
       )}
 
-      {/* Bottom bar — thumb-reachable, same three destinations as the top. */}
+      {/* Dock — a floating glass pill, thumb-reachable, and out of the way while reading. */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-50 md:hidden"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        className={cn('mobile-dock md:hidden', dockHidden && !mobileMenuOpen && 'is-hidden')}
         aria-label="Primary"
       >
-        <div className="absolute inset-0 border-t border-white/[0.07] bg-[hsl(234_32%_5%_/_0.9)] backdrop-blur-xl" />
-        <div className="relative flex h-[60px] items-stretch">
-          {PRIMARY_NAV.map(({ to, label, icon: Icon, match }) => {
-            const active = isActive(match);
-            return (
-              <Link
-                key={to}
-                to={to}
-                aria-current={active ? 'page' : undefined}
-                className="relative flex flex-1 flex-col items-center justify-center gap-1"
-              >
-                {active && <span className="absolute inset-x-6 top-0 h-[2px] rounded-full bg-[hsl(var(--primary))]" />}
-                <Icon className={cn('h-[18px] w-[18px]', active ? 'text-[hsl(var(--primary))]' : 'text-muted-foreground')} />
-                <span className={cn('text-[10px] font-medium', active ? 'text-foreground' : 'text-muted-foreground')}>
-                  {label}
-                </span>
-              </Link>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => setMobileSearchOpen(true)}
-            className="flex flex-1 flex-col items-center justify-center gap-1"
-          >
-            <Search className="h-[18px] w-[18px] text-muted-foreground" />
-            <span className="text-[10px] font-medium text-muted-foreground">Search</span>
-          </button>
-        </div>
+        {DOCK_NAV.map((item) => {
+          const { to, label, icon: Icon } = item;
+          const active = isActive(item);
+          return (
+            <Link key={to} to={to} aria-current={active ? 'page' : undefined} className={cn('mobile-dock-item', active && 'is-active')}>
+              <Icon className="h-[18px] w-[18px]" strokeWidth={active ? 2.25 : 1.9} />
+              <span>{label}</span>
+            </Link>
+          );
+        })}
+        <button type="button" onClick={() => setMobileSearchOpen(true)} className="mobile-dock-item" aria-label="Search">
+          <Search className="h-[18px] w-[18px]" strokeWidth={1.9} />
+          <span>Search</span>
+        </button>
       </nav>
     </>
   );
