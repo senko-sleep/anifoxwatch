@@ -438,6 +438,12 @@ function streamCacheSet(key: string, data: any, ttlOverride?: number): void {
     streamCache.set(key, { data, expiresAt: Date.now() + ttl });
 }
 
+/** Node's certificate verification failures: expired, revoked, self-signed, untrusted, wrong host. */
+function isCertificateError(code: string | undefined, message: string): boolean {
+    return /^(CERT_|ERR_TLS_CERT|UNABLE_TO_(GET|VERIFY)|DEPTH_ZERO_SELF_SIGNED|SELF_SIGNED_CERT)/.test(code || '') ||
+        /certificate|self[- ]signed/i.test(message);
+}
+
 interface ResolvedStream { streamData: any; lastError: string | null }
 interface InFlight { promise: Promise<ResolvedStream>; controller: AbortController; waiters: number }
 const inFlightStreams = new Map<string, InFlight>();
@@ -1592,8 +1598,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Try each referer combo
     let proxyResponse: AxiosResponse | null = null;
     let lastProxyError: unknown = null;
+    let certificateRejected = false;
 
-    const makeProxyRequest = (targetUrl: string, combo: { referer: string; origin: string }, relaxedTls: boolean): Promise<AxiosResponse> => {
+    const makeProxyRequest = (targetUrl: string, combo: { referer: string; origin: string }): Promise<AxiosResponse> => {
         const headers: Record<string, string> = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept': '*/*',
@@ -1614,10 +1621,6 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         }
         if (req.headers.range) headers['Range'] = req.headers.range as string;
 
-        const agentOptions = relaxedTls
-            ? { rejectUnauthorized: false, ciphers: 'DEFAULT:@SECLEVEL=0' }
-            : undefined;
-
         // Segments must be fast — 15s timeout to match client-side for zero lag
         // Matches client-side fragLoadingTimeOut (15s) to prevent server timeout before client
         // Manifests are infrequent so stay at 20s.
@@ -1632,11 +1635,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             timeout: timeoutMs,
             maxRedirects: 5,
             validateStatus: (s: number) => s < 400,
-            // Use the persistent keepAlive agent for segment fetches;
-            // relax TLS when requested.
-            ...(agentOptions
-                ? { httpsAgent: new https.Agent({ ...agentOptions }) }
-                : { httpsAgent: proxyKeepAliveAgent }),
+            // Persistent keepAlive agent for segment fetches; certificates are always verified.
+            httpsAgent: proxyKeepAliveAgent,
         });
     };
 
@@ -1703,7 +1703,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
         try {
             const targetUrl = cachedProtocol === 'http' ? url.replace(/^https:\/\//i, 'http://') : url;
-            proxyResponse = await makeProxyRequest(targetUrl, combo, false);
+            proxyResponse = await makeProxyRequest(targetUrl, combo);
             logger.info(`[PROXY] Success on attempt ${attempt + 1} (${combo.referer})`, { domain, requestId });
             break;
         } catch (err: unknown) {
@@ -1732,13 +1732,19 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             lastProxyError = err;
             const errMsg = err instanceof Error ? err.message : String(err);
             const errCode = (err as NodeJS.ErrnoException).code;
+            // A certificate that fails verification (expired, revoked, self-signed, wrong host)
+            // makes this CDN unavailable: certificate checks are never relaxed and the request is
+            // never downgraded or relayed around them. The 502 below sends the player to its
+            // next provider.
+            if (isCertificateError(errCode, errMsg)) {
+                certificateRejected = true;
+                logger.warn(`[PROXY] ${domain} failed certificate verification (${errCode || errMsg}) — treating source as unavailable`, { requestId });
+                break;
+            }
             const isTlsError =
                 errCode === 'EPROTO' || errCode === 'ECONNRESET' || errCode === 'ECONNREFUSED' ||
-                errCode === 'CERT_REVOKED' || errCode === 'CERT_HAS_EXPIRED' ||
-                errMsg.includes('certificate has expired') ||
                 errMsg.includes('EPROTO') || errMsg.includes('wrong version number') ||
-                errMsg.includes('socket hang up') || errMsg.includes('alert protocol version') ||
-                errMsg.includes('revoked');
+                errMsg.includes('socket hang up') || errMsg.includes('alert protocol version');
 
             let rotationTried = false;
 
@@ -1764,7 +1770,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                     const altDomain = new URL(altUrl).hostname;
                     for (const rotateCombo of refererCombos) {
                         try {
-                            proxyResponse = await makeProxyRequest(altUrl, rotateCombo, false);
+                            proxyResponse = await makeProxyRequest(altUrl, rotateCombo);
                             logger.info(`[PROXY] Rotation success: ${domain} → ${altDomain} (referer: ${rotateCombo.referer})`, { requestId });
                             mirrorBlacklist.delete(altDomain); // Clear any prior blacklist entry on success
                             break; // Break inner referer loop
@@ -1784,39 +1790,31 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             }
 
             if (isTlsError && cachedProtocol !== 'http') {
-                logger.warn(`[PROXY] TLS error for ${domain} — trying relaxed TLS`, { requestId });
-                try {
-                    proxyResponse = await makeProxyRequest(url, combo, true);
-                    logger.info(`[PROXY] Relaxed TLS success for ${domain}`, { domain, requestId });
-                    break;
-                } catch (tlsErr: unknown) {
-                    lastProxyError = tlsErr;
-                    logger.warn(`[PROXY] Relaxed TLS failed for ${domain}: ${tlsErr instanceof Error ? tlsErr.message : String(tlsErr)}`, { requestId });
-
-                    if (url.startsWith('https://')) {
-                        try {
-                            const httpResp = await makeProxyRequest(url.replace(/^https:\/\//i, 'http://'), combo, false);
-                            const ct = httpResp.headers['content-type'] || '';
-                            if (ct.includes('text/html')) {
-                                // ISP block page — drain and break out of loop completely
-                                httpResp.data?.resume?.();
-                                logger.warn(`[PROXY] HTTP fallback returned HTML (ISP block) for ${domain}. Skipping remaining combos.`, { requestId });
-                                break; // Break out of referer loop!
-                            } else {
-                                setProtocolCache(domain, 'http');
-                                proxyResponse = httpResp;
-                                logger.info(`[PROXY] HTTP fallback success for ${domain}`, { domain, requestId });
-                                break;
-                            }
-                        } catch (httpErr: unknown) {
-                            lastProxyError = httpErr;
-                            logger.warn(`[PROXY] HTTP fallback failed for ${domain}`, { requestId });
-                            // If HTTP also fails with timeout/connection error, it's a hard block.
+                // A protocol-level failure (not a certificate one — those stop above). Some
+                // CDNs only answer on plain HTTP; TLS verification is never switched off.
+                if (url.startsWith('https://')) {
+                    try {
+                        const httpResp = await makeProxyRequest(url.replace(/^https:\/\//i, 'http://'), combo);
+                        const ct = httpResp.headers['content-type'] || '';
+                        if (ct.includes('text/html')) {
+                            // ISP block page — drain and break out of loop completely
+                            httpResp.data?.resume?.();
+                            logger.warn(`[PROXY] HTTP fallback returned HTML (ISP block) for ${domain}. Skipping remaining combos.`, { requestId });
+                            break; // Break out of referer loop!
+                        } else {
+                            setProtocolCache(domain, 'http');
+                            proxyResponse = httpResp;
+                            logger.info(`[PROXY] HTTP fallback success for ${domain}`, { domain, requestId });
                             break;
                         }
-                    } else {
-                        break; // Not HTTPS, so no HTTP fallback to try. Hard block.
+                    } catch (httpErr: unknown) {
+                        lastProxyError = httpErr;
+                        logger.warn(`[PROXY] HTTP fallback failed for ${domain}`, { requestId });
+                        // If HTTP also fails with timeout/connection error, it's a hard block.
+                        break;
                     }
+                } else {
+                    break; // Not HTTPS, so no HTTP fallback to try. Hard block.
                 }
             } else if (!rotationTried && status === 403 && isMegaupDomain) {
                 // CDN access denied — no referer will fix this. Break immediately.
@@ -1834,6 +1832,16 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             // Manifests: 400ms (was 800ms). Segments: 100ms (was 300ms).
             if (attempt < refererCombos.length - 1) await new Promise(r => setTimeout(r, isM3u8 ? 400 : 100));
         }
+    }
+
+    if (!proxyResponse && certificateRejected) {
+        // Not relayed through the remote proxy: that would only route around the failed check.
+        res.set('Access-Control-Allow-Origin', '*').status(502).json({
+            error: 'Upstream certificate failed verification',
+            reason: 'tls_certificate',
+            domain,
+        });
+        return;
     }
 
     if (!proxyResponse) {

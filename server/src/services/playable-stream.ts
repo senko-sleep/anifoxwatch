@@ -1,5 +1,4 @@
 import axios from 'axios';
-import https from 'node:https';
 import type { StreamingData, VideoSource } from '../types/streaming.js';
 import { streamExtractor } from './stream-extractor.js';
 
@@ -7,24 +6,13 @@ export const mediaHeaders = (data: StreamingData, source: VideoSource): Record<s
     Object.fromEntries(Object.entries({ 'user-agent': 'Mozilla/5.0', ...data.headers, ...source.headers })
         .map(([key, value]) => [key.toLowerCase(), value]));
 
-const EXPIRED_CERT = /CERT_HAS_EXPIRED|certificate has expired/;
-const relaxedTlsAgent = new https.Agent({ rejectUnauthorized: false });
-
 /** Read a bounded prefix, including when an upstream ignores Range. Never download an episode. */
 async function readMedia(url: string, headers: Record<string, string>, signal: AbortSignal, limit: number, range = false): Promise<Buffer> {
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Invalid media protocol');
-    const get = (relaxedTls: boolean) => axios.get(url, {
+    const response = await axios.get(url, {
         headers: { ...headers, ...(range ? { Range: `bytes=0-${limit - 1}` } : {}) },
         signal, timeout: 8000, responseType: 'stream', maxRedirects: 5,
-        ...(relaxedTls ? { httpsAgent: relaxedTlsAgent } : {}),
-    });
-    // CDNs let certificates lapse (echovideo's hlsxst3, Oct 2026). The stream proxy already
-    // falls back to relaxed TLS for those, so validation must too, or a stream the proxy
-    // would play is thrown away here.
-    const response = await get(false).catch((error) => {
-        if (!EXPIRED_CERT.test(`${error?.code} ${error?.message}`)) throw error;
-        return get(true);
     });
     const chunks: Buffer[] = [];
     let size = 0;
