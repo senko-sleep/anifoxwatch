@@ -10,7 +10,7 @@ import { AnimeSlider } from '@/components/home/AnimeSlider';
 import { SectionHeader } from '@/components/shared/SectionHeader';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { useAnime, useAnimeArtwork, useBrowse, useEpisodeDetails, useEpisodes, useRelatedAnime, useSeasons } from '@/hooks/useAnime';
+import { useAnime, useAnimeArtwork, useBrowse, useEpisodeDetails, useEpisodes, usePrefetchNextEpisode, useRelatedAnime, useSeasons } from '@/hooks/useAnime';
 import { useHentaiTitle } from '@/hooks/useHentai';
 import { useResolvedAnimeId } from '@/hooks/useResolvedAnimeId';
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
@@ -224,6 +224,18 @@ const AnimePage = ({ adult = false }: { adult?: boolean }) => {
     if (own && own !== String(beginEpisode) && !/^episode\s*\d+$/i.test(own)) return own;
     return details?.get(beginEpisode)?.title;
   })();
+
+  // Resolving a stream takes seconds; start it for the episode the Watch button opens while
+  // the visitor is still reading this page. The API keeps the answer, so the player's own
+  // request for it returns immediately.
+  const prefetchEpisode = usePrefetchNextEpisode();
+  const beginEpisodeId = episodes.find((e) => e.number === beginEpisode)?.id;
+  useEffect(() => {
+    if (isAdultPage || !beginEpisodeId || !animeId.startsWith('anilist-')) return;
+    const anilistId = parseInt(animeId.slice('anilist-'.length), 10) || undefined;
+    prefetchEpisode(animeId, beginEpisodeId, 'sub', beginEpisode, anilistId, anime?.title);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per episode, not per render
+  }, [animeId, beginEpisodeId, isAdultPage]);
 
   // The alternate title only earns its line when it says something the main title doesn't.
   const altTitle = (() => {

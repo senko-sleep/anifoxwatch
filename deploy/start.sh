@@ -22,6 +22,33 @@ node_pid=$!
 PORT="${PORT}" NODE_PORT="${NODE_PORT}" media-proxy &
 proxy_pid=$!
 
+# Exiting is not the only way Node fails. On a 512MB instance it can wedge instead — alive,
+# answering nothing — while the proxy keeps the platform's TCP health check green, so the
+# instance is never replaced (seen 2026-10-13: 45 minutes of silence, reported HEALTHY).
+# Node's own /health is asked directly; if it stays silent the process is killed, `wait -n`
+# below sees the exit, and the platform restarts a clean container.
+WATCHDOG_GRACE="${WATCHDOG_GRACE:-90}"
+WATCHDOG_INTERVAL="${WATCHDOG_INTERVAL:-20}"
+WATCHDOG_STRIKES="${WATCHDOG_STRIKES:-4}"
+(
+    sleep "$WATCHDOG_GRACE"
+    strikes=0
+    while kill -0 "$node_pid" 2>/dev/null; do
+        if curl -fsS -m 10 -o /dev/null "http://127.0.0.1:${NODE_PORT}/health"; then
+            strikes=0
+        else
+            strikes=$((strikes + 1))
+            echo "[watchdog] node /health unanswered (${strikes}/${WATCHDOG_STRIKES})"
+            if [ "$strikes" -ge "$WATCHDOG_STRIKES" ]; then
+                echo "[watchdog] node is unresponsive; killing it so the container restarts"
+                kill -KILL "$node_pid" 2>/dev/null || true
+                exit 1
+            fi
+        fi
+        sleep "$WATCHDOG_INTERVAL"
+    done
+) &
+
 # Forward a shutdown to both, so a deploy drains rather than drops connections.
 terminate() {
     echo "[start] signal received, stopping children"

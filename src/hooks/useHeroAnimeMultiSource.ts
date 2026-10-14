@@ -55,9 +55,9 @@ interface CachedHeroData {
   version: number;
 }
 
-const CACHE_KEY = 'anistream_hero_v12';
+const CACHE_KEY = 'anistream_hero_v13';
 const CACHE_TTL = 20 * 60 * 1000;
-const CACHE_VERSION = 12;
+const CACHE_VERSION = 13;
 
 // User-Agent for external APIs (Jikan v4 requires this)
 const USER_AGENT = 'AniStreamHub/1.0 (+https://github.com/anistream-hub)';
@@ -71,10 +71,10 @@ export const STATIC_FALLBACK_HERO_ANIME: HeroAnime[] = [
       romaji: 'Ore dake Level Up na Ken',
       native: '俺だけレベルアップな件',
     },
-    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/151807-3528b1e4fa8e9f8daea8d655ad1bf2c8.jpg',
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/151807-37yfQA3ym8PA.jpg',
     coverImage: {
-      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-3528b1e4fa8e9f8daea8d655ad1bf2c8.jpg',
-      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx151807-3528b1e4fa8e9f8daea8d655ad1bf2c8.jpg',
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx151807-it355ZgzquUd.png',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx151807-it355ZgzquUd.png',
       color: '#3582d8',
     },
     description: 'In a world where hunters must battle deadly monsters to protect humanity, Sung Jinwoo, notoriously known as the weakest hunter of all mankind, finds himself in a struggle for survival.',
@@ -102,8 +102,8 @@ export const STATIC_FALLBACK_HERO_ANIME: HeroAnime[] = [
     },
     bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/154587-ivXNJ23SM1xB.jpg',
     coverImage: {
-      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-gviZjMmQEptO.jpg',
-      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx154587-gviZjMmQEptO.jpg',
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx154587-qQTzQnEJJ3oB.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx154587-qQTzQnEJJ3oB.jpg',
       color: '#43a5d8',
     },
     description: 'The demon king has been defeated, and the victorious hero party returns home before disbanding. The four—mage Frieren, hero Himmel, priest Heiter, and warrior Eisen—reminisce over their decade-long journey.',
@@ -131,8 +131,8 @@ export const STATIC_FALLBACK_HERO_ANIME: HeroAnime[] = [
     },
     bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/113415-jQBSkxWAAk83.jpg',
     coverImage: {
-      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-bbBWj4pAcpfD.jpg',
-      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx113415-bbBWj4pAcpfD.jpg',
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx113415-LHBAeoZDIsnF.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx113415-LHBAeoZDIsnF.jpg',
       color: '#e44141',
     },
     description: 'A boy swallowed a cursed talisman - the finger of a demon - and became the curse himself. He enters a shaman school to be able to locate the demon other body parts and thus exorcise himself.',
@@ -158,10 +158,10 @@ export const STATIC_FALLBACK_HERO_ANIME: HeroAnime[] = [
       romaji: 'Kimetsu no Yaiba',
       native: '鬼滅の刃',
     },
-    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-YfZhKBUDDS6L.jpg',
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/101922-33MtJGsUSxga.jpg',
     coverImage: {
-      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-PEn1CTbeUgqm.jpg',
-      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx101922-PEn1CTbeUgqm.jpg',
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx101922-WBsBl0ClmgYL.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx101922-WBsBl0ClmgYL.jpg',
       color: '#f16543',
     },
     description: 'It is the Taisho Period in Japan. Tanjiro, a kindhearted boy who sells charcoal for a living, finds his family slaughtered by a demon. To make matters worse, his younger sister Nezuko has transformed into a demon.',
@@ -187,10 +187,10 @@ export const STATIC_FALLBACK_HERO_ANIME: HeroAnime[] = [
       romaji: 'Chainsaw Man',
       native: 'チェンソーマン',
     },
-    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/127230-01e405f63d0c9f13cf6b92a2a0d778fb.jpg',
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/127230-o8IRwCGVr9KW.jpg',
     coverImage: {
-      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx127230-01e405f63d0c9f13cf6b92a2a0d778fb.jpg',
-      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx127230-01e405f63d0c9f13cf6b92a2a0d778fb.jpg',
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx127230-DdP4vAdssLoz.png',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx127230-DdP4vAdssLoz.png',
       color: '#e47025',
     },
     description: 'Denji is a teenage boy living with a Chainsaw Devil named Pochita. Due to the debt his father left behind, he has been living a rock-bottom life while repaying his debt by harvesting devil corpses with Pochita.',
@@ -216,10 +216,10 @@ export const STATIC_FALLBACK_HERO_ANIME: HeroAnime[] = [
       romaji: 'Shingeki no Kyojin',
       native: '進撃の巨人',
     },
-    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/16498-8jpFfEkWRfs2.jpg',
+    bannerImage: 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/16498-8jpFCOcDmneX.jpg',
     coverImage: {
-      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-C6FPmWm59CyP.jpg',
-      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx16498-C6FPmWm59CyP.jpg',
+      extraLarge: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-buvcRTBx4NSm.jpg',
+      large: 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx16498-buvcRTBx4NSm.jpg',
       color: '#463b2f',
     },
     description: 'Centuries ago, mankind was slaughtered to near extinction by monstrous humanoid creatures called Titans, forcing humans to hide in fear behind enormous concentric walls.',

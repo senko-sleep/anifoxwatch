@@ -55,6 +55,20 @@ describe('resolve-slug', () => {
         expect((await resolve('spy-x-family-140960')).id).toBe('anilist-140960');
     });
 
+    it('matches a title whose punctuation the slug deleted (Steins;Gate → steinsgate)', async () => {
+        anilist.getAnimeById.mockResolvedValue(media(9253, 'Steins;Gate'));
+        sources.search.mockResolvedValue({ results: [] });
+        expect((await resolve('steinsgate-9253')).id).toBe('anilist-9253');
+    });
+
+    it('answers from AniList without waiting on a slow provider probe', async () => {
+        anilist.getAnimeById.mockResolvedValue(media(47, 'Akira'));
+        sources.search.mockReturnValue(new Promise(() => {}));
+        const t0 = Date.now();
+        expect((await resolve('akira-47')).id).toBe('anilist-47');
+        expect(Date.now() - t0).toBeLessThan(2_000);
+    });
+
     it('treats a number that is part of the title as the title, not an id', async () => {
         anilist.getAnimeById.mockResolvedValue(media(100, 'Prétear'));
         sources.search.mockResolvedValue({ results: [hit('aniwaves-mob-psycho-100-76660', 'Mob Psycho 100')] });

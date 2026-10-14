@@ -1842,6 +1842,9 @@ export class SourceManager {
                         studios: anilistData.studios,
                         season: anilistData.season,
                         year: anilistData.year,
+                        // Scrapers label finished shows "Ongoing" freely (Prison School, 2015).
+                        status: anilistData.status || streamingMatch.status,
+                        type: anilistData.type || streamingMatch.type,
                         image: anilistData.image || streamingMatch.image,
                         cover: anilistData.cover || streamingMatch.cover,
                     };

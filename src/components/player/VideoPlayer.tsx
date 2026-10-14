@@ -1420,6 +1420,37 @@ export const VideoPlayer = ({
   }, []);
 
 
+  // <track> refuses cross-origin files unless the whole <video> is crossorigin, which would
+  // break direct sources that send no CORS headers. Subtitles come through the API proxy
+  // (which does send them) from another origin, so they are fetched and handed to <track>
+  // as same-origin blob URLs instead. Only the chosen track is fetched: sources list a dozen
+  // languages, and fetching them all up front queues the video's own manifest behind them.
+  const [trackUrls, setTrackUrls] = useState<Record<string, string>>({});
+  const activeSubtitleUrl = subtitleEnabled
+    ? subtitles.find((s) => s.lang === selectedSubtitle)?.url
+    : undefined;
+  useEffect(() => {
+    const url = activeSubtitleUrl;
+    if (!url) return;
+    let sameOrigin = false;
+    try { sameOrigin = /^(blob|data):/.test(url) || new URL(url, location.href).origin === location.origin; } catch { return; }
+    if (sameOrigin) { setTrackUrls({ [url]: url }); return; }
+    let cancelled = false;
+    let blobUrl: string | undefined;
+    fetch(url)
+      .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(`subtitle ${r.status}`))))
+      .then((blob) => {
+        if (cancelled) return;
+        blobUrl = URL.createObjectURL(new Blob([blob], { type: 'text/vtt' }));
+        setTrackUrls({ [url]: blobUrl });
+      })
+      .catch(() => { /* an unreachable subtitle file just shows nothing */ });
+    return () => {
+      cancelled = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [activeSubtitleUrl]);
+
   // Subtitle track handler
   useEffect(() => {
     const video = videoRef.current;
@@ -1429,7 +1460,7 @@ export const VideoPlayer = ({
     for (let i = 0; i < tracks.length; i++) {
       tracks[i].mode = subtitleEnabled && selectedSubtitle === tracks[i].language ? 'showing' : 'hidden';
     }
-  }, [selectedSubtitle, subtitleEnabled]);
+  }, [selectedSubtitle, subtitleEnabled, trackUrls]);
 
   // Controls visibility — show controls temporarily then auto-hide
   const showControlsTemporarily = useCallback(() => {
@@ -1924,11 +1955,11 @@ export const VideoPlayer = ({
         crossOrigin={undefined}
         style={{ willChange: 'contents', transform: 'translateZ(0)' }}
       >
-       {subtitles.map((sub, i) => (
+       {subtitles.map((sub, i) => trackUrls[sub.url] && (
          <track
            key={i}
            kind="subtitles"
-           src={sub.url}
+           src={trackUrls[sub.url]}
            srcLang={sub.lang}
            label={sub.label || sub.lang}
            default={i === 0}

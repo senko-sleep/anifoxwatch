@@ -23,6 +23,10 @@ const STATUS_MAP: Record<string, Anime['status']> = {
   CANCELLED: 'Completed',
 };
 
+// Jikan and Kitsu are last-ditch fallbacks; a host that hangs (Jikan does, for ~21s) must
+// not hold the title page hostage.
+const FALLBACK_TIMEOUT_MS = 4_000;
+
 // In-memory cache for fast metadata lookup
 const animeDetailCache = new Map<string, Anime>();
 
@@ -168,7 +172,7 @@ export async function fetchJikanAnimeDetails(queryOrMalId: string | number): Pro
       ? `https://api.jikan.moe/v4/anime/${queryOrMalId}/full`
       : `https://api.jikan.moe/v4/anime?q=${encodeURIComponent(String(queryOrMalId))}&limit=1`;
 
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: AbortSignal.timeout(FALLBACK_TIMEOUT_MS) });
     if (!res.ok) return null;
     const json = await res.json();
     const item = isId ? json.data : json.data?.[0];
@@ -223,7 +227,7 @@ export async function fetchKitsuAnimeDetails(queryOrKitsuId: string): Promise<An
       ? `https://kitsu.io/api/edge/anime/${queryOrKitsuId}`
       : `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(queryOrKitsuId)}&page[limit]=1`;
 
-    const res = await fetch(url, { headers: { Accept: 'application/vnd.api+json' } });
+    const res = await fetch(url, { headers: { Accept: 'application/vnd.api+json' }, signal: AbortSignal.timeout(FALLBACK_TIMEOUT_MS) });
     if (!res.ok) return null;
     const json = await res.json();
     const item = isId ? json.data : json.data?.[0];

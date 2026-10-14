@@ -4,7 +4,7 @@ import { StreamingData, VideoSource, EpisodeServer, VideoSubtitle } from '../typ
 import { logger } from '../utils/logger.js';
 import * as cheerio from 'cheerio';
 
-let puppeteer: any = null;
+import { streamExtractor } from '../services/stream-extractor.js';
 
 export class AnichiSource extends BaseAnimeSource {
     name = 'Anichi';
@@ -24,24 +24,26 @@ export class AnichiSource extends BaseAnimeSource {
         this.cache.set(key, { data, expires: Date.now() + ttl });
     }
 
+    /**
+     * A context in the shared Chromium, not a Chromium of its own. This used to launch a new
+     * browser on every call — the 60s health check included — which on a 512MB instance ran
+     * alongside the extractor's browser and stalled the API. Callers still `close()` it.
+     */
     private async getBrowser(timeoutMs = 10_000) {
-        if (!puppeteer) {
-            const puppeteerModuleName = 'puppeteer';
-            puppeteer = (await import(puppeteerModuleName)).default;
+        const pending = streamExtractor.newContext();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            return await Promise.race([
+                pending,
+                new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Browser context timeout')), timeoutMs); }),
+            ]);
+        } catch (error) {
+            // A context that arrives after we gave up must still be closed.
+            pending.then((context: any) => context.close()).catch(() => {});
+            throw error;
+        } finally {
+            clearTimeout(timer);
         }
-        return await puppeteer.launch({
-            timeout: Math.min(timeoutMs, 10_000),
-            headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--disable-gpu',
-                '--disable-web-security'
-            ]
-        });
     }
 
     private bindBrowserAbort(browser: any, signal?: AbortSignal): () => void {

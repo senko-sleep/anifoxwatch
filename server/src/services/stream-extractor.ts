@@ -74,6 +74,17 @@ class StreamExtractor {
     }
 
     /**
+     * An isolated incognito context in the shared Chromium. Sources that need a browser of
+     * their own take one of these instead of launching another Chromium: on a 512MB host a
+     * second browser process is what tips the instance into swap and stalls the API.
+     * Closing the context closes only its pages.
+     */
+    async newContext(): Promise<any> {
+        const browser = await this.getBrowser();
+        return browser.createBrowserContext();
+    }
+
+    /**
      * Get or create browser instance (singleton)
      */
     private async getBrowser(): Promise<any> {

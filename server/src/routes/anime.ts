@@ -15,22 +15,22 @@ const router = Router();
  * id in a slug from a streaming source's own id that merely ends in digits.
  */
 function titleMatchesSlug(media: AnimeBase, spoken: string): boolean {
-    const words = (s: string): Set<string> =>
-        new Set(
-            s
-                .toLowerCase()
-                .normalize('NFKD')
-                .replace(/[^a-z0-9\s]/g, ' ')
-                .split(/\s+/)
-                .filter((w) => w.length > 1 || /\d/.test(w))
-        );
+    // Slugs delete punctuation ("Steins;Gate" → "steinsgate", "Journey’s" → "journeys"),
+    // so a title's words are taken both ways: punctuation as a break and punctuation deleted.
+    const words = (s: string, punctuation: ' ' | ''): string[] =>
+        s
+            .toLowerCase()
+            .normalize('NFKD')
+            .replace(/[^a-z0-9\s]/g, punctuation)
+            .split(/\s+/)
+            .filter((w) => w.length > 1 || /\d/.test(w));
 
-    const want = words(spoken);
+    const want = new Set(words(spoken, ' '));
     if (!want.size) return false;
 
     for (const title of [media.title, media.titleEnglish, media.titleRomaji, media.titleJapanese]) {
         if (!title) continue;
-        const have = words(title);
+        const have = new Set([...words(title, ' '), ...words(title, '')]);
         const hits = [...want].filter((w) => have.has(w)).length;
         if (hits / want.size >= 0.6) return true;
     }
@@ -98,23 +98,14 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
             const sourceId = `aniwaves-${trailingNumMatch[1]}`;
             const spokenTitle = slug.replace(/-\d+$/, '').replace(/-/g, ' ');
 
-            // Check the provider that issued this old URL before asking AniList.
-            // This avoids spending an AniList request on source IDs such as the
-            // `82684` in `yani-neko-82684`.
-            try {
-                const sourceSearch = await Promise.race([
-                    sourceManager.search(spokenTitle, 1, 'Aniwaves'),
-                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Source slug probe timeout')), 8_000)),
-                ]);
-                if (sourceSearch.results.some((item) => item.id === sourceId)) {
-                    const result = { id: sourceId, title: spokenTitle, source: 'Aniwaves' };
-                    remember(result, 60 * 60 * 1000);
-                    res.json(result);
-                    return;
-                }
-            } catch {
-                // Fall through to the verified AniList path and other sources.
-            }
+            // The number is either an AniList id or the id of the provider that issued an old
+            // URL (the `82684` in `yani-neko-82684`). Both are asked at once: an AniList entry
+            // that goes by the slug's name answers immediately, and only otherwise does the
+            // (slow, up to 8s) provider probe get waited on. This is on every page load.
+            const providerProbe = Promise.race([
+                sourceManager.search(spokenTitle, 1, 'Aniwaves'),
+                new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Source slug probe timeout')), 8_000)),
+            ]).then((r) => r.results.some((item) => item.id === sourceId), () => false);
 
             const anilistId = `anilist-${trailingNumMatch[1]}`;
 
@@ -126,6 +117,13 @@ router.get('/resolve-slug', async (req: Request, res: Response): Promise<void> =
                 lookupFailed = true;
                 degraded = true;
                 logger.warn(`Failed to verify AniList id for slug: ${(error as Error).message}`, undefined, 'AnimeRoutes');
+            }
+
+            if (!(media && titleMatchesSlug(media, spokenTitle)) && await providerProbe) {
+                const result = { id: sourceId, title: spokenTitle, source: 'Aniwaves' };
+                remember(result, 60 * 60 * 1000);
+                res.json(result);
+                return;
             }
 
             // AniList unreachable: an AniList-shaped id (4+ digits) is trusted rather than
@@ -1253,11 +1251,12 @@ router.get('/episodes', async (req: Request, res: Response): Promise<void> => {
         
         // Log episode IDs for debugging
         console.log(`[Episodes API] Returning ${result.length} episodes for ${id}:`, result.map((e: any) => ({ id: e.id, number: e.number })));
-        
-        res.json({ episodes: result });
+
+        // The global request timeout may already have answered 504.
+        if (!res.headersSent) res.json({ episodes: result });
     } catch (error) {
         console.error('Get episodes error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
     }
 });
 

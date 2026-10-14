@@ -151,6 +151,7 @@ export function WatchEpisodeGrid({
                   onClick={() => onEpisodeSelect(ep.id, ep.number)}
                   className="group block w-full text-left"
                   aria-current={current || undefined}
+                  data-episode={ep.number}
                 >
                   <span
                     className={cn(

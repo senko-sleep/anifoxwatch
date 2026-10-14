@@ -438,6 +438,41 @@ function streamCacheSet(key: string, data: any, ttlOverride?: number): void {
     streamCache.set(key, { data, expiresAt: Date.now() + ttl });
 }
 
+interface ResolvedStream { streamData: any; lastError: string | null }
+interface InFlight { promise: Promise<ResolvedStream>; controller: AbortController; waiters: number }
+const inFlightStreams = new Map<string, InFlight>();
+
+/**
+ * One resolution per episode at a time, cached once it succeeds. Requests that arrive while
+ * it runs wait on it instead of starting their own; it is only abandoned when every one of
+ * them has gone away, so a prefetch the user then clicks on carries on rather than restarts.
+ */
+async function sharedResolve(key: string, signal: AbortSignal, run: (signal: AbortSignal) => Promise<ResolvedStream>): Promise<ResolvedStream> {
+    const cached = streamCacheGet(key);
+    if (cached) return { streamData: cached, lastError: null };
+
+    let flight = inFlightStreams.get(key);
+    if (!flight) {
+        const controller = new AbortController();
+        const promise = run(controller.signal).then((result) => {
+            if (result.streamData?.sources?.length) streamCacheSet(key, result.streamData);
+            return result;
+        }).finally(() => inFlightStreams.delete(key));
+        flight = { promise, controller, waiters: 0 };
+        inFlightStreams.set(key, flight);
+    }
+    const joined = flight;
+    joined.waiters++;
+    const leave = () => { if (--joined.waiters === 0) joined.controller.abort(signal.reason); };
+    if (signal.aborted) leave();
+    else signal.addEventListener('abort', leave, { once: true });
+    try {
+        return await joined.promise;
+    } finally {
+        signal.removeEventListener('abort', leave);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Dub validation
 // ---------------------------------------------------------------------------
@@ -1083,51 +1118,47 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
 
     const preferredSource = explicitServer || (req.query.preferred_source as string) || undefined;
 
-    let streamData: any = { sources: [], subtitles: [] };
-    let lastError: string | null = null;
-
-    try {
-        logger.info(`[STREAM] Calling sourceManager.getStreamingLinks with:`, {
-            episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle
-        });
-
-        // Check if sourceManager exists and has sources
-        if (!sourceManager) {
-            logger.error(`[STREAM] sourceManager is not initialized!`);
-            throw new Error('sourceManager not initialized');
-        }
-
-        const sourcesCount = (sourceManager as any).sources?.size || 0;
-        logger.info(`[STREAM] sourceManager has ${sourcesCount} sources registered`);
-
-        streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, requestController.signal,
-            isDubRequested ? DUB_RESOLVE_BUDGET_MS : GLOBAL_TIMEOUT_MS - 5_000);
-        logger.info(`[STREAM] getStreamingLinks returned:`, {
-            hasSources: streamData?.sources?.length > 0,
-            sourcesCount: streamData?.sources?.length,
-            subtitlesCount: streamData?.subtitles?.length
-        });
-    } catch (e: unknown) {
-        lastError = e instanceof Error ? e.message : String(e);
-    }
-
-    // If no dub sources found, fall back to sub sequentially
-    if (!streamData?.sources?.length && isDubRequested && !requestController.signal.aborted) {
+    const resolve = async (signal: AbortSignal): Promise<ResolvedStream> => {
+        let streamData: any = { sources: [], subtitles: [] };
+        let lastError: string | null = null;
         try {
-            logger.info(`[STREAM] Sequential sub fallback for dub request ${episodeId}`, { requestId });
-            const remainingMs = GLOBAL_TIMEOUT_MS - (Date.now() - requestStarted) - 1_000;
-            const subFallback = remainingMs > 0
-                ? await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, requestController.signal,
-                    Math.min(SUB_FALLBACK_BUDGET_MS, remainingMs))
-                : null;
-            if (subFallback?.sources?.length) {
-                streamData = { ...subFallback, category: 'sub', dubFallback: true };
-                logger.info(`[STREAM] Sequential sub fallback succeeded for ${episodeId}`, { requestId });
-            }
+            logger.info(`[STREAM] Calling sourceManager.getStreamingLinks with:`, {
+                episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle
+            });
+            streamData = await sourceManager.getStreamingLinks(episodeId, preferredSource, cat, episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, signal,
+                isDubRequested ? DUB_RESOLVE_BUDGET_MS : GLOBAL_TIMEOUT_MS - 5_000);
         } catch (e: unknown) {
             lastError = e instanceof Error ? e.message : String(e);
         }
-    }
+
+        // If no dub sources found, fall back to sub sequentially
+        if (!streamData?.sources?.length && isDubRequested && !signal.aborted) {
+            try {
+                logger.info(`[STREAM] Sequential sub fallback for dub request ${episodeId}`, { requestId });
+                const remainingMs = GLOBAL_TIMEOUT_MS - (Date.now() - requestStarted) - 1_000;
+                const subFallback = remainingMs > 0
+                    ? await sourceManager.getStreamingLinks(episodeId, preferredSource, 'sub', episodeNum, anilistId, queryTitle as string, noCache, excludedProviders, signal,
+                        Math.min(SUB_FALLBACK_BUDGET_MS, remainingMs))
+                    : null;
+                if (subFallback?.sources?.length) {
+                    streamData = { ...subFallback, category: 'sub', dubFallback: true };
+                    logger.info(`[STREAM] Sequential sub fallback succeeded for ${episodeId}`, { requestId });
+                }
+            } catch (e: unknown) {
+                lastError = e instanceof Error ? e.message : String(e);
+            }
+        }
+        return { streamData, lastError };
+    };
+
+    // Resolving takes seconds; the answer is good for minutes. Repeat plays, the title
+    // page's warm-up and the player's next-episode prefetch all reuse one resolution.
+    // Raw provider data is cached — proxy URLs are rebuilt per response below.
+    // A client retrying a broken stream sends nocache/exclude_providers and skips this.
+    const cacheKey = `${streamCacheKey(episodeId, preferredSource, cat)}|${episodeNum ?? ''}|${anilistId ?? ''}`;
+    const { streamData, lastError } = noCache
+        ? await resolve(requestController.signal)
+        : await sharedResolve(cacheKey, requestController.signal, resolve);
 
     if (streamData?.sources?.length) {
         logger.info(`[STREAM] Source resolved (${streamData.source ?? 'unknown'}, cat=${streamData.category ?? cat}) for ${episodeId}`, { requestId });
@@ -1703,7 +1734,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             const errCode = (err as NodeJS.ErrnoException).code;
             const isTlsError =
                 errCode === 'EPROTO' || errCode === 'ECONNRESET' || errCode === 'ECONNREFUSED' ||
-                errCode === 'CERT_REVOKED' ||
+                errCode === 'CERT_REVOKED' || errCode === 'CERT_HAS_EXPIRED' ||
+                errMsg.includes('certificate has expired') ||
                 errMsg.includes('EPROTO') || errMsg.includes('wrong version number') ||
                 errMsg.includes('socket hang up') || errMsg.includes('alert protocol version') ||
                 errMsg.includes('revoked');
@@ -2073,6 +2105,10 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         } else { res.end(); }
         logger.error(`[PROXY] Upstream stream error for ${domain}`, err);
       });
+      // Adding a 'data' listener does not restart a stream that was explicitly paused — and
+      // the content-type sniff above pauses it to peek at the first chunk (Echovideo labels
+      // every segment image/jpeg). Without this every such segment stalls until timeout.
+      origStream.resume();
 
       // Replace the stream the rest of the handler will pipe.
       (proxyResponse! as any).data = sniffer;

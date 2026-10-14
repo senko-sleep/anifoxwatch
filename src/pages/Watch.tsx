@@ -7,7 +7,7 @@ import { WatchEpisodeGrid } from '../components/player/WatchEpisodeGrid';
 import { StreamingControls } from '../components/player/StreamingControls';
 import { DownloadManager } from '../components/player/DownloadManager';
 import { useHentaiTitle } from '@/hooks/useHentai';
-import { useAnime, useAnimeArtwork, useEpisodes, useEpisodeDetails, useSeasons, useStreamingLinks, useEpisodeServers, useDubStreamProbe } from '@/hooks/useAnime';
+import { useAnime, useAnimeArtwork, useEpisodes, useEpisodeDetails, useSeasons, useStreamingLinks, useEpisodeServers, useDubStreamProbe, usePrefetchNextEpisode } from '@/hooks/useAnime';
 import { ping } from '@/utils/keep-alive';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -319,6 +319,18 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     refetch: refetchStream
   } = useStreamingLinks(getEpisodeIdForStreaming(), streamServer, audioType, isStreamEnabled, selectedEpisodeNum,
     cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined, anime?.title, bypassCache, failedProviders);
+
+  // Once this episode has a source, resolve the next one in the background so Next (or
+  // picking it from the list) starts at once instead of waiting seconds for a resolver.
+  const prefetchEpisode = usePrefetchNextEpisode();
+  const currentHasSource = (streamData?.sources?.length ?? 0) > 0;
+  const nextListedEpisode = episodes?.find((e) => e.number === selectedEpisodeNum + 1);
+  useEffect(() => {
+    if (!currentHasSource || !nextListedEpisode?.id) return;
+    const anilistId = cleanAnimeId.startsWith('anilist-') ? parseInt(cleanAnimeId.replace('anilist-', ''), 10) || undefined : undefined;
+    prefetchEpisode(cleanAnimeId, nextListedEpisode.id, audioType, nextListedEpisode.number, anilistId, anime?.title);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per episode/audio, not per render
+  }, [currentHasSource, nextListedEpisode?.id, audioType, cleanAnimeId]);
 
   // Get best quality source - skip sources that previously failed
   // IMPORTANT: implemented as useMemo (not useCallback + call-in-render) so that Watch re-renders
@@ -1135,7 +1147,9 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
           />
           <div className="relative mx-auto w-full max-w-[100rem] px-0 sm:px-6 lg:px-10">
             <div className="relative aspect-[16/9] w-full overflow-hidden bg-black sm:rounded-b-2xl" ref={playerRef}>
-              {streamLoading ? (
+              {/* Before the episode list arrives the stream query is disabled, which reports
+                  "not loading" — that is still finding a source, not "No source". */}
+              {streamLoading || (!streamData && !streamError) ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black">
                   <Loader2 className="h-7 w-7 animate-spin text-white/50" />
                   <div className="text-center">
