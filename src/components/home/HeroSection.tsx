@@ -28,8 +28,11 @@ const FADE_MS = 1200;
 const TRAILER_PRELOAD_MS = 3500;
 /** ...and may only take over the stage once it is truly playing, and not before this. */
 const TRAILER_MIN_REVEAL_MS = 7000;
-/** Skip the first frames: YouTube's title card / play glyph / ad slate live there. */
-const TRAILER_SKIP_SEC = 1.2;
+/**
+ * YouTube draws its pause/skip overlay and title bar for the first ~3s of playback even with
+ * controls=0; it auto-hides once playback runs uninterrupted, so only reveal after that.
+ */
+const TRAILER_SKIP_SEC = 4.5;
 /** Hand the stage back to the artwork this long before the slide changes. */
 const TRAILER_OUTRO_MS = 1600;
 
@@ -314,9 +317,9 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                   </span>
                 )}
                 <span className="uppercase tracking-wide">{format}</span>
-                {episodes && <span className="hidden sm:inline">{episodes}</span>}
-                {studio && <span className="hidden sm:inline">{studio}</span>}
-                {airing && <span className="hidden text-emerald-300/90 sm:inline">{airing}</span>}
+                {episodes && <span>{episodes}</span>}
+                {studio && <span className="home-hero-studio">{studio}</span>}
+                {airing && <span className="home-hero-airing text-emerald-300/90">{airing}</span>}
               </div>
 
               <div className="home-hero-summary mt-3 sm:mt-4">
@@ -324,6 +327,20 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                   {synopsis}
                 </p>
               </div>
+
+              {genres.length > 0 && (
+                <div className="home-hero-genres mt-3 flex flex-wrap gap-1.5 sm:mt-3.5 sm:gap-2">
+                  {genres.map((g) => (
+                    <Link
+                      key={g}
+                      to={`/browse?genres=${encodeURIComponent(g)}`}
+                      className="home-hero-genre py-0.5 text-[10px] text-foreground/75 transition-colors hover:text-foreground sm:text-[11px]"
+                    >
+                      {g}
+                    </Link>
+                  ))}
+                </div>
+              )}
 
               <div className="home-hero-actions mt-4 flex flex-wrap items-center gap-2 sm:mt-6 sm:gap-2.5">
                 <Link
@@ -365,19 +382,6 @@ export const HeroSection = ({ heroAnime }: HeroSectionProps) => {
                 </div>
               )}
 
-              {genres.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1.5 sm:mt-3.5 sm:gap-2">
-                  {genres.map((g) => (
-                    <Link
-                      key={g}
-                      to={`/browse?genres=${encodeURIComponent(g)}`}
-                      className="home-hero-genre py-0.5 text-[10px] text-foreground/75 transition-colors hover:text-foreground sm:text-[11px]"
-                    >
-                      {g}
-                    </Link>
-                  ))}
-                </div>
-              )}
               </div>
             </div>
 

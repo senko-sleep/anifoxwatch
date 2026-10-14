@@ -29,7 +29,7 @@ const PRIMARY_NAV = [
   { to: '/browse', label: 'Browse', icon: Compass, isActive: (pathname: string, search: string) => (pathname === '/browse' || pathname === '/search') && !new URLSearchParams(search).has('type') },
 ];
 
-const DOCK_NAV = PRIMARY_NAV.filter(({ label }) => ['Home', 'Browse', 'Schedule', 'Movies'].includes(label));
+const DOCK_NAV = ['Home', 'Browse', 'Schedule', 'Movies'].map((l) => PRIMARY_NAV.find(({ label }) => label === l)!);
 
 const MORE_NAV = [
   { to: '/docs', label: 'API docs', icon: FileText },
@@ -120,6 +120,8 @@ export const Navbar = () => {
             ? 'home-floating-header absolute inset-x-0 top-0 z-50 w-full transition-[background-color,border-color,backdrop-filter] duration-300'
             : 'sticky top-0 z-50 w-full transition-[background-color,border-color,backdrop-filter] duration-300',
           location.pathname === '/'
+            ? 'border-b border-transparent bg-transparent'
+            : !scrolled && /^\/(anime|hentai)\//.test(location.pathname)
             ? 'border-b border-transparent bg-transparent'
             : scrolled
             ? 'border-b border-white/[0.07] bg-[hsl(234_32%_5%_/_0.82)] backdrop-blur-xl backdrop-saturate-150'
@@ -226,6 +228,15 @@ export const Navbar = () => {
 
             <button
               type="button"
+              onClick={() => setMobileSearchOpen(true)}
+              aria-label="Search"
+              className="mobile-header-icon md:hidden"
+            >
+              <Search className="h-[22px] w-[22px]" strokeWidth={2} />
+            </button>
+
+            <button
+              type="button"
               onClick={() => setMobileMenuOpen((v) => !v)}
               aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
               aria-expanded={mobileMenuOpen}
@@ -320,7 +331,7 @@ export const Navbar = () => {
         </div>
       )}
 
-      {/* Dock — a floating glass pill, thumb-reachable, and out of the way while reading. */}
+      {/* Tab bar — four thumb-reachable destinations; search lives in the header. */}
       <nav
         className={cn('mobile-dock md:hidden', dockHidden && !mobileMenuOpen && 'is-hidden')}
         aria-label="Primary"
@@ -330,15 +341,11 @@ export const Navbar = () => {
           const active = isActive(item);
           return (
             <Link key={to} to={to} aria-current={active ? 'page' : undefined} className={cn('mobile-dock-item', active && 'is-active')}>
-              <Icon className="h-[18px] w-[18px]" strokeWidth={active ? 2.25 : 1.9} />
+              <Icon className="h-[22px] w-[22px]" strokeWidth={active ? 2.3 : 1.8} fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.18 : 0} />
               <span>{label}</span>
             </Link>
           );
         })}
-        <button type="button" onClick={() => setMobileSearchOpen(true)} className="mobile-dock-item" aria-label="Search">
-          <Search className="h-[18px] w-[18px]" strokeWidth={1.9} />
-          <span>Search</span>
-        </button>
       </nav>
     </>
   );

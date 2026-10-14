@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  AlertCircle, ArrowLeft, Check,
-  Play, Search,
+  AlertCircle, ArrowLeft, BookOpen, Check,
+  ListVideo, Play, Search, Star,
 } from 'lucide-react';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
@@ -225,11 +225,6 @@ const AnimePage = ({ adult = false }: { adult?: boolean }) => {
     return details?.get(beginEpisode)?.title;
   })();
 
-  const beginStill =
-    details?.get(beginEpisode)?.thumbnail ||
-    episodes.find((e) => e.number === beginEpisode)?.thumbnail ||
-    fallbackStill;
-
   // The alternate title only earns its line when it says something the main title doesn't.
   const altTitle = (() => {
     const alt = anime?.titleJapanese?.trim();
@@ -239,6 +234,82 @@ const AnimePage = ({ adult = false }: { adult?: boolean }) => {
   })();
 
   const poster = ensureHttps(anime?.coverImage || anime?.image || anime?.cover || '');
+  const bannerArt = anime?.bannerImage || anime?.banner || artwork?.banner || '';
+
+  // A tall, faint column of the native title on the page edge — the abstract, editorial touch.
+  const nativeTitle = anime?.titleJapanese?.trim() || '';
+  const verticalTitle = /[぀-ヿ一-鿿]/.test(nativeTitle) ? nativeTitle.split(/[:：(（「～〜]/)[0].trim().slice(0, 18) : '';
+
+  const kicker = [
+    anime?.type === 'Movie' ? 'Film' : anime?.type,
+    anime?.season && anime?.year
+      ? `${anime.season[0].toUpperCase()}${anime.season.slice(1).toLowerCase()} ${anime.year}`
+      : anime?.year ? String(anime.year) : null,
+    anime?.studios?.[0],
+  ].filter(Boolean) as string[];
+
+
+  const wideArt = bannerArt ? ensureHttps(bannerArt) : poster;
+  const scoreValue = anime?.rating
+    ? (Number(anime.rating) > 10 ? Number(anime.rating) / 10 : Number(anime.rating)).toFixed(1)
+    : null;
+  const airingIn = (() => {
+    const secs = anime?.timeUntilAiring;
+    if (!anime?.nextAiringEpisode || !secs || secs <= 0) return null;
+    const mins = Math.floor(secs / 60);
+    const d = Math.floor(mins / 1440);
+    const h = Math.floor((mins % 1440) / 60);
+    return `Episode ${anime.nextAiringEpisode} in ${d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${mins % 60}m` : `${mins}m`}`;
+  })();
+  const totalEpisodes = anime?.episodes || episodes.length;
+  const meta = [
+    scoreValue ? { key: 'score', value: scoreValue, tone: 'is-score' } : null,
+    totalEpisodes
+      ? {
+          key: 'eps',
+          value:
+            anime?.status === 'Ongoing' && episodes.length && anime?.episodes
+              ? `${episodes.length} of ${anime.episodes} episodes`
+              : `${totalEpisodes} episode${totalEpisodes === 1 ? '' : 's'}`,
+        }
+      : null,
+    anime?.status
+      ? { key: 'status', value: anime.status === 'Ongoing' ? 'Airing' : anime.status, tone: anime.status === 'Ongoing' ? 'is-live' : undefined }
+      : null,
+    airingIn ? { key: 'next', value: airingIn, tone: 'is-next' } : null,
+  ].filter(Boolean) as { key: string; value: string; tone?: string }[];
+
+  const hasDub = Boolean(anime?.dubCount) || episodes.some((e) => e.hasDub);
+  const premiered = [
+    anime?.season ? anime.season[0].toUpperCase() + anime.season.slice(1).toLowerCase() : '',
+    anime?.year ?? '',
+  ].join(' ').trim();
+  const facts = [
+    anime?.type ? { label: 'Format', value: anime.type === 'Movie' ? 'Film' : anime.type } : null,
+    premiered ? { label: 'Premiered', value: premiered } : null,
+    anime?.studios?.[0] ? { label: 'Studio', value: anime.studios[0] } : null,
+    anime?.duration ? { label: 'Runtime', value: anime.duration.replace(/\s*per ep\.?/i, '') } : null,
+    anime ? { label: 'Audio', value: hasDub ? 'Sub · Dub' : 'Sub' } : null,
+    scoreValue ? { label: 'Score', value: scoreValue, tone: 'is-score' } : null,
+  ].filter(Boolean) as { label: string; value: string; tone?: string }[];
+
+  const isFilm = anime?.type === 'Movie' && episodes.length <= 1;
+  const playLabel = inProgress
+    ? `Continue episode ${beginEpisode}`
+    : resumeEpisode
+      ? `Up next: episode ${beginEpisode}`
+      : isFilm
+        ? 'Watch film'
+        : `Watch episode ${beginEpisode}`;
+  const playHint = inProgress ? remainingLabel : beginTitle && !isFilm ? beginTitle : undefined;
+  const episodeSummary = episodes.length
+    ? [
+        anime?.status === 'Ongoing' && anime?.episodes
+          ? `${episodes.length} of ${anime.episodes} out`
+          : `${episodes.length} episode${episodes.length === 1 ? '' : 's'}`,
+        hasDub ? 'Sub & Dub' : 'Subbed',
+      ].join(' · ')
+    : '';
 
   if (!isResolving && !isLoading && (error || !anime)) {
     return (
@@ -261,234 +332,225 @@ const AnimePage = ({ adult = false }: { adult?: boolean }) => {
   }
 
   return (
-    <div className="relative min-h-screen bg-[hsl(236_38%_2.5%)]" style={atmosphereStyle(anime?.accentColor)}>
+    <div className="title-page relative min-h-screen bg-[hsl(236_38%_2.5%)]" style={atmosphereStyle(anime?.accentColor)}>
       <Navbar />
 
-      {/* Info on the left; episodes + seasons live in their own sticky panel on the right. */}
-      <div className="relative">
-        {/* The room is dark. The only light is the poster's own colour, pooled behind it. */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
-          <div
-            className="absolute -left-36 -top-20 h-[36rem] w-[36rem] rounded-full opacity-[0.22] blur-[110px]"
-            style={{ background: 'hsl(var(--atmos))' }}
-          />
+      {/* Stage: the title's own art, full-bleed under the bar, dissolving into the room below. */}
+      <section className="title-stage">
+        <div className="title-stage-art" aria-hidden>
+          {wideArt && (
+            <img src={wideArt} alt="" referrerPolicy="no-referrer" className={cn('title-stage-wide', !bannerArt && 'is-soft')} />
+          )}
+          {poster && <img src={poster} alt="" referrerPolicy="no-referrer" className="title-stage-tall" />}
+          <div className="title-stage-shade" />
         </div>
 
-        <div className={cn('page-x relative grid gap-x-14 gap-y-12 pt-6 sm:pt-10 lg:grid-cols-[minmax(0,1fr)_28rem]', relatedItems.length === 0 && 'page-bottom')}>
-          <div className="min-w-0 lg:col-start-1 lg:row-start-1">
-          <Link
-            to={backHref || '/browse'}
-            className="inline-flex items-center gap-2 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            {backHref ? 'Back' : 'Browse'}
-          </Link>
+        <div className="page-x title-grid title-stage-grid">
+          <div className="title-stage-copy">
+            <Link to={backHref || '/browse'} className="title-back">
+              <ArrowLeft className="h-4 w-4" />
+              {backHref ? 'Back' : 'Browse'}
+            </Link>
 
-          <div className="mt-8 flex flex-col gap-8 sm:flex-row sm:gap-10">
-            {/* Poster */}
-            <div className="relative w-40 shrink-0 sm:w-52 lg:w-60">
-              <div
-                aria-hidden
-                className="absolute inset-3 rounded-2xl opacity-50 blur-2xl"
-                style={{ background: 'hsl(var(--atmos))' }}
-              />
-              <div
-                className="art-frame relative aspect-[2/3] w-full"
-                style={{ boxShadow: '0 0 0 1px hsl(0 0% 100% / 0.08), 0 28px 70px -22px hsl(var(--atmos) / 0.6)' }}
-              >
-                {isLoading || isResolving ? (
-                  <div className="absolute inset-0 skeleton rounded-none" />
-                ) : poster ? (
-                  <img
-                    src={poster}
-                    alt={anime?.title ?? ''}
-                    className="absolute inset-0 h-full w-full object-cover"
-                    referrerPolicy="no-referrer"
-                    onError={(e) => {
-                      const el = e.currentTarget as HTMLImageElement;
-                      if (!el.dataset.proxied) {
-                        el.dataset.proxied = '1';
-                        el.src = `${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(poster)}`;
-                      }
-                    }}
-                  />
+            {isLoading || isResolving ? (
+              <div className="title-copy space-y-3">
+                <div className="skeleton h-3 w-40" />
+                <div className="skeleton h-14 w-3/4" />
+                <div className="skeleton h-4 w-1/2" />
+                <div className="skeleton h-16 w-full max-w-xl" />
+              </div>
+            ) : (
+              <div className="title-copy">
+                {kicker.length > 0 && (
+                  <p className="title-eyebrow">
+                    {kicker.map((k, i) => (
+                      <span key={k}>
+                        {i > 0 && <i aria-hidden>·</i>}
+                        {k}
+                      </span>
+                    ))}
+                  </p>
+                )}
+
+                <h1 className={cn('title-name', (anime?.title?.length ?? 0) > 34 && 'is-long', (anime?.title?.length ?? 0) > 60 && 'is-longer')}>
+                  {anime?.title}
+                </h1>
+
+                {meta.length > 0 && (
+                  <p className="title-meta">
+                    {meta.map((m) => (
+                      <span key={m.key} className={m.tone}>
+                        {m.key === 'score' && <Star className="h-3.5 w-3.5 fill-current" />}
+                        {m.key === 'status' && m.tone === 'is-live' && <i className="title-live-dot" aria-hidden />}
+                        {m.value}
+                      </span>
+                    ))}
+                  </p>
+                )}
+
+                {hasSynopsis && <p className="title-synopsis">{lead}</p>}
+
+                {genres.length > 0 && (
+                  <div className="title-genres">
+                    {genres.slice(0, 4).map((g) => (
+                      <Link key={g} to={`/browse?genres=${encodeURIComponent(g)}`}>
+                        {g}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+
+                {isAdultPage && episodes.length === 0 && !episodesLoading ? (
+                  <p className="title-note">
+                    No site carries this title yet. It's listed so you can find it — it'll be playable once a source adds it.
+                  </p>
                 ) : (
-                  <div className="absolute inset-0 bg-[hsl(234_22%_11%)]" />
+                  <div className="title-actions">
+                    <Link to={watchHref(beginEpisode)} className="btn-ember title-play">
+                      <Play className="h-4 w-4 fill-current" />
+                      {playLabel}
+                      {inProgress && historyEntry && (
+                        <span className="title-play-progress" aria-hidden>
+                          <span style={{ width: `${Math.round(Math.min(1, historyEntry.progress) * 100)}%` }} />
+                        </span>
+                      )}
+                    </Link>
+                    {hasSynopsis && rest ? (
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <button type="button" className="title-ghost">
+                            <BookOpen className="h-4 w-4" />
+                            Full story
+                          </button>
+                        </DialogTrigger>
+                        <DialogContent
+                          style={atmosphereStyle(anime?.accentColor)}
+                          className="max-h-[82vh] max-w-2xl gap-0 overflow-y-auto rounded-2xl border-white/[0.08] bg-[hsl(236_36%_4%)] p-8 shadow-[0_40px_120px_-30px_hsl(var(--atmos)_/_0.45)] sm:p-12"
+                        >
+                          <DialogTitle className="eyebrow !text-[10.5px] text-muted-foreground/70">{anime?.title}</DialogTitle>
+                          <DialogDescription className="sr-only">Full synopsis</DialogDescription>
+                          <div className="mt-8 space-y-6">
+                            {synopsis.split(/\n\s*\n/).map((para, i) => (
+                              <p
+                                key={i}
+                                className={cn(
+                                  'whitespace-pre-line',
+                                  i === 0 ? 'text-[1.15rem] leading-[1.7] text-foreground/85' : 'text-[16px] leading-[1.95] text-foreground/60'
+                                )}
+                              >
+                                {para.trim()}
+                              </p>
+                            ))}
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                    ) : (
+                      <a href="#episodes" className="title-ghost">
+                        <ListVideo className="h-4 w-4" />
+                        Episodes
+                      </a>
+                    )}
+                    {playHint && <span className="title-play-hint">{playHint}</span>}
+                  </div>
+                )}
+
+                {anime?.status === 'Upcoming' && (
+                  <p className="title-note text-amber-300/80">Coming soon — the source only has a preview clip so far.</p>
                 )}
               </div>
-            </div>
+            )}
+          </div>
+        </div>
+      </section>
 
-            {/* Title block */}
-            <div className="flex min-w-0 flex-1 flex-col">
+      <div className={cn('page-x title-grid title-body', relatedItems.length === 0 && 'page-bottom')}>
+        {/* Key art: rises out of the stage into the page, carrying the title's own light with it. */}
+        <aside className="title-aside" aria-label="About this title">
+          <div
+            className="title-poster"
+            onMouseMove={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              e.currentTarget.style.setProperty('--rx', `${(((e.clientX - r.left) / r.width - 0.5) * 8).toFixed(2)}deg`);
+              e.currentTarget.style.setProperty('--ry', `${(-((e.clientY - r.top) / r.height - 0.5) * 8).toFixed(2)}deg`);
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.setProperty('--rx', '0deg');
+              e.currentTarget.style.setProperty('--ry', '0deg');
+            }}
+          >
+            {verticalTitle && <span className="title-poster-native" aria-hidden>{verticalTitle}</span>}
+            <div className="title-poster-frame">
               {isLoading || isResolving ? (
-                <div className="space-y-3">
-                  <div className="skeleton h-9 w-2/3" />
-                  <div className="skeleton h-4 w-1/3" />
-                  <div className="skeleton h-16 w-full" />
-                </div>
+                <div className="absolute inset-0 skeleton rounded-none" />
+              ) : poster ? (
+                <img
+                  src={poster}
+                  alt={anime?.title ?? ''}
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    const el = e.currentTarget as HTMLImageElement;
+                    if (!el.dataset.proxied) {
+                      el.dataset.proxied = '1';
+                      el.src = `${apiUrl('/api/image-proxy')}?url=${encodeURIComponent(poster)}`;
+                    }
+                  }}
+                />
               ) : (
-                <>
-                  {genres.length > 0 && (
-                    <p className="eyebrow mb-5 flex flex-wrap items-center gap-x-2.5 !text-[10.5px] text-muted-foreground/70">
-                      {genres.slice(0, 3).map((g, i) => (
-                        <span key={g} className="inline-flex items-center gap-2.5">
-                          {i > 0 && <span className="opacity-40">·</span>}
-                          <Link to={`/browse?genres=${encodeURIComponent(g)}`} className="transition-colors hover:text-foreground">
-                            {g}
-                          </Link>
-                        </span>
-                      ))}
-                    </p>
-                  )}
-
-                  <h1 className="font-display text-2xl font-medium leading-[1.15] sm:text-3xl lg:text-[2.4rem]">
-                    {anime?.title}
-                  </h1>
-                  {altTitle && (
-                    <p className="mt-2 text-sm text-muted-foreground/70">{altTitle}</p>
-                  )}
-
-                  {hasSynopsis && (
-                    <div className="mt-7 max-w-lg">
-                      <p className="text-[1.0625rem] font-normal leading-[1.65] text-foreground/75">{lead}</p>
-                      {rest && (
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <button
-                              type="button"
-                              className="mt-3 inline-flex items-center gap-1 text-[12px] text-muted-foreground/70 transition-colors hover:text-foreground"
-                            >
-                              The full story
-                            </button>
-                          </DialogTrigger>
-                          <DialogContent
-                            style={atmosphereStyle(anime?.accentColor)}
-                            className="max-h-[82vh] max-w-2xl gap-0 overflow-y-auto rounded-2xl border-white/[0.08] bg-[hsl(236_36%_4%)] p-8 shadow-[0_40px_120px_-30px_hsl(var(--atmos)_/_0.45)] sm:p-12"
-                          >
-                            <DialogTitle className="eyebrow !text-[10.5px] text-muted-foreground/70">
-                              {anime?.title}
-                            </DialogTitle>
-                            <DialogDescription className="sr-only">Full synopsis</DialogDescription>
-                            <div className="mt-8 space-y-6">
-                              {synopsis.split(/\n\s*\n/).map((para, i) => (
-                                <p
-                                  key={i}
-                                  className={cn(
-                                    'whitespace-pre-line',
-                                    i === 0
-                                      ? 'text-[1.15rem] font-normal leading-[1.7] text-foreground/85'
-                                      : 'text-[16px] leading-[1.95] text-foreground/60'
-                                  )}
-                                >
-                                  {para.trim()}
-                                </p>
-                              ))}
-                            </div>
-                          </DialogContent>
-                        </Dialog>
-                      )}
-                    </div>
-                  )}
-
-                  {/* An adult title no site carries: say so, rather than offer a Begin that leads nowhere. */}
-                  {isAdultPage && episodes.length === 0 && !episodesLoading && (
-                    <p className="mt-12 max-w-sm text-[13px] leading-relaxed text-muted-foreground">
-                      No site carries this title yet. It's listed so you can find it — it'll be playable once a source adds it.
-                    </p>
-                  )}
-
-                  {/* The gate: the first frame of where you will be, not a button. */}
-                  {(!isAdultPage || episodes.length > 0) && (
-                  <Link
-                    to={watchHref(beginEpisode)}
-                    className="group/begin mt-12 flex items-center gap-5 sm:gap-6 lg:mt-auto lg:flex-col lg:items-start lg:gap-4 lg:pt-10 xl:flex-row xl:items-center xl:gap-6"
-                  >
-                    <span className="art-frame relative block aspect-video w-44 shrink-0 !rounded-xl shadow-[0_24px_60px_-20px_hsl(var(--atmos)_/_0.6)] sm:w-52">
-                      {beginStill ? (
-                        <img
-                          src={ensureHttps(beginStill)}
-                          alt=""
-                          referrerPolicy="no-referrer"
-                          className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 ease-out group-hover/begin:scale-[1.04]"
-                        />
-                      ) : (
-                        <span className="absolute inset-0" style={{ background: 'hsl(var(--atmos) / 0.25)' }} />
-                      )}
-                      <span className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/5 to-transparent" />
-                      {inProgress && historyEntry && (
-                        <span className="absolute inset-x-0 bottom-0 h-[2px] bg-white/15">
-                          <span
-                            className="block h-full bg-[hsl(var(--atmos))]"
-                            style={{ width: `${Math.round(Math.min(1, historyEntry.progress) * 100)}%` }}
-                          />
-                        </span>
-                      )}
-                      <span className="absolute inset-0 grid place-items-center">
-                        <span className="grid h-12 w-12 place-items-center rounded-full bg-black/40 ring-1 ring-white/40 backdrop-blur-sm transition-all duration-500 group-hover/begin:scale-110 group-hover/begin:bg-black/60 group-hover/begin:ring-white/70">
-                          <Play className="ml-0.5 h-4 w-4 fill-current" />
-                        </span>
-                      </span>
-                    </span>
-                    <span className="block min-w-0">
-                      <span className="eyebrow block !text-[10px]">
-                        {resumeEpisode ? (inProgress ? 'Where you left off' : 'Up next') : 'Begin'}
-                      </span>
-                      <span className="mt-2 block text-[15px] text-foreground/90">
-                        Episode {beginEpisode}
-                        {inProgress && remainingLabel && <span className="text-muted-foreground/70"> · {remainingLabel}</span>}
-                      </span>
-                      {beginTitle && (
-                        <span className="mt-1 line-clamp-2 block text-[13px] leading-snug text-muted-foreground/80">{beginTitle}</span>
-                      )}
-                    </span>
-                  </Link>
-                  )}
-
-                  {/* Announced but not released — the source only carries a teaser for these. */}
-                  {anime?.status === 'Upcoming' && (
-                    <p className="mt-4 max-w-sm text-[12.5px] leading-relaxed text-amber-300/80">
-                      Coming soon — the source only has a preview clip so far.
-                    </p>
-                  )}
-                </>
+                <div className="absolute inset-0 bg-[hsl(234_22%_11%)]" />
               )}
+              <span className="title-poster-sheen" aria-hidden />
             </div>
           </div>
-          </div>
 
-        <aside
-          aria-label="Episodes"
-          className="min-w-0 lg:sticky lg:top-24 lg:col-start-2 lg:row-start-1 lg:flex lg:max-h-[calc(100vh-7.5rem)] lg:gap-4 lg:self-start lg:pt-[3.25rem]"
-        >
+          {facts.length > 0 && (
+            <dl className="title-facts">
+              {facts.map((f) => (
+                <div key={f.label}>
+                  <dt>{f.label}</dt>
+                  <dd className={f.tone}>{f.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {altTitle && <p className="title-alt">{altTitle}</p>}
+        </aside>
+
+        <section id="episodes" aria-label="Episodes" className="title-episodes">
+          <header className="title-ep-head">
+            <div className="min-w-0">
+              <h2>Episodes</h2>
+              {episodeSummary && <p>{episodeSummary}</p>}
+            </div>
+            {episodes.length > 30 && (
+              <label className="title-ep-search">
+                <Search className="h-4 w-4 shrink-0" />
+                <input
+                  value={episodeQuery}
+                  onChange={(e) => setEpisodeQuery(e.target.value)}
+                  placeholder="Find an episode"
+                  aria-label="Find an episode"
+                />
+              </label>
+            )}
+          </header>
+
           {seasons.length > 1 && (
-            <SeasonShelf
+            <SeasonTabs
               seasons={seasons}
               currentId={currentSeasonId}
               onPick={(season) => navigate(animePath({ id: `anilist-${season.id}`, title: season.title }))}
             />
           )}
 
-          <div className="min-w-0 flex-1 lg:flex lg:min-h-0 lg:flex-col">
-          {episodes.length > 30 && (
-            <label className="glass-input mb-5 flex h-10 w-full items-center gap-2 rounded-full px-4">
-              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <input
-                value={episodeQuery}
-                onChange={(e) => setEpisodeQuery(e.target.value)}
-                placeholder="Find an episode"
-                className="w-full bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
-              />
-            </label>
-          )}
-
           {ranges.length > 1 && !episodeQuery && (
-            <div className="mb-3 flex flex-wrap gap-2">
+            <div className="title-ranges">
               {ranges.map((r) => (
                 <button
                   key={r.start}
                   type="button"
                   onClick={() => setRangeStart(r.start)}
-                  className={cn('fox-chip', rangeStart === r.start ? 'fox-chip-active' : 'fox-chip-inactive')}
+                  aria-pressed={rangeStart === r.start}
+                  className={cn(rangeStart === r.start && 'is-active')}
                 >
                   {r.label}
                 </button>
@@ -497,72 +559,59 @@ const AnimePage = ({ adult = false }: { adult?: boolean }) => {
           )}
 
           {episodesLoading ? (
-            <div className="grid gap-2">
-              {Array.from({ length: 9 }).map((_, i) => (
-                <div key={i} className="skeleton h-16 w-full rounded-xl" />
+            <div className="title-ep-list is-rich">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 py-2">
+                  <div className="skeleton aspect-video w-40 shrink-0 rounded-lg" />
+                  <div className="flex-1 space-y-2">
+                    <div className="skeleton h-3.5 w-2/3" />
+                    <div className="skeleton h-3 w-full" />
+                  </div>
+                </div>
               ))}
             </div>
           ) : visibleEpisodes.length === 0 ? (
-            <p className="text-sm text-muted-foreground/70">
+            <p className="title-note">
               {episodeQuery ? 'No episode matches that.' : 'Episodes will appear here once a source lists them.'}
             </p>
           ) : (
-            <div
-              ref={listRef}
-              className="scrollbar-thin relative -mx-3 max-h-[34rem] min-h-0 overflow-y-auto px-3 lg:max-h-none lg:flex-1"
-            >
-            <ul
-              className={
-                hasDetails
-                  ? 'space-y-2'
-                  : 'grid gap-2'
-              }
-            >
-              {visibleEpisodes.map((ep) => (
-                <EpisodeRow
-                  key={ep.id || ep.number}
-                  episode={ep}
-                  detail={details?.get(ep.number)}
-                  stillFallback={episodeStillFallback}
-                  rich={hasDetails}
-                  href={watchHref(ep.number)}
-                  watched={lastNumber != null && (ep.number < lastNumber || (finished && ep.number === lastNumber))}
-                  current={resumeEpisode === ep.number}
-                  progress={inProgress && lastNumber === ep.number ? historyEntry?.progress : undefined}
-                  remaining={inProgress && lastNumber === ep.number ? remainingLabel : undefined}
-                />
-              ))}
-            </ul>
+            <div ref={listRef} className={cn('title-ep-scroll scrollbar-thin', visibleEpisodes.length > (hasDetails ? 8 : 60) && 'is-capped')}>
+              <ul className={cn('title-ep-list', hasDetails ? 'is-rich' : 'is-tiles')}>
+                {visibleEpisodes.map((ep, i) => (
+                  <EpisodeRow
+                    key={ep.id || ep.number}
+                    index={i}
+                    episode={ep}
+                    detail={details?.get(ep.number)}
+                    stillFallback={episodeStillFallback}
+                    rich={hasDetails}
+                    href={watchHref(ep.number)}
+                    watched={lastNumber != null && (ep.number < lastNumber || (finished && ep.number === lastNumber))}
+                    current={resumeEpisode === ep.number}
+                    progress={inProgress && lastNumber === ep.number ? historyEntry?.progress : undefined}
+                    remaining={inProgress && lastNumber === ep.number ? remainingLabel : undefined}
+                  />
+                ))}
+              </ul>
             </div>
           )}
-          </div>
-        </aside>
-
-        </div>
-
-        {relatedItems.length > 0 && (
-          <section className="page-x page-bottom relative pt-14 sm:pt-20">
-            <SectionHeader
-              title="More like this"
-              subtitle="Sequels, spin-offs and what fans recommend"
-            />
-            <AnimeSlider anime={relatedItems} />
-          </section>
-        )}
+        </section>
       </div>
+
+      {relatedItems.length > 0 && (
+        <section className="page-x page-bottom relative pt-16 sm:pt-24">
+          <SectionHeader title="More like this" subtitle="Sequels, spin-offs and what fans recommend" />
+          <AnimeSlider anime={relatedItems} />
+        </section>
+      )}
 
       <Footer />
     </div>
   );
 };
 
-/**
- * Seasons as a shelf beside the episodes, not a control above them: bare numbers
- * on the list's edge, the current one marked by a thin accent line. Hovering
- * a number lifts a label with that season's title — nothing reflows.
- * On small screens it lies down as a plain row of text.
- */
-const SeasonShelf = ({
+/** Seasons as quiet text tabs above the list; the current one carries the accent underline. */
+const SeasonTabs = ({
   seasons,
   currentId,
   onPick,
@@ -571,52 +620,29 @@ const SeasonShelf = ({
   currentId: string;
   onPick: (season: SeasonEntry) => void;
 }) => (
-  <nav aria-label="Seasons" className="mb-5 lg:mb-0 lg:w-8 lg:shrink-0">
-    <ul className="scrollbar-none flex gap-6 overflow-x-auto lg:flex-col lg:gap-1 lg:overflow-visible">
-      {seasons.map((season, i) => {
-        const active = String(season.id) === currentId;
-        return (
-          <li key={season.id} className="group/season relative shrink-0">
-            <button
-              type="button"
-              onClick={() => !active && onPick(season)}
-              aria-current={active ? 'true' : undefined}
-              aria-label={`Season ${i + 1}: ${season.title}`}
-              className={cn(
-                'relative flex h-9 items-center text-[13px] tabular-nums transition-colors duration-300 lg:w-8 lg:justify-center',
-                active ? 'text-foreground' : 'text-muted-foreground/50 hover:text-foreground'
-              )}
-            >
-              <span
-                aria-hidden
-                className={cn(
-                  'absolute left-0 top-2 hidden h-5 w-0.5 rounded-full bg-[hsl(var(--atmos))] transition-opacity duration-300 lg:block',
-                  active ? 'opacity-100' : 'opacity-0'
-                )}
-              />
-              <span className="lg:hidden">Season {i + 1}</span>
-              <span className="hidden lg:inline">{i + 1}</span>
-            </button>
-
-            <span
-              role="tooltip"
-              className="pointer-events-none absolute left-full top-1/2 z-30 ml-3 hidden -translate-x-1 -translate-y-1/2 whitespace-nowrap rounded-lg bg-[hsl(236_34%_6%_/_0.92)] px-3 py-2 text-[12px] opacity-0 shadow-[0_12px_32px_-12px_hsl(236_40%_2%)] ring-1 ring-white/[0.08] backdrop-blur-md transition-all duration-300 group-focus-within/season:translate-x-0 group-focus-within/season:opacity-100 group-hover/season:translate-x-0 group-hover/season:opacity-100 lg:block"
-            >
-              <span className="block text-foreground/90">Season {i + 1}</span>
-              <span className="block max-w-[16rem] truncate text-muted-foreground">
-                {season.title}
-                {season.episodes ? ` · ${season.episodes} eps` : ''}
-              </span>
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+  <nav aria-label="Seasons" className="title-seasons scrollbar-none">
+    {seasons.map((season, i) => {
+      const active = String(season.id) === currentId;
+      return (
+        <button
+          key={season.id}
+          type="button"
+          onClick={() => !active && onPick(season)}
+          aria-current={active ? 'true' : undefined}
+          title={`${season.title}${season.episodes ? ` · ${season.episodes} eps` : ''}`}
+          className={cn(active && 'is-active')}
+        >
+          Season {i + 1}
+          {season.year && <small>{season.year}</small>}
+        </button>
+      );
+    })}
   </nav>
 );
 
-/** One episode. With Kitsu data: a still and a two-line synopsis; without, the compact number tile. */
+/** One episode. With stills: a wide frame and a two-line synopsis; without, a compact number tile. */
 const EpisodeRow = ({
+  index,
   episode,
   detail,
   stillFallback,
@@ -627,6 +653,7 @@ const EpisodeRow = ({
   progress,
   remaining,
 }: {
+  index: number;
   episode: Episode;
   detail?: EpisodeDetail;
   /** Picture to use when neither the details nor the episode have one. */
@@ -639,98 +666,64 @@ const EpisodeRow = ({
   remaining?: string;
 }) => {
   const pct = Math.round(Math.min(1, Math.max(0, progress ?? (watched ? 1 : 0))) * 100);
-  const own = episode.title?.trim() && episode.title !== String(episode.number) ? episode.title : '';
-  const title = own || detail?.title || `Episode ${episode.number}`;
+  const raw = episode.title?.trim() ?? '';
+  const own = raw && raw !== String(episode.number) && !/^episode\s*\d+$/i.test(raw) ? raw : '';
+  const named = own || detail?.title || '';
   const still = detail?.thumbnail || episode.thumbnail || stillFallback;
-  const tags = (
-    <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
-      {episode.hasSub && <span>Sub</span>}
-      {episode.hasDub && <span>Dub</span>}
-      {episode.isFiller && <span className="text-amber-300/80">Filler</span>}
-      {current && <span className="text-[hsl(var(--atmos))]">Continue</span>}
-    </span>
-  );
-  const frame = cn(
-    'group flex rounded-xl border transition-colors duration-200',
-    current
-      ? 'border-[hsl(var(--atmos)_/_0.45)] bg-[hsl(var(--atmos)_/_0.1)]'
-      : 'border-white/[0.06] bg-white/[0.025] hover:border-white/[0.14] hover:bg-white/[0.05]'
-  );
+  const delay = { '--i': Math.min(index, 12) } as React.CSSProperties;
 
-  if (rich) {
+  if (!rich) {
     return (
-      <li data-current={current || undefined}>
+      <li data-current={current || undefined} style={delay}>
         <Link
           to={href}
-          className={cn(
-            'group flex items-center gap-4 rounded-lg px-1.5 py-3 transition-colors duration-300',
-            current ? 'bg-[hsl(var(--atmos)_/_0.06)]' : ''
-          )}
+          title={named ? `Episode ${episode.number} — ${named}` : `Episode ${episode.number}`}
+          className={cn('ep-tile', current && 'is-current', watched && 'is-watched')}
         >
-          <div className="art-frame relative aspect-video w-32 shrink-0 !rounded-lg shadow-[0_12px_32px_-16px_hsl(var(--atmos)_/_0.4)]">
-            {still ? (
-              <img
-                src={ensureHttps(still)}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                referrerPolicy="no-referrer"
-                className={cn('absolute inset-0 h-full w-full object-cover', watched && 'opacity-40')}
-              />
-            ) : (
-              <span className="absolute inset-0 bg-white/[0.03]" />
-            )}
-            {pct > 0 && (
-              <span className="absolute inset-x-0 bottom-0 h-[2px] bg-white/10">
-                <span
-                  className={cn('block h-full bg-[hsl(var(--atmos))]', !progress && 'opacity-40')}
-                  style={{ width: `${pct}%` }}
-                />
-              </span>
-            )}
-          </div>
-
-          <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-2 text-[13px] font-medium text-foreground/90">
-              <span className="truncate">{title}</span>
-              {watched && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-            </span>
-            {detail?.synopsis && (
-              <span className="mt-1.5 line-clamp-2 text-[12px] leading-relaxed text-muted-foreground/80">
-                {detail.synopsis}
-              </span>
-            )}
-            {current && (
-              <span className="mt-1 block text-[11px] text-[hsl(var(--atmos))]">
-                {remaining ? `Continue · ${remaining}` : progress ? 'Continue' : 'Up next'}
-              </span>
-            )}
-          </span>
+          {watched && !current ? <Check className="h-4 w-4" /> : episode.number}
+          {pct > 0 && current && <span className="ep-tile-progress" style={{ width: `${pct}%` }} />}
         </Link>
       </li>
     );
   }
 
   return (
-    <li data-current={current || undefined}>
-      <Link to={href} className={cn(frame, 'items-center gap-3.5 p-3')}>
-        <span
-          className={cn(
-            'grid h-10 w-10 shrink-0 place-items-center rounded-lg text-[13px] font-semibold tabular-nums',
-            current
-              ? 'bg-[hsl(var(--atmos))] text-[hsl(234_30%_6%)]'
-              : watched
-                ? 'bg-white/[0.06] text-muted-foreground'
-                : 'bg-white/[0.06] text-foreground/80'
+    <li data-current={current || undefined} style={delay}>
+      <Link to={href} className={cn('ep-row', current && 'is-current', watched && 'is-watched')}>
+        <span className="ep-row-still">
+          {still ? (
+            <img src={ensureHttps(still)} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" />
+          ) : (
+            <span className="absolute inset-0 bg-white/[0.04]" />
           )}
-        >
-          {watched ? <Check className="h-4 w-4" /> : episode.number}
+          <span className="ep-row-play" aria-hidden>
+            <Play className="h-4 w-4 fill-current" />
+          </span>
+          {pct > 0 && (
+            <span className="ep-row-progress" aria-hidden>
+              <span style={{ width: `${pct}%` }} />
+            </span>
+          )}
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-medium text-foreground/85">{title}</span>
-          <span className="mt-0.5 block">{tags}</span>
+
+        <span className="ep-row-text">
+          <span className="ep-row-num">
+            EP {String(episode.number).padStart(2, '0')}
+            {episode.isFiller && <em>Filler</em>}
+            {watched && <Check className="h-3 w-3" />}
+          </span>
+          <span className="ep-row-title">{named || `Episode ${episode.number}`}</span>
+          {detail?.synopsis ? (
+            <span className="ep-row-syn">{detail.synopsis}</span>
+          ) : (
+            <span className="ep-row-tags">
+              {[episode.hasSub && 'Sub', episode.hasDub && 'Dub'].filter(Boolean).join(' · ')}
+            </span>
+          )}
+          {current && (
+            <span className="ep-row-current">{remaining ? `Continue · ${remaining}` : progress ? 'Continue' : 'Up next'}</span>
+          )}
         </span>
-        <Play className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       </Link>
     </li>
   );
