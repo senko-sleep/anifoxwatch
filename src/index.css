@@ -1114,7 +1114,7 @@
   background:
     radial-gradient(ellipse 70% 90% at 0% 75%, hsl(236 40% 2% / .82) 0%, hsl(236 40% 2% / .35) 55%, transparent 80%),
     linear-gradient(90deg, hsl(236 40% 2% / .9) 0%, hsl(236 40% 2% / .66) 28%, hsl(236 40% 2% / .2) 55%, transparent 75%),
-    linear-gradient(180deg, hsl(236 40% 2% / .55) 0%, transparent 18%),
+    linear-gradient(180deg, hsl(236 40% 2% / .78) 0%, hsl(236 40% 2% / .4) 9%, transparent 20%),
     radial-gradient(ellipse 60% 50% at 82% 100%, hsl(var(--atmos, var(--primary)) / .16), transparent 70%);
 }
 /* A slow drift as the page scrolls, where the browser can do it for free. */
@@ -1240,7 +1240,9 @@
 .title-seasons button.is-active { color: #fff; }
 .title-seasons button.is-active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: hsl(var(--primary)); box-shadow: 0 0 12px hsl(var(--primary) / .6); }
 
-.title-ranges { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: 1rem; }
+.title-ranges { display: flex; gap: .4rem; margin-top: 1rem; overflow-x: auto; scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 3rem), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 3rem), transparent); padding-right: 3rem; }
+.title-ranges::-webkit-scrollbar { display: none; }
+.title-ranges button { flex: none; }
 .title-ranges button { height: 1.85rem; padding: 0 .8rem; border-radius: 999px; font-size: 12px; font-variant-numeric: tabular-nums; color: hsl(0 0% 100% / .55); background: hsl(0 0% 100% / .04); transition: background-color 160ms ease, color 160ms ease; }
 .title-ranges button:hover { color: #fff; background: hsl(0 0% 100% / .08); }
 .title-ranges button.is-active { color: hsl(24 45% 10%); background: hsl(var(--primary)); font-weight: 600; }
@@ -1273,7 +1275,8 @@
 .ep-row-syn { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; font-size: 12.5px; line-height: 1.5; color: hsl(0 0% 100% / .5); }
 .ep-row-tags { font-size: 12px; color: hsl(0 0% 100% / .42); }
 .ep-row-current { font-size: 11.5px; font-weight: 600; color: hsl(var(--primary)); }
-.ep-row.is-current .ep-row-still { box-shadow: 0 0 0 2px hsl(var(--primary)), 0 10px 30px -12px hsl(var(--primary) / .7); }
+.ep-row.is-current { background: linear-gradient(90deg, hsl(var(--primary) / .09), transparent 75%); }
+.ep-row.is-current .ep-row-still { box-shadow: 0 0 0 2px hsl(var(--primary)), 0 4px 14px -8px hsl(var(--primary) / .8); }
 .ep-row.is-watched .ep-row-still img { opacity: .45; }
 .ep-row.is-watched .ep-row-title { color: hsl(0 0% 100% / .55); }
 
