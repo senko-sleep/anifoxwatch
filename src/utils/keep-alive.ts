@@ -18,18 +18,19 @@ let isTabVisible = true;
 /**
  * Ping the backend health endpoint — exported so pages can trigger an immediate warm-up.
  */
-export async function ping(): Promise<boolean> {
+export async function ping(signal?: AbortSignal): Promise<boolean> {
   if (!isTabVisible) return false;
 
   try {
     const resp = await fetch(apiUrl('/api/health'), {
       method: 'GET', mode: 'cors', cache: 'no-cache',
-      referrerPolicy: 'no-referrer', signal: AbortSignal.timeout(10000),
+      referrerPolicy: 'no-referrer', signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
     });
     consecutiveFailures = 0;
     return resp.ok;
   } catch {
-    consecutiveFailures++;
+    if (!signal?.aborted) consecutiveFailures++;
     return false;
   }
 }

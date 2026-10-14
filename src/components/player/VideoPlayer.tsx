@@ -554,6 +554,22 @@ export const VideoPlayer = ({
         // Track non-fatal fragLoadError (e.g. proxy 502 on segments)
         // Reset counter on successful frag load
         if (data.details === 'fragLoadError' || data.details === 'fragLoadTimeOut') {
+          if (data.details === 'fragLoadTimeOut' && !data.fatal && stallDurationRef.current < 3000) {
+            let bufferAhead = 0;
+            for (let i = 0; i < video.buffered.length; i++) {
+              if (video.buffered.start(i) <= video.currentTime && video.buffered.end(i) > video.currentTime) {
+                bufferAhead = video.buffered.end(i) - video.currentTime;
+                break;
+              }
+            }
+            // A future segment may be waiting for the proxy's bounded fallback.
+            // Keep decoded playback alive while HLS performs its bounded retries.
+            // Low-buffer failures and the stall watchdog still trigger failover.
+            if (bufferAhead >= 3) {
+              playerLog('warn', 'Fragment timeout with playable buffer — allowing bounded HLS retry', { bufferAhead });
+              return;
+            }
+          }
           fragLoadErrorCount++;
           const fragLoadErrorThreshold = video.currentTime > 5 ? 2 : 1;
           playerLog('warn', `fragLoadError count: ${fragLoadErrorCount}/${fragLoadErrorThreshold}`, {

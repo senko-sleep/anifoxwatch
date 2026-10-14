@@ -1727,6 +1727,15 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             if (lifetime.signal.aborted) return;
             (err as any).response?.data?.destroy?.();
             const status = (err as any).response?.status;
+            if (status === 403 && domain === 'cdnx.aniwatchtv.site' && urlObj.pathname.startsWith('/uwu/')) {
+                // This signed CDN path returned an explicit access failure.
+                // A generic public relay cannot refresh it; let the player
+                // request a freshly verified backend immediately.
+                res.set('Access-Control-Allow-Origin', '*').status(403).json({
+                    error: 'Media source access expired or denied', reason: 'stream_expired', retryable: true, domain,
+                });
+                return;
+            }
             // If it failed with Range header, try once more WITHOUT Range for segments
             if (req.headers.range && isSegment && !isM3u8 && (status === 502 || status === 403 || status === 416)) {
                 try {

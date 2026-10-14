@@ -38,4 +38,17 @@ describe('stream request lifetime', () => {
     await result;
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('immediately cancels the cold-start retry delay', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+    const controller = new AbortController();
+    const pending = apiClient.getStreamingLinks('ep1', undefined, 'sub', 1, 21, undefined, false, [], controller.signal);
+    const result = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(1000);
+    controller.abort();
+    await result;
+    expect(vi.getTimerCount()).toBe(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });

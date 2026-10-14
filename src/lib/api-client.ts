@@ -793,9 +793,15 @@ const primaryBase = this.apiBase();
                 const deadline = Date.now() + 75_000; // wait up to 75 s
                 while (Date.now() < deadline) {
                     signal?.throwIfAborted();
-                    await new Promise(r => setTimeout(r, 4000));
+                    await new Promise<void>((resolve, reject) => {
+                        const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', aborted); };
+                        const aborted = () => { cleanup(); reject(signal?.reason); };
+                        const timer = setTimeout(() => { cleanup(); resolve(); }, 4000);
+                        if (signal?.aborted) aborted();
+                        else signal?.addEventListener('abort', aborted, { once: true });
+                    });
                     signal?.throwIfAborted();
-                    woke = await ping();
+                    woke = await ping(signal);
                     if (woke) break;
                 }
                 if (woke) {

@@ -115,4 +115,24 @@ describe('VideoPlayer media recovery', () => {
     expect(onError).toHaveBeenCalledExactlyOnceWith('stall_timeout_error');
     expect(video.currentTime).toBeLessThan(242);
   });
+
+  it('keeps playing through nonfatal fragment timeouts while buffered, then fails over with a depleted buffer', () => {
+    const onError = vi.fn();
+    const { container } = render(<VideoPlayer src={src} onError={onError} />);
+    const video = startedVideo(container);
+    let bufferEnd = 270;
+    Object.defineProperty(video, 'buffered', {
+      configurable: true,
+      value: { length: 1, start: () => 230, end: () => bufferEnd },
+    });
+    const timeout = () => mocks.instances[0].handlers.get('error')?.('error', {
+      type: 'network', details: 'fragLoadTimeOut', fatal: false,
+    });
+    act(() => { timeout(); timeout(); timeout(); });
+    expect(onError).not.toHaveBeenCalled();
+    expect(mocks.instances[0].destroy).not.toHaveBeenCalled();
+    bufferEnd = 241;
+    act(() => { timeout(); timeout(); });
+    expect(onError).toHaveBeenCalledExactlyOnceWith('frag_load_error');
+  });
 });

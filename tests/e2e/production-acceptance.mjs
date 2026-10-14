@@ -41,11 +41,11 @@ const state = (page) => page.evaluate(() => {
 }).catch((e) => ({ video: false, evalError: e.message.slice(0, 100) }));
 
 async function waitFirstFrame(page, timeout) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < timeout) {
+  const t0 = performance.now();
+  while (performance.now() - t0 < timeout) {
     const s = await state(page);
-    if (s.video && s.rs >= 2 && s.w > 0 && s.t > 0 && s.frames > 0) return { ok: true, ms: Date.now() - t0, s };
-    if (!s.video && /No source for this episode|couldn.t load|Stream unavailable/i.test(s.text ?? '')) return { ok: false, ms: Date.now() - t0, s, why: 'error-ui' };
+    if (s.video && s.rs >= 2 && s.w > 0 && s.t > 0 && s.frames > 0) return { ok: true, ms: performance.now() - t0, s };
+    if (!s.video && /No source for this episode|couldn.t load|Stream unavailable/i.test(s.text ?? '')) return { ok: false, ms: performance.now() - t0, s, why: 'error-ui' };
     await sleep(100);
   }
   return { ok: false, ms: timeout, s: await state(page), why: 'timeout' };
@@ -56,14 +56,14 @@ const play = (page) => page.evaluate(() => { const v = document.querySelector('v
 /** Watches the clock for `sec` seconds; returns advance, max stall and frame delta. */
 async function observe(page, sec) {
   const a = await state(page);
-  let last = a, lastMove = Date.now(), maxStall = 0;
-  const end = Date.now() + sec * 1000;
-  while (Date.now() < end) {
+  let last = a, lastMove = performance.now(), maxStall = 0;
+  const end = performance.now() + sec * 1000;
+  while (performance.now() < end) {
     await sleep(1000);
     const s = await state(page);
     if (!s.video) return { ok: false, why: 'video vanished', s };
-    if (s.t > last.t + 0.05) lastMove = Date.now();
-    maxStall = Math.max(maxStall, (Date.now() - lastMove) / 1000);
+    if (s.t > last.t + 0.05) lastMove = performance.now();
+    maxStall = Math.max(maxStall, (performance.now() - lastMove) / 1000);
     last = s;
   }
   return { advance: +(last.t - a.t).toFixed(2), frames: last.frames - a.frames, maxStall: +maxStall.toFixed(1), from: a.t, to: last.t, end: last };
@@ -71,19 +71,21 @@ async function observe(page, sec) {
 
 async function seekTo(page, t) {
   await page.evaluate((x) => { document.querySelector('video').currentTime = x; }, t);
-  const t0 = Date.now();
-  while (Date.now() - t0 < 30_000) {
+  const t0 = performance.now();
+  while (performance.now() - t0 < 30_000) {
     await sleep(250);
     const s = await state(page);
     if (s.video && Math.abs(s.t - t) < 20 && s.rs >= 3 && !s.paused) {
       const o = await observe(page, 5);
-      return { ok: o.advance >= 2.5 && o.frames > 0, ms: Date.now() - t0, ...o };
+      return { ok: o.advance >= 2.5 && o.frames > 0, ms: performance.now() - t0, ...o };
     }
   }
   return { ok: false, ms: 30_000, s: await state(page) };
 }
 
 function trackNet(page, r) {
+  const started = new WeakMap();
+  page.on('request', (req) => started.set(req, performance.now()));
   page.on('requestfinished', async (req) => {
     const u = req.url();
     if (!/\/api\/stream\//.test(u)) return;
@@ -97,21 +99,29 @@ function trackNet(page, r) {
   page.on('requestfailed', (req) => {
     const f = req.failure()?.errorText ?? '';
     if (!/ERR_ABORTED/.test(f)) r.netFail.push(`${f} ${req.url().slice(0, 120)}`);
+    const ms = performance.now() - (started.get(req) ?? performance.now());
+    if (req.url().includes('/api/stream/') && ms > 500) {
+      r.failedRequests ??= [];
+      r.failedRequests.push({ ms, error: f, url: req.url() });
+      if (r.failedRequests.length > 40) r.failedRequests.shift();
+    }
   });
   page.on('pageerror', (e) => r.pageErr.push(e.message.slice(0, 160)));
   page.on('console', (msg) => {
     if (msg.type() !== 'error' && msg.type() !== 'warning') return;
     r.console ??= [];
-    if (r.console.length < 40) r.console.push(msg.text().slice(0, 400));
+    r.console.push(msg.text().slice(0, 400));
+    if (r.console.length > 40) r.console.shift();
   });
 }
 
 async function healthSample() {
-  const started = Date.now();
+  const started = performance.now();
   try {
     const response = await fetch(`${API}/health`, { signal: AbortSignal.timeout(10_000) });
-    return { at: new Date().toISOString(), ms: Date.now() - started, status: response.status(), ...(await response.json()) };
-  } catch (error) { return { at: new Date().toISOString(), ms: Date.now() - started, error: error.message }; }
+    const health = await response.json();
+    return { at: new Date().toISOString(), ms: performance.now() - started, httpStatus: response.status, ...health };
+  } catch (error) { return { at: new Date().toISOString(), ms: performance.now() - started, error: error.message }; }
 }
 
 async function fullRun(browser, n) {
@@ -120,25 +130,26 @@ async function fullRun(browser, n) {
   const page = await ctx.newPage();
   trackNet(page, r);
   r.health = [await healthSample()];
-  let sampling = false;
-  const healthTimer = setInterval(async () => {
+  let sampling = null;
+  const healthTimer = setInterval(() => {
     if (sampling) return;
-    sampling = true;
-    try { r.health.push(await healthSample()); } finally { sampling = false; }
+    sampling = healthSample().then(sample => r.health.push(sample)).finally(() => { sampling = null; });
   }, 10_000);
   try {
-    const t0 = Date.now();
+    const t0 = performance.now();
     await page.goto(URL0, { waitUntil: 'commit', timeout: 45_000 });
     const ff = await waitFirstFrame(page, 90_000);
-    r.firstFrameMs = Date.now() - t0;
+    r.firstFrameMs = performance.now() - t0;
     r.steps.firstFrame = ff;
     if (!ff.ok) throw new Error(`no first frame (${ff.why}) ${JSON.stringify(ff.s)}`);
+    log(`run ${n}: first decoded frame ${r.firstFrameMs}ms; observing ${PLAY_SEC}s playback`);
     await play(page);
 
     const o = await observe(page, PLAY_SEC);
     r.steps.play = o;
     if (!(o.advance >= PLAY_SEC * 0.8 && o.frames > PLAY_SEC * 10 && o.maxStall <= STALL_SEC))
       throw new Error(`playback unhealthy ${JSON.stringify(o)}`);
+    log(`run ${n}: ${o.advance}s advanced, ${o.frames} frames, ${o.maxStall}s max stall; checking seeks and resume`);
 
     const dur = o.end.dur > 0 && isFinite(o.end.dur) ? o.end.dur : 1400;
     const fwd = Math.min(dur - 60, o.end.t + 300);
@@ -168,11 +179,11 @@ async function fullRun(browser, n) {
       for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (/video-position|watch_history/.test(k)) out[k] = localStorage.getItem(k).slice(0, 200); }
       return out;
     });
-    const t1 = Date.now();
+    const t1 = performance.now();
     await page.reload({ waitUntil: 'commit' });
     const rf = await waitFirstFrame(page, 90_000);
     const rs = await state(page);
-    r.steps.resume = { savedNear: before.t, resumedAt: rs.t ?? null, ms: Date.now() - t1, keys: Object.keys(saved), firstFrame: rf };
+    r.steps.resume = { savedNear: before.t, resumedAt: rs.t ?? null, ms: performance.now() - t1, keys: Object.keys(saved), firstFrame: rf };
     if (!rf.ok || Math.abs(rs.t - before.t) > 20) throw new Error(`resume failed ${JSON.stringify(r.steps.resume)} saved=${JSON.stringify(saved)}`);
     r.pass = true;
   } catch (e) {
@@ -181,7 +192,12 @@ async function fullRun(browser, n) {
     await page.screenshot({ path: `prod-fail-${n}.png` }).catch(() => {});
   } finally {
     clearInterval(healthTimer);
+    if (sampling) await sampling;
     r.health.push(await healthSample());
+    if (r.pass && r.health.some(sample => sample.httpStatus !== 200)) {
+      r.pass = false;
+      r.failure = 'API health request failed during playback';
+    }
     await ctx.close();
   }
   return r;
@@ -197,7 +213,7 @@ async function binge(browser) {
   trackNet(page, r);
   for (const ep of eps) {
     const u = new URL(URL0); u.searchParams.set('ep', String(ep));
-    const t0 = Date.now();
+    const t0 = performance.now();
     const e = { ep };
     try {
       if (ep === eps[0]) await page.goto(u.toString(), { waitUntil: 'commit' });
@@ -216,7 +232,7 @@ async function binge(browser) {
         await page.waitForFunction(() => { const v = document.querySelector('video'); return !v || v.currentTime < 5; }, null, { timeout: 20_000 }).catch(() => {});
       }
       const ff = await waitFirstFrame(page, 90_000);
-      e.firstFrameMs = Date.now() - t0;
+      e.firstFrameMs = performance.now() - t0;
       if (!ff.ok) { e.pass = false; e.failure = `${ff.why} ${JSON.stringify(ff.s).slice(0, 300)}`; }
       else { await play(page); const o = await observe(page, +(process.env.EP_SEC ?? 15)); e.advance = o.advance; e.frames = o.frames; e.maxStall = o.maxStall; e.pass = o.advance >= 10 && o.frames > 100; }
     } catch (err) { e.pass = false; e.failure = err.message.slice(0, 300); }
@@ -236,15 +252,17 @@ const main = async () => {
     log(`binge ${r.eps.filter((e) => e.pass).length}/${r.eps.length}`);
     if (r.eps.some(e => !e.pass)) process.exitCode = 1;
   } else {
-    let streak = 0, passed = 0;
+    let streak = 0, passed = 0, attempted = 0;
     for (let n = 1; n <= RUNS; n++) {
       const r = await fullRun(browser, n);
+      attempted++;
       appendFileSync(OUT, JSON.stringify(r) + '\n');
       streak = r.pass ? streak + 1 : 0; passed += r.pass ? 1 : 0;
       const s = r.steps;
       log(`run ${n} ${r.pass ? 'PASS' : 'FAIL'} ttff=${r.firstFrameMs}ms play=${s.play?.advance}s/${PLAY_SEC} stall=${s.play?.maxStall}s seekF=${s.seekFwd?.ms}ms seekB=${s.seekBack?.ms}ms resume=${s.resume?.savedNear}->${s.resume?.resumedAt} api=${JSON.stringify(r.api.map((a) => [a.st, a.ms]))} streak=${streak}${r.failure ? `\n    FAIL: ${r.failure}` : ''}${r.httpErr.length ? `\n    http: ${r.httpErr.slice(0, 5).join(' | ')}` : ''}`);
+      if (!r.pass && process.env.CONTINUE_ON_FAILURE !== '1') break;
     }
-    log(`${passed}/${RUNS} passed, final streak ${streak}`);
+    log(`${passed}/${attempted} attempted passed, final streak ${streak}, required ${RUNS}`);
     if (streak < RUNS) process.exitCode = 1;
   }
   await browser.close();
