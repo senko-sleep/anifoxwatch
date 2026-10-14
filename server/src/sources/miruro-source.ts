@@ -292,7 +292,14 @@ export class MiruroSource extends BaseAnimeSource {
             if (category === 'sub') payload(ordered[0], 'yuki');
             // Loli's independent CDN passed later-fragment probes while Yuki returned 403 after a
             // playable start, so it goes first; the others are hedges, not a sequential timeout chain.
-            const tasks = ordered.flatMap(candidate => BACKENDS.map(backend => async (taskSignal: AbortSignal) => {
+            const tasks = ordered.flatMap((candidate, index) => BACKENDS.map(backend => async (taskSignal: AbortSignal) => {
+                if (index > 0) {
+                    // Both routes front the same backends. Any HTTP answer on the first route
+                    // (including 429/502) speaks for this backend; asking again only feeds a rate
+                    // limit. Only an unreachable first route is worth a second one.
+                    const first = await payload(ordered[0], backend).then(() => null, (error: { response?: unknown }) => error);
+                    if (!first || first.response) throw new Error(`MegaVid ${backend} already answered on the primary route`);
+                }
                 try {
                     const result = await verify(candidate, backend, taskSignal);
                     console.log(JSON.stringify({ type: 'miruro_backend', backend, status: 'validated', episodeId, host: result.media.hostname }));
