@@ -135,4 +135,21 @@ describe('VideoPlayer media recovery', () => {
     act(() => { timeout(); timeout(); });
     expect(onError).toHaveBeenCalledExactlyOnceWith('frag_load_error');
   });
+
+  it('retries a cold first fragment once before abandoning the source at startup', () => {
+    const onError = vi.fn();
+    render(<VideoPlayer src={src} onError={onError} />);
+    const hls = mocks.instances[0];
+    // Time-to-first-byte is bounded; a large fragment on a slow link may keep downloading.
+    expect(hls.config.fragLoadPolicy.default).toMatchObject({ maxTimeToFirstByteMs: 8000, maxLoadTimeMs: 60000 });
+    expect(hls.config.fragLoadingTimeOut).toBeUndefined();
+    const timeout = () => hls.handlers.get('error')?.('error', { type: 'network', details: 'fragLoadTimeOut', fatal: false });
+    act(() => { timeout(); });
+    expect(onError).not.toHaveBeenCalled();
+    act(() => { hls.handlers.get('frag')?.('frag', { frag: { duration: 10, stats: { loading: { start: 0, end: 900 } } } }); });
+    act(() => { timeout(); });
+    expect(onError).not.toHaveBeenCalled();
+    act(() => { timeout(); });
+    expect(onError).toHaveBeenCalledExactlyOnceWith('frag_load_error');
+  });
 });

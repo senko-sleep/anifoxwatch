@@ -426,26 +426,29 @@ export const VideoPlayer = ({
         startLevel: 0,
         abrEwmaDefaultEstimate: onMobile ? 800_000 : 1_500_000,
         // ── Timeouts ─────────────────────────────────────────────────────
-        // The media proxy may spend 15s waiting on a stalled CDN segment. Fail over
-        // before that request occupies the player's only startup path for too long.
-        fragLoadingTimeOut: 8000,
+        // A dead or stalled CDN shows up as no first byte, so that is what is bounded tightly.
+        // The whole download is not: 1080p fragments here run 2-5 MB, and a total-time cap of
+        // 8s (the legacy fragLoadingTimeOut sets both) failed every large fragment below ~5 Mbps.
+        fragLoadPolicy: {
+          default: {
+            maxTimeToFirstByteMs: 8000,
+            maxLoadTimeMs: 60000,
+            timeoutRetry: { maxNumRetry: 2, retryDelayMs: 0, maxRetryDelayMs: 0 },
+            errorRetry: { maxNumRetry: 3, retryDelayMs: 150, maxRetryDelayMs: 4000, backoff: 'linear' },
+          },
+        },
         manifestLoadingTimeOut: 20000,
         levelLoadingTimeOut: 15000,
         // ── Prefetch & retries ────────────────────────────────────────────
         startFragPrefetch: true,
-        fragLoadingMaxRetry: 3,
         manifestLoadingMaxRetry: 2,
         levelLoadingMaxRetry: 2,
-        fragLoadingRetryDelay: 150,
         manifestLoadingRetryDelay: 200,
         maxStarvationDelay: 3,
         maxLoadingDelay: 3,
         nudgeOffset: 0.05,
         nudgeMaxRetry: 6,
         loader: PostProxyLoader,
-        xhrSetup: (xhr) => {
-          xhr.timeout = 20000;
-        }
       });
 
       hls.loadSource(resolvedSrc);
@@ -571,7 +574,9 @@ export const VideoPlayer = ({
             }
           }
           fragLoadErrorCount++;
-          const fragLoadErrorThreshold = video.currentTime > 5 ? 2 : 1;
+          // One retry before abandoning a source: the first request for a fragment is often the
+          // one that warms a cold CDN edge, and switching provider costs far more than a retry.
+          const fragLoadErrorThreshold = 2;
           playerLog('warn', `fragLoadError count: ${fragLoadErrorCount}/${fragLoadErrorThreshold}`, {
             url: data.url?.substring(0, 100),
             response: data.response

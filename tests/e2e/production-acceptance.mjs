@@ -6,12 +6,12 @@
  *   MODE=binge EPISODES=1-16 URL=... node tests/e2e/prod-playback.mjs
  *
  * A run passes only if, in a fresh browser context:
- *   1. the <video> reaches readyState>=2 with videoWidth>0 (first decoded frame),
+ *   1. the <video> reaches readyState>=2 with videoWidth>0 (first decoded frame) within TTFF_MAX_MS,
  *   2. decoded frame count (getVideoPlaybackQuality) keeps increasing,
  *   3. currentTime advances >= 0.8 * PLAY_SEC over PLAY_SEC of wall time with no stall > STALL_SEC,
  *   4. seek forward and backward both land and keep playing,
  *   5. pause holds the clock still, resume moves it again,
- *   6. a reload restores the saved position (Continue Watching), within 3s.
+ *   6. a reload restores the saved position (Continue Watching), within 3s, and decodes within TTFF_MAX_MS.
  * Results are appended as JSON lines to OUT.
  */
 import { chromium } from 'playwright';
@@ -21,6 +21,8 @@ const URL0 = process.env.URL ?? 'https://anifoxwatch.web.app/watch/anime/you-and
 const RUNS = +(process.env.RUNS ?? 20);
 const PLAY_SEC = +(process.env.PLAY_SEC ?? 60);
 const STALL_SEC = +(process.env.STALL_SEC ?? 3);
+// A first frame that takes most of a minute is a hang to a viewer, even if it eventually plays.
+const TTFF_MAX_MS = +(process.env.TTFF_MAX_MS ?? 15_000);
 const MODE = process.env.MODE ?? 'full';
 const OUT = process.env.OUT ?? '.artifacts/production-acceptance.jsonl';
 const HEADLESS = process.env.HEADED ? false : true;
@@ -142,6 +144,7 @@ async function fullRun(browser, n) {
     r.firstFrameMs = performance.now() - t0;
     r.steps.firstFrame = ff;
     if (!ff.ok) throw new Error(`no first frame (${ff.why}) ${JSON.stringify(ff.s)}`);
+    if (r.firstFrameMs > TTFF_MAX_MS) throw new Error(`first frame took ${Math.round(r.firstFrameMs)}ms (limit ${TTFF_MAX_MS}ms)`);
     log(`run ${n}: first decoded frame ${r.firstFrameMs}ms; observing ${PLAY_SEC}s playback`);
     await play(page);
 
@@ -185,6 +188,7 @@ async function fullRun(browser, n) {
     const rs = await state(page);
     r.steps.resume = { savedNear: before.t, resumedAt: rs.t ?? null, ms: performance.now() - t1, keys: Object.keys(saved), firstFrame: rf };
     if (!rf.ok || Math.abs(rs.t - before.t) > 3) throw new Error(`resume failed ${JSON.stringify(r.steps.resume)} saved=${JSON.stringify(saved)}`);
+    if (r.steps.resume.ms > TTFF_MAX_MS) throw new Error(`reload took ${Math.round(r.steps.resume.ms)}ms to decode (limit ${TTFF_MAX_MS}ms)`);
     r.pass = true;
   } catch (e) {
     r.pass = false;
@@ -234,7 +238,11 @@ async function binge(browser) {
       const ff = await waitFirstFrame(page, 90_000);
       e.firstFrameMs = performance.now() - t0;
       if (!ff.ok) { e.pass = false; e.failure = `${ff.why} ${JSON.stringify(ff.s).slice(0, 300)}`; }
-      else { await play(page); const o = await observe(page, +(process.env.EP_SEC ?? 15)); e.advance = o.advance; e.frames = o.frames; e.maxStall = o.maxStall; e.pass = o.advance >= 10 && o.frames > 100; }
+      else {
+        await play(page); const o = await observe(page, +(process.env.EP_SEC ?? 15)); e.advance = o.advance; e.frames = o.frames; e.maxStall = o.maxStall;
+        e.pass = o.advance >= 10 && o.frames > 100 && e.firstFrameMs <= TTFF_MAX_MS;
+        if (!e.pass) e.failure = e.firstFrameMs > TTFF_MAX_MS ? `first frame took ${Math.round(e.firstFrameMs)}ms (limit ${TTFF_MAX_MS}ms)` : `playback unhealthy ${JSON.stringify(o).slice(0, 200)}`;
+      }
     } catch (err) { e.pass = false; e.failure = err.message.slice(0, 300); }
     e.mem = await page.evaluate(() => performance.memory?.usedJSHeapSize ?? null).catch(() => null);
     log(`  ep${ep} ${e.pass ? 'PASS' : 'FAIL'} frame=${e.firstFrameMs}ms adv=${e.advance} via=${e.via ?? 'goto'} ${e.failure ?? ''}`);
