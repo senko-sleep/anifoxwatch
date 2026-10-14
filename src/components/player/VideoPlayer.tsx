@@ -47,6 +47,8 @@ interface VideoSubtitle {
 
 interface VideoPlayerProps {
   src: string;
+  // Successful source resolutions can renew authorization without changing URL.
+  reloadToken?: number;
   isM3U8?: boolean;
   subtitles?: Array<{ lang: string; label?: string; url: string }>;
   intro?: { start: number; end: number };
@@ -88,6 +90,7 @@ const playerLog = (level: 'info' | 'warn' | 'error', message: string, data?: any
 
 export const VideoPlayer = ({
   src,
+  reloadToken = 0,
   isM3U8 = true,
   subtitles = [],
   intro,
@@ -684,17 +687,31 @@ export const VideoPlayer = ({
       stallDurationRef.current = 0;
 
       const WATCHDOG_INTERVAL_MS = 500;
+      let seekWaitingSince = 0;
       stallWatchdogRef.current = setInterval(() => {
         const v = videoRef.current;
         if (!v || !hlsRef.current) return;
         // Only watch when the player should be advancing
-        if (v.paused || v.seeking || v.ended || v.readyState < 2) {
+        if (v.paused || v.ended || document.visibilityState === 'hidden') {
           // Reset stall counter whenever we're legitimately not playing
           stallDurationRef.current = 0;
           lastPlayheadRef.current = v.currentTime;
           // Clear buffering indicator when not playing (guarded — avoids React churn)
           safeSetIsBuffering(false);
+          seekWaitingSince = 0;
           return;
+        }
+
+        // A seek can leave readyState below HAVE_CURRENT_DATA indefinitely.
+        // Allow a short buffer flush, then measure that wait like any other stall.
+        if (v.seeking) {
+          if (!seekWaitingSince) seekWaitingSince = Date.now();
+          if (Date.now() - seekWaitingSince < 3000) {
+            lastPlayheadRef.current = v.currentTime;
+            return;
+          }
+        } else {
+          seekWaitingSince = 0;
         }
 
         const now = v.currentTime;
@@ -738,15 +755,16 @@ export const VideoPlayer = ({
           // Recovery can be expensive; avoid doing it repeatedly in a tight loop.
           if (recoveryInProgressRef.current) return;
           recoveryInProgressRef.current = true;
-          playerLog('warn', 'Watchdog: 6s stall — attempting recoverMediaError');
+          playerLog('warn', 'Watchdog: 6s stall — attempting media recovery');
           try {
-            hlsRef.current?.recoverMediaError();
+            if (v.readyState < 2 || v.seeking) hlsRef.current?.startLoad(v.currentTime);
+            else hlsRef.current?.recoverMediaError();
           } catch { /* ignore */ }
           setTimeout(() => {
             recoveryInProgressRef.current = false;
           }, 1500);
 
-        } else if (stalledMs >= 4_000) {
+        } else if (stalledMs >= 4_000 && v.readyState >= 2 && !v.seeking) {
           // Decoder-kick trick: briefly drop playback rate to 0 then restore
           // This shakes loose a frozen decoder pipeline without seeking
           playerLog('warn', 'Watchdog: 4s stall — applying decoder-kick (rate 0→1)');
@@ -757,7 +775,7 @@ export const VideoPlayer = ({
               if (v && !v.paused) v.playbackRate = savedRate || 1;
             }, 80);
           } catch { /* ignore */ }
-        } else if (stalledMs >= 3_000) {
+        } else if (stalledMs >= 3_000 && v.readyState >= 2 && !v.seeking) {
           // Buffer nudge — seek over a tiny gap
           playerLog('warn', 'Watchdog: 3s stall — attempting buffer nudge');
           try {
@@ -774,7 +792,7 @@ export const VideoPlayer = ({
             if (!nudged) {
               // Also check if we're between buffered ranges
               for (let i = 0; i < buf.length; i++) {
-                if (buf.start(i) > now + 0.1) {
+                if (buf.start(i) > now + 0.1 && buf.start(i) - now < 2.5) {
                   v.currentTime = buf.start(i) + 0.05;
                   nudged = true;
                   break;
@@ -785,6 +803,9 @@ export const VideoPlayer = ({
               // Generic micro-nudge to unblock decoder
               v.currentTime = now + 0.1;
             }
+            // A recovery seek is not playback. Don't let our own nudge reset
+            // the stall deadline when the decoder is still frozen.
+            lastPlayheadRef.current = v.currentTime;
           } catch { /* ignore */ }
         }
       }, WATCHDOG_INTERVAL_MS);
@@ -1056,7 +1077,7 @@ export const VideoPlayer = ({
   // parent never trigger HLS destroy/recreate mid-stream (which caused
   // bufferAppendError + ERR_FILE_NOT_FOUND on blob MSE URLs).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src, isM3U8]);
+  }, [src, isM3U8, reloadToken]);
 
     // Keep duration in sync — use event-driven approach instead of RAF polling.
   useEffect(() => {

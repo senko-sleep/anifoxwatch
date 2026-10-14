@@ -4,6 +4,8 @@
 
 # ── Stage 1: Build ──────────────────────────────────────────────────────────
 FROM node:20-slim AS builder
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 WORKDIR /app
 
@@ -20,27 +22,23 @@ FROM node:20-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Chromium + fonts for Puppeteer-based extractors
+# The 512 MB API must not launch Chromium. Browser extraction may use an approved
+# external extractor; direct HTTP providers remain available without one.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
-        chromium \
         ca-certificates \
         curl \
-        fonts-ipafont-gothic \
-        fonts-wqy-zenhei \
-        fonts-freefont-ttf \
-        libxss1 \
         dumb-init \
     && rm -rf /var/lib/apt/lists/*
 
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
-# Mainstream streams require Chromium, including validation of ReAnime embeds.
-# Size the service for browser extraction; disabling it removes those playback paths.
-ENV DISABLE_BROWSER_SOURCES=false
+ENV BROWSER_EXTRACTOR=remote
+ENV LOW_MEMORY_PROFILE=true
+ENV MEMORY_LIMIT_MB=512
 ENV NODE_OPTIONS="--max-old-space-size=220"
 # Koyeb injects PORT automatically; default to 8000 to match free tier expectations
 ENV PORT=8000
@@ -52,6 +50,7 @@ COPY patches ./patches
 RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
+COPY seed ./seed
 
 EXPOSE 8000
 

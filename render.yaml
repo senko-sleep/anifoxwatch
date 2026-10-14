@@ -20,10 +20,14 @@ services:
         value: 8080
       - key: ENABLE_ADULT_CONTENT
         value: "true"
-      # Mainstream playback requires Chromium. Provision enough memory for extraction;
-      # the free plan can run out of memory and is not a reliable playback guarantee.
-      - key: DISABLE_BROWSER_SOURCES
-        value: "false"
+      # Browser-only providers require an approved external extractor. This API
+      # never launches Chromium alongside Node on the 512 MB instance.
+      - key: BROWSER_EXTRACTOR
+        value: "remote"
+      - key: LOW_MEMORY_PROFILE
+        value: "true"
+      - key: MEMORY_LIMIT_MB
+        value: "512"
       # Render's router sits in front of the app: without this every visitor looks like one
       # address (the router's), which breaks per-client logging and limits.
       - key: TRUST_PROXY

@@ -48,11 +48,12 @@ WATCHDOG_STRIKES="${WATCHDOG_STRIKES:-4}"
         sleep "$WATCHDOG_INTERVAL"
     done
 ) &
+watchdog_pid=$!
 
 # Forward a shutdown to both, so a deploy drains rather than drops connections.
 terminate() {
     echo "[start] signal received, stopping children"
-    kill -TERM "$node_pid" "$proxy_pid" 2>/dev/null || true
+    kill -TERM "$node_pid" "$proxy_pid" "$watchdog_pid" 2>/dev/null || true
     wait "$node_pid" 2>/dev/null || true
     wait "$proxy_pid" 2>/dev/null || true
     exit 0
@@ -60,9 +61,10 @@ terminate() {
 trap terminate TERM INT
 
 # `wait -n` returns on the first child to exit, whichever it is.
-wait -n
-status=$?
+# Capture a failing child's exit before `set -e` can bypass sibling cleanup.
+status=0
+wait -n || status=$?
 
 echo "[start] a child exited with status ${status}; stopping the container"
-kill -TERM "$node_pid" "$proxy_pid" 2>/dev/null || true
+kill -TERM "$node_pid" "$proxy_pid" "$watchdog_pid" 2>/dev/null || true
 exit "$status"

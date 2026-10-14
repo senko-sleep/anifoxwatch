@@ -1,5 +1,7 @@
 import { saveMediaContext, getMediaContext, childMediaHeaders } from '../services/media-context.js';
 import { isMedia } from '../services/playable-stream.js';
+import { proxyLifetime } from '../services/proxy-lifetime.js';
+import { LOW_MEMORY_PROFILE } from '../lib/runtime-memory.js';
 import { isBlockedEpisodeId } from '../services/hentai-index.js';
 import { Router, Request, Response } from 'express';
 import { sourceManager } from '../services/source-manager.js';
@@ -39,15 +41,16 @@ router.get('/debug', (req: Request, res: Response) => {
 });
 
 // ── Persistent HTTPS agent for proxy segment fetches ───────────────────────
-// POWERHOUSE MODE: Massive connection pool for zero-latency segment fetching
+// Reuse a bounded socket pool within the container's memory budget.
 // Reuses TCP connections across the ~350 segments in a 24-minute episode.
 // Without keepAlive each segment pays a full TCP+TLS handshake (~80-200ms).
 const proxyKeepAliveAgent = new https.Agent({
     keepAlive: true,
-    maxSockets: 100,        // Increased from 25 to 100 for parallel segment loading
-    maxFreeSockets: 50,     // Increased from 10 to 50 - keep more connections alive
-    timeout: 90000,         // Increased from 60s to 90s - longer-lived connections for CDN blocking
-    scheduling: 'fifo',
+    maxSockets: LOW_MEMORY_PROFILE ? 16 : 32,
+    maxTotalSockets: LOW_MEMORY_PROFILE ? 24 : 64,
+    maxFreeSockets: LOW_MEMORY_PROFILE ? 4 : 8,
+    timeout: 20_000,
+    scheduling: 'lifo',
 });
 
 // ---------------------------------------------------------------------------
@@ -266,7 +269,7 @@ const ISP_PROBE_TTL = 10 * 60 * 1000; // 10 minutes
 const ISP_PROBE_TIMEOUT = 4000;
 const ispReachability = new Map<string, { reachable: boolean; checkedAt: number }>();
 
-async function isLocallyReachable(url: string, domain: string, referer?: string): Promise<boolean> {
+async function isLocallyReachable(url: string, domain: string, referer?: string, signal?: AbortSignal): Promise<boolean> {
     const cached = ispReachability.get(domain);
     if (cached && Date.now() - cached.checkedAt < ISP_PROBE_TTL) return cached.reachable;
 
@@ -276,6 +279,7 @@ async function isLocallyReachable(url: string, domain: string, referer?: string)
             method: 'get',
             url,
             responseType: 'stream',
+            signal,
             timeout: ISP_PROBE_TIMEOUT,
             maxRedirects: 3,
             validateStatus: () => true,
@@ -296,40 +300,17 @@ async function isLocallyReachable(url: string, domain: string, referer?: string)
     return reachable;
 }
 
-/** Remembers domains that failed TLS so we can skip straight to HTTP fallback. */
-const PROTOCOL_CACHE_MAX = 500;
-const PROTOCOL_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
-interface ProtocolEntry { protocol: 'http' | 'https'; setAt: number }
-const protocolCache = new Map<string, ProtocolEntry>();
-
-function getProtocolCache(domain: string): 'http' | 'https' | undefined {
-    const entry = protocolCache.get(domain);
-    if (!entry) return undefined;
-    if (Date.now() - entry.setAt > PROTOCOL_CACHE_TTL) { protocolCache.delete(domain); return undefined; }
-    return entry.protocol;
-}
-
-function setProtocolCache(domain: string, protocol: 'http' | 'https'): void {
-    if (protocolCache.size >= PROTOCOL_CACHE_MAX) {
-        // Evict oldest entry
-        const oldestKey = protocolCache.keys().next().value;
-        if (oldestKey) protocolCache.delete(oldestKey);
-    }
-    protocolCache.set(domain, { protocol, setAt: Date.now() });
-}
-
 // ---------------------------------------------------------------------------
 // Segment cache (in-memory LRU)
 // ---------------------------------------------------------------------------
 
-// POWERHOUSE MODE: Massive cache to eliminate buffering entirely
-// 1GB cache fits ~150 segments (half an episode) for zero buffering
-const IS_LOW_MEMORY = process.env.NODE_ENV === 'production' && (!process.env.POSTGRES_URL || process.env.RENDER === 'true');
-const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 50 * 1024 * 1024 : 512 * 1024 * 1024; // 50MB on low-memory (Render), 512MB otherwise
+const IS_LOW_MEMORY = LOW_MEMORY_PROFILE;
+const SEGMENT_CACHE_MAX_BYTES = IS_LOW_MEMORY ? 16 * 1024 * 1024 : 64 * 1024 * 1024;
 const SEGMENT_CACHE_TTL = 30 * 60 * 1000; // 30 minutes - reduced from 60 minutes
 
 // Manifest cache - m3u8 manifests are small but critical for startup performance
-const MANIFEST_CACHE_MAX_ENTRIES = IS_LOW_MEMORY ? 500 : 2000; // 500 on low-memory (Render), 2000 otherwise
+const MANIFEST_CACHE_MAX_ENTRIES = IS_LOW_MEMORY ? 128 : 500;
+const MANIFEST_CACHE_MAX_BYTES = (IS_LOW_MEMORY ? 4 : 16) * 1024 * 1024;
 const MANIFEST_CACHE_TTL = 30 * 60 * 1000; // 30 minutes - reduced from 60 minutes
 
 interface SegmentCacheEntry { data: Buffer; contentType: string; fetchedAt: number; size: number; lastUsed: number }
@@ -338,12 +319,13 @@ interface ManifestCacheEntry { data: string; fetchedAt: number; lastUsed: number
 const segmentCache = new Map<string, SegmentCacheEntry>();
 const manifestCache = new Map<string, ManifestCacheEntry>();
 let segmentCacheBytes = 0;
+let manifestCacheBytes = 0;
 
 function segmentCacheEvict(): void {
-    // True LRU: sort by lastUsed ascending and evict until under budget
-    const entries = [...segmentCache.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-    for (const [key, entry] of entries) {
-        if (segmentCacheBytes <= SEGMENT_CACHE_MAX_BYTES) break;
+    while (segmentCacheBytes > SEGMENT_CACHE_MAX_BYTES) {
+        const key = segmentCache.keys().next().value;
+        if (!key) break;
+        const entry = segmentCache.get(key)!;
         segmentCacheBytes -= entry.size;
         segmentCache.delete(key);
     }
@@ -358,6 +340,8 @@ function segmentCacheGet(url: string): Buffer | null {
         return null;
     }
     entry.lastUsed = Date.now(); // update LRU timestamp
+    segmentCache.delete(url);
+    segmentCache.set(url, entry);
     return entry.data;
 }
 
@@ -365,17 +349,17 @@ function segmentCacheSet(url: string, data: Buffer, contentType: string): void {
     if (data.length > SEGMENT_CACHE_MAX_BYTES / 10) return; // Skip segments > 10% of budget
     const existing = segmentCache.get(url);
     if (existing) segmentCacheBytes -= existing.size;
+    segmentCache.delete(url);
     segmentCache.set(url, { data, contentType, fetchedAt: Date.now(), lastUsed: Date.now(), size: data.length });
     segmentCacheBytes += data.length;
     segmentCacheEvict();
 }
 
 function manifestCacheEvict(): void {
-    // LRU eviction for manifests
-    if (manifestCache.size <= MANIFEST_CACHE_MAX_ENTRIES) return;
-    const entries = [...manifestCache.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-    const toEvict = entries.slice(0, manifestCache.size - MANIFEST_CACHE_MAX_ENTRIES);
-    for (const [key] of toEvict) {
+    while (manifestCache.size > MANIFEST_CACHE_MAX_ENTRIES || manifestCacheBytes > MANIFEST_CACHE_MAX_BYTES) {
+        const key = manifestCache.keys().next().value;
+        if (!key) break;
+        manifestCacheBytes -= manifestCache.get(key)!.data.length * 2;
         manifestCache.delete(key);
     }
 }
@@ -384,21 +368,24 @@ function manifestCacheGet(url: string): string | null {
     const entry = manifestCache.get(url);
     if (!entry) return null;
     if (Date.now() - entry.fetchedAt > MANIFEST_CACHE_TTL) {
+        manifestCacheBytes -= entry.data.length * 2;
         manifestCache.delete(url);
         return null;
     }
     entry.lastUsed = Date.now();
+    manifestCache.delete(url);
+    manifestCache.set(url, entry);
     return entry.data;
 }
 
 function manifestCacheSet(url: string, data: string): void {
+    if (data.length * 2 > MANIFEST_CACHE_MAX_BYTES) return;
     const existing = manifestCache.get(url);
+    if (existing) manifestCacheBytes -= existing.data.length * 2;
+    manifestCache.delete(url);
     manifestCache.set(url, { data, fetchedAt: Date.now(), lastUsed: Date.now() });
-    if (existing) {
-        // Update in place, no size change for manifests
-    } else {
-        manifestCacheEvict();
-    }
+    manifestCacheBytes += data.length * 2;
+    manifestCacheEvict();
 }
 
 // ---------------------------------------------------------------------------
@@ -476,13 +463,19 @@ async function sharedResolve(key: string, signal: AbortSignal, run: (signal: Abo
     }
     const joined = flight;
     joined.waiters++;
-    const leave = () => { if (--joined.waiters === 0) joined.controller.abort(signal.reason); };
+    let departed = false;
+    const leave = () => {
+        if (departed) return;
+        departed = true;
+        if (--joined.waiters === 0) joined.controller.abort(signal.reason);
+    };
     if (signal.aborted) leave();
     else signal.addEventListener('abort', leave, { once: true });
     try {
         return await joined.promise;
     } finally {
         signal.removeEventListener('abort', leave);
+        leave();
     }
 }
 
@@ -728,11 +721,12 @@ async function streamToString(stream: Readable, maxSize = 5 * 1024 * 1024): Prom
 }
 
 async function checkEchovideoManifest(proxyResponse: { data: Readable }): Promise<{ isManifest: boolean; content?: string }> {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         const stream = proxyResponse.data;
         const chunks: Buffer[] = [];
         let totalSize = 0;
         let decided = false;
+        let manifest = false;
 
         const cleanup = () => {
             stream.removeListener('data', onData);
@@ -745,12 +739,15 @@ async function checkEchovideoManifest(proxyResponse: { data: Readable }): Promis
             chunks.push(chunk);
             totalSize += chunk.length;
 
-            const head = Buffer.concat(chunks).toString('utf-8', 0, Math.min(totalSize, 4096));
+            // Inspect the prefix once; avoid copying a growing playlist on every chunk.
+            const head = manifest ? '#EXTM3U' : Buffer.concat(chunks, Math.min(totalSize, 4096)).toString('utf-8');
             if (head.includes('#EXTM3U')) {
-                if (totalSize > 2 * 1024 * 1024) {
+                manifest = true;
+                if (totalSize > 1024 * 1024) {
                     decided = true;
                     cleanup();
-                    resolve({ isManifest: true, content: Buffer.concat(chunks).toString('utf-8') });
+                    stream.destroy();
+                    reject(new Error('HLS manifest exceeds 1 MiB'));
                 }
             } else if (totalSize >= 512 || head.includes('#EXTINF') || head.startsWith('G') || head.includes('ftyp') || head.includes('moov')) {
                 decided = true;
@@ -779,11 +776,11 @@ async function checkEchovideoManifest(proxyResponse: { data: Readable }): Promis
             }
         };
 
-        const onError = () => {
+        const onError = (error: Error) => {
             if (decided) return;
             decided = true;
             cleanup();
-            resolve({ isManifest: false });
+            reject(error);
         };
 
         stream.on('data', onData);
@@ -803,14 +800,18 @@ async function forwardToRemoteProxy(
     domain: string,
     requestId: string | undefined,
     label: string,
+    signal: AbortSignal,
 ): Promise<boolean> {
     const remoteProxy = process.env.REMOTE_PROXY_URL || DEFAULT_REMOTE_STREAM_PROXY;
-    const remoteTarget = `${remoteProxy}?url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
+    const remoteTarget = remoteProxy.endsWith('url=')
+        ? `${remoteProxy}${encodeURIComponent(url)}`
+        : `${remoteProxy}${remoteProxy.includes('?') ? '&' : '?'}url=${encodeURIComponent(url)}${refererParam ? `&referer=${encodeURIComponent(refererParam)}` : ''}`;
     try {
         const remoteResp = await axios({
             method: 'get',
             url: remoteTarget,
             responseType: 'stream',
+            signal,
             timeout: 15000,
             maxRedirects: 5,
             // Judge the response ourselves so an error page can fall back to a local fetch.
@@ -1289,10 +1290,10 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
  *   blocking. Supports Range requests for seeking.
  */
 router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
-    let url = (req.query.url || req.body.url) as string | undefined;
+    let url = (req.query.url || req.body?.url) as string | undefined;
     const requestId = (req as any).id;
     const proxyBase = getProxyBaseUrl(req);
-    let refererParam = (req.query.referer || req.body.referer) as string | undefined;
+    let refererParam = (req.query.referer || req.body?.referer) as string | undefined;
     if (refererParam !== undefined) {
         refererParam = refererParam.trim();
         if (refererParam === '') {
@@ -1354,6 +1355,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     const isSegment = url.includes('.ts') || url.includes('.m4s') || (isMegaupDomain && hasObfuscatedExt) || isEchovideoSegment || isHavenSegment;
     // Better MP4 detection - check for .mp4 anywhere in URL, not just at the end (handles query parameters)
     const isVideo = url.includes('.mp4');
+    const lifetime = proxyLifetime(req, res, isVideo ? 30_000 : isSegment ? 12_000 : 20_000);
+    try {
 
     // Serve cached manifests without hitting upstream
     if (isM3u8 && !req.headers.range && !contextId) {
@@ -1397,11 +1400,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Fast-path for ISP-blocked domains — but only when this host really is
     // unreachable from here (see `isLocallyReachable`).
     if (process.env.IS_REMOTE_PROXY !== 'true' && isIspBlockedDomain(domain)) {
-        if (await isLocallyReachable(url, domain, refererParam)) {
+        if (await isLocallyReachable(url, domain, refererParam, lifetime.signal)) {
             logger.info(`[PROXY] ${domain} listed as ISP-blocked but reachable here — serving locally`, { domain, requestId });
         } else {
             logger.info(`[PROXY] ISP-blocked ${domain} — routing to remote proxy`, { domain, requestId });
-            const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'ISP fast-path');
+            if (lifetime.signal.aborted) return;
+            const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'ISP fast-path', lifetime.signal);
             if (ok) return;
             logger.warn(`[PROXY] Remote proxy failed for ISP-blocked ${domain} — falling back to local rotation`, { requestId });
         }
@@ -1411,11 +1415,13 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // Unresolvable or ISP-blocked domains are forwarded to remote proxy in the checks below.
 
     const isResolvable = await isDomainResolvable(domain);
+    if (lifetime.signal.aborted) return;
     if (!isResolvable) {
         if (process.env.IS_REMOTE_PROXY !== 'true' && !isIspBlockedDomain(domain)) {
             logger.info(`[PROXY] Unresolvable ${domain} — routing to remote proxy`, { domain, requestId });
-            const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'Unresolvable fast-path');
+            const ok = await forwardToRemoteProxy(res, url, refererParam, domain, requestId, 'Unresolvable fast-path', lifetime.signal);
             if (ok) return;
+            if (lifetime.signal.aborted) return;
         }
 
         if (!isMegaupDomain) {
@@ -1562,11 +1568,13 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 method: 'GET',
                 headers: requestHeaders,
                 agent: proxyKeepAliveAgent,
-                timeout: 60000,
+                signal: lifetime.signal,
+                timeout: 20_000,
             };
             const upstreamReq = https.request(options, (upstreamRes) => {
+                if (lifetime.signal.aborted) { upstreamRes.destroy(); resolve(false); return; }
                 if (!upstreamRes.statusCode || upstreamRes.statusCode >= 400) {
-                    upstreamRes.resume();
+                    upstreamRes.destroy();
                     logger.warn(`[PROXY] MP4 fast-path upstream error ${upstreamRes.statusCode} for ${domain}`, { requestId });
                     resolve(false);
                     return;
@@ -1578,6 +1586,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 if (upstreamRes.headers['content-range']) res.set('Content-Range', upstreamRes.headers['content-range']);
                 if (upstreamRes.headers['accept-ranges']) res.set('Accept-Ranges', upstreamRes.headers['accept-ranges']);
                 res.status(upstreamRes.statusCode);
+                lifetime.streaming();
                 upstreamRes.on('error', (e) => {
                     logger.error(`[PROXY] MP4 fast-path pipe error for ${domain}`, e as Error, { requestId });
                     if (!res.writableEnded) res.end();
@@ -1599,6 +1608,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         });
 
         if (mp4Result) return;
+        if (lifetime.signal.aborted) return;
         logger.warn(`[PROXY] MP4 fast-path failed for ${domain}, falling back to axios loop`, { requestId });
     }
 
@@ -1607,7 +1617,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     let lastProxyError: unknown = null;
     let certificateRejected = false;
 
-    const makeProxyRequest = (targetUrl: string, combo: { referer: string; origin: string }): Promise<AxiosResponse> => {
+    const makeProxyRequest = async (targetUrl: string, combo: { referer: string; origin: string }): Promise<AxiosResponse> => {
+        lifetime.signal.throwIfAborted();
         const headers: Record<string, string> = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'Accept': '*/*',
@@ -1639,7 +1650,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             url: targetUrl,
             responseType: 'stream',
             headers,
-            timeout: timeoutMs,
+            timeout: Math.min(timeoutMs, lifetime.remaining()),
+            signal: lifetime.signal,
             maxRedirects: 5,
             validateStatus: (s: number) => s < 400,
             // Persistent keepAlive agent for segment fetches; certificates are always verified.
@@ -1706,14 +1718,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     for (let attempt = 0; attempt < refererCombos.length; attempt++) {
         const combo = refererCombos[attempt];
-        const cachedProtocol = getProtocolCache(domain);
 
         try {
-            const targetUrl = cachedProtocol === 'http' ? url.replace(/^https:\/\//i, 'http://') : url;
-            proxyResponse = await makeProxyRequest(targetUrl, combo);
+            proxyResponse = await makeProxyRequest(url, combo);
             logger.info(`[PROXY] Success on attempt ${attempt + 1} (${combo.referer})`, { domain, requestId });
             break;
         } catch (err: unknown) {
+            if (lifetime.signal.aborted) return;
+            (err as any).response?.data?.destroy?.();
             const status = (err as any).response?.status;
             // If it failed with Range header, try once more WITHOUT Range for segments
             if (req.headers.range && isSegment && !isM3u8 && (status === 502 || status === 403 || status === 416)) {
@@ -1728,12 +1740,17 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                             'Referer': combo.referer,
                             'Origin': combo.origin || combo.referer.replace(/\/$/, ''),
                         },
-                        timeout: 15000,
+                        timeout: Math.min(15_000, lifetime.remaining()),
+                        signal: lifetime.signal,
+                        httpsAgent: proxyKeepAliveAgent,
                         validateStatus: (s) => s < 400
                     });
                     logger.info(`[PROXY] Success without Range for ${domain}`, { requestId });
                     break;
-                } catch { /* proceed to normal rotation */ }
+                } catch (retryError: any) {
+                    retryError.response?.data?.destroy?.();
+                    if (lifetime.signal.aborted) return;
+                }
             }
 
             lastProxyError = err;
@@ -1782,6 +1799,8 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                             mirrorBlacklist.delete(altDomain); // Clear any prior blacklist entry on success
                             break; // Break inner referer loop
                         } catch (altErr: any) {
+                            altErr.response?.data?.destroy?.();
+                            if (lifetime.signal.aborted) return;
                             const altStatus = altErr.response?.status;
                             mirrorBlacklist.set(altDomain, Date.now() + MIRROR_BLACKLIST_TTL);
                             logger.warn(`[PROXY] Rotation fail: ${altDomain} with ${rotateCombo.referer} (${altStatus || altErr.code})`, { requestId });
@@ -1796,33 +1815,9 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 }
             }
 
-            if (isTlsError && cachedProtocol !== 'http') {
-                // A protocol-level failure (not a certificate one — those stop above). Some
-                // CDNs only answer on plain HTTP; TLS verification is never switched off.
-                if (url.startsWith('https://')) {
-                    try {
-                        const httpResp = await makeProxyRequest(url.replace(/^https:\/\//i, 'http://'), combo);
-                        const ct = httpResp.headers['content-type'] || '';
-                        if (ct.includes('text/html')) {
-                            // ISP block page — drain and break out of loop completely
-                            httpResp.data?.resume?.();
-                            logger.warn(`[PROXY] HTTP fallback returned HTML (ISP block) for ${domain}. Skipping remaining combos.`, { requestId });
-                            break; // Break out of referer loop!
-                        } else {
-                            setProtocolCache(domain, 'http');
-                            proxyResponse = httpResp;
-                            logger.info(`[PROXY] HTTP fallback success for ${domain}`, { domain, requestId });
-                            break;
-                        }
-                    } catch (httpErr: unknown) {
-                        lastProxyError = httpErr;
-                        logger.warn(`[PROXY] HTTP fallback failed for ${domain}`, { requestId });
-                        // If HTTP also fails with timeout/connection error, it's a hard block.
-                        break;
-                    }
-                } else {
-                    break; // Not HTTPS, so no HTTP fallback to try. Hard block.
-                }
+            if (isTlsError && !rotationTried) {
+                // Keep HTTPS transport intact; recovery selects another source.
+                break;
             } else if (!rotationTried && status === 403 && isMegaupDomain) {
                 // CDN access denied — no referer will fix this. Break immediately.
                 // (Skip when rotation was already tried — rotation is our best shot.)
@@ -1862,11 +1857,13 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         for (const tryUrl of urlsToTry) {
             const tryDomain = (() => { try { return new URL(tryUrl).hostname; } catch { return domain; } })();
             logger.info(`[PROXY] Trying remote proxy for ${tryDomain}`, { domain: tryDomain, requestId });
-            remoteOk = await forwardToRemoteProxy(res, tryUrl, refererParam, tryDomain, requestId, 'Remote fallback');
+            if (lifetime.signal.aborted) return;
+            remoteOk = await forwardToRemoteProxy(res, tryUrl, refererParam, tryDomain, requestId, 'Remote fallback', lifetime.signal);
             if (remoteOk) break;
         }
 
         if (!remoteOk) {
+            if (lifetime.signal.aborted) return;
             const err = lastProxyError;
             const errMsg = err instanceof Error ? err.message : String(err);
             const errCode = (err as NodeJS.ErrnoException | undefined)?.code;
@@ -1899,6 +1896,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         res.set('Access-Control-Allow-Origin', '*').status(proxyResponse!.status).json({ error: 'Upstream error', status: proxyResponse!.status, domain });
         return;
     }
+    if (isVideo) lifetime.streaming();
 
     // ---------- M3U8 manifest handling ----------
     let upstreamCt = proxyResponse!.headers['content-type'] || '';
@@ -1941,6 +1939,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     if ((isEchovideoSegment || mayBeExtensionlessManifest) && !isUpstreamM3u8 && !req._normalizedCt) {
         try {
             const check = await checkEchovideoManifest(proxyResponse!);
+            if (lifetime.signal.aborted) return;
             if (check.isManifest && check.content) {
                 isEchovideoManifest = true;
                 const content = check.content;
@@ -1968,13 +1967,18 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
                 return;
             }
         } catch (err) {
+            if (lifetime.signal.aborted) return;
             logger.error(`[PROXY] Failed checking Echovideo manifest`, err as Error);
+            proxyResponse!.data.destroy();
+            res.status(502).json({ error: 'Invalid upstream manifest' });
+            return;
         }
     }
 
     if (isUpstreamM3u8) {
         try {
-            const content = await streamToString(proxyResponse!.data);
+            const content = await streamToString(proxyResponse!.data, 1024 * 1024);
+            if (lifetime.signal.aborted) return;
 
             // A real HLS manifest always begins with #EXTM3U. If the upstream
             // returned HTML/JSON (ad page, ISP block, error body), reject it so
@@ -2012,6 +2016,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
             res.send(rewritten);
             logger.info(`[PROXY] Rewrote m3u8 from ${domain}`, { domain, originalSize: content.length, requestId });
         } catch (err) {
+            if (lifetime.signal.aborted) return;
             logger.error(`[PROXY] Failed to process m3u8 from ${domain}`, err as Error);
             res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Failed to process manifest' });
         }
@@ -2234,14 +2239,14 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
 
     // Buffer cacheable segments; pipe everything else directly
     if (isSegment && !req.headers.range && proxyResponse!.status === 200) {
-        const MAX_CACHE_SEGMENT = 4 * 1024 * 1024;
+        const MAX_CACHE_SEGMENT = Math.min(4 * 1024 * 1024, SEGMENT_CACHE_MAX_BYTES / 10);
         const chunks: Buffer[] = [];
         let total = 0;
         let overflow = false;
 
         proxyResponse!.data.on('data', (chunk: Buffer) => {
             total += chunk.length;
-            if (total > MAX_CACHE_SEGMENT) { overflow = true; return; }
+            if (total > MAX_CACHE_SEGMENT) { overflow = true; chunks.length = 0; return; }
             chunks.push(chunk);
         });
         proxyResponse!.data.on('end', () => {
@@ -2279,6 +2284,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         if (!res.headersSent) res.set('Access-Control-Allow-Origin', '*').status(502).json({ error: 'Stream error' });
         else res.end();
     });
+    } catch (error) {
+        if (lifetime.signal.aborted || res.writableEnded || res.destroyed) return;
+        logger.error('[PROXY] Upstream processing failed', error as Error, { requestId });
+        if (!res.headersSent) res.status(502).json({ error: 'Media proxy failed', retryable: true });
+        else res.destroy();
+    }
 });
 
 /**

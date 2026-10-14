@@ -16,6 +16,7 @@ import { initDatabase } from './lib/db.js';
 import { anilistSlot, anilistThrottled, anilistOk, anilistGap } from './lib/anilist-pace.js';
 import { streamExtractor } from './services/stream-extractor.js';
 import { SwrCache } from './lib/swr-cache.js';
+import { runtimeMemoryStats } from './lib/runtime-memory.js';
 // Extend Request interface to include id and reliability utilities
 interface ExtendedRequest extends Request {
     id: string;
@@ -155,7 +156,7 @@ app.head('/', (_req: Request, res: Response) => {
 });
 
 // Health check endpoint (fast response)
-app.get('/health', (_req: Request, res: Response) => {
+app.get('/health', async (_req: Request, res: Response) => {
     // Explicit CORS headers as safety net — this endpoint is probed by the frontend
     const origin = _req.headers.origin;
     res.set('Access-Control-Allow-Origin', origin || '*');
@@ -165,7 +166,9 @@ app.get('/health', (_req: Request, res: Response) => {
         status: 'healthy',
         timestamp: new Date().toISOString(),
         version: '1.0.0',
-        uptime: process.uptime()
+        uptime: process.uptime(),
+        browserExtractorMode: streamExtractor.mode,
+        resources: await runtimeMemoryStats()
     });
 });
 

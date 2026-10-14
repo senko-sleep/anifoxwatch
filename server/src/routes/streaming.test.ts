@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
+import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 const streaming = { getStreamingLinks: vi.fn() };
@@ -31,6 +32,31 @@ beforeEach(() => {
 });
 
 describe('stream failure semantics', () => {
+    it('cancels a stalled segment origin when the player abandons its request', async () => {
+        let sawRequest!: () => void;
+        let sawClose!: () => void;
+        const requested = new Promise<void>(resolve => { sawRequest = resolve; });
+        const closed = new Promise<void>(resolve => { sawClose = resolve; });
+        const upstream = createServer((_req, response) => {
+            sawRequest();
+            response.once('close', sawClose);
+            // A CDN that never sends headers must not outlive a seeking player.
+        });
+        await new Promise<void>(resolve => upstream.listen(0, '127.0.0.1', resolve));
+        const target = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/stall.ts`;
+        const controller = new AbortController();
+        const pending = fetch(`${base}/api/stream/proxy?url=${encodeURIComponent(target)}`, { signal: controller.signal })
+            .catch(() => undefined);
+        try {
+            await requested;
+            controller.abort();
+            await Promise.race([closed, new Promise((_, reject) => setTimeout(() => reject(new Error('Origin was not cancelled')), 1000))]);
+            await pending;
+        } finally {
+            upstream.closeAllConnections();
+            upstream.close();
+        }
+    });
     it('reports resolver exhaustion as a retryable 503, not a missing episode', async () => {
         streaming.getStreamingLinks.mockResolvedValue({ sources: [], subtitles: [] });
 

@@ -1,10 +1,12 @@
 # syntax=docker/dockerfile:1
-# Same image as /Dockerfile. Build context MUST be the repo root (parent of server/):
+# Browser-free Node-only alternative. Build context MUST be the repo root (parent of server/):
 #   docker build -f server/Dockerfile .
 #   docker build -f Dockerfile .
 # (If context is ./server, COPY server/... will fail.)
 
 FROM node:20-slim AS builder
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 WORKDIR /app
 
@@ -23,37 +25,18 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
-    chromium \
-    chromium-sandbox \
     ca-certificates \
     curl \
-    fonts-ipafont-gothic \
-    fonts-wqy-zenhei \
-    fonts-freefont-ttf \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libcups2 \
-    libdrm2 \
-    libgbm1 \
-    libnss3 \
-    libpango-1.0-0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    libxss1 \
     dumb-init \
     && rm -rf /var/lib/apt/lists/*
 
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
-# Mainstream streams require Chromium, including validation of ReAnime embeds.
-# Size the service for browser extraction; disabling it removes those playback paths.
-ENV DISABLE_BROWSER_SOURCES=false
+# Chromium belongs in a separately approved extractor, never in this 512 MB API.
+ENV BROWSER_EXTRACTOR=remote
+ENV LOW_MEMORY_PROFILE=true
+ENV MEMORY_LIMIT_MB=512
 ENV NODE_OPTIONS="--max-old-space-size=220"
 
 WORKDIR /app

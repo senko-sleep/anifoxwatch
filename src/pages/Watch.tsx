@@ -314,6 +314,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   const [bypassCache, setBypassCache] = useState(false);
   const {
     data: streamData,
+    dataUpdatedAt: streamUpdatedAt,
     isLoading: streamLoading,
     error: streamError,
     refetch: refetchStream
@@ -1180,6 +1181,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                 <VideoPlayer
                   key={`${cleanAnimeId}-${selectedEpisodeNum}-${audioType}`}
                   src={videoSource?.url || ''}
+                  reloadToken={streamUpdatedAt}
                   isM3U8={videoSource?.isM3U8}
                   subtitles={streamData?.subtitles}
                   intro={streamData?.intro}
@@ -1218,6 +1220,11 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                           setServerRetryCount(0);
                           setSourceRetryIndex(0);
                           setSelectedServer('');
+                          setUserPickedServer(false);
+                          setFailedProviders([]);
+                          setFailedAniwavesServers([]);
+                          refreshedExpiredProvidersRef.current.clear();
+                          lastFailedSourceRef.current = '';
                           setBypassCache(true);
                           refetchStream();
                         }}
@@ -1232,6 +1239,11 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                           onClick={() => {
                             const currentIndex = servers.findIndex((sv) => sv.name === selectedServer);
                             setSelectedServer(servers[(currentIndex + 1) % servers.length].name);
+                            setUserPickedServer(true);
+                            setServerRetryCount(0);
+                            setFailedProviders([]);
+                            setFailedAniwavesServers([]);
+                            refreshedExpiredProvidersRef.current.clear();
                           }}
                           className="text-[13px] text-white/60 transition-colors hover:text-white"
                         >
@@ -1338,6 +1350,9 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                 setSelectedServer(server);
                 setUserPickedServer(true);
                 setServerRetryCount(0);
+                setFailedProviders([]);
+                setFailedAniwavesServers([]);
+                refreshedExpiredProvidersRef.current.clear();
               }}
               serversLoading={serversLoading}
               autoPlay={autoPlay}

@@ -600,7 +600,21 @@ class AnimeApiClient {
         return response.servers || [];
     }
 
-    async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean, excludedProviders: string[] = []): Promise<StreamingData> {
+    async getStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean, excludedProviders: string[] = [], signal?: AbortSignal): Promise<StreamingData> {
+        const controller = new AbortController();
+        const onAbort = () => controller.abort(signal?.reason);
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener('abort', onAbort, { once: true });
+        const deadline = setTimeout(() => controller.abort(new DOMException('Stream request exceeded 60 seconds', 'TimeoutError')), 60_000);
+        try {
+            return await this.fetchStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache, excludedProviders, controller.signal);
+        } finally {
+            clearTimeout(deadline);
+            signal?.removeEventListener('abort', onAbort);
+        }
+    }
+
+    private async fetchStreamingLinks(episodeId: string, server?: string, category?: string, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean, excludedProviders: string[] = [], signal?: AbortSignal): Promise<StreamingData> {
         // Simple ID normalization - just handle basic episode ID formats
         let slugPart = episodeId;
         let epPart = '';
@@ -639,6 +653,7 @@ class AnimeApiClient {
         console.log(`[API] 📺 Fetching stream for episode: ${episodeId}`, { server, category });
 
         const tryFetch = async (base: string): Promise<StreamingData> => {
+            signal?.throwIfAborted();
             // Resolver requests have a 38s server-side hard deadline. Keep a small
             // transport margin, so the UI can surface a real failure promptly.
             const streamTimeoutMs = 45_000;
@@ -647,13 +662,15 @@ class AnimeApiClient {
 
             for (let attempt = 0; attempt < maxAttempts; attempt++) {
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), streamTimeoutMs);
+                const timeoutId = setTimeout(() => controller.abort(new DOMException('Stream response exceeded 45 seconds', 'TimeoutError')), streamTimeoutMs);
+                const onAbort = () => controller.abort(signal?.reason);
+                if (signal?.aborted) onAbort();
+                else signal?.addEventListener('abort', onAbort, { once: true });
                 try {
                     const response = await fetch(`${base}${streamPath}`, {
                         signal: controller.signal,
                         headers: { 'Accept': 'application/json' }
                     });
-                    clearTimeout(timeoutId);
                     if (!response.ok) {
                         const errorText = await response.text();
                         let errorMessage = `API Error: ${response.status} ${response.statusText}`;
@@ -685,7 +702,7 @@ class AnimeApiClient {
                     if (!contentType || !contentType.includes('application/json')) {
                         throw new Error(`Stream API returned invalid format (${contentType || 'text/html'}).`);
                     }
-                    return response.json();
+                    return await response.json();
                 } catch (e) {
                     clearTimeout(timeoutId);
                     lastErr = e as Error;
@@ -695,6 +712,9 @@ class AnimeApiClient {
                         continue;
                     }
                     throw lastErr;
+                } finally {
+                    clearTimeout(timeoutId);
+                    signal?.removeEventListener('abort', onAbort);
                 }
             }
             throw lastErr || new Error('Stream fetch failed');
@@ -744,6 +764,7 @@ const primaryBase = this.apiBase();
                 });
                 return data;
             } catch (primaryErr) {
+                if (signal?.aborted) throw primaryErr;
                 // Try fallback host before giving up (if configured)
                 const fallback = getApiFallbackUrl();
                 if (fallback && fallback !== primaryBase) {
@@ -771,7 +792,9 @@ const primaryBase = this.apiBase();
                 let woke = false;
                 const deadline = Date.now() + 75_000; // wait up to 75 s
                 while (Date.now() < deadline) {
+                    signal?.throwIfAborted();
                     await new Promise(r => setTimeout(r, 4000));
+                    signal?.throwIfAborted();
                     woke = await ping();
                     if (woke) break;
                 }

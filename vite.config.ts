@@ -87,7 +87,7 @@ export default defineConfig(async ({ mode }) => {
         "/api": {
           target: apiProxyTarget,
           changeOrigin: true,
-          secure: false,
+          secure: true,
           timeout: 35_000,
           proxyTimeout: 35_000,
           configure: (proxy, _options) => {
@@ -106,7 +106,7 @@ export default defineConfig(async ({ mode }) => {
         "/health": {
           target: apiProxyTarget,
           changeOrigin: true,
-          secure: false,
+          secure: true,
           timeout: 10_000,
           proxyTimeout: 10_000,
           configure: (proxy, _options) => {

@@ -44,6 +44,12 @@ export async function resolveProviders(providers: StreamProvider[], request: {
     let unverifiedFallback: StreamingData | undefined;
     const eligibleProviders = providers.filter(provider => provider.getStreamingLinks &&
         !request.excludedProviders?.includes(provider.name));
+    // A playback failure excludes a provider from the normal race, but a
+    // transient CDN error must not permanently strand episodes with one source.
+    // Freshly revalidate it once, after all independent alternatives fail.
+    const recoveryProviders = providers.filter(provider => provider.getStreamingLinks &&
+        request.excludedProviders?.includes(provider.name));
+    const recoveryNames = new Set(recoveryProviders.map(provider => provider.name));
     const orderedProviders = [...eligibleProviders];
     const browserBacked = new Set(['Aniwaves', 'Anichi', 'ReAnime']);
     // A native browser extractor can exhaust a small production instance
@@ -60,6 +66,7 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         remainingProviders.filter(provider => !browserBacked.has(provider.name)),
         remainingProviders.filter(provider => browserBacked.has(provider.name) && provider.name !== 'ReAnime'),
         remainingProviders.filter(provider => provider.name === 'ReAnime'),
+        recoveryProviders,
     ].filter(batch => batch.length > 0);
     const tasksFor = (batch: StreamProvider[], batchSignal: AbortSignal) => batch.map(async provider => {
         const providerStarted = Date.now();
@@ -91,17 +98,26 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         }
         await Promise.resolve();
         const controller = new AbortController();
-        const cancelWithBatch = () => controller.abort();
+        const cancelWithBatch = () => {
+            controller.abort(batchSignal.reason);
+            if (attempt.status === 'pending') {
+                attempt.status = 'cancelled';
+                attempt.endedAt = new Date().toISOString();
+                attempt.durationMs = Date.now() - providerStarted;
+            }
+        };
         if (batchSignal.aborted) controller.abort();
         else batchSignal.addEventListener('abort', cancelWithBatch, { once: true });
         let timeout: ReturnType<typeof setTimeout>;
+        let rejectCancellation: () => void = () => {};
         const providerBudget = provider.name === 'ReAnime' && request.category === 'dub' ? 9_000
             : provider.name === request.nativeProvider ? 18_000 : 9_000;
         const providerTimeout = Math.max(1, Math.min(providerBudget, totalBudgetMs - 25,
             totalBudgetMs - (Date.now() - requestStarted) - 25));
         const options: SourceRequestOptions = {
             signal: controller.signal, timeout: providerTimeout,
-            episodeNum: request.episodeNum, anilistId: request.anilistId, bypassCache: request.bypassCache,
+            episodeNum: request.episodeNum, anilistId: request.anilistId,
+            bypassCache: request.bypassCache || recoveryNames.has(provider.name),
         };
         let stage = 'identity';
         let stageStarted = Date.now();
@@ -145,9 +161,9 @@ export async function resolveProviders(providers: StreamProvider[], request: {
             controller.signal.throwIfAborted();
             beginStage('validateSource');
             let valid = await playableStreams({ ...data, source: provider.name,
-                sources: data.sources.filter(source => !source.category || source.category === request.category) }, controller.signal, request.bypassCache);
+                sources: data.sources.filter(source => !source.category || source.category === request.category) }, controller.signal, options.bypassCache);
             logStage(stage, valid.sources.length ? 'playable' : 'invalid', `sources=${valid.sources.length}`);
-            if (!valid.sources.length && !request.bypassCache && !controller.signal.aborted) {
+            if (!valid.sources.length && !options.bypassCache && !controller.signal.aborted) {
                 // A signed URL can expire before its provider's metadata cache does.
                 beginStage('retryFreshSource');
                 data = await provider.getStreamingLinks!(id, server, request.category, { ...options, bypassCache: true });
@@ -179,7 +195,12 @@ export async function resolveProviders(providers: StreamProvider[], request: {
             return { ...valid, sources: valid.sources.filter(source => source.probeVerified === true) };
         };
         try {
-            return await Promise.race([work(), new Promise<never>((_, reject) => {
+            const cancelled = new Promise<never>((_, reject) => {
+                rejectCancellation = () => reject(controller.signal.reason || new Error('Provider cancelled'));
+                if (controller.signal.aborted) rejectCancellation();
+                else controller.signal.addEventListener('abort', rejectCancellation, { once: true });
+            });
+            return await Promise.race([work(), cancelled, new Promise<never>((_, reject) => {
                 timeout = setTimeout(() => { controller.abort(new Error('Provider timeout')); reject(new Error('Provider timeout')); }, options.timeout);
             })]);
         } catch (error) {
@@ -205,6 +226,7 @@ export async function resolveProviders(providers: StreamProvider[], request: {
             throw error;
         } finally {
             clearTimeout(timeout!);
+            controller.signal.removeEventListener('abort', rejectCancellation);
             batchSignal.removeEventListener('abort', cancelWithBatch);
         }
     });
@@ -225,6 +247,7 @@ export async function resolveProviders(providers: StreamProvider[], request: {
             if ('deadline' in batchResult) break;
             if (batchResult.winner) {
                 const winner = batchResult.winner;
+                batchController.abort(new Error('Another provider won'));
                 console.log(JSON.stringify({ type: 'stream_resolver_result', source: winner.source, status: 'playable',
                     startedAt: new Date(requestStarted).toISOString(), endedAt: new Date().toISOString(),
                     durationMs: Date.now() - requestStarted, providersAttempted: attempts.map(a => a.provider) }));

@@ -100,6 +100,35 @@ describe('provider fallback and identity', () => {
         const result = await resultPromise;
         expect(result.sources).toEqual([]);
         expect(Date.now() - started).toBeLessThan(500);
+        expect(result.attempts?.[0].status).toBe('cancelled');
+    });
+    it('tries an excluded provider once with fresh verified media after alternatives fail', async () => {
+        const order: string[] = [];
+        const failed = provider('RecoveryAlternative', {
+            getStreamingLinks: async () => { order.push('alternative'); return { sources: [], subtitles: [] }; },
+        });
+        const recovered = provider('RecoverFresh', {
+            getStreamingLinks: vi.fn(async (_id, _server, _category, options) => {
+                order.push('fresh');
+                expect(options?.bypassCache).toBe(true);
+                return data('/master.m3u8');
+            }),
+        });
+        const result = await resolveProviders([failed, recovered], {
+            ...request, bypassCache: true, excludedProviders: ['RecoverFresh'], timeoutMs: 2000,
+        });
+        expect(result.source).toBe('RecoverFresh');
+        expect(result.sources[0].probeVerified).toBe(true);
+        expect(order).toEqual(['alternative', 'fresh']);
+        expect(recovered.getStreamingLinks).toHaveBeenCalledTimes(1);
+    });
+    it('does not retry an excluded provider when an independent source plays', async () => {
+        const excluded = provider('ExcludedHealthyUnused');
+        const result = await resolveProviders([provider('HealthyAlternative'), excluded], {
+            ...request, excludedProviders: ['ExcludedHealthyUnused'],
+        });
+        expect(result.source).toBe('HealthyAlternative');
+        expect(excluded.getStreamingLinks).not.toHaveBeenCalled();
     });
     it('caps cross-provider timeouts while preserving a separately bounded native budget', async () => {
         let fallbackTimeout: number | undefined;

@@ -7,6 +7,7 @@ import { fetchSeasonalFromAniList, fetchRelatedFromAniList, fetchSeasonChain, fe
 import { fetchKitsuEpisodeDetails, type EpisodeDetail } from '@/lib/kitsu-episodes';
 import { searchAniList, browseAniList } from '@/lib/anilist-browse';
 import { hentaiApi, type HentaiSort } from '@/lib/hentai-client';
+import { streamQueryKey } from '@/lib/stream-query';
 
 // ─── Direct AniList seasonal fallback ────────────────────────────────────────
 // Used when the server-side /api/anime/seasonal returns empty (e.g. AniList
@@ -410,10 +411,10 @@ export function useEpisodeServers(episodeId: string, enabled: boolean = true) {
 
 export function useStreamingLinks(episodeId: string, server?: string, category?: string, enabled: boolean = true, episodeNum?: number, anilistId?: number, animeTitle?: string, bypassCache?: boolean, excludedProviders: string[] = []) {
     return useQuery<StreamingData, Error>({
-        queryKey: [...queryKeys.stream(episodeId, server, category), episodeNum, anilistId, animeTitle, bypassCache, excludedProviders.join(',')],
-        queryFn: async () => {
+        queryKey: streamQueryKey(episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache, excludedProviders),
+        queryFn: async ({ signal }) => {
             console.log('[useStreamingLinks] Fetching stream:', { episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache });
-            const result = await apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache, excludedProviders);
+            const result = await apiClient.getStreamingLinks(episodeId, server, category, episodeNum, anilistId, animeTitle, bypassCache, excludedProviders, signal);
             console.log('[useStreamingLinks] Stream result:', {
                 sourceCount: result.sources?.length || 0,
                 source: result.source,
@@ -422,7 +423,7 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
             return result;
         },
         enabled: enabled && episodeId.length > 0,
-        staleTime: 5 * 60 * 1000,  // Cache for 5 min to reduce UI struggling on episode switch
+        staleTime: bypassCache ? 0 : 5 * 60 * 1000,
         gcTime: 10 * 60 * 1000,     // Keep in memory for 10 min
         // FAST STARTUP: Reduced retries to avoid abort signal conflicts
         retry: (failureCount, error) => {
@@ -519,12 +520,12 @@ export function usePrefetchDubStream(
 
     useEffect(() => {
         if (!enabled || !episodeId || !hasDub || !subStreamReady) return;
-        const streamKey = queryKeys.stream(episodeId, undefined, 'dub');
+        const streamKey = streamQueryKey(episodeId, undefined, 'dub', episodeNum, anilistId, animeTitle);
         if (queryClient.getQueryData(streamKey)) return;
         queryClient.prefetchQuery({
             queryKey: streamKey,
-            queryFn: () => apiClient.getStreamingLinks(episodeId, undefined, 'dub', episodeNum, anilistId, animeTitle),
-            staleTime: 15 * 60 * 1000,
+            queryFn: ({ signal }) => apiClient.getStreamingLinks(episodeId, undefined, 'dub', episodeNum, anilistId, animeTitle, false, [], signal),
+            staleTime: 5 * 60 * 1000,
         });
     }, [enabled, episodeId, hasDub, subStreamReady, episodeNum, anilistId, animeTitle, queryClient]);
 }
@@ -549,15 +550,14 @@ export function usePrefetchNextEpisode() {
                 staleTime: 60 * 60 * 1000,
             });
         }
-        // Prefetch streaming links (auto server) so video loads instantly on episode switch.
-        // 15min staleTime matches the live streaming hook — data stays fresh for the whole
-        // watch session without re-fetching when the user clicks Next Episode.
-        const streamKey = queryKeys.stream(episodeId, undefined, category);
+        // Use the foreground query identity and freshness window so Next reuses
+        // the prefetched result without extending the life of signed media URLs.
+        const streamKey = streamQueryKey(episodeId, undefined, category, episodeNum, anilistId, animeTitle);
         if (!queryClient.getQueryData(streamKey)) {
             queryClient.prefetchQuery({
                 queryKey: streamKey,
-                queryFn: () => apiClient.getStreamingLinks(episodeId, undefined, category, episodeNum, anilistId, animeTitle),
-                staleTime: 15 * 60 * 1000,
+                queryFn: ({ signal }) => apiClient.getStreamingLinks(episodeId, undefined, category, episodeNum, anilistId, animeTitle, false, [], signal),
+                staleTime: 5 * 60 * 1000,
             });
         }
     };

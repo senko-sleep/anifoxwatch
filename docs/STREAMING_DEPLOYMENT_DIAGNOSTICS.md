@@ -1,5 +1,11 @@
 # Streaming deployment diagnostic record
 
+The September entries below are historical. Current production uses
+`https://poor-marne-sssssenko-05a416b4.koyeb.app` and the repository-root Dockerfile,
+as inspected on October 13, 2026. See [the current Koyeb release procedure](../deploy/KOYEB.md)
+for browser-free 512 MB settings and decoded-playback acceptance. Older statements about
+`DISABLE_BROWSER_SOURCES` and the previous public hostname do not describe current settings.
+
 ## 2026-09-27: Koyeb playback failure
 
 | Test | Result | What it establishes |

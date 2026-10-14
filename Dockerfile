@@ -37,6 +37,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # ── Node API build ─────────────────────────────────────────────────────────────
 FROM node:20-slim AS builder
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 
 WORKDIR /app
 
@@ -69,8 +71,10 @@ ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 ENV BROWSER_EXTRACTOR=remote
-# Without Chromium in the process the API can use more of the 512MB for itself.
-ENV NODE_OPTIONS="--max-old-space-size=300"
+# Reserve room for Buffers, native allocations, and the media proxy within 512 MB.
+ENV LOW_MEMORY_PROFILE=true
+ENV MEMORY_LIMIT_MB=512
+ENV NODE_OPTIONS="--max-old-space-size=220"
 
 WORKDIR /app
 
@@ -94,6 +98,6 @@ ENV NODE_PORT=3001
 ENV MEDIA_ACCEL=1
 EXPOSE 8080 
 
-# dumb-init reaps the zombies Chromium leaves behind and forwards signals to the whole group.
+# Reap child processes and forward shutdown signals to the whole process group.
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["/usr/local/bin/start.sh"]
