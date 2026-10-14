@@ -16,6 +16,7 @@
  */
 import { chromium } from 'playwright';
 import { appendFileSync } from 'node:fs';
+import https from 'node:https';
 
 const URL0 = process.env.URL ?? 'https://anifoxwatch.web.app/watch/anime/you-and-i-are-polar-opposites-season-2-210031?lang=sub&ep=1&s=2';
 const RUNS = +(process.env.RUNS ?? 20);
@@ -117,13 +118,40 @@ function trackNet(page, r) {
   });
 }
 
+/** GET /health on a brand-new TCP+TLS connection (no pooled socket can be reused). */
+function freshConnectionHealth(timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(`${API}/health`, { agent: false, timeout: timeoutMs }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => { try { resolve({ httpStatus: res.statusCode, ...JSON.parse(body) }); } catch (e) { reject(e); } });
+    });
+    req.on('timeout', () => req.destroy(new Error('fresh-connection health timed out')));
+    req.on('error', reject);
+  });
+}
+
 async function healthSample() {
   const started = performance.now();
   try {
     const response = await fetch(`${API}/health`, { signal: AbortSignal.timeout(10_000) });
     const health = await response.json();
     return { at: new Date().toISOString(), ms: performance.now() - started, httpStatus: response.status, ...health };
-  } catch (error) { return { at: new Date().toISOString(), ms: performance.now() - started, error: error.message }; }
+  } catch (error) {
+    // fetch reuses pooled keep-alive sockets, and one that the platform edge dropped while idle
+    // swallows the request until the timeout (seen 04:13 UTC: the in-container watchdog and the
+    // browser's own requests reached the API throughout). Ask again on a fresh connection; only a
+    // failure there says the API itself is unresponsive. Both outcomes are recorded.
+    const retryStarted = performance.now();
+    try {
+      const health = await freshConnectionHealth(10_000);
+      return { at: new Date().toISOString(), ms: performance.now() - started, freshMs: performance.now() - retryStarted,
+        pooledError: error.message, staleConnection: true, ...health };
+    } catch (freshError) {
+      return { at: new Date().toISOString(), ms: performance.now() - started, error: error.message, freshError: freshError.message };
+    }
+  }
 }
 
 async function fullRun(browser, n) {
