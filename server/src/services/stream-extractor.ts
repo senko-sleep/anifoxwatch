@@ -1,4 +1,6 @@
 import { logger } from '../utils/logger.js';
+import { cacheTtlForUrls } from '../utils/signed-url.js';
+import { DisabledStreamExtractor, RemoteStreamExtractor } from './remote-extractor.js';
 
 let puppeteer: any = null;
 
@@ -9,14 +11,14 @@ let puppeteer: any = null;
  */
 const LAUNCH_TIMEOUT_MS = Number(process.env.PUPPETEER_LAUNCH_TIMEOUT_MS) || (process.env.NODE_ENV === 'production' ? 60_000 : 20_000);
 
-interface ExtractedStream {
+export interface ExtractedStream {
     url: string;
     quality: string;
     type: 'hls' | 'mp4';
     headers?: Record<string, string>;
 }
 
-interface ExtractionResult {
+export interface ExtractionResult {
     playbackVerified?: boolean;
     success: boolean;
     streams: ExtractedStream[];
@@ -30,8 +32,52 @@ class StreamExtractor {
     // In-flight deduplication: if the same embed URL is being extracted concurrently,
     // share the result instead of launching multiple Puppeteer pages.
     private inFlight: Map<string, Promise<ExtractionResult>> = new Map();
-    private resultCache: Map<string, { result: ExtractionResult; timestamp: number }> = new Map();
-    private readonly RESULT_CACHE_TTL_MS = 30 * 60 * 1000;
+    private resultCache: Map<string, { result: ExtractionResult; expiresAt: number }> = new Map();
+    private readonly RESULT_CACHE_TTL_MS = 15 * 60 * 1000;
+    readonly mode = 'local' as const;
+
+    // ─── Idle shutdown ──────────────────────────────────────────────────────
+    // Chromium is only needed while a stream is being resolved, never while it plays. Once no
+    // page or context has been in use for BROWSER_IDLE_CLOSE_MS the browser is closed; the next
+    // extraction relaunches it. On Cloud Run this keeps a warm instance from holding ~300MB of
+    // Chromium between requests; locally it stops a dev server from keeping one forever.
+    private activeContexts = 0;
+    private lastActivity = Date.now();
+    private readonly IDLE_CLOSE_MS = Number(process.env.BROWSER_IDLE_CLOSE_MS) || 60_000;
+    private idleTimer: ReturnType<typeof setInterval> | null = null;
+    private readonly counters = { launches: 0, idleCloses: 0, pagesOpened: 0, contextsOpened: 0, extractions: 0, cacheHits: 0, inFlightJoins: 0 };
+
+    private touch(): void {
+        this.lastActivity = Date.now();
+        if (this.idleTimer) return;
+        this.idleTimer = setInterval(() => void this.closeIfIdle(), Math.min(15_000, this.IDLE_CLOSE_MS));
+        this.idleTimer.unref?.();
+    }
+
+    private async closeIfIdle(): Promise<void> {
+        const busy = this.activePages > 0 || this.activeContexts > 0 || this.inFlight.size > 0 || this.browserLaunchPromise;
+        if (busy || Date.now() - this.lastActivity < this.IDLE_CLOSE_MS) return;
+        if (this.idleTimer) { clearInterval(this.idleTimer); this.idleTimer = null; }
+        if (!this.browser) return;
+        this.counters.idleCloses++;
+        logger.info(`[StreamExtractor] Browser idle for ${Math.round(this.IDLE_CLOSE_MS / 1000)}s — closing`);
+        await this.close().catch(() => {});
+    }
+
+    /** What the browser is doing right now — for the extractor service's /v1/stats and tests. */
+    stats() {
+        return {
+            mode: this.mode,
+            browserOpen: !!this.browser?.connected,
+            browserPid: this.browser?.process?.()?.pid ?? null,
+            activePages: this.activePages,
+            activeContexts: this.activeContexts,
+            inFlight: this.inFlight.size,
+            cachedResults: this.resultCache.size,
+            idleMs: Date.now() - this.lastActivity,
+            ...this.counters,
+        };
+    }
 
     // ─── Launch circuit breaker ─────────────────────────────────────────────
     // A host that cannot run Chromium cannot run it on the next request either, and every
@@ -79,9 +125,28 @@ class StreamExtractor {
      * second browser process is what tips the instance into swap and stalls the API.
      * Closing the context closes only its pages.
      */
+    /** Only meaningful remotely; with a local browser the sources run in this process. */
+    async runSource<T>(source: string, method: string): Promise<T> {
+        throw new Error(`runSource(${source}.${method}) is for remote extraction; this process has a local browser`);
+    }
+
     async newContext(): Promise<any> {
-        const browser = await this.getBrowser();
-        return browser.createBrowserContext();
+        this.activeContexts++;
+        this.touch();
+        try {
+            const context = await (await this.getBrowser()).createBrowserContext();
+            this.counters.contextsOpened++;
+            const close = context.close.bind(context);
+            let closed = false;
+            context.close = async () => {
+                if (!closed) { closed = true; this.activeContexts--; this.touch(); }
+                return close();
+            };
+            return context;
+        } catch (error) {
+            this.activeContexts--;
+            throw error;
+        }
     }
 
     /**
@@ -165,6 +230,8 @@ class StreamExtractor {
 
             this.browser = await this.browserLaunchPromise;
             this.launchFailures = 0;
+            this.counters.launches++;
+            this.touch();
             this.browser.once('disconnected', () => {
                 logger.warn('[StreamExtractor] Browser disconnected — next request relaunches');
                 this.browser = null;
@@ -209,6 +276,8 @@ class StreamExtractor {
         }
         signal?.throwIfAborted();
         this.activePages++;
+        this.counters.pagesOpened++;
+        this.touch();
 
         try {
             const browser = await this.getBrowser();
@@ -561,8 +630,9 @@ class StreamExtractor {
     async extractFromEmbed(embedUrl: string, timeoutMs?: number, verifyPlayback = false, bypassCache = false, signal?: AbortSignal): Promise<ExtractionResult> {
         const cacheId = `${embedUrl}:${verifyPlayback}`;
         const cached = this.resultCache.get(cacheId);
-        if (cached && Date.now() - cached.timestamp < (verifyPlayback ? 30000 : this.RESULT_CACHE_TTL_MS) && cached.result.success && !bypassCache) {
+        if (cached && Date.now() < cached.expiresAt && cached.result.success && !bypassCache) {
             logger.info(`[StreamExtractor] Cache hit for embed: ${embedUrl.substring(0, 80)}...`);
+            this.counters.cacheHits++;
             return cached.result;
         }
 
@@ -576,15 +646,19 @@ class StreamExtractor {
         const existing = this.inFlight.get(cacheId);
         if (existing) {
             logger.info(`[StreamExtractor] Reusing in-flight extraction for: ${embedUrl.substring(0, 80)}...`);
+            this.counters.inFlightJoins++;
             return existing;
         }
 
         logger.info(`[StreamExtractor] Extracting from embed: ${embedUrl.substring(0, 80)}...`);
+        this.counters.extractions++;
 
         const extractionPromise = this._extractFromEmbedImpl(embedUrl, timeoutMs, verifyPlayback, signal)
             .then((result) => {
                 if (result.success && result.streams.length > 0) {
-                    this.resultCache.set(cacheId, { result, timestamp: Date.now() });
+                    // Capped by the streams' own signed-URL expiry, if they state one.
+                    const ttl = cacheTtlForUrls(result.streams.map((s) => s.url), verifyPlayback ? 30_000 : this.RESULT_CACHE_TTL_MS);
+                    if (ttl > 0) this.resultCache.set(cacheId, { result, expiresAt: Date.now() + ttl });
                 }
                 return result;
             });
@@ -835,5 +909,36 @@ class StreamExtractor {
     }
 }
 
-// Export singleton instance
-export const streamExtractor = new StreamExtractor();
+export type BrowserExtractor = StreamExtractor | RemoteStreamExtractor | DisabledStreamExtractor;
+
+/**
+ * Where Chromium runs, chosen once at startup:
+ *   BROWSER_EXTRACTOR=local   this process launches it (development; the Cloud Run extractor)
+ *   BROWSER_EXTRACTOR=remote  the Cloud Run extractor at EXTRACTOR_URL, authenticated with
+ *                             EXTRACTOR_TOKEN (the API on Koyeb)
+ *   BROWSER_EXTRACTOR=off     nowhere; browser-only paths fail at once and the browser-free
+ *                             providers carry playback
+ * Unset: remote when EXTRACTOR_URL is set; otherwise local in development and off in
+ * production — a production API never launches Chromium unless told to.
+ */
+function createStreamExtractor(): BrowserExtractor {
+    const configured = (process.env.BROWSER_EXTRACTOR || '').trim().toLowerCase();
+    const mode = configured || (process.env.EXTRACTOR_URL ? 'remote' : process.env.NODE_ENV === 'production' ? 'off' : 'local');
+    if (mode === 'remote') {
+        const url = process.env.EXTRACTOR_URL?.trim();
+        const token = process.env.EXTRACTOR_TOKEN?.trim();
+        if (url && token) {
+            logger.info(`[StreamExtractor] Browser extraction is remote: ${new URL(url).origin}`);
+            return new RemoteStreamExtractor(url, token);
+        }
+        logger.error('[StreamExtractor] BROWSER_EXTRACTOR=remote needs EXTRACTOR_URL and EXTRACTOR_TOKEN; browser extraction is off');
+        return new DisabledStreamExtractor();
+    }
+    if (mode === 'off' || process.env.FORCE_DISABLE_BROWSER_SOURCES === 'true') {
+        logger.info('[StreamExtractor] Browser extraction is off on this host');
+        return new DisabledStreamExtractor();
+    }
+    return new StreamExtractor();
+}
+
+export const streamExtractor: BrowserExtractor = createStreamExtractor();

@@ -38,7 +38,7 @@ export class ReAnimeSource extends BaseAnimeSource {
     }
 
     /** Prefer curl/axios; use the shared browser only when Cloudflare requires JavaScript. */
-    private async fetchJson<T>(path: string, options?: SourceRequestOptions): Promise<T> {
+    private async fetchJson<T>(path: string, options?: SourceRequestOptions, allowBrowser = true): Promise<T> {
         const url = path.startsWith('http') ? path : `${this.baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
         const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
         // Leave enough of the provider budget for Chromium to clear the JS challenge.
@@ -71,7 +71,7 @@ export class ReAnimeSource extends BaseAnimeSource {
             } catch (axiosErr: any) {
                 const status = axiosErr?.response?.status;
                 const challenge = status === 403 || axiosErr?.response?.headers?.['cf-mitigated'] === 'challenge';
-                if (challenge) {
+                if (challenge && allowBrowser) {
                     logger.info('[ReAnime] Cloudflare challenge detected; retrying with shared Chromium', undefined, this.name);
                     try {
                         return await streamExtractor.fetchJsonInBrowser<T>(url, {
@@ -105,10 +105,12 @@ export class ReAnimeSource extends BaseAnimeSource {
 
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
         try {
-            const data = await this.fetchJson<any>('/api/v1/search?q=cat', options);
+            // No Chromium fallback here: this runs from the 60s recovery loop.
+            const data = await this.fetchJson<any>('/api/v1/search?q=cat', options, false);
             return !!data;
-        } catch {
-            return false;
+        } catch (error: any) {
+            // A Cloudflare challenge means the site is up; real requests clear it in the browser.
+            return error?.response?.status === 403;
         }
     }
 

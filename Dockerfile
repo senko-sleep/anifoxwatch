@@ -52,44 +52,25 @@ RUN npx tsc --project tsconfig.json
 FROM node:20-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
+# No Chromium in this image, by design: on a 512MB instance a browser next to the API is what
+# stalled it. Browser extraction runs in the separate Cloud Run service (server/Dockerfile.extractor)
+# and is reached over HTTPS via EXTRACTOR_URL / EXTRACTOR_TOKEN. With no browser binary here,
+# nothing can launch one by accident. curl stays: the HentaiHaven source shells out to it.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update -qq \
     && apt-get install -qq -y --no-install-recommends \
-    chromium \
-    chromium-sandbox \
     ca-certificates \
     curl \
-    fonts-ipafont-gothic \
-    fonts-wqy-zenhei \
-    fonts-freefont-ttf \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libcups2 \
-    libdrm2 \
-    libgbm1 \
-    libnss3 \
-    libpango-1.0-0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxkbcommon0 \
-    libxrandr2 \
-    libxss1 \
     dumb-init \
     && rm -rf /var/lib/apt/lists/*
 
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV NODE_ENV=production
-# Mainstream streams require Chromium, including validation of ReAnime embeds.
-# Size the service for browser extraction; disabling it removes those playback paths.
-ENV DISABLE_BROWSER_SOURCES=false
-# Node no longer carries media bytes, so its heap is sized for the API alone. The headroom this
-# frees on a 512MB box goes to Chromium, whose launch is the thing that actually runs out of it.
-ENV NODE_OPTIONS="--max-old-space-size=220"
+ENV BROWSER_EXTRACTOR=remote
+# Without Chromium in the process the API can use more of the 512MB for itself.
+ENV NODE_OPTIONS="--max-old-space-size=300"
 
 WORKDIR /app
 

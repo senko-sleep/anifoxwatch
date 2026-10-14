@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js';
 import * as cheerio from 'cheerio';
 
 import { streamExtractor } from '../services/stream-extractor.js';
+import { cacheTtlForUrls } from '../utils/signed-url.js';
 
 export class AnichiSource extends BaseAnimeSource {
     name = 'Anichi';
@@ -53,30 +54,48 @@ export class AnichiSource extends BaseAnimeSource {
         return () => signal?.removeEventListener('abort', close);
     }
 
+    /**
+     * Plain HTTP, never a browser: this runs from the 60s recovery loop, and starting Chromium
+     * there costs memory (or Cloud Run time) for nobody. A Cloudflare challenge (403/503 with
+     * a body) still means the site is up; real requests have their own circuit breakers.
+     */
     async healthCheck(options?: SourceRequestOptions): Promise<boolean> {
-        let browser;
-        let unbindAbort = () => {};
         try {
-            browser = await this.getBrowser(options?.timeout);
-            unbindAbort = this.bindBrowserAbort(browser, options?.signal);
-            options?.signal?.throwIfAborted();
-            const page = await browser.newPage();
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
-            const resp = await page.goto('https://anichi.to', { waitUntil: 'domcontentloaded', timeout: 10000 });
-            await page.close();
-            return resp.status() === 200;
+            const timeout = AbortSignal.timeout(options?.timeout ?? 8_000);
+            const res = await fetch(this.baseUrl, {
+                method: 'HEAD',
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36' },
+                signal: options?.signal ? AbortSignal.any([options.signal, timeout]) : timeout,
+            });
+            return res.status < 500 || res.status === 503;
         } catch {
             return false;
-        } finally {
-            unbindAbort();
-            if (browser) await browser.close().catch(() => {});
         }
+    }
+
+    /**
+     * When Chromium is not in this process (the API on Koyeb), the browser-driven methods run
+     * on the extractor service instead — the same code, called there in its local mode.
+     * Only plain data crosses: options are reduced to what the methods read from them.
+     */
+    private get remote(): boolean {
+        return streamExtractor.mode !== 'local';
+    }
+
+    private viaExtractor<T>(method: 'search' | 'getEpisodes' | 'getStreamingLinks', args: unknown[], options?: SourceRequestOptions): Promise<T> {
+        const plain = options && { episodeNum: options.episodeNum, anilistId: options.anilistId, bypassCache: options.bypassCache };
+        return streamExtractor.runSource<T>(this.name, method, [...args, plain], options?.timeout ?? 25_000, options?.signal);
     }
 
     async search(query: string, pageNum: number = 1, filters?: any, options?: SourceRequestOptions): Promise<AnimeSearchResult> {
         const cacheKey = `search:${query}:${pageNum}`;
         const cached = this.getCached<AnimeSearchResult>(cacheKey);
         if (cached) return cached;
+        if (this.remote) {
+            const result = await this.viaExtractor<AnimeSearchResult>('search', [query, pageNum, filters], options);
+            this.setCache(cacheKey, result);
+            return result;
+        }
 
         let browser;
         let unbindAbort = () => {};
@@ -162,6 +181,11 @@ export class AnichiSource extends BaseAnimeSource {
         const cacheKey = `episodes:${cleanId}`;
         const cached = this.getCached<Episode[]>(cacheKey);
         if (cached) return cached;
+        if (this.remote) {
+            const episodes = await this.viaExtractor<Episode[]>('getEpisodes', [animeId], options);
+            if (episodes.length) this.setCache(cacheKey, episodes);
+            return episodes;
+        }
 
         let browser;
         let unbindAbort = () => {};
@@ -249,6 +273,12 @@ export class AnichiSource extends BaseAnimeSource {
         const cacheKey = `stream:${cleanSlug}:${epNum}:${category}`;
         const cached = this.getCached<StreamingData>(cacheKey);
         if (cached && !options?.bypassCache) return cached;
+        if (this.remote) {
+            const data = await this.viaExtractor<StreamingData>('getStreamingLinks', [episodeId, server, category], options);
+            const ttl = cacheTtlForUrls((data.sources ?? []).map((s) => s.url), this.CACHE_TTL);
+            if (data.sources?.length && ttl > 0) this.setCache(cacheKey, data, ttl);
+            return data;
+        }
 
         let browser;
         let unbindAbort = () => {};

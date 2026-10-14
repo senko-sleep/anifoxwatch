@@ -12,6 +12,7 @@ declare module 'express' {
 }
 
 import { logger } from '../utils/logger.js';
+import { cacheTtlForUrls } from '../utils/signed-url.js';
 import { streamExtractor } from '../services/stream-extractor.js';
 import axios, { type AxiosResponse } from 'axios';
 import https from 'node:https';
@@ -434,7 +435,13 @@ function streamCacheSet(key: string, data: any, ttlOverride?: number): void {
             if (oldest) streamCache.delete(oldest);
         }
     }
-    const ttl = ttlOverride != null ? ttlOverride : STREAM_CACHE_TTL;
+    // Never past the earliest signed-URL expiry among the sources: an expired link that is
+    // still cached would be served as if it played.
+    const ttl = cacheTtlForUrls(
+        (data.sources as VideoSource[]).map((s) => s.originalUrl || s.url),
+        ttlOverride != null ? ttlOverride : STREAM_CACHE_TTL,
+    );
+    if (ttl <= 0) return;
     streamCache.set(key, { data, expiresAt: Date.now() + ttl });
 }
 
@@ -1011,7 +1018,7 @@ router.get('/diag', async (req: Request, res: Response): Promise<void> => {
     }
 
     // 3. Can Chromium start here, and how long does it take from cold?
-    if (process.env.DISABLE_BROWSER_SOURCES !== 'true') {
+    if (streamExtractor.mode !== 'off') {
         const probe = await run('chromium launch probe', () => streamExtractor.probe());
         if (probe) stages[stages.length - 1].detail = probe;
 

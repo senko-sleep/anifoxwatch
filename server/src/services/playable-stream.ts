@@ -91,7 +91,7 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
                 // If browser sources are disabled on this host (e.g. low-memory Koyeb/Render container),
                 // or if the embed is an iframe player (FlixCloud, etc.), pass it directly to the client.
                 const isIframeTarget = source.url && /flixcloud|megacloud|rabbitstream|streamtape|streamwish/i.test(source.url);
-                if (process.env.DISABLE_BROWSER_SOURCES === 'true' || isIframeTarget) {
+                if (streamExtractor.mode === 'off' || isIframeTarget) {
                     return [{ ...source, probeVerified: false }];
                 }
                 try {
