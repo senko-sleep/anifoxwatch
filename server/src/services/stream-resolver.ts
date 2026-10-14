@@ -4,6 +4,10 @@ import { playableStreams } from './playable-stream.js';
 
 export type StreamProvider = AnimeSource & {
     acceptsAniListId?: boolean;
+    /** Builds this provider's episode id straight from a MAL id, skipping title search. */
+    idForMal?(malId: number, episodeNum: number): string;
+    /** Per-attempt budget for a provider whose upstream is known to answer slowly when cold. */
+    streamBudgetMs?: number;
     getStreamingLinks?(id: string, server?: string, category?: 'sub' | 'dub', options?: SourceRequestOptions): Promise<StreamingData>;
 };
 
@@ -19,7 +23,7 @@ export function sameTitle(a: string, b: string): boolean {
 }
 
 export async function resolveProviders(providers: StreamProvider[], request: {
-    episodeId: string; episodeNum: number; nativeProvider?: string; anilistId?: number;
+    episodeId: string; episodeNum: number; nativeProvider?: string; anilistId?: number; malId?: number;
     titles: string[]; category: 'sub' | 'dub'; server?: string; bypassCache?: boolean;
     timeoutMs?: number; excludedProviders?: string[]; signal?: AbortSignal;
 }): Promise<StreamingData> {
@@ -110,7 +114,8 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         else batchSignal.addEventListener('abort', cancelWithBatch, { once: true });
         let timeout: ReturnType<typeof setTimeout>;
         let rejectCancellation: () => void = () => {};
-        const providerBudget = provider.name === 'ReAnime' && request.category === 'dub' ? 9_000
+        const providerBudget = provider.streamBudgetMs ? provider.streamBudgetMs
+            : provider.name === 'ReAnime' && request.category === 'dub' ? 9_000
             : provider.name === request.nativeProvider ? 18_000 : 9_000;
         const providerTimeout = Math.max(1, Math.min(providerBudget, totalBudgetMs - 25,
             totalBudgetMs - (Date.now() - requestStarted) - 25));
@@ -132,6 +137,7 @@ export async function resolveProviders(providers: StreamProvider[], request: {
         const work = async () => {
             let id: string | undefined;
             if (provider.name === request.nativeProvider) id = request.episodeId;
+            else if (provider.idForMal && request.malId) id = provider.idForMal(request.malId, request.episodeNum);
             else if (provider.acceptsAniListId && request.anilistId) id = `anilist-${request.anilistId}`;
             else {
                 for (const title of request.titles) {

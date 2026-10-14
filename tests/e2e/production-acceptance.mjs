@@ -11,7 +11,7 @@
  *   3. currentTime advances >= 0.8 * PLAY_SEC over PLAY_SEC of wall time with no stall > STALL_SEC,
  *   4. seek forward and backward both land and keep playing,
  *   5. pause holds the clock still, resume moves it again,
- *   6. a reload restores the saved position (Continue Watching), within 15s.
+ *   6. a reload restores the saved position (Continue Watching), within 3s.
  * Results are appended as JSON lines to OUT.
  */
 import { chromium } from 'playwright';
@@ -75,7 +75,7 @@ async function seekTo(page, t) {
   while (performance.now() - t0 < 30_000) {
     await sleep(250);
     const s = await state(page);
-    if (s.video && Math.abs(s.t - t) < 20 && s.rs >= 3 && !s.paused) {
+    if (s.video && Math.abs(s.t - t) < 3 && s.rs >= 3 && !s.paused) {
       const o = await observe(page, 5);
       return { ok: o.advance >= 2.5 && o.frames > 0, ms: performance.now() - t0, ...o };
     }
@@ -184,7 +184,7 @@ async function fullRun(browser, n) {
     const rf = await waitFirstFrame(page, 90_000);
     const rs = await state(page);
     r.steps.resume = { savedNear: before.t, resumedAt: rs.t ?? null, ms: performance.now() - t1, keys: Object.keys(saved), firstFrame: rf };
-    if (!rf.ok || Math.abs(rs.t - before.t) > 20) throw new Error(`resume failed ${JSON.stringify(r.steps.resume)} saved=${JSON.stringify(saved)}`);
+    if (!rf.ok || Math.abs(rs.t - before.t) > 3) throw new Error(`resume failed ${JSON.stringify(r.steps.resume)} saved=${JSON.stringify(saved)}`);
     r.pass = true;
   } catch (e) {
     r.pass = false;

@@ -3201,7 +3201,12 @@ export class SourceManager {
         const titles = title && !/^\d+$/.test(title) ? [title] : [];
         const adult = /^(watchhentai|hentaimama|hentaihaven|hanime|akih|hentai)-/i.test(episodeId) || (!!title && isLikelyHentai(title));
         // Canonical identity is resolved once, never inferred from another provider's numeric ID.
-        if (!adult && !(anilistId && forcedTitle)) {
+        let malId: number | undefined;
+        if (!adult && anilistId && forcedTitle) {
+            // Titles are already known; only the MAL id is wanted. The watch page has just loaded
+            // this record, so it is normally a cache hit; a slow AniList must not delay resolution.
+            malId = (await withTimeout(() => anilistService.getAnimeById(anilistId!), 1500).catch(() => null))?.malId;
+        } else if (!adult) {
             const identityStarted = Date.now();
             console.log(JSON.stringify({ type: 'stream_identity_lookup', status: 'start', startedAt: new Date(identityStarted).toISOString(),
                 animeId: anilistId || episodeId, hasTitle: !!title }));
@@ -3209,10 +3214,11 @@ export class SourceManager {
                 const info = await withTimeout(() => anilistId ? anilistService.getAnimeById(anilistId) : anilistService.searchByTitle(title), 5000);
                 if (info && (anilistId || [info.title, info.titleEnglish, info.titleRomaji, info.titleJapanese].some(alias => alias && sameTitle(title, alias)))) {
                     anilistId ||= Number(info.id.match(/^anilist-(\d+)/)?.[1]) || undefined;
+                    malId = info.malId;
                     if (info.title) titles.push(info.title);
                 }
                 console.log(JSON.stringify({ type: 'stream_identity_lookup', status: 'complete', endedAt: new Date().toISOString(),
-                    durationMs: Date.now() - identityStarted, anilistId, titleCount: titles.length }));
+                    durationMs: Date.now() - identityStarted, anilistId, malId, titleCount: titles.length }));
             } catch (error) {
                 console.warn(JSON.stringify({ type: 'stream_identity_lookup', status: 'failed', endedAt: new Date().toISOString(),
                     durationMs: Date.now() - identityStarted, reason: (error as Error).message }));
@@ -3225,7 +3231,7 @@ export class SourceManager {
             !(browserBackedSourcesDisabled() && BROWSER_BACKED_STREAM_SOURCES.has(source.name)));
         const native = providers.find(source => episodeId.toLowerCase().startsWith(source.name.toLowerCase() + '-'));
         return resolveProviders(providers, {
-            episodeId, episodeNum: number, nativeProvider: native?.name, anilistId,
+            episodeId, episodeNum: number, nativeProvider: native?.name, anilistId, malId,
             titles: [...new Set(titles.flatMap(t => this.titleSearchVariants(t)))],
             category, server, bypassCache, excludedProviders, signal, timeoutMs,
         });

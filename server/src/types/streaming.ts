@@ -28,6 +28,8 @@ export interface VideoSource {
     skipProbe?: boolean;
     /** True after a media-byte probe or extractor-observed decoded playback. */
     probeVerified?: boolean;
+    /** Epoch ms when the provider itself probed this URL's media bytes; a fresh one is not re-probed. */
+    verifiedAt?: number;
 }
 
 export interface VideoSubtitle {

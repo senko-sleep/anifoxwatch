@@ -12,6 +12,8 @@ vi.mock('../utils/logger.js', () => ({
 }));
 vi.mock('../services/stream-extractor.js', () => ({ streamExtractor: { probe: vi.fn(), extractFromEmbed: vi.fn() } }));
 
+// These tests stand up their own upstreams on loopback, which production refuses to proxy.
+process.env.PROXY_ALLOW_PRIVATE_HOSTS = '1';
 const { default: router } = await import('./streaming.js');
 
 let base = '';

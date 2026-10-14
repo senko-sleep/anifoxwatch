@@ -69,6 +69,8 @@ export async function probeMedia(url: string, headers: Record<string, string>, s
     if (!key && !isMedia(segment)) throw new Error('Invalid HLS media segment');
 }
 
+const FRESH_VERIFICATION_MS = 15_000;
+
 /** Embeds are extraction inputs, never proof that playback works. */
 export async function playableStreams(data: StreamingData, signal: AbortSignal, bypassCache = false): Promise<StreamingData> {
     const seen = new Set<string>();
@@ -126,6 +128,13 @@ export async function playableStreams(data: StreamingData, signal: AbortSignal, 
                         continue;
                     }
                     const headers = mediaHeaders(data, candidate);
+                    // A provider that has just read this URL's media bytes itself (e.g. an HLS
+                    // preflight of several fragments) has already proven more than one probe would.
+                    // Cached results age past the window and are probed again.
+                    if (!bypassCache && candidate.verifiedAt && Date.now() - candidate.verifiedAt < FRESH_VERIFICATION_MS) {
+                        valid.push({ ...candidate, headers, probeVerified: true });
+                        continue;
+                    }
                     await probeMedia(candidate.originalUrl || candidate.url, headers, signal);
                     valid.push({ ...candidate, headers, probeVerified: true });
                 } catch (error) { console.warn(`[StreamValidation] ${data.source}: ${(error as Error).message}`); }

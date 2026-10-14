@@ -5,6 +5,8 @@ import { BaseAnimeSource, type SourceRequestOptions } from './base-source.js';
 import type { AnimeBase, AnimeSearchResult, Episode, TopAnime } from '../types/anime.js';
 import type { EpisodeServer, StreamingData, VideoSource, VideoSubtitle } from '../types/streaming.js';
 import { preflightHls } from '../services/hls-preflight.js';
+import { hedged } from '../lib/hedged.js';
+import { isPublicHttpUrl } from '../lib/public-url.js';
 
 type CacheEntry<T> = { value: T; expires: number };
 type MiruroServer = { name: string; category: 'sub' | 'dub'; url: string };
@@ -24,6 +26,9 @@ type MegaVideoPayload = {
 export class MiruroSource extends BaseAnimeSource {
     name = 'Miruro';
     baseUrl = 'https://miruro.ro';
+    // MegaVid builds Loli's source on the first request for an episode (seen at 4-8s) and caches
+    // it after; a 9s attempt cut that off and failed cold episodes that played fine a moment later.
+    readonly streamBudgetMs = 15_000;
     private readonly client: AxiosInstance;
     private readonly cache = new Map<string, CacheEntry<unknown>>();
     private readonly cacheLimit = 80;
@@ -213,12 +218,29 @@ export class MiruroSource extends BaseAnimeSource {
 
     async getEpisodeServers(episodeId: string, options?: SourceRequestOptions): Promise<EpisodeServer[]> {
         try {
-            return (await this.servers(episodeId, options))
-                .filter(server => new URL(server.url).hostname === 'megavid.buzz')
-                .map(server => ({
+            const servers = /^miruro-mal-/i.test(episodeId)
+                ? [...await this.megavidServers(episodeId, 'sub'), ...await this.megavidServers(episodeId, 'dub')]
+                : (await this.servers(episodeId, options)).filter(server => new URL(server.url).hostname === 'megavid.buzz');
+            return servers.map(server => ({
                 name: `${server.name} (${server.category.toUpperCase()})`, url: server.url, type: server.category,
             }));
         } catch { return []; }
+    }
+
+    /** MegaVid keys episodes by MAL id; with one known, none of Miruro's HTML pages are needed. */
+    idForMal(malId: number, episodeNum: number): string {
+        return `miruro-mal-${malId}-${episodeNum}`;
+    }
+
+    private async megavidServers(episodeId: string, category: 'sub' | 'dub', options?: SourceRequestOptions): Promise<MiruroServer[]> {
+        const mal = episodeId.match(/^miruro-mal-(\d+)-(\d+)$/i);
+        // The same two MegaVid routes Miruro's episode page embeds; both front the same backends.
+        if (mal) return ['mal', 'aniwave/mal'].map((route, index) => ({
+            name: `MegaVid ${index + 1}`, category, url: `https://megavid.buzz/${route}/${mal[1]}/${mal[2]}/${category}`,
+        }));
+        return (await this.servers(episodeId, options))
+            .filter(item => item.category === category && new URL(item.url).hostname === 'megavid.buzz')
+            .slice(0, 2);
     }
 
     async getStreamingLinks(episodeId: string, server?: string, category: 'sub' | 'dub' = 'sub', options?: SourceRequestOptions): Promise<StreamingData> {
@@ -228,76 +250,76 @@ export class MiruroSource extends BaseAnimeSource {
             const cached = this.cached<StreamingData>(cacheKey);
             if (cached) return cached;
         }
-        options = { ...options, signal: AbortSignal.any([
+        const signal = AbortSignal.any([
             ...(options?.signal ? [options.signal] : []),
-            AbortSignal.timeout(Math.max(1, Math.min(options?.timeout || 9000, 9000))),
-        ]) };
+            AbortSignal.timeout(Math.max(1, Math.min(options?.timeout || this.streamBudgetMs, this.streamBudgetMs))),
+        ]);
+        options = { ...options, signal };
         try {
-            const available = (await this.servers(episodeId, options))
-                .filter(item => item.category === category && new URL(item.url).hostname === 'megavid.buzz')
-                .slice(0, 2);
+            const available = await this.megavidServers(episodeId, category, options);
             const selectedName = server?.toLowerCase().replace(/\s*\(.*/, '');
             const candidates = selectedName && available.some(item => item.name.toLowerCase() === selectedName)
                 ? available.filter(item => item.name.toLowerCase() === selectedName) : available;
             if (!candidates.length) return empty();
-            // Loli's independent Echovideo CDN passed later-fragment probes
-            // while Yuki returned 403 after a playable start. Keep other backends
-            // only when their complete exposed rendition set passes preflight.
             const ordered = [...candidates].sort((a, b) => Number(b.name.toUpperCase() === 'ANI 2') - Number(a.name.toUpperCase() === 'ANI 2'));
-            const resolveBackend = async (candidate: MiruroServer, backend: 'loli' | 'sora' | 'yuki', signal?: AbortSignal) => {
-                const endpoint = `${candidate.url.replace(/\/$/, '')}/source?axsv=${backend}`;
-                const response = await this.client.get<MegaVideoPayload>(endpoint, {
-                    signal: signal || options?.signal,
-                    timeout: Math.max(1, Math.min(options?.timeout || 3_500, 3_500)),
-                    headers: { Referer: candidate.url, Accept: 'application/json' },
-                });
-                const data = response.data;
+            // One small JSON request per (server, backend), shared by verification and the subtitle lookup.
+            const payloads = new Map<string, Promise<MegaVideoPayload>>();
+            const payload = (candidate: MiruroServer, backend: Backend): Promise<MegaVideoPayload> => {
+                const key = `${candidate.url}|${backend}`;
+                let pending = payloads.get(key);
+                if (!pending) {
+                    // Loli's answer may finish after another backend wins: MegaVid caches it, so the next
+                    // resolution (refresh-ahead, a reload, the next viewer) gets Loli at once.
+                    pending = this.client.get<MegaVideoPayload>(`${candidate.url.replace(/\/$/, '')}/source?axsv=${backend}`, {
+                        signal: backend === 'loli' ? AbortSignal.timeout(10_000) : signal,
+                        timeout: backend === 'loli' ? 10_000 : 3_500, headers: { Referer: candidate.url, Accept: 'application/json' },
+                    }).then(response => response.data);
+                    pending.catch(() => { /* observed by whichever caller awaits it */ });
+                    payloads.set(key, pending);
+                }
+                return pending;
+            };
+            const verify = async (candidate: MiruroServer, backend: Backend, taskSignal: AbortSignal) => {
+                const data = await payload(candidate, backend);
                 if (data.status !== 'ok' || !data.source) throw new Error('MegaVid returned no source');
                 const media = new URL(data.source);
-                if (media.protocol !== 'https:' || !(['cdnx.aniwatchtv.site', 'megavid.buzz'].includes(media.hostname) || /^(?:[a-z0-9-]+\.)?echovideo\.(?:to|ru)$/.test(media.hostname)))
-                    throw new Error('Invalid MegaVid media URL');
-                const source: VideoSource = { url: media.href, originalUrl: media.href,
-                    headers: { Referer: 'https://megavid.buzz/', Origin: 'https://megavid.buzz' },
-                    quality: 'auto', isM3U8: data.type === 'hls' || /\.m3u8(?:\?|$)/i.test(media.href),
-                    category, server: `Miruro ${candidate.name} ${backend}` };
-                const subtitles: VideoSubtitle[] = (data.tracks || []).filter(track => track.file && track.kind === 'captions')
-                    .map(track => ({ url: track.file!, lang: track.label || 'Unknown', label: track.label }));
-                const preflightSignal = AbortSignal.any([signal || options!.signal!, AbortSignal.timeout(4000)]);
-                await preflightHls(media.href, source.headers!, preflightSignal);
-                return { source, subtitles };
+                // CDN hosts rotate (echovideo.to → dpopdrop89.store); the preflight is what proves media.
+                if (!isPublicHttpUrl(media, true)) throw new Error('Invalid MegaVid media URL');
+                await preflightHls(media.href, MEGAVID_HEADERS, AbortSignal.any([taskSignal, AbortSignal.timeout(4000)]));
+                return { candidate, backend, media, data };
             };
-            let result: Awaited<ReturnType<typeof resolveBackend>> | undefined;
-            for (const backend of ['loli', 'sora', 'yuki'] as const) {
-                options?.signal?.throwIfAborted();
+            // Soft subtitle tracks live on Yuki/Sora even when Loli carries the video; ask early, it is tiny.
+            if (category === 'sub') payload(ordered[0], 'yuki');
+            // Loli's independent CDN passed later-fragment probes while Yuki returned 403 after a
+            // playable start, so it goes first; the others are hedges, not a sequential timeout chain.
+            const tasks = ordered.flatMap(candidate => BACKENDS.map(backend => async (taskSignal: AbortSignal) => {
                 try {
-                    result = await resolveBackend(ordered[0], backend, options?.signal);
-                    console.log(JSON.stringify({ type: 'miruro_backend', backend, status: 'validated', episodeId,
-                        host: new URL(result.source.url).hostname }));
-                    break;
+                    const result = await verify(candidate, backend, taskSignal);
+                    console.log(JSON.stringify({ type: 'miruro_backend', backend, status: 'validated', episodeId, host: result.media.hostname }));
+                    return result;
                 } catch (error) {
-                    console.warn(JSON.stringify({ type: 'miruro_backend', backend, status: 'rejected', episodeId,
+                    if (!taskSignal.aborted || signal.aborted) console.warn(JSON.stringify({ type: 'miruro_backend', backend, status: 'rejected', episodeId,
                         reason: (error as Error).message }));
+                    throw error;
                 }
+            }));
+            const winner = await hedged(tasks, 2_500, signal).catch(() => undefined);
+            if (!winner) return empty();
+            let subtitles = tracksOf(winner.data);
+            if (!subtitles.length && category === 'sub' && !signal.aborted) {
+                // Optional tracks must not discard verified video or extend the budget much.
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                const extra = await Promise.race([
+                    payload(ordered[0], 'yuki').catch(() => null),
+                    new Promise<null>(resolve => { timer = setTimeout(resolve, 800, null); }),
+                ]);
+                clearTimeout(timer);
+                subtitles = tracksOf(extra);
             }
-            if (!result) return empty();
-            if (!result.subtitles.length && category === 'sub' && !options.signal!.aborted) {
-                // Loli's video can be healthy while another backend owns the
-                // available soft subtitle tracks. Preserve those without
-                // choosing that backend's broken video or extending the budget.
-                try {
-                    const metadata = await this.client.get<MegaVideoPayload>(`${ordered[0].url.replace(/\/$/, '')}/source?axsv=yuki`, {
-                        signal: options.signal, timeout: 800, headers: { Referer: ordered[0].url, Accept: 'application/json' },
-                    });
-                    result.subtitles = (metadata.data.tracks || []).filter(track => track.file && track.kind === 'captions')
-                        .flatMap(track => {
-                            try {
-                                const url = new URL(track.file!);
-                                return url.protocol === 'https:' ? [{ url: url.href, lang: track.label || 'Unknown', label: track.label }] : [];
-                            } catch { return []; }
-                        });
-                } catch { /* Optional tracks must not discard verified video. */ }
-            }
-            const data: StreamingData = { sources: [result.source], subtitles: result.subtitles, source: this.name, category };
+            const source: VideoSource = { url: winner.media.href, originalUrl: winner.media.href, headers: { ...MEGAVID_HEADERS },
+                quality: 'auto', isM3U8: winner.data.type === 'hls' || /\.m3u8(?:\?|$)/i.test(winner.media.href),
+                category, server: `Miruro ${winner.candidate.name} ${winner.backend}`, verifiedAt: Date.now() };
+            const data: StreamingData = { sources: [source], subtitles, source: this.name, category };
             this.handleSuccess();
             // Source URLs can be signed; keep this much shorter than episode metadata.
             return this.remember(cacheKey, data, 90_000);
@@ -306,4 +328,17 @@ export class MiruroSource extends BaseAnimeSource {
             return empty();
         }
     }
+}
+
+type Backend = 'loli' | 'sora' | 'yuki';
+const BACKENDS: readonly Backend[] = ['loli', 'sora', 'yuki'];
+const MEGAVID_HEADERS = { Referer: 'https://megavid.buzz/', Origin: 'https://megavid.buzz' };
+
+function tracksOf(data?: MegaVideoPayload | null): VideoSubtitle[] {
+    return (data?.tracks || []).filter(track => track.file && track.kind === 'captions').flatMap(track => {
+        try {
+            const url = new URL(track.file!);
+            return url.protocol === 'https:' ? [{ url: url.href, lang: track.label || 'Unknown', label: track.label }] : [];
+        } catch { return []; }
+    });
 }

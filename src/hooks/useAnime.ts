@@ -433,12 +433,17 @@ export function useStreamingLinks(episodeId: string, server?: string, category?:
             const status = (error as { status?: number })?.status;
             // Don't retry on 404 or client errors
             if (status && status >= 400 && status < 500) return false;
+            // Every provider failing at once is usually a short upstream burst (a backend 502s,
+            // a CDN host rotates). The server marks it retryable; ask again twice, spaced out,
+            // before telling the viewer there is no source.
+            if ((error as { retryable?: boolean })?.retryable === true) return failureCount < 2;
             const msg = String((error as Error)?.message || '');
             if (/404|no streaming sources found/i.test(msg)) return false;
             // Only retry once for network errors
             return failureCount < 1;
         },
-        retryDelay: 1000, // Fixed 1s delay
+        retryDelay: (failureCount, error) => (error as { retryable?: boolean })?.retryable === true
+            ? (failureCount === 0 ? 4_000 : 10_000) : 1000,
         refetchOnWindowFocus: false,
     });
 }

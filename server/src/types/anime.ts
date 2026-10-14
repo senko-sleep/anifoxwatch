@@ -1,6 +1,7 @@
 export interface AnimeBase {
     id: string;
     streamingId?: string; // The actual streaming source ID for navigation
+    malId?: number; // MyAnimeList ID (AniList idMal); keys MAL-indexed players such as MegaVid
     title: string;
     titleJapanese?: string;
     titleEnglish?: string; // English title from AniList

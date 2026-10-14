@@ -1,5 +1,6 @@
 import { saveMediaContext, getMediaContext, childMediaHeaders } from '../services/media-context.js';
-import { isMedia } from '../services/playable-stream.js';
+import { isMedia, playableStreams } from '../services/playable-stream.js';
+import { isPublicHttpUrl } from '../lib/public-url.js';
 import { proxyLifetime } from '../services/proxy-lifetime.js';
 import { LOW_MEMORY_PROFILE } from '../lib/runtime-memory.js';
 import { isBlockedEpisodeId } from '../services/hentai-index.js';
@@ -396,18 +397,50 @@ const STREAM_CACHE_TTL = 15 * 60 * 1000; // 15 minutes — reduced from 20 minut
 // MEMORY OPTIMIZATION: Reduce cache on low-memory systems (Render free tier)
 const STREAM_CACHE_MAX = IS_LOW_MEMORY ? 10 : 100; // 10 entries on Render, 100 elsewhere
 
-interface StreamCacheEntry { data: any; expiresAt: number }
+interface StreamCacheEntry { data: any; storedAt: number; expiresAt: number }
 const streamCache = new Map<string, StreamCacheEntry>();
+
+// The last answer that resolved for each episode, kept well past its cache TTL. Upstreams fail in
+// bursts (a backend 502s, a CDN host rotates) while yesterday's manifest still plays, so before a
+// fresh failure becomes a 503 the old answer is re-probed and, if its bytes still decode, served.
+// Entries are small JSON (one or two URLs), so the cap bounds memory to a few tens of KB.
+const LAST_GOOD_MAX = IS_LOW_MEMORY ? 32 : 200;
+const LAST_GOOD_TTL = 6 * 60 * 60 * 1000;
+const lastGoodStreams = new Map<string, { data: any; storedAt: number }>();
+
+function lastGoodSet(key: string, data: any): void {
+    lastGoodStreams.delete(key);
+    lastGoodStreams.set(key, { data, storedAt: Date.now() });
+    while (lastGoodStreams.size > LAST_GOOD_MAX) lastGoodStreams.delete(lastGoodStreams.keys().next().value!);
+}
+
+async function revalidateLastGood(key: string, excludedProviders: string[], signal: AbortSignal): Promise<any | null> {
+    const entry = lastGoodStreams.get(key);
+    if (!entry || Date.now() - entry.storedAt > LAST_GOOD_TTL || signal.aborted) return null;
+    if (excludedProviders.includes(entry.data?.source)) return null;
+    const probeSignal = AbortSignal.any([signal, AbortSignal.timeout(6_000)]);
+    try {
+        const valid = await playableStreams({ ...entry.data, sources: (entry.data.sources as VideoSource[]).filter(s => !s.isEmbed) },
+            probeSignal, true);
+        const verified = valid.sources.filter(s => s.probeVerified === true);
+        logger.info(`[STREAM] Last-good revalidation ${verified.length ? 'passed' : 'failed'} for ${key}`, { source: entry.data?.source });
+        if (!verified.length) { lastGoodStreams.delete(key); return null; }
+        const data = { ...entry.data, sources: verified, staleRevalidated: true };
+        // Share the re-probe with the next few requests rather than probing per request.
+        streamCacheSet(key, data, 2 * 60 * 1000);
+        return data;
+    } catch { return null; }
+}
 
 function streamCacheKey(episodeId: string, server: string | undefined, category: string): string {
     return `${episodeId}|${server ?? ''}|${category}`;
 }
 
-function streamCacheGet(key: string): any | null {
+function streamCacheEntry(key: string): StreamCacheEntry | null {
     const entry = streamCache.get(key);
     if (!entry) return null;
     if (Date.now() > entry.expiresAt) { streamCache.delete(key); return null; }
-    return entry.data;
+    return entry;
 }
 
 function streamCacheSet(key: string, data: any, ttlOverride?: number): void {
@@ -429,7 +462,7 @@ function streamCacheSet(key: string, data: any, ttlOverride?: number): void {
         ttlOverride != null ? ttlOverride : STREAM_CACHE_TTL,
     );
     if (ttl <= 0) return;
-    streamCache.set(key, { data, expiresAt: Date.now() + ttl });
+    streamCache.set(key, { data, storedAt: Date.now(), expiresAt: Date.now() + ttl });
 }
 
 /** Node's certificate verification failures: expired, revoked, self-signed, untrusted, wrong host. */
@@ -442,26 +475,47 @@ interface ResolvedStream { streamData: any; lastError: string | null }
 interface InFlight { promise: Promise<ResolvedStream>; controller: AbortController; waiters: number }
 const inFlightStreams = new Map<string, InFlight>();
 
+function startFlight(key: string, run: (signal: AbortSignal) => Promise<ResolvedStream>): InFlight {
+    const controller = new AbortController();
+    const promise = run(controller.signal).then((result) => {
+        // A revalidated last-good answer caches itself briefly, so a fresh resolution is retried soon.
+        if (result.streamData?.sources?.length && !result.streamData.staleRevalidated) {
+            streamCacheSet(key, result.streamData);
+            lastGoodSet(key, result.streamData);
+        }
+        return result;
+    }).finally(() => inFlightStreams.delete(key));
+    const flight = { promise, controller, waiters: 0 };
+    inFlightStreams.set(key, flight);
+    return flight;
+}
+
+// Refresh-ahead: an entry that viewers are still hitting late in its life is re-resolved in the
+// background, so its expiry never lands on a viewer as a fresh multi-second (or failed) resolution.
+// One background refresh at a time keeps a 0.1 vCPU instance from spending itself on prefetches.
+let backgroundRefreshes = 0;
+function maybeRefreshAhead(key: string, entry: StreamCacheEntry, run: (signal: AbortSignal) => Promise<ResolvedStream>): void {
+    const age = Date.now() - entry.storedAt;
+    if (age < (entry.expiresAt - entry.storedAt) * 0.6 || inFlightStreams.has(key) || backgroundRefreshes >= 1) return;
+    backgroundRefreshes++;
+    const flight = startFlight(key, run);
+    const deadline = setTimeout(() => flight.controller.abort(new Error('Background refresh deadline')), GLOBAL_TIMEOUT_MS);
+    flight.promise.catch(() => {}).finally(() => { clearTimeout(deadline); backgroundRefreshes--; });
+}
+
 /**
  * One resolution per episode at a time, cached once it succeeds. Requests that arrive while
  * it runs wait on it instead of starting their own; it is only abandoned when every one of
  * them has gone away, so a prefetch the user then clicks on carries on rather than restarts.
  */
 async function sharedResolve(key: string, signal: AbortSignal, run: (signal: AbortSignal) => Promise<ResolvedStream>): Promise<ResolvedStream> {
-    const cached = streamCacheGet(key);
-    if (cached) return { streamData: cached, lastError: null };
-
-    let flight = inFlightStreams.get(key);
-    if (!flight) {
-        const controller = new AbortController();
-        const promise = run(controller.signal).then((result) => {
-            if (result.streamData?.sources?.length) streamCacheSet(key, result.streamData);
-            return result;
-        }).finally(() => inFlightStreams.delete(key));
-        flight = { promise, controller, waiters: 0 };
-        inFlightStreams.set(key, flight);
+    const cached = streamCacheEntry(key);
+    if (cached) {
+        maybeRefreshAhead(key, cached, run);
+        return { streamData: cached.data, lastError: null };
     }
-    const joined = flight;
+
+    const joined = inFlightStreams.get(key) ?? startFlight(key, run);
     joined.waiters++;
     let departed = false;
     const leave = () => {
@@ -564,11 +618,14 @@ const getProxyBaseUrl = (req: Request): string => {
     return 'http://localhost:3001/api/stream/proxy';
 };
 
-const proxyUrl = (url: string, proxyBase: string, referer?: string, headers?: Record<string, string>): string => {
+const proxyUrl = (url: string, proxyBase: string, referer?: string, headers?: Record<string, string>, segment = false): string => {
     const target = unwrapProxyTarget(url);
     let out = `${proxyBase}?url=${encodeURIComponent(target)}`;
     if (referer) out += `&referer=${encodeURIComponent(referer)}`;
     if (headers && Object.keys(headers).length) out += `&context=${saveMediaContext(target, headers)}`;
+    // Marks a media segment named by a playlist we rewrote: the proxy can hand it to the Rust data
+    // plane without first downloading it to find out whether it is a playlist.
+    if (segment) out += '&k=s';
     return out;
 };
 
@@ -592,15 +649,18 @@ const rewriteM3u8Content = (
     const urlNoQuery = originalUrl.split('?')[0].split('#')[0];
     const baseUrl = urlNoQuery.substring(0, urlNoQuery.lastIndexOf('/') + 1);
     const origin = new URL(originalUrl).origin;
+    // In a media playlist every URI line is a segment; in a master playlist they are playlists.
+    const isMediaPlaylist = content.includes('#EXTINF') && !content.includes('#EXT-X-STREAM-INF');
 
     return content.split('\n').map(line => {
         const t = line.trim();
         if (t.startsWith('#') && t.includes('URI="')) {
+            const isInit = isMediaPlaylist && t.startsWith('#EXT-X-MAP');
             return line.replace(/URI="([^"]+)"/g, (_match, uri) => {
                 const abs = uri.startsWith('http') ? uri : uri.startsWith('/')
                     ? `${origin}${uri}`
                     : `${baseUrl}${uri}`;
-                return `URI="${proxyUrl(abs, proxyBase, referer, headers ? childMediaHeaders(headers, originalUrl, abs) : undefined)}"`;
+                return `URI="${proxyUrl(abs, proxyBase, referer, headers ? childMediaHeaders(headers, originalUrl, abs) : undefined, isInit)}"`;
             });
         }
         if (!t || t.startsWith('#')) return line;
@@ -609,7 +669,7 @@ const rewriteM3u8Content = (
         const abs = t.startsWith('http') ? t : t.startsWith('/')
             ? `${origin}${t}`
             : `${baseUrl}${t}`;
-        return proxyUrl(abs, proxyBase, referer, headers ? childMediaHeaders(headers, originalUrl, abs) : undefined);
+        return proxyUrl(abs, proxyBase, referer, headers ? childMediaHeaders(headers, originalUrl, abs) : undefined, isMediaPlaylist);
     }).join('\n');
 };
 
@@ -1170,9 +1230,17 @@ router.get('/watch/:episodeId(*)', async (req: Request, res: Response): Promise<
     // Raw provider data is cached — proxy URLs are rebuilt per response below.
     // A client retrying a broken stream sends nocache/exclude_providers and skips this.
     const cacheKey = `${streamCacheKey(episodeId, preferredSource, cat)}|${episodeNum ?? ''}|${anilistId ?? ''}`;
+    const resolveOrLastGood = async (signal: AbortSignal): Promise<ResolvedStream> => {
+        const result = await resolve(signal);
+        if (result.streamData?.sources?.length || signal.aborted) return result;
+        const stale = await revalidateLastGood(cacheKey, excludedProviders, signal);
+        return stale ? { streamData: stale, lastError: result.lastError } : result;
+    };
+    // A client that excluded providers after a playback failure gets no stale answer from them;
+    // one that only bypassed the cache may still fall back to a re-probed last-good stream.
     const { streamData, lastError } = noCache
-        ? await resolve(requestController.signal)
-        : await sharedResolve(cacheKey, requestController.signal, resolve);
+        ? await resolveOrLastGood(requestController.signal)
+        : await sharedResolve(cacheKey, requestController.signal, resolveOrLastGood);
 
     if (streamData?.sources?.length) {
         logger.info(`[STREAM] Source resolved (${streamData.source ?? 'unknown'}, cat=${streamData.category ?? cat}) for ${episodeId}`, { requestId });
@@ -1325,6 +1393,12 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     }
     const domain = urlObj.hostname;
 
+    // An open media proxy must never be pointed at loopback, private ranges or cloud metadata.
+    if (!isPublicHttpUrl(urlObj) && process.env.PROXY_ALLOW_PRIVATE_HOSTS !== '1') {
+        res.set('Access-Control-Allow-Origin', '*').status(400).json({ error: 'Blocked address' });
+        return;
+    }
+
     // Preserve the original URL before any rewrites — the remote proxy (Vercel)
     // might have better connectivity to the original CDN domain.
     const originalUrlBeforeRewrite = url;
@@ -1373,8 +1447,13 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
         }
     }
 
+    // A segment named by a playlist we rewrote, on a CDN that needs no per-request rotation or
+    // custom headers, goes straight to the Rust data plane: Node never holds its bytes.
+    const delegateSegment = MEDIA_ACCEL_ENABLED && req.query.k === 's' && !contextId && !isM3u8 &&
+        !isMegaupDomain && !isFlixcloudDomain && !isIspBlockedDomain(domain);
+
     // Serve cached segments without hitting upstream
-    if (isSegment && !req.headers.range && !contextId) {
+    if (isSegment && !delegateSegment && !req.headers.range && !contextId) {
         const cachedData = segmentCacheGet(url);
         if (cachedData) {
             const entry = segmentCache.get(url)!;
@@ -1527,7 +1606,7 @@ router.get('/proxy', async (req: Request, res: Response): Promise<void> => {
     // referer combo loop entirely and use Node's native https.request which pipes
     // directly without holding the full response in memory. This avoids the 20s
     // axios timeout that fires before the large file starts streaming.
-    if (isVideo && !isM3u8 && !isSegment) {
+    if (delegateSegment || (isVideo && !isM3u8 && !isSegment)) {
         const bestReferer =
             refererParam ||
             (matchedProxyConfig ? matchedProxyConfig[1].referer : undefined) ||
