@@ -2577,14 +2577,14 @@ export const VideoPlayer = ({
                 </DropdownMenu>
               )}
 
-              {/* Desktop: PiP & Settings */}
-              {!isMobile() && (
-                <>
+              {/* PiP is available on supported mobile and desktop browsers. */}
                   {document.pictureInPictureEnabled && (
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={togglePiP}
+                      aria-label={isPiPActive ? 'Exit picture-in-picture' : 'Enter picture-in-picture'}
+                      title={isPiPActive ? 'Exit picture-in-picture' : 'Enter picture-in-picture'}
                       className={cn(
                         "text-white hover:bg-white/20",
                         isPiPActive && "text-fox-orange"
@@ -2597,6 +2597,9 @@ export const VideoPlayer = ({
                       )}
                     </Button>
                   )}
+              {/* Desktop settings */}
+              {!isMobile() && (
+                <>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
