@@ -1,0 +1,56 @@
+{
+  "timestamp": "2026-10-14T03:00:50.842Z",
+  "deploymentId": "4ee279ca-48f1-403e-baa6-326474d3a8a8",
+  "exitCode": 0,
+  "cgroup": {
+    "currentBytes": 183742464,
+    "peakBytes": 189296640,
+    "limitBytes": 536870912,
+    "failcnt": 0
+  },
+  "chromiumCount": 0,
+  "processes": [
+    {
+      "name": "start.sh",
+      "pid": 2,
+      "ppid": 1,
+      "rssKiB": 3112,
+      "threads": 1
+    },
+    {
+      "name": "node",
+      "pid": 3,
+      "ppid": 2,
+      "rssKiB": 117896,
+      "threads": 11
+    },
+    {
+      "name": "media-proxy",
+      "pid": 4,
+      "ppid": 2,
+      "rssKiB": 7120,
+      "threads": 2
+    },
+    {
+      "name": "start.sh",
+      "pid": 5,
+      "ppid": 2,
+      "rssKiB": 1948,
+      "threads": 1
+    },
+    {
+      "name": "sleep",
+      "pid": 82,
+      "ppid": 5,
+      "rssKiB": 896,
+      "threads": 1
+    },
+    {
+      "name": "sh",
+      "pid": 83,
+      "ppid": 0,
+      "rssKiB": 928,
+      "threads": 1
+    }
+  ]
+}

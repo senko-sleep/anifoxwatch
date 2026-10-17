@@ -1,0 +1,4 @@
+#!/bin/bash
+echo "$$" > "$START_TEST_DIR/proxy.pid"
+trap 'echo stopped > "$START_TEST_DIR/proxy.stopped"; exit 0' TERM
+while true; do sleep 0.1; done

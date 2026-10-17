@@ -1,0 +1,172 @@
+{
+  "targetDeploymentId": "9307e260-0234-4e7a-b36c-6247baa1bc5c",
+  "activationObservedAt": "2026-10-14T02:34:46.322Z",
+  "queriedAt": "2026-10-14T02:41:50.870Z",
+  "metrics": [
+    {
+      "metric_name": "CPU_TOTAL_PERCENT",
+      "data": [
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 621.9043579101562
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 1.999855875968933
+        }
+      ]
+    },
+    {
+      "metric_name": "MEM_RSS",
+      "data": [
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 172597248
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 179728384
+        }
+      ]
+    },
+    {
+      "metric_name": "HTTP_THROUGHPUT",
+      "data": [
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 9
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 40
+        },
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 0
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "metric_name": "HTTP_RESPONSE_TIME_50P",
+      "data": [
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 3
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 190.0436043267694
+        }
+      ]
+    },
+    {
+      "metric_name": "HTTP_RESPONSE_TIME_90P",
+      "data": [
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 4.6
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 2055.7673766357448
+        }
+      ]
+    },
+    {
+      "metric_name": "HTTP_RESPONSE_TIME_99P",
+      "data": [
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 4.96
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 8111.5347532714795
+        }
+      ]
+    },
+    {
+      "metric_name": "HTTP_RESPONSE_TIME_MAX",
+      "data": [
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 5
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 10000
+        }
+      ]
+    },
+    {
+      "metric_name": "PUBLIC_DATA_TRANSFER_IN",
+      "data": [
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 12700
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 64908
+        }
+      ]
+    },
+    {
+      "metric_name": "PUBLIC_DATA_TRANSFER_OUT",
+      "data": [
+        {
+          "timestamp": "2026-10-14T02:34:46Z",
+          "value": 18267
+        },
+        {
+          "timestamp": "2026-10-14T02:39:46Z",
+          "value": 12366922
+        }
+      ]
+    }
+  ]
+}

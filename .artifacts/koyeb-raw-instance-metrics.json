@@ -1,0 +1,71 @@
+{
+  "instanceId": "9d5b1017-780c-5a10-2145-928e3a531680",
+  "start": "2026-10-14T02:36:00Z",
+  "end": "2026-10-14T02:38:00Z",
+  "queriedAt": "2026-10-14T02:47:03.498Z",
+  "replies": [
+    {
+      "name": "CPU_TOTAL_PERCENT",
+      "status": 200,
+      "reply": {
+        "metrics": [
+          {
+            "labels": {
+              "instance_id": "9d5b1017-780c-5a10-2145-928e3a531680"
+            },
+            "samples": [
+              {
+                "timestamp": "2026-10-14T02:36:00Z",
+                "value": 0
+              },
+              {
+                "timestamp": "2026-10-14T02:37:00Z",
+                "value": 3.9999043941497803
+              },
+              {
+                "timestamp": "2026-10-14T02:38:00Z",
+                "value": 1.999914526939392
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "MEM_RSS",
+      "status": 200,
+      "reply": {
+        "metrics": [
+          {
+            "labels": {
+              "instance_id": "9d5b1017-780c-5a10-2145-928e3a531680"
+            },
+            "samples": [
+              {
+                "timestamp": "2026-10-14T02:36:00Z",
+                "value": 163549184
+              },
+              {
+                "timestamp": "2026-10-14T02:37:00Z",
+                "value": 179290112
+              },
+              {
+                "timestamp": "2026-10-14T02:38:00Z",
+                "value": 179269632
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "HTTP_RESPONSE_TIME_MAX",
+      "status": 501,
+      "reply": {
+        "status": 501,
+        "code": "unimplemented",
+        "message": "http response time per instance is unavailable"
+      }
+    }
+  ]
+}

@@ -37,6 +37,7 @@ import {
 import { cn } from '@/lib/utils';
 import { PostProxyLoader } from '@/lib/hls-post-loader';
 import { apiUrl } from '@/lib/api-config';
+import { lockLandscape, syncOrientationWithFullscreen } from '@/lib/orientationLock';
 import { WatchHistory } from '@/lib/watch-history';
 
 interface VideoSubtitle {
@@ -1204,12 +1205,8 @@ export const VideoPlayer = ({
       if (container?.requestFullscreen) {
         try {
           await container.requestFullscreen();
-          if (screen.orientation && (screen.orientation as any).lock) {
-            try {
-              await (screen.orientation as any).lock('landscape');
-            } catch (e) {
-              playerLog('warn', 'Auto-fullscreen orientation lock failed', e);
-            }
+          if (!(await lockLandscape())) {
+            playerLog('warn', 'Auto-fullscreen orientation lock failed');
           }
         } catch (e) {
           playerLog('warn', 'Auto-fullscreen container request failed', e);
@@ -1400,24 +1397,14 @@ export const VideoPlayer = ({
 
   // Fullscreen change handler
   useEffect(() => {
-    const handleFullscreenChange = () => {
-      const inFullscreen = !!document.fullscreenElement;
+    return syncOrientationWithFullscreen(isMobile, (inFullscreen) => {
       setIsFullscreen(inFullscreen);
-      // If exited fullscreen while landscape was locked, unlock orientation
       if (!inFullscreen && isLandscapeLockedRef.current) {
         isLandscapeLockedRef.current = false;
         setIsLandscapeLocked(false);
-        try {
-          if ((screen.orientation as any).unlock) {
-            (screen.orientation as any).unlock();
-          }
-        } catch (_e) { /* ignore */ }
       }
-    };
-
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
+    });
+  }, [isMobile]);
 
   // Next episode countdown timer
   useEffect(() => {
@@ -1622,15 +1609,6 @@ export const VideoPlayer = ({
         (video as any).webkitExitFullscreen();
       }
     } else {
-      // Lock orientation to landscape BEFORE entering fullscreen on mobile
-      if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
-        try {
-          await (screen.orientation as any).lock('landscape');
-        } catch (e) {
-          playerLog('warn', 'Orientation lock failed', e);
-        }
-      }
-
       let enteredFs = false;
       if (container.requestFullscreen) {
         try {
@@ -1641,13 +1619,9 @@ export const VideoPlayer = ({
         }
       }
 
-      // Ensure orientation lock is attempted even if fullscreen entered via video element
-      if (isMobile() && screen.orientation && (screen.orientation as any).lock) {
-        try {
-          await (screen.orientation as any).lock('landscape');
-        } catch (e) {
-          playerLog('warn', 'Orientation lock failed', e);
-        }
+      // Lock only works once fullscreen is active (also re-applied on fullscreenchange)
+      if (enteredFs && isMobile() && !(await lockLandscape())) {
+        playerLog('warn', 'Orientation lock failed');
       }
 
       if (!enteredFs && isMobile() && (video as any).webkitEnterFullscreen) {

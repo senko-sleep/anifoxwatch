@@ -1,0 +1,62 @@
+[
+    {
+        "timestamp":  "2026-10-14T02:26:44.3639879+00:00",
+        "latencyMs":  623.0999,
+        "uptime":  1111.224159283,
+        "memory":  {
+                       "rss":  118542336,
+                       "heapTotal":  32387072,
+                       "heapUsed":  28171808,
+                       "external":  4408913,
+                       "arrayBuffers":  796361
+                   }
+    },
+    {
+        "timestamp":  "2026-10-14T02:26:44.4624369+00:00",
+        "latencyMs":  67.0855,
+        "uptime":  1111.489008918,
+        "memory":  {
+                       "rss":  118542336,
+                       "heapTotal":  32387072,
+                       "heapUsed":  28239280,
+                       "external":  4408913,
+                       "arrayBuffers":  796361
+                   }
+    },
+    {
+        "timestamp":  "2026-10-14T02:26:44.5340048+00:00",
+        "latencyMs":  71.2542,
+        "uptime":  1111.556340433,
+        "memory":  {
+                       "rss":  118542336,
+                       "heapTotal":  32387072,
+                       "heapUsed":  28302032,
+                       "external":  4408913,
+                       "arrayBuffers":  796361
+                   }
+    },
+    {
+        "timestamp":  "2026-10-14T02:26:44.6006564+00:00",
+        "latencyMs":  66.2576,
+        "uptime":  1111.625269814,
+        "memory":  {
+                       "rss":  118542336,
+                       "heapTotal":  32387072,
+                       "heapUsed":  28367032,
+                       "external":  4408913,
+                       "arrayBuffers":  796361
+                   }
+    },
+    {
+        "timestamp":  "2026-10-14T02:26:44.6689794+00:00",
+        "latencyMs":  68.0252,
+        "uptime":  1111.695674134,
+        "memory":  {
+                       "rss":  118542336,
+                       "heapTotal":  32387072,
+                       "heapUsed":  28429624,
+                       "external":  4408913,
+                       "arrayBuffers":  796361
+                   }
+    }
+]

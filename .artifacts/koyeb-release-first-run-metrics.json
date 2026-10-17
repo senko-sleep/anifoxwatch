@@ -1,0 +1,9 @@
+{"metric_name":"CPU_TOTAL_PERCENT","data":[{"timestamp":"2026-10-14T02:36:00Z","value":0}]}
+{"metric_name":"MEM_RSS","data":[{"timestamp":"2026-10-14T02:36:00Z","value":163549184}]}
+{"metric_name":"HTTP_THROUGHPUT","data":[{"timestamp":"2026-10-14T02:36:00Z","value":0},{"timestamp":"2026-10-14T02:36:00Z","value":7},{"timestamp":"2026-10-14T02:36:00Z","value":0},{"timestamp":"2026-10-14T02:36:00Z","value":0},{"timestamp":"2026-10-14T02:36:00Z","value":0}]}
+{"metric_name":"HTTP_RESPONSE_TIME_50P","data":[{"timestamp":"2026-10-14T02:36:00Z","value":3.070638305387054}]}
+{"metric_name":"HTTP_RESPONSE_TIME_90P","data":[{"timestamp":"2026-10-14T02:36:00Z","value":4.727148949696697}]}
+{"metric_name":"HTTP_RESPONSE_TIME_99P","data":[{"timestamp":"2026-10-14T02:36:00Z","value":8.534337500000014}]}
+{"metric_name":"HTTP_RESPONSE_TIME_MAX","data":[{"timestamp":"2026-10-14T02:36:00Z","value":10}]}
+{"metric_name":"PUBLIC_DATA_TRANSFER_IN","data":[{"timestamp":"2026-10-14T02:36:00Z","value":12768}]}
+{"metric_name":"PUBLIC_DATA_TRANSFER_OUT","data":[{"timestamp":"2026-10-14T02:36:00Z","value":17048}]}

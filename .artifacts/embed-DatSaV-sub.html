@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Echovideo - Seihantai Na Kimi To Boku 2nd Season | Episode 1</title>
+<link href="/images/favicon.png" type="image/x-icon" rel="shortcut icon">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+<script src="/jwplayer/player/v/8.18.4/jwplayer.js"></script>
+<link rel="stylesheet" href="/css/rspnsv.min.css?2" type="text/css" />
+<style>
+.jw-slider-volume .jw-intro, .jw-slider-volume .jw-outro { display: none; }.jw-outro,.jw-intro {background-color: #6200ff!important;height: 10px;z-index:3; transform: translate(0,0) scale(1,.6); transition: transform 150ms ease-in-out;}.jw-knob {z-index: 4;}
+</style>
+</head>
+<body>
+    <div id="mg-player" data-id="Yqszz0r0X-xRvyoCa4CmUDy9Hd_bsS1ge062V8Lr0BCYsIvk6a6wp_FFeuir0v4pPulZz75af-f8bDc1-TJCJhCd6mJZ16jPDusD618-f3lhqwE0wHrgThPER3MVaFNVkWsrWlGc71xRu3DLPRkFCk54fI-g_FngqcQqqVkzMrinzCJ07rF0Ulo-pDURT083nnKeHO33HcxfikMWw4pHWe6mvRAkvCBhlwbp97iYtMw" data-realid="a73689f7919539186d7c52d88c501a77">
+			<div class="content-center">
+                <div class="loading-content" id="loading">
+                </div>
+            </div>
+	</div>
+<script>
+const qs = window.location.search;
+const up = new URLSearchParams(qs);
+var ap = up.get('autoPlay');
+var asi = up.get('asi');
+var xtime = up.get('time');
+if (ap) {
+    if (ap == 0) {
+        ap = false;
+    } else {
+        ap = true;
+    }
+} else {
+    ap = true;
+}
+
+var videoId = document.getElementById("mg-player").getAttribute("data-realid");
+var muxet = document.getElementById("mg-player").getAttribute("data-id");
+
+// Keep a valid episode-specific resume key even if data-realid is missing.
+if (!videoId) {
+    videoId = "jwplayer.resume." + (muxet || window.location.pathname);
+}
+
+function toggleJwPictureInPicture() {
+    var video = document.querySelector("#mg-player video");
+
+    if (!video) {
+        console.warn("JWPlayer video element not found.");
+        return;
+    }
+
+    if (!document.pictureInPictureEnabled ||
+        typeof video.requestPictureInPicture !== "function") {
+        console.warn("Picture-in-Picture is not supported.");
+        return;
+    }
+
+    if (video.disablePictureInPicture) {
+        console.warn("Picture-in-Picture is disabled for this video.");
+        return;
+    }
+
+    if (document.pictureInPictureElement) {
+        document.exitPictureInPicture().catch(function (error) {
+            console.warn("Could not exit Picture-in-Picture:", error);
+        });
+        return;
+    }
+
+    video.requestPictureInPicture().catch(function (error) {
+        console.warn("Could not enter Picture-in-Picture:", error);
+    });
+}
+
+function saveCurrentJwPosition() {
+    try {
+        var position = Number(player.getPosition());
+        if (isFinite(position) && position >= 0 && videoId) {
+            localStorage.setItem(videoId, position.toString());
+        }
+    } catch (e) {
+        console.warn("Could not save JWPlayer position:", e);
+    }
+}
+
+
+
+const E6 = () => {
+    if (10 < player.getPosition()) {
+        player.seek(player.getPosition() - 10);
+    } else {
+        player.seek(0);
+    }
+};
+const E7 = () => {
+    if (player.getPosition() < player.getDuration()) {
+        player.seek(player.getPosition() + 10);
+    }
+};
+
+fetch("getSources?id=" + muxet)
+.then(function (response) {
+    if (!response.ok) {
+        throw new Error("getSources HTTP " + response.status);
+    }
+
+    return response.json();
+})
+.then(function (data) {
+    if (!data || typeof data !== "object") {
+        throw new Error("Invalid MP4 source response");
+    }
+
+    // New response format:
+    // { "1171": { "HD": ["url"], "SD": ["url"], "HQ": ["url"] } }
+    var episodeKey = Object.keys(data)[0];
+    var episodeData = episodeKey ? data[episodeKey] : null;
+
+    if (!episodeData || typeof episodeData !== "object") {
+        throw new Error("No playable MP4 sources returned");
+    }
+
+    data.jwSources = Object.keys(episodeData)
+    .map(function (label) {
+        var source = episodeData[label];
+
+        if (!Array.isArray(source) || !source.length) {
+            return null;
+        }
+
+        var file = String(source[0] || "").trim();
+
+        if (!file) {
+            return null;
+        }
+
+        return {
+            file: file,
+            label: label,
+            type: "video/mp4"
+        };
+    })
+    .filter(function (source) {
+        return source !== null;
+    });
+
+    if (!data.jwSources.length) {
+        throw new Error("No valid MP4 qualities returned");
+    }
+
+    try {
+        window.currentHlsHost = new URL(data.jwSources[0].file).host;
+    } catch (e) {
+        window.currentHlsHost = "";
+    }
+
+    configurePlayer(player, data);
+
+    if (typeof window.runHlsHealthCheck === "function") {
+        window.runHlsHealthCheck();
+    } else {
+        console.warn("runHlsHealthCheck is not loaded");
+    }
+})
+.catch(function (error) {
+    console.error("JWPlayer source error:", error);
+
+    var loading = document.getElementById("loading");
+    if (loading) {
+        loading.textContent = "Video source could not be loaded.";
+    }
+});
+
+const storedCaptions = localStorage.getItem("jwplayer.captions");
+
+if (!storedCaptions || storedCaptions === "undefined" || storedCaptions === "{}") {
+    const defaultCaptions = {
+        backgroundOpacity: 0,
+        edgeStyle: "raised",
+        color: "#ffff00",
+        userFontScale: 1.25
+    };
+
+    localStorage.setItem("jwplayer.captions", JSON.stringify(defaultCaptions));
+}
+
+var player = jwplayer("mg-player");
+function configurePlayer(player, data) {
+    player.setup({
+        controls: true,
+        sources: data.jwSources,
+        tracks: data.tracks,
+        image: data.image,
+        width: "100%",
+        height: "100%",
+        primary: "html5",
+        autostart: ap,
+        playbackRateControls: true,
+        playbackRates: [0.25, 0.75, 1, 1.25, 1.5, 1.75, 2, 4],
+		fullscreenOrientationLock: "landscape",
+        skin: {
+            name: "jwplayer",
+            active: "#fff"
+        },
+        key: "uoW6qHjBL3KNudxKVnwa3rt5LlTakbko9e6aQ6VUyKQ="
+    });
+
+    // Backup resume saves. The normal time handler below still saves continuously.
+    player.on("pause", saveCurrentJwPosition);
+    player.on("complete", function () {
+        try { localStorage.removeItem(videoId); } catch (e) {}
+    });
+
+    window.addEventListener("beforeunload", saveCurrentJwPosition);
+    document.addEventListener("visibilitychange", function () {
+        if (document.visibilityState === "hidden") {
+            saveCurrentJwPosition();
+        }
+    });
+
+	player.on('fullscreen', function(event) {
+    var isFullscreen = player.getFullscreen();
+    
+    if (isFullscreen && window.screen && window.screen.orientation) {
+        // Lock to landscape when entering fullscreen
+        window.screen.orientation.lock('landscape').catch(function(error) {
+            console.warn('Orientation lock failed:', error);
+        });
+    } else if (!isFullscreen && window.screen && window.screen.orientation) {
+        // Unlock when exiting fullscreen
+        window.screen.orientation.unlock();
+    }
+});
+
+window.addEventListener('resize', function() {
+    if (player.getFullscreen() && window.screen && window.screen.orientation) {
+        // Re-lock orientation on rotation to maintain landscape
+        window.screen.orientation.lock('landscape').catch(function(e) {});
+    }
+});
+
+    var skp_add = false;
+    player.on("ready", function () {
+		
+		    var video = document.querySelector("#mg-player video");
+
+    if (video) {
+        video.setAttribute("playsinline", "");
+        video.setAttribute("webkit-playsinline", "");
+        video.removeAttribute("crossorigin");
+    }
+
+        $(".jw-icon-rewind").remove();
+        player.addButton("/player/svg/skip-10-next.svg", '+10s', E7, "forward-10s-button");
+        player.addButton("/player/svg/skip-10-prev.svg", "-10s", E6, "rewind-10s-button");
+		
+		var pipIcon =
+    'data:image/svg+xml;charset=UTF-8,' +
+    encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">' +
+        '<path fill="white" d="M19 7h-8v6h8V7Zm2-4H3a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm0 16H3V5h18v14Z"/>' +
+        '</svg>'
+    );
+
+if (
+    document.pictureInPictureEnabled &&
+    HTMLVideoElement.prototype.requestPictureInPicture
+) {
+    player.addButton(
+        pipIcon,
+        "Picture in Picture",
+        toggleJwPictureInPicture,
+        "picture-in-picture-button"
+    );
+}
+
+        if (xtime) {
+            setInitialPlaybackPosition(player, parseFloat(xtime), ap);
+        } else {
+            getAndSetVideoPlaybackPosition(player, videoId, ap);
+        }
+        player.on("time", function (event) {
+            var currentTime = player.getPosition();
+            var duration = player.getDuration();
+            var vp = (currentTime / duration) * 100;
+            if (vp == 100) {
+                var eventx1 = 'complete';
+                player.seek(0);
+            } else {
+                var eventx1 = 'time';
+            }
+            var messageData = {
+                channel: 'megacloud',
+                event: eventx1,
+                time: player.getPosition(),
+                duration: player.getDuration(),
+                percent: vp
+            };
+            var messageJSON = JSON.stringify(messageData);
+            if (eventx1 == 'complete') {
+                setTimeout(function () {
+                    window.parent.postMessage(messageJSON, '*');
+                }, 200);
+            } else {
+                window.parent.postMessage(messageJSON, '*');
+            }
+
+            try {
+                var resumePosition = Number(event && event.position);
+                if (!isFinite(resumePosition)) {
+                    resumePosition = Number(player.getPosition());
+                }
+                if (isFinite(resumePosition) && resumePosition >= 0 && videoId) {
+                    localStorage.setItem(videoId, resumePosition.toString());
+                }
+            } catch (e) {
+                console.warn("Could not save resume position:", e);
+            }
+            var skipButton = document.getElementById("skip-button");
+
+            if (skipButton) {
+                var hasIntro = data.intro &&
+                    isFinite(Number(data.intro.start)) &&
+                    isFinite(Number(data.intro.end));
+
+                var hasOutro = data.outro &&
+                    isFinite(Number(data.outro.start)) &&
+                    isFinite(Number(data.outro.end));
+
+                if (hasIntro && event.position >= data.intro.start && event.position < data.intro.end) {
+                    skip_inu(data.intro.end, 'Intro', asi);
+                    skipButton.style.display = "inline-block";
+                } else if (hasOutro && event.position >= data.outro.start && event.position < data.outro.end) {
+                    skip_inu(data.outro.end, 'Outro', asi);
+                    skipButton.style.display = "inline-block";
+                } else {
+                    skipButton.style.display = "none";
+                }
+            }
+        });
+
+        player.on("seek", function (event) {
+            if (skp_add == true) {
+                skipButton.style.display = "none";
+            }
+        });
+    });
+
+    player.on('firstFrame', function () {
+        var duration = player.getDuration();
+        var introMarginLeft = 0;
+        var introWidth = 0;
+
+        if (data.intro && $('.jw-intro').length === 0) {
+            introMarginLeft = (data.intro.start / duration) * 100;
+            introWidth = ((data.intro.end - data.intro.start) / duration) * 100;
+
+            $(".jw-slider-container").append("<div class=\"jw-reset jw-intro\" style=\"margin-left: " + introMarginLeft + "%; width: " + introWidth + "%\"></div>");
+        }
+
+        var outroMarginLeft = 0;
+        var outroWidth = 0;
+        if (data.outro && $('.jw-outro').length === 0) {
+            data.outro.end = data.outro.end > duration ? duration : data.outro.end;
+            outroMarginLeft = (data.outro.start / duration) * 100 - introWidth - introMarginLeft;
+            outroWidth = ((data.outro.end - data.outro.start) / duration) * 100;
+            $(".jw-slider-container").append("<div class=\"jw-reset jw-outro\" style=\"margin-left: " + outroMarginLeft + "%; width: " + outroWidth + "%\"></div>");
+        }
+    });
+	
+}
+
+function setInitialPlaybackPosition(player, startTime, ap) {
+    startTime = parseFloat(startTime);
+
+    if (!isFinite(startTime) || startTime <= 0) {
+        return;
+    }
+
+    var applied = false;
+
+    function applyResume() {
+        if (applied) return;
+
+        var duration = Number(player.getDuration());
+
+        if (!isFinite(duration) || duration <= 0) {
+            return;
+        }
+
+        applied = true;
+        player.seek(Math.min(startTime, Math.max(0, duration - 1)));
+    }
+
+    // MP4 resume is most reliable once the first frame/metadata is available.
+    player.once("firstFrame", applyResume);
+
+    // When autoplay is disabled, firstFrame only happens after the user presses play.
+    player.once("play", function () {
+        setTimeout(applyResume, 0);
+    });
+}
+
+function getAndSetVideoPlaybackPosition(player, videoId, ap) {
+    var timestamp = localStorage.getItem(videoId);
+
+    if (timestamp !== null) {
+        setInitialPlaybackPosition(player, parseFloat(timestamp), ap);
+    }
+}
+
+function skip_inu(timeToSkip, text, asi) {
+    var skipButton = document.getElementById("skip-button");
+    if (asi == 1) {
+        player.seek(timeToSkip);
+        skipButton.style.display = "none";
+    } else {
+        skipButton.textContent = "Skip " + text;
+        skipButton.addEventListener("click", function () {
+            player.seek(timeToSkip);
+            skipButton.style.display = "none";
+        });
+    }
+}
+
+(function () {
+  var syncAdded = false;
+
+  function addSyncBtn(player) {
+    if (syncAdded) return;
+    function onSyncClick() {
+      // ask parent to fetch host state from socket (only this client will get reply)
+      window.parent.postMessage(JSON.stringify({
+        channel: 'megacloud',
+        event: 'request_sync_pull'
+      }), '*');
+    }
+    player.addButton('/images/sync.png', 'Sync Time', onSyncClick, 'sync-button');
+    syncAdded = true;
+  }
+
+  function hideSyncBtn() {
+    var el = document.querySelector('[button="sync-button"]');
+    if (el) el.style.display = 'none';
+  }
+  function showSyncBtn() {
+    var el = document.querySelector('[button="sync-button"]');
+    if (el) el.style.display = '';
+  }
+
+  // 1) Receive commands from parent
+  function onParentMessage(e) {
+    var data = e.data || e.message;
+    try { data = typeof data === 'string' ? JSON.parse(data) : data; } catch (_) { return; }
+    if (!data || data.channel !== 'megacloud') return;
+
+    // Parent decides whether to show the sync button (route + role)
+    if (data.event === 'toggle_sync_button') {
+      if (data.show === true) {
+        if (!syncAdded && typeof player !== 'undefined') addSyncBtn(player);
+        showSyncBtn();
+      } else {
+        hideSyncBtn();
+      }
+      return;
+    }
+
+    // Parent asks us to SEEK to a specific time (seconds)
+    if (data.event === 'seek') {
+      var t = Number(data.time) || 0;
+      if (typeof player !== 'undefined' && typeof player.seek === 'function') {
+        player.seek(t);
+      }
+      return;
+    }
+  }
+  window.addEventListener('message', onParentMessage);
+
+  // 2) Ensure the listener is ready after JW is ready
+  if (typeof player !== 'undefined' && typeof player.on === 'function') {
+    player.on('ready', function () {
+      // do nothing here; parent will toggle the button visibility later
+      // (you can add the button eagerly if you want:)
+      // addSyncBtn(player);
+    });
+  }
+})();
+</script>
+<div class="botright" id="botright">
+<a href="javascript:;" id="skip-button" class="zbtn-outline zbtn" style="display:none;"></a>
+</div>
+</body>
+</html>

@@ -1,0 +1,79 @@
+{
+  "instanceId": "5175ae72-e5ac-6364-8ba7-55e119047044",
+  "start": "2026-10-14T02:52:01Z",
+  "end": "2026-10-14T02:56:00Z",
+  "queriedAt": "2026-10-14T02:56:26.521Z",
+  "replies": [
+    {
+      "name": "CPU_TOTAL_PERCENT",
+      "status": 200,
+      "reply": {
+        "metrics": [
+          {
+            "labels": {
+              "instance_id": "5175ae72-e5ac-6364-8ba7-55e119047044"
+            },
+            "samples": [
+              {
+                "timestamp": "2026-10-14T02:52:01Z",
+                "value": null
+              },
+              {
+                "timestamp": "2026-10-14T02:53:01Z",
+                "value": null
+              },
+              {
+                "timestamp": "2026-10-14T02:54:01Z",
+                "value": 0
+              },
+              {
+                "timestamp": "2026-10-14T02:55:01Z",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "MEM_RSS",
+      "status": 200,
+      "reply": {
+        "metrics": [
+          {
+            "labels": {
+              "instance_id": "5175ae72-e5ac-6364-8ba7-55e119047044"
+            },
+            "samples": [
+              {
+                "timestamp": "2026-10-14T02:52:01Z",
+                "value": null
+              },
+              {
+                "timestamp": "2026-10-14T02:53:01Z",
+                "value": null
+              },
+              {
+                "timestamp": "2026-10-14T02:54:01Z",
+                "value": 158355456
+              },
+              {
+                "timestamp": "2026-10-14T02:55:01Z",
+                "value": 171700224
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "HTTP_RESPONSE_TIME_MAX",
+      "status": 501,
+      "reply": {
+        "status": 501,
+        "code": "unimplemented",
+        "message": "http response time per instance is unavailable"
+      }
+    }
+  ]
+}
