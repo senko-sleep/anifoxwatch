@@ -209,6 +209,38 @@ describe('CSS landscape fallback when the phone will not rotate', () => {
     expect(document.body.style.overflow).not.toBe('hidden');
   });
 
+  it('iPad (reports a Mac user agent): still gets the landscape fallback', async () => {
+    const IPAD_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15';
+    Object.defineProperty(window.navigator, 'userAgent', { get: () => IPAD_UA, configurable: true });
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { get: () => 5, configurable: true });
+    lock.mockRejectedValue(new DOMException('not supported', 'NotSupportedError'));
+    try {
+      const { container } = render(<VideoPlayer src={src} />);
+      startedVideo(container);
+      await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+      act(() => vi.advanceTimersByTime(800));
+      expect(stageOf(container).style.transform).toBe('rotate(90deg) translateY(-100%)');
+    } finally {
+      delete (window.navigator as any).maxTouchPoints;
+    }
+  });
+
+  it('a desktop Mac (no touch) is left alone', async () => {
+    const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15';
+    Object.defineProperty(window.navigator, 'userAgent', { get: () => MAC_UA, configurable: true });
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { get: () => 0, configurable: true });
+    try {
+      const { container } = render(<VideoPlayer src={src} />);
+      startedVideo(container);
+      await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+      act(() => vi.advanceTimersByTime(800));
+      expect(lock).not.toHaveBeenCalled();
+      expect(stageOf(container).style.transform).toBe('');
+    } finally {
+      delete (window.navigator as any).maxTouchPoints;
+    }
+  });
+
   async function enterPseudoLandscape(container: HTMLElement) {
     await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
     act(() => vi.advanceTimersByTime(800));

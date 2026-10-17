@@ -1,5 +1,6 @@
-const STATIC_CACHE = 'anistream-static-v4';
-const DYNAMIC_CACHE = 'anistream-dynamic-v4';
+// v5: drops shells cached by v4, which could hold a pre-deploy index.html.
+const STATIC_CACHE = 'anistream-static-v5';
+const DYNAMIC_CACHE = 'anistream-dynamic-v5';
 
 const STATIC_ASSETS = [
   '/',
@@ -12,7 +13,8 @@ const STATIC_ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE)
-      .then((cache) => cache.addAll(STATIC_ASSETS).catch(() => {}))
+      // 'reload' bypasses the HTTP cache so the precache never stores a stale shell
+      .then((cache) => cache.addAll(STATIC_ASSETS.map((u) => new Request(u, { cache: 'reload' }))).catch(() => {}))
       .then(() => self.skipWaiting())
   );
 });
@@ -82,7 +84,10 @@ async function cacheFirst(req, cacheName) {
 async function networkFirst(req, cacheName) {
   const cache = await caches.open(cacheName);
   try {
-    const res = await fetch(req);
+    // 'no-cache' revalidates with the server instead of trusting the HTTP cache:
+    // Firebase serves SPA routes (incl. the installed app's start_url "/") with
+    // max-age=3600, which kept the app on the previous deploy for up to an hour.
+    const res = await fetch(req.mode === 'navigate' ? req.url : req, { cache: 'no-cache', credentials: 'same-origin' });
     if (res.ok) cache.put(req, res.clone());
     return res;
   } catch {

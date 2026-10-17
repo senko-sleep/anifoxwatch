@@ -32,7 +32,8 @@ import {
 import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { WatchHistory } from '@/lib/watch-history';
 import { nextAniwavesServer } from '@/lib/stream-failover';
-import { audioTypeFromQuery, type AudioType } from '@/lib/audio-type';
+import type { AudioType } from '@/lib/audio-type';
+import { preferredAudioType, rememberAudioPreference } from '@/lib/audio-preference';
 import { EMBED_DOMAINS, embedPlaybackUrlFor, embedUrlFor } from '@/lib/embed-source';
 import { toast } from 'sonner';
 
@@ -167,11 +168,13 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   const officialEpisodeUrl = !adult && cleanAnimeId === 'anilist-189046' && selectedEpisodeNum === 14
     ? 'https://www.crunchyroll.com/watch/GE00345564ENUS/five-obstacles'
     : null;
-  const [audioType, setAudioType] = useState<AudioType>(() => audioTypeFromQuery(searchParams.get('lang')));
-  const [audioManuallySet, setAudioManuallySet] = useState(() => {
-    const requestedLanguage = searchParams.get('lang');
-    return requestedLanguage === 'sub' || requestedLanguage === 'dub';
-  });
+  const startingAudio = (animeId: string) => preferredAudioType(
+    animeId,
+    searchParams.get('lang'),
+    WatchHistory.get().find((item) => item.animeId === animeId)?.audioType,
+  );
+  const [audioType, setAudioType] = useState<AudioType>(() => startingAudio(cleanAnimeId).audioType);
+  const [audioManuallySet, setAudioManuallySet] = useState(() => startingAudio(cleanAnimeId).sticky);
   const embedFrameRef = useRef<HTMLIFrameElement>(null);
   const [quality, setQuality] = useState<QualityType>('auto');
   const [selectedServer, setSelectedServer] = useState<string>('');
@@ -450,6 +453,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
         intro: streamData?.intro,
         outro: streamData?.outro,
         episodeNum: selectedEpisodeNum,
+        audioType,
       }
     : null;
   const heldPlayerRef = useRef<NonNullable<typeof livePlayer> | null>(null);
@@ -568,8 +572,11 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
     setUserPickedServer(false);
     setServerRetryCount(0);
     setSourceRetryIndex(0);
-    setAudioManuallySet(false);
+    const audio = startingAudio(cleanAnimeId);
+    setAudioType(audio.audioType);
+    setAudioManuallySet(audio.sticky);
     setStreamSlowWarning(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only on anime navigation
   }, [cleanAnimeId]);
 
   // Initialize episode from URL or first episode (runs once on mount)
@@ -1203,6 +1210,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                     hasNextEpisode={hasNext}
                     animeId={cleanAnimeId}
                     selectedEpisodeNum={p.episodeNum}
+                    audioType={p.audioType}
                     animeTitle={anime.title}
                     animeImage={anime.image}
                     animeSeason={anime.season}
@@ -1374,6 +1382,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
               onAudioTypeChange={(type) => {
                 setAudioManuallySet(true);
                 setAudioType(type);
+                rememberAudioPreference(cleanAnimeId, type);
                 setSearchParams((previous) => {
                   const next = new URLSearchParams(previous);
                   next.set('lang', type);

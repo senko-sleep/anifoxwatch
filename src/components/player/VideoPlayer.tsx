@@ -67,6 +67,8 @@ interface VideoPlayerProps {
   animeImage?: string;
   animeSeason?: string;
   isAdult?: boolean;
+  /** Language being played; recorded in watch history so Continue Watching reopens it in the same one. */
+  audioType?: 'sub' | 'dub';
   onBack?: () => void;
   onEpisodes?: () => void;
   onShowSettings?: () => void;
@@ -109,6 +111,7 @@ export const VideoPlayer = ({
   animeImage,
   animeSeason,
   isAdult,
+  audioType,
   onBack,
   onEpisodes,
   onShowSettings,
@@ -292,6 +295,12 @@ export const VideoPlayer = ({
   const isMobile = useCallback(() => {
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   }, []);
+
+  // Phones and tablets that need help getting into landscape. iPadOS Safari (and the
+  // home-screen app) reports a Mac user agent, so it is caught by its touch points.
+  const isHandheld = useCallback(() => {
+    return isMobile() || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  }, [isMobile]);
 
   // Position persistence functions
   const getPositionKey = useCallback(() => {
@@ -1195,7 +1204,8 @@ export const VideoPlayer = ({
         time,
         video.duration,
         frameThumbnail,
-        isAdult
+        isAdult,
+        audioType
       );
     };
 
@@ -1455,7 +1465,7 @@ export const VideoPlayer = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('pagehide', handleVisibilityChange);
     };
-  }, [intro, outro, onEnded, hasNextEpisode, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, animeSeason, isAdult, autoFullscreen, isMobile]);
+  }, [intro, outro, onEnded, hasNextEpisode, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, animeSeason, isAdult, audioType, autoFullscreen, isMobile]);
 
   // After a landscape request, give the OS a moment to rotate; if the screen is
   // still portrait, fall back to rotating the stage with CSS.
@@ -1481,9 +1491,9 @@ export const VideoPlayer = ({
 
   // Fullscreen change handler
   useEffect(() => {
-    return syncOrientationWithFullscreen(isMobile, (inFullscreen) => {
+    return syncOrientationWithFullscreen(isHandheld, (inFullscreen) => {
       setIsFullscreen(inFullscreen || fakeFullscreenRef.current);
-      if (inFullscreen && isMobile()) {
+      if (inFullscreen && isHandheld()) {
         isLandscapeLockedRef.current = true;
         setIsLandscapeLocked(true);
         scheduleRotateCheck();
@@ -1495,7 +1505,7 @@ export const VideoPlayer = ({
         }
       }
     });
-  }, [isMobile, scheduleRotateCheck, clearRotateFallback]);
+  }, [isHandheld, scheduleRotateCheck, clearRotateFallback]);
 
   // Track the viewport while fullscreen so the CSS landscape stage fits it, and lock
   // page scroll under the CSS fullscreen.
@@ -1734,7 +1744,7 @@ export const VideoPlayer = ({
     }
 
     if (document.fullscreenElement || (video as any).webkitDisplayingFullscreen) {
-      if (isMobile()) unlockOrientation();
+      if (isHandheld()) unlockOrientation();
       if (document.exitFullscreen) {
         await document.exitFullscreen();
       } else if ((video as any).webkitExitFullscreen) {
@@ -1752,11 +1762,11 @@ export const VideoPlayer = ({
       }
 
       // Lock only works once fullscreen is active (also re-applied on fullscreenchange)
-      if (enteredFs && isMobile() && !(await lockLandscape())) {
+      if (enteredFs && isHandheld() && !(await lockLandscape())) {
         playerLog('warn', 'Orientation lock failed');
       }
 
-      if (!enteredFs && isMobile()) {
+      if (!enteredFs && isHandheld()) {
         // iPhone Safari has no element fullscreen and no orientation lock; its native
         // video fullscreen can't be rotated either. Use a CSS fullscreen we can rotate.
         fakeFullscreenRef.current = true;
@@ -1768,7 +1778,7 @@ export const VideoPlayer = ({
         scheduleRotateCheck();
       }
     }
-  }, [isMobile, scheduleRotateCheck, clearRotateFallback]);
+  }, [isHandheld, scheduleRotateCheck, clearRotateFallback]);
 
   const skipIntro = useCallback(() => {
     const video = videoRef.current;
