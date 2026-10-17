@@ -38,7 +38,8 @@ import { cn } from '@/lib/utils';
 import { PostProxyLoader } from '@/lib/hls-post-loader';
 import { apiUrl } from '@/lib/api-config';
 import { isTimeBuffered } from '@/lib/buffered';
-import { lockLandscape, syncOrientationWithFullscreen } from '@/lib/orientationLock';
+import { lockLandscape, syncOrientationWithFullscreen, unlockOrientation } from '@/lib/orientationLock';
+import { landscapeStageStyle, localPoint } from '@/lib/playerGeometry';
 import { WatchHistory } from '@/lib/watch-history';
 
 interface VideoSubtitle {
@@ -267,6 +268,22 @@ export const VideoPlayer = ({
   // Landscape lock state
   const [isLandscapeLocked, setIsLandscapeLocked] = useState(false);
   const isLandscapeLockedRef = useRef(false);
+
+  // Pseudo-landscape: when the OS won't rotate (no orientation lock on iPhone, rejected
+  // or ignored on some Android browsers), rotate the player stage with CSS instead.
+  // iPhone also lacks element fullscreen, so it gets a CSS (fixed, full-viewport) one.
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [fakeFullscreen, setFakeFullscreen] = useState(false);
+  const fakeFullscreenRef = useRef(false);
+  const [rotateFallback, setRotateFallback] = useState(false);
+  const rotateCheckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [viewport, setViewport] = useState(() => ({
+    w: typeof window !== 'undefined' ? window.innerWidth : 0,
+    h: typeof window !== 'undefined' ? window.innerHeight : 0,
+  }));
+  const pseudoLandscape = rotateFallback && viewport.h > viewport.w;
+  const pseudoLandscapeRef = useRef(false);
+  pseudoLandscapeRef.current = pseudoLandscape;
 
   // Auto-fullscreen on mobile: trigger once per mount when autoFullscreen prop is true
   const autoFullscreenFiredRef = useRef(false);
@@ -1440,16 +1457,66 @@ export const VideoPlayer = ({
     };
   }, [intro, outro, onEnded, hasNextEpisode, savePosition, clearSavedPosition, animeId, selectedEpisodeNum, animeTitle, animeImage, animeSeason, isAdult, autoFullscreen, isMobile]);
 
+  // After a landscape request, give the OS a moment to rotate; if the screen is
+  // still portrait, fall back to rotating the stage with CSS.
+  const scheduleRotateCheck = useCallback(() => {
+    if (rotateCheckTimerRef.current) clearTimeout(rotateCheckTimerRef.current);
+    rotateCheckTimerRef.current = setTimeout(() => {
+      rotateCheckTimerRef.current = null;
+      const stillFullscreen = !!document.fullscreenElement || fakeFullscreenRef.current;
+      if (!stillFullscreen) return;
+      setViewport({ w: window.innerWidth, h: window.innerHeight });
+      if (window.innerHeight > window.innerWidth) {
+        playerLog('warn', 'Screen did not rotate to landscape — using CSS landscape');
+        setRotateFallback(true);
+      }
+    }, 700);
+  }, []);
+
+  const clearRotateFallback = useCallback(() => {
+    if (rotateCheckTimerRef.current) clearTimeout(rotateCheckTimerRef.current);
+    rotateCheckTimerRef.current = null;
+    setRotateFallback(false);
+  }, []);
+
   // Fullscreen change handler
   useEffect(() => {
     return syncOrientationWithFullscreen(isMobile, (inFullscreen) => {
-      setIsFullscreen(inFullscreen);
-      if (!inFullscreen && isLandscapeLockedRef.current) {
-        isLandscapeLockedRef.current = false;
-        setIsLandscapeLocked(false);
+      setIsFullscreen(inFullscreen || fakeFullscreenRef.current);
+      if (inFullscreen && isMobile()) {
+        isLandscapeLockedRef.current = true;
+        setIsLandscapeLocked(true);
+        scheduleRotateCheck();
+      } else if (!inFullscreen && !fakeFullscreenRef.current) {
+        clearRotateFallback();
+        if (isLandscapeLockedRef.current) {
+          isLandscapeLockedRef.current = false;
+          setIsLandscapeLocked(false);
+        }
       }
     });
-  }, [isMobile]);
+  }, [isMobile, scheduleRotateCheck, clearRotateFallback]);
+
+  // Track the viewport while fullscreen so the CSS landscape stage fits it, and lock
+  // page scroll under the CSS fullscreen.
+  useEffect(() => {
+    if (!isFullscreen && !fakeFullscreen) return;
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    onResize();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    const prevOverflow = document.body.style.overflow;
+    if (fakeFullscreen) document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+      if (fakeFullscreen) document.body.style.overflow = prevOverflow;
+    };
+  }, [isFullscreen, fakeFullscreen]);
+
+  useEffect(() => () => {
+    if (rotateCheckTimerRef.current) clearTimeout(rotateCheckTimerRef.current);
+  }, []);
 
   // Next episode countdown timer
   useEffect(() => {
@@ -1656,14 +1723,18 @@ export const VideoPlayer = ({
     const video = videoRef.current;
     if (!container || !video) return;
 
+    if (fakeFullscreenRef.current) {
+      fakeFullscreenRef.current = false;
+      setFakeFullscreen(false);
+      setIsFullscreen(false);
+      clearRotateFallback();
+      isLandscapeLockedRef.current = false;
+      setIsLandscapeLocked(false);
+      return;
+    }
+
     if (document.fullscreenElement || (video as any).webkitDisplayingFullscreen) {
-      if (isMobile() && screen.orientation && (screen.orientation as any).unlock) {
-        try {
-          (screen.orientation as any).unlock();
-        } catch (e) {
-          playerLog('warn', 'Orientation unlock failed', e);
-        }
-      }
+      if (isMobile()) unlockOrientation();
       if (document.exitFullscreen) {
         await document.exitFullscreen();
       } else if ((video as any).webkitExitFullscreen) {
@@ -1685,15 +1756,19 @@ export const VideoPlayer = ({
         playerLog('warn', 'Orientation lock failed');
       }
 
-      if (!enteredFs && isMobile() && (video as any).webkitEnterFullscreen) {
-        try {
-          (video as any).webkitEnterFullscreen();
-        } catch (e) {
-          playerLog('warn', 'webkitEnterFullscreen failed', e);
-        }
+      if (!enteredFs && isMobile()) {
+        // iPhone Safari has no element fullscreen and no orientation lock; its native
+        // video fullscreen can't be rotated either. Use a CSS fullscreen we can rotate.
+        fakeFullscreenRef.current = true;
+        setFakeFullscreen(true);
+        setIsFullscreen(true);
+        isLandscapeLockedRef.current = true;
+        setIsLandscapeLocked(true);
+        void lockLandscape();
+        scheduleRotateCheck();
       }
     }
-  }, [isMobile]);
+  }, [isMobile, scheduleRotateCheck, clearRotateFallback]);
 
   const skipIntro = useCallback(() => {
     const video = videoRef.current;
@@ -1747,49 +1822,9 @@ export const VideoPlayer = ({
     setSubtitleEnabled(!!lang);
   }, []);
 
-  // Toggle landscape orientation lock + fullscreen on mobile
-  const toggleLandscapeLock = useCallback(async () => {
-    const video = videoRef.current;
-    const container = containerRef.current;
-    if (!video || !container) return;
-
-    try {
-      if (isLandscapeLockedRef.current) {
-        // Unlock orientation
-        if ((screen.orientation as any).unlock) {
-          (screen.orientation as any).unlock();
-        }
-        // Exit fullscreen if active
-        if (document.fullscreenElement) {
-          await document.exitFullscreen();
-        } else if ((video as any).webkitDisplayingFullscreen) {
-          (video as any).webkitExitFullscreen?.();
-        }
-        isLandscapeLockedRef.current = false;
-        setIsLandscapeLocked(false);
-      } else {
-        // Enter fullscreen FIRST
-        let enteredFs = false;
-        if (container.requestFullscreen) {
-          await container.requestFullscreen();
-          enteredFs = true;
-        } else if ((video as any).webkitEnterFullscreen) {
-          (video as any).webkitEnterFullscreen();
-        }
-
-        // Lock orientation AFTER
-        if (enteredFs && screen.orientation && (screen.orientation as any).lock) {
-          await (screen.orientation as any).lock('landscape');
-        }
-        isLandscapeLockedRef.current = true;
-        setIsLandscapeLocked(true);
-      }
-    } catch (e) {
-      playerLog('warn', 'Landscape lock toggle failed', e);
-      // Fallback to regular fullscreen
-      toggleFullscreen();
-    }
-  }, [toggleFullscreen]);
+  // Landscape button: on mobile, fullscreen already means landscape (OS lock, or the
+  // CSS fallback when the OS refuses), so it shares the fullscreen path.
+  const toggleLandscapeLock = useCallback(() => toggleFullscreen(), [toggleFullscreen]);
 
   // ─── TOUCH HANDLERS ────────────────────────────────────────────────────────
 
@@ -1806,13 +1841,12 @@ export const VideoPlayer = ({
     const container = containerRef.current;
     if (!container) return;
 
-    const rect = container.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
-    const width = rect.width;
+    // Positions are kept in the stage's own frame so gestures follow what the viewer
+    // sees, including under the CSS landscape rotation.
+    const { x, y, width } = localPoint(stageRef.current ?? container, touch.clientX, touch.clientY, pseudoLandscapeRef.current);
 
-    setTouchStartPos({ x: touch.clientX, y: touch.clientY });
-    setTouchCurrentPos({ x: touch.clientX, y: touch.clientY });
+    setTouchStartPos({ x, y });
+    setTouchCurrentPos({ x, y });
 
     if (lastTapRef.current) {
       const timeDiff = now - lastTapRef.current.time;
@@ -1855,14 +1889,21 @@ export const VideoPlayer = ({
     }
   }, [showControlsTemporarily, toggleControlsVisibility, isMobile]);
 
+  // Pointer position along the progress bar, in the bar's own pixels (rotation-aware).
+  const progressLocal = (clientX: number, clientY: number) =>
+    progressContainerRef.current
+      ? localPoint(progressContainerRef.current, clientX, clientY, pseudoLandscapeRef.current)
+      : null;
+
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     if (!touchStartPos || !containerRef.current || !videoRef.current) return;
 
     const touch = e.touches[0];
-    setTouchCurrentPos({ x: touch.clientX, y: touch.clientY });
+    const p = localPoint(stageRef.current ?? containerRef.current, touch.clientX, touch.clientY, pseudoLandscapeRef.current);
+    setTouchCurrentPos({ x: p.x, y: p.y });
 
-    const dx = touch.clientX - touchStartPos.x;
-    const dy = touch.clientY - touchStartPos.y;
+    const dx = p.x - touchStartPos.x;
+    const dy = p.y - touchStartPos.y;
 
     if (!isSwiping) {
       // Classify by the dominant axis so a sideways drag with some vertical
@@ -1875,9 +1916,7 @@ export const VideoPlayer = ({
         setShowSwipeOverlay(true);
         setShowControls(false);
       } else if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) {
-        const rect = containerRef.current.getBoundingClientRect();
-        const startXRel = touchStartPos.x - rect.left;
-        if (startXRel > rect.width * 0.5) {
+        if (touchStartPos.x > p.width * 0.5) {
           if (swipeOverlayTimerRef.current) clearTimeout(swipeOverlayTimerRef.current);
           setIsSwiping(true);
           setSwipeType('volume');
@@ -1890,15 +1929,13 @@ export const VideoPlayer = ({
     }
 
     if (swipeType === 'seek') {
-      const rect = containerRef.current.getBoundingClientRect();
-      const seekDelta = (dx / rect.width) * (duration || 300);
+      const seekDelta = (dx / p.width) * (duration || 300);
       const newTime = Math.max(0, Math.min(duration, swipeStartValueRef.current + seekDelta));
       // Preview only; the seek is committed once on release ("Release to Seek")
       setSwipeValue(newTime);
       swipeSeekTargetRef.current = newTime;
     } else if (swipeType === 'volume') {
-      const rect = containerRef.current.getBoundingClientRect();
-      const volumeDelta = -(dy / (rect.height * 0.5));
+      const volumeDelta = -(dy / (p.height * 0.5));
       const newVolume = Math.max(0, Math.min(1, swipeStartValueRef.current + volumeDelta));
       videoRef.current.volume = newVolume;
       setVolume(newVolume);
@@ -1983,14 +2020,23 @@ export const VideoPlayer = ({
     <div
       ref={containerRef}
       className={cn(
-        "relative w-full h-full bg-black group overflow-hidden touch-none"
+        "bg-black group overflow-hidden touch-none",
+        fakeFullscreen ? "fixed inset-0 z-[2147483647] w-screen h-[100dvh]" : "relative w-full h-full"
       )}
+      data-pseudo-landscape={pseudoLandscape || undefined}
       onMouseMove={showControlsTemporarily}
       onMouseLeave={() => isPlaying && setShowControls(false)}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
+      {/* Stage: everything the viewer sees. Rotated 90° (not the container, whose
+          :fullscreen UA style forces transform: none) when the OS won't rotate. */}
+      <div
+        ref={stageRef}
+        className="absolute inset-0"
+        style={pseudoLandscape ? landscapeStageStyle(viewport.w, viewport.h) : undefined}
+      >
       {/* Swipe Overlay */}
       {showSwipeOverlay && (
         <div className="absolute inset-0 z-40 flex items-center justify-center pointer-events-none">
@@ -2288,12 +2334,11 @@ export const VideoPlayer = ({
               className="relative group/progress cursor-pointer py-2"
               onMouseEnter={() => setIsProgressHovering(true)}
               onMouseLeave={() => setIsProgressHovering(false)}
-              onMouseMove={(e) => setProgressMouseX(e.clientX)}
+              onMouseMove={(e) => setProgressMouseX(progressLocal(e.clientX, e.clientY)?.x ?? 0)}
               onClick={(e) => {
-                const rect = progressContainerRef.current?.getBoundingClientRect();
-                if (rect) {
-                  const x = e.clientX - rect.left;
-                  const percentage = x / rect.width;
+                const p = progressLocal(e.clientX, e.clientY);
+                if (p && p.width > 0) {
+                  const percentage = Math.max(0, Math.min(1, p.x / p.width));
                   const dur = durationRef.current || duration || 0;
                   const time = percentage * dur;
                   handleSeek([time]);
@@ -2303,13 +2348,13 @@ export const VideoPlayer = ({
                 e.stopPropagation();
                 if (e.touches[0]) {
                   setIsProgressTouching(true);
-                  setProgressTouchX(e.touches[0].clientX);
+                  setProgressTouchX(progressLocal(e.touches[0].clientX, e.touches[0].clientY)?.x ?? 0);
                 }
               }}
               onTouchMove={(e) => {
                 e.stopPropagation();
                 if (e.touches[0]) {
-                  setProgressTouchX(e.touches[0].clientX);
+                  setProgressTouchX(progressLocal(e.touches[0].clientX, e.touches[0].clientY)?.x ?? 0);
                 }
               }}
               onTouchEnd={(e) => {
@@ -2342,9 +2387,9 @@ export const VideoPlayer = ({
                 />
                 {/* Hover position indicator line */}
                 {(isProgressHovering || isProgressTouching) && progressContainerRef.current && (() => {
-                  const rect = progressContainerRef.current!.getBoundingClientRect();
-                  const mx = (isProgressTouching ? progressTouchX : progressMouseX) - rect.left;
-                  const pct = Math.max(0, Math.min(100, (mx / rect.width) * 100));
+                  const mx = isProgressTouching ? progressTouchX : progressMouseX;
+                  const width = progressContainerRef.current!.offsetWidth || progressLocal(0, 0)?.width || 1;
+                  const pct = Math.max(0, Math.min(100, (mx / width) * 100));
                   return (
                     <div
                       className="absolute inset-y-0 w-[2px] bg-white/60 pointer-events-none z-10"
@@ -2781,6 +2826,7 @@ export const VideoPlayer = ({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

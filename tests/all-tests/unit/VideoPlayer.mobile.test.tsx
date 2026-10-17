@@ -146,6 +146,120 @@ describe('mobile fullscreen orientation', () => {
   });
 });
 
+describe('CSS landscape fallback when the phone will not rotate', () => {
+  const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1';
+  const PORTRAIT = { w: 390, h: 844 };
+  const setViewport = (w: number, h: number) => {
+    Object.defineProperty(window, 'innerWidth', { value: w, configurable: true, writable: true });
+    Object.defineProperty(window, 'innerHeight', { value: h, configurable: true, writable: true });
+  };
+  const screenRect = (left: number, top: number, width: number, height: number) =>
+    ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+  const stageOf = (container: HTMLElement) => surface(container).firstElementChild as HTMLElement;
+
+  beforeEach(() => {
+    setViewport(PORTRAIT.w, PORTRAIT.h);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(screenRect(0, 0, PORTRAIT.w, PORTRAIT.h));
+  });
+  afterEach(() => setViewport(1024, 768));
+
+  it('Android: lock accepted but screen still portrait -> stage rotated to fill the screen', async () => {
+    const { container } = render(<VideoPlayer src={src} />);
+    startedVideo(container);
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+    expect(stageOf(container).style.transform).toBe('');
+
+    act(() => vi.advanceTimersByTime(800));
+    const stage = stageOf(container);
+    expect(surface(container).dataset.pseudoLandscape).toBe('true');
+    expect(stage.style.transform).toBe('rotate(90deg) translateY(-100%)');
+    expect(stage.style.width).toBe(`${PORTRAIT.h}px`);
+    expect(stage.style.height).toBe(`${PORTRAIT.w}px`);
+
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); }); // exit
+    expect(stageOf(container).style.transform).toBe('');
+    expect(surface(container).dataset.pseudoLandscape).toBeUndefined();
+  });
+
+  it('Android: when the OS really rotates, no CSS rotation is applied', async () => {
+    lock.mockImplementation(async () => { calls.push('lock'); setViewport(PORTRAIT.h, PORTRAIT.w); });
+    const { container } = render(<VideoPlayer src={src} />);
+    startedVideo(container);
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+    act(() => vi.advanceTimersByTime(800));
+    expect(stageOf(container).style.transform).toBe('');
+  });
+
+  it('iPhone: no element fullscreen -> CSS fullscreen, rotated to landscape; exit restores', async () => {
+    Object.defineProperty(window.navigator, 'userAgent', { get: () => IPHONE_UA, configurable: true });
+    Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', { value: undefined, configurable: true });
+    lock.mockRejectedValue(new DOMException('not supported', 'NotSupportedError'));
+    const { container } = render(<VideoPlayer src={src} />);
+    startedVideo(container);
+
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+    expect(surface(container).className).toMatch(/\bfixed\b/);
+    act(() => vi.advanceTimersByTime(800));
+    expect(stageOf(container).style.transform).toBe('rotate(90deg) translateY(-100%)');
+    expect(document.body.style.overflow).toBe('hidden');
+
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); }); // exit
+    expect(surface(container).className).not.toMatch(/\bfixed\b/);
+    expect(stageOf(container).style.transform).toBe('');
+    expect(document.body.style.overflow).not.toBe('hidden');
+  });
+
+  async function enterPseudoLandscape(container: HTMLElement) {
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+    act(() => vi.advanceTimersByTime(800));
+    expect(surface(container).dataset.pseudoLandscape).toBe('true');
+  }
+
+  it('rotated: a swipe along the landscape width (screen vertical) seeks', async () => {
+    const { container, queryByText } = render(<VideoPlayer src={src} />);
+    const video = startedVideo(container);
+    video.volume = 0.6;
+    await enterPseudoLandscape(container);
+    const el = surface(container);
+
+    act(() => { fireEvent.touchStart(el, touch(200, 100)); });
+    act(() => { fireEvent.touchMove(el, touch(205, 180)); });
+    act(() => { fireEvent.touchMove(el, touch(210, 500)); }); // +400px of an 844px-wide landscape stage
+    expect(queryByText('Release to Seek')).not.toBeNull();
+    act(() => { fireEvent.touchEnd(el, { touches: [] }); });
+    expect(video.currentTime).toBeCloseTo(240 + (400 / 844) * 1440, 1);
+    expect(video.volume).toBe(0.6);
+  });
+
+  it('rotated: a swipe along the landscape height on its right half changes volume', async () => {
+    const { container, queryByText } = render(<VideoPlayer src={src} />);
+    const video = startedVideo(container);
+    video.volume = 1;
+    await enterPseudoLandscape(container);
+    const el = surface(container);
+
+    // Landscape right half = lower part of the portrait screen; landscape "down" = screen leftwards
+    act(() => { fireEvent.touchStart(el, touch(300, 700)); });
+    act(() => { fireEvent.touchMove(el, touch(220, 700)); });
+    act(() => { fireEvent.touchMove(el, touch(105, 700)); });
+    expect(queryByText('Volume')).not.toBeNull();
+    expect(video.volume).toBeLessThan(1);
+    act(() => { fireEvent.touchEnd(el, { touches: [] }); });
+  });
+
+  it('rotated: tapping the progress bar seeks to the tapped landscape position', async () => {
+    const { container } = render(<VideoPlayer src={src} />);
+    const video = startedVideo(container);
+    await enterPseudoLandscape(container);
+    const bar = container.querySelector('.group\\/progress') as HTMLElement;
+    // Rotated, the bar is a vertical strip on screen: 800px tall starting at y=22
+    vi.spyOn(bar, 'getBoundingClientRect').mockReturnValue(screenRect(20, 22, 20, 800));
+
+    act(() => { fireEvent.click(bar, { clientX: 30, clientY: 22 + 600 }); });
+    expect(video.currentTime).toBeCloseTo(0.75 * 1440, 1);
+  });
+});
+
 describe('mobile swipe gestures', () => {
   it('a horizontal swipe seeks once on release and never shows or changes volume', () => {
     const { container, queryByText } = render(<VideoPlayer src={src} />);

@@ -252,9 +252,12 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
   useEffect(() => {
     if (!isHovering || !containerRef.current || !duration) return;
 
-    const rect = containerRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(mouseX - rect.left, rect.width));
-    const pct = x / rect.width;
+    // mouseX is relative to the bar, in its own pixels; offsetWidth ignores the
+    // player's CSS landscape rotation, unlike getBoundingClientRect.
+    const width = containerRef.current.offsetWidth || containerRef.current.getBoundingClientRect().width;
+    if (!width) return;
+    const x = Math.max(0, Math.min(mouseX, width));
+    const pct = x / width;
     const time = pct * duration;
 
     setPreviewTime(time);
@@ -284,9 +287,8 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
   }, []);
 
   // â”€â”€ Layout: clamp so preview never overflows the progress bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const containerRect = containerRef.current?.getBoundingClientRect();
   const halfW = PREVIEW_W / 2 + 8;
-  const containerWidth = containerRect?.width ?? 800;
+  const containerWidth = containerRef.current?.offsetWidth || containerRef.current?.getBoundingClientRect().width || 800;
   const clampedLeft = Math.max(halfW, Math.min(position, containerWidth - halfW));
 
   if (!isHovering) return null;
