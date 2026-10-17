@@ -140,6 +140,22 @@ describe('mobile fullscreen orientation', () => {
     expect(lock).not.toHaveBeenCalled();
   });
 
+  it('detects a touch phone requesting a desktop page, even in landscape', async () => {
+    setMobile(false);
+    Object.defineProperty(window.navigator, 'maxTouchPoints', { value: 5, configurable: true });
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      matches: query === '(pointer: coarse)' || query === '(hover: none)',
+    }) as MediaQueryList);
+    try {
+      const { container } = render(<VideoPlayer src={src} />);
+      expect(container.querySelector('button[aria-label^="Rotate to"]')).not.toBeNull();
+      await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+      expect(lock).toHaveBeenCalledWith('landscape');
+    } finally {
+      delete (window.navigator as any).maxTouchPoints;
+    }
+  });
+
   it('PWA manifest does not pin the app to portrait', () => {
     const manifest = JSON.parse(readFileSync('public/manifest.webmanifest', 'utf8'));
     expect(String(manifest.orientation ?? 'any')).not.toMatch(/portrait/);
@@ -190,6 +206,17 @@ describe('CSS landscape fallback when the phone will not rotate', () => {
     expect(stageOf(container).style.transform).toBe('');
   });
 
+  it('schedules the landscape fallback even before fullscreenchange arrives', async () => {
+    vi.mocked(HTMLElement.prototype.requestFullscreen).mockImplementation(async function (this: HTMLElement) {
+      Object.defineProperty(document, 'fullscreenElement', { value: this, configurable: true });
+    });
+    lock.mockRejectedValue(new Error('Unavailable'));
+    const { container } = render(<VideoPlayer src={src} />);
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+    act(() => vi.advanceTimersByTime(800));
+    expect(surface(container).dataset.pseudoLandscape).toBe('true');
+  });
+
   it('iPhone: no element fullscreen -> CSS fullscreen, rotated to landscape; exit restores', async () => {
     Object.defineProperty(window.navigator, 'userAgent', { get: () => IPHONE_UA, configurable: true });
     Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', { value: undefined, configurable: true });
@@ -207,6 +234,33 @@ describe('CSS landscape fallback when the phone will not rotate', () => {
     expect(surface(container).className).not.toMatch(/\bfixed\b/);
     expect(stageOf(container).style.transform).toBe('');
     expect(document.body.style.overflow).not.toBe('hidden');
+  });
+
+  it('iPhone: playback auto-fullscreen uses the rotatable player instead of native video fullscreen', async () => {
+    Object.defineProperty(window.navigator, 'userAgent', { get: () => IPHONE_UA, configurable: true });
+    Object.defineProperty(HTMLElement.prototype, 'requestFullscreen', { value: undefined, configurable: true });
+    const { container } = render(<VideoPlayer src={src} autoFullscreen />);
+    const video = startedVideo(container);
+    const nativeFullscreen = vi.fn();
+    Object.defineProperty(video, 'webkitEnterFullscreen', { value: nativeFullscreen, configurable: true });
+    await act(async () => { fireEvent.play(video); });
+    act(() => vi.advanceTimersByTime(800));
+    expect(nativeFullscreen).not.toHaveBeenCalled();
+    expect(surface(container).className).toMatch(/\bfixed\b/);
+    expect(stageOf(container).style.transform).toBe('rotate(90deg) translateY(-100%)');
+    await act(async () => { fireEvent.play(video); });
+    expect(surface(container).className).toMatch(/\bfixed\b/);
+  });
+
+  it('still rotates when native fullscreen fails and orientation locking is unavailable', async () => {
+    vi.mocked(HTMLElement.prototype.requestFullscreen).mockRejectedValue(new Error('Denied'));
+    lock.mockRejectedValue(new Error('Unavailable'));
+    const { container } = render(<VideoPlayer src={src} />);
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+    act(() => vi.advanceTimersByTime(800));
+    expect(surface(container).dataset.pseudoLandscape).toBe('true');
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+    expect(unlock).toHaveBeenCalled();
   });
 
   it('iPad (reports a Mac user agent): still gets the landscape fallback', async () => {
@@ -289,6 +343,49 @@ describe('CSS landscape fallback when the phone will not rotate', () => {
 
     act(() => { fireEvent.click(bar, { clientX: 30, clientY: 22 + 600 }); });
     expect(video.currentTime).toBeCloseTo(0.75 * 1440, 1);
+  });
+});
+
+describe('manual rotate button', () => {
+  const rotateBtn = (c: HTMLElement) => c.querySelector('button[aria-label^="Rotate to"]') as HTMLElement;
+
+  it('replaces the mobile subtitle button and opens landscape fullscreen first', async () => {
+    const { container } = render(<VideoPlayer src={src} subtitles={[{ lang: 'en', label: 'English', url: 'x.vtt' } as any]} />);
+    startedVideo(container);
+    expect(rotateBtn(container)).not.toBeNull();
+    expect(container.querySelectorAll('svg.lucide-subtitles').length).toBe(0);
+    await act(async () => { fireEvent.click(rotateBtn(container)); });
+    expect(document.fullscreenElement).not.toBeNull();
+    expect(lock).toHaveBeenLastCalledWith('landscape');
+  });
+
+  it('flips to portrait in fullscreen, remembers it, and a new player honours it', async () => {
+    const first = render(<VideoPlayer src={src} />);
+    startedVideo(first.container);
+    await act(async () => { fireEvent.click(rotateBtn(first.container)); });
+    await act(async () => { fireEvent.click(rotateBtn(first.container)); });
+    expect(lock).toHaveBeenLastCalledWith('portrait');
+    expect(localStorage.getItem('player-orientation-pref')).toBe('portrait');
+    first.unmount();
+    act(() => setFullscreen(null));
+    lock.mockClear();
+
+    const second = render(<VideoPlayer src={src} />);
+    startedVideo(second.container);
+    await act(async () => { fireEvent.keyDown(window, { key: 'f' }); });
+    expect(lock).toHaveBeenLastCalledWith('portrait');
+    act(() => vi.advanceTimersByTime(800));
+    expect((surface(second.container).firstElementChild as HTMLElement).style.transform).toBe('');
+  });
+
+  it('flips back to landscape and remembers that too', async () => {
+    localStorage.setItem('player-orientation-pref', 'portrait');
+    const { container } = render(<VideoPlayer src={src} />);
+    startedVideo(container);
+    await act(async () => { fireEvent.click(rotateBtn(container)); });
+    await act(async () => { fireEvent.click(rotateBtn(container)); });
+    expect(lock).toHaveBeenLastCalledWith('landscape');
+    expect(localStorage.getItem('player-orientation-pref')).toBe('landscape');
   });
 });
 

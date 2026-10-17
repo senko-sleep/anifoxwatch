@@ -10,16 +10,39 @@ type LockableOrientation = {
 const getOrientation = (): LockableOrientation | null =>
   (typeof screen !== 'undefined' && (screen.orientation as unknown as LockableOrientation)) || null;
 
-export async function lockLandscape(): Promise<boolean> {
+export type OrientationPref = 'landscape' | 'portrait';
+
+const PREF_KEY = 'player-orientation-pref';
+
+/** The viewer's remembered fullscreen orientation (landscape unless they chose portrait). */
+export function loadOrientationPref(): OrientationPref {
+  try {
+    return localStorage.getItem(PREF_KEY) === 'portrait' ? 'portrait' : 'landscape';
+  } catch {
+    return 'landscape';
+  }
+}
+
+export function saveOrientationPref(pref: OrientationPref): void {
+  try {
+    localStorage.setItem(PREF_KEY, pref);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export async function lockOrientation(pref: OrientationPref): Promise<boolean> {
   const o = getOrientation();
   if (!o?.lock) return false;
   try {
-    await o.lock('landscape');
+    await o.lock(pref);
     return true;
   } catch {
     return false;
   }
 }
+
+export const lockLandscape = () => lockOrientation('landscape');
 
 export function unlockOrientation(): void {
   try {
@@ -30,19 +53,20 @@ export function unlockOrientation(): void {
 }
 
 /**
- * Keeps orientation in sync with fullscreen: landscape-locked while `target`
- * (or any element) is fullscreen on a mobile device, unlocked otherwise.
+ * Keeps orientation in sync with fullscreen: locked to the viewer's preferred
+ * orientation while fullscreen on a mobile device, unlocked otherwise.
  * Returns a cleanup function.
  */
 export function syncOrientationWithFullscreen(
   isMobile: () => boolean,
   onChange?: (inFullscreen: boolean) => void,
   doc: Document = document,
+  getPref: () => OrientationPref = () => 'landscape',
 ): () => void {
   const handler = () => {
     const inFullscreen = !!doc.fullscreenElement;
     if (isMobile()) {
-      if (inFullscreen) void lockLandscape();
+      if (inFullscreen) void lockOrientation(getPref());
       else unlockOrientation();
     }
     onChange?.(inFullscreen);

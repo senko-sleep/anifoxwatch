@@ -38,8 +38,12 @@ import { cn } from '@/lib/utils';
 import { PostProxyLoader } from '@/lib/hls-post-loader';
 import { apiUrl } from '@/lib/api-config';
 import { isTimeBuffered } from '@/lib/buffered';
-import { lockLandscape, syncOrientationWithFullscreen, unlockOrientation } from '@/lib/orientationLock';
+import {
+  loadOrientationPref, lockOrientation, saveOrientationPref, syncOrientationWithFullscreen, unlockOrientation,
+  type OrientationPref,
+} from '@/lib/orientationLock';
 import { landscapeStageStyle, localPoint } from '@/lib/playerGeometry';
+import { isMobileDevice } from '@/lib/mobile-device';
 import { WatchHistory } from '@/lib/watch-history';
 
 interface VideoSubtitle {
@@ -284,22 +288,27 @@ export const VideoPlayer = ({
     w: typeof window !== 'undefined' ? window.innerWidth : 0,
     h: typeof window !== 'undefined' ? window.innerHeight : 0,
   }));
-  const pseudoLandscape = rotateFallback && viewport.h > viewport.w;
+  // Remembered fullscreen orientation, flipped by the rotate button on mobile.
+  const [orientationPref, setOrientationPref] = useState<OrientationPref>(loadOrientationPref);
+  const orientationPrefRef = useRef(orientationPref);
+  orientationPrefRef.current = orientationPref;
+  const pseudoLandscape = rotateFallback && orientationPref === 'landscape' && viewport.h > viewport.w;
   const pseudoLandscapeRef = useRef(false);
   pseudoLandscapeRef.current = pseudoLandscape;
 
   // Auto-fullscreen on mobile: trigger once per mount when autoFullscreen prop is true
   const autoFullscreenFiredRef = useRef(false);
+  const enterFullscreenRef = useRef<() => Promise<void>>(async () => {});
 
   // Helper to detect mobile device
   const isMobile = useCallback(() => {
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    return isMobileDevice();
   }, []);
 
   // Phones and tablets that need help getting into landscape. iPadOS Safari (and the
   // home-screen app) reports a Mac user agent, so it is caught by its touch points.
   const isHandheld = useCallback(() => {
-    return isMobile() || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+    return isMobile();
   }, [isMobile]);
 
   // Position persistence functions
@@ -1216,33 +1225,12 @@ export const VideoPlayer = ({
       if (autoFullscreen && isMobile() && !autoFullscreenFiredRef.current) {
         autoFullscreenFiredRef.current = true;
         
-        // Try webkitEnterFullscreen first (iOS Safari), then fallback to container fullscreen
-        if ((video as any).webkitEnterFullscreen) {
-          try {
-            (video as any).webkitEnterFullscreen();
-          } catch (e) {
-            playerLog('warn', 'Auto-fullscreen webkitEnterFullscreen failed', e);
-            tryEnterContainerFullscreen();
-          }
-        } else {
-          tryEnterContainerFullscreen();
+        if (!document.fullscreenElement && !fakeFullscreenRef.current) {
+          void enterFullscreenRef.current();
         }
       }
     };
     
-    const tryEnterContainerFullscreen = async () => {
-      const container = containerRef.current;
-      if (container?.requestFullscreen) {
-        try {
-          await container.requestFullscreen();
-          if (!(await lockLandscape())) {
-            playerLog('warn', 'Auto-fullscreen orientation lock failed');
-          }
-        } catch (e) {
-          playerLog('warn', 'Auto-fullscreen container request failed', e);
-        }
-      }
-    };
     const handlePause = () => {
       setIsPlaying(false);
       if (video.currentTime > 5 && video.duration - video.currentTime > 10) {
@@ -1494,9 +1482,10 @@ export const VideoPlayer = ({
     return syncOrientationWithFullscreen(isHandheld, (inFullscreen) => {
       setIsFullscreen(inFullscreen || fakeFullscreenRef.current);
       if (inFullscreen && isHandheld()) {
-        isLandscapeLockedRef.current = true;
-        setIsLandscapeLocked(true);
-        scheduleRotateCheck();
+        const landscape = orientationPrefRef.current === 'landscape';
+        isLandscapeLockedRef.current = landscape;
+        setIsLandscapeLocked(landscape);
+        if (landscape) scheduleRotateCheck();
       } else if (!inFullscreen && !fakeFullscreenRef.current) {
         clearRotateFallback();
         if (isLandscapeLockedRef.current) {
@@ -1504,8 +1493,9 @@ export const VideoPlayer = ({
           setIsLandscapeLocked(false);
         }
       }
-    });
+    }, document, () => orientationPrefRef.current);
   }, [isHandheld, scheduleRotateCheck, clearRotateFallback]);
+  // (the sync helper reads the remembered orientation through orientationPrefRef)
 
   // Track the viewport while fullscreen so the CSS landscape stage fits it, and lock
   // page scroll under the CSS fullscreen.
@@ -1737,6 +1727,7 @@ export const VideoPlayer = ({
       fakeFullscreenRef.current = false;
       setFakeFullscreen(false);
       setIsFullscreen(false);
+      unlockOrientation();
       clearRotateFallback();
       isLandscapeLockedRef.current = false;
       setIsLandscapeLocked(false);
@@ -1761,8 +1752,13 @@ export const VideoPlayer = ({
         }
       }
 
+      // Schedule independently of the orientation promise and fullscreen event:
+      // some browsers resolve fullscreen before sending the event or never rotate.
+      if (enteredFs && isHandheld() && orientationPrefRef.current === 'landscape') {
+        scheduleRotateCheck();
+      }
       // Lock only works once fullscreen is active (also re-applied on fullscreenchange)
-      if (enteredFs && isHandheld() && !(await lockLandscape())) {
+      if (enteredFs && isHandheld() && !(await lockOrientation(orientationPrefRef.current))) {
         playerLog('warn', 'Orientation lock failed');
       }
 
@@ -1772,13 +1768,15 @@ export const VideoPlayer = ({
         fakeFullscreenRef.current = true;
         setFakeFullscreen(true);
         setIsFullscreen(true);
-        isLandscapeLockedRef.current = true;
-        setIsLandscapeLocked(true);
-        void lockLandscape();
-        scheduleRotateCheck();
+        const landscape = orientationPrefRef.current === 'landscape';
+        isLandscapeLockedRef.current = landscape;
+        setIsLandscapeLocked(landscape);
+        void lockOrientation(orientationPrefRef.current);
+        if (landscape) scheduleRotateCheck();
       }
     }
   }, [isHandheld, scheduleRotateCheck, clearRotateFallback]);
+  enterFullscreenRef.current = toggleFullscreen;
 
   const skipIntro = useCallback(() => {
     const video = videoRef.current;
@@ -1834,7 +1832,25 @@ export const VideoPlayer = ({
 
   // Landscape button: on mobile, fullscreen already means landscape (OS lock, or the
   // CSS fallback when the OS refuses), so it shares the fullscreen path.
-  const toggleLandscapeLock = useCallback(() => toggleFullscreen(), [toggleFullscreen]);
+  // Rotate button: outside fullscreen it opens fullscreen in the remembered orientation;
+  // inside fullscreen it flips landscape <-> portrait and remembers the choice.
+  const toggleLandscapeLock = useCallback(async () => {
+    const inFullscreen = !!document.fullscreenElement || fakeFullscreenRef.current;
+    if (!inFullscreen) {
+      await toggleFullscreen();
+      return;
+    }
+    const next: OrientationPref = orientationPrefRef.current === 'landscape' ? 'portrait' : 'landscape';
+    orientationPrefRef.current = next;
+    setOrientationPref(next);
+    saveOrientationPref(next);
+    clearRotateFallback();
+    const landscape = next === 'landscape';
+    isLandscapeLockedRef.current = landscape;
+    setIsLandscapeLocked(landscape);
+    await lockOrientation(next);
+    if (landscape) scheduleRotateCheck();
+  }, [toggleFullscreen, clearRotateFallback, scheduleRotateCheck]);
 
   // ─── TOUCH HANDLERS ────────────────────────────────────────────────────────
 
@@ -2481,19 +2497,18 @@ export const VideoPlayer = ({
                    </div>
                  </div>
                )}
-               {/* Mobile: Subtitles toggle */}
+               {/* Mobile: manual rotate (subtitles live in the settings panel). Opens fullscreen
+                   in the remembered orientation; in fullscreen it flips and remembers it. */}
                {isMobile() && (
                  <Button
                    variant="ghost"
                    size="icon"
-                   onClick={toggleSubtitles}
-                   className={cn(
-                     "text-white hover:bg-white/20",
-                     subtitleEnabled && "text-fox-orange",
-                     subtitles.length === 0 && "opacity-50 cursor-not-allowed"
-                   )}
+                   onClick={(e) => { e.stopPropagation(); void toggleLandscapeLock(); }}
+                   aria-label={orientationPref === 'landscape' ? 'Rotate to portrait' : 'Rotate to landscape'}
+                   title={orientationPref === 'landscape' ? 'Rotate to portrait' : 'Rotate to landscape'}
+                   className={cn("hover:bg-white/20", isLandscapeLocked ? "text-fox-orange" : "text-white")}
                  >
-                   <Subtitles className="w-5 h-5" />
+                   <RotateCw className="w-5 h-5" />
                  </Button>
                )}
 
@@ -2524,34 +2539,6 @@ export const VideoPlayer = ({
                 className="text-white hover:bg-white/20 h-9 w-9"
               >
                 <Settings className="w-5 h-5" />
-              </Button>
-            )}
-            {/* Mobile: Subtitles toggle */}
-            {isMobile() && subtitles.length > 0 && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={toggleSubtitles}
-                className={cn(
-                  "text-white hover:bg-white/20",
-                  subtitleEnabled && "text-fox-orange"
-                )}
-              >
-                <Subtitles className="w-5 h-5" />
-              </Button>
-            )}
-            {/* Mobile: Subtitles toggle */}
-            {isMobile() && subtitles.length > 0 && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={toggleSubtitles}
-                className={cn(
-                  "text-white hover:bg-white/20",
-                  subtitleEnabled && "text-fox-orange"
-                )}
-              >
-                <Subtitles className="w-5 h-5" />
               </Button>
             )}
 
@@ -2652,22 +2639,6 @@ export const VideoPlayer = ({
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </>
-              )}
-
-              {/* Mobile: Landscape lock button */}
-              {isMobile() && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={(e) => { e.stopPropagation(); toggleLandscapeLock(); }}
-                  title={isLandscapeLocked ? 'Unlock orientation' : 'Watch in landscape'}
-                  className={cn(
-                    "hover:bg-white/20 h-9 w-9 transition-colors",
-                    isLandscapeLocked ? "text-fox-orange" : "text-white"
-                  )}
-                >
-                  <RotateCw className="w-5 h-5" />
-                </Button>
               )}
 
               {/* Fullscreen */}

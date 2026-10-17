@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { atmosphereStyle, cn, formatRating } from '@/lib/utils';
 import { animeSlug, hentaiSlugToId, parseSeasonParam, watchPathForSlug } from '@/lib/routes';
 import { apiUrl } from '@/lib/api-config';
+import { isMobileDevice } from '@/lib/mobile-device';
 import {
   AlertCircle,
   ArrowLeft,
@@ -203,7 +204,7 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
 
   // Helper to detect mobile
   const isMobile = useCallback(() => {
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+    return isMobileDevice();
   }, []);
 
   // Landscape mode handler
