@@ -37,6 +37,7 @@ import {
 import { cn } from '@/lib/utils';
 import { PostProxyLoader } from '@/lib/hls-post-loader';
 import { apiUrl } from '@/lib/api-config';
+import { isTimeBuffered } from '@/lib/buffered';
 import { lockLandscape, syncOrientationWithFullscreen } from '@/lib/orientationLock';
 import { WatchHistory } from '@/lib/watch-history';
 
@@ -254,6 +255,8 @@ export const VideoPlayer = ({
   const [swipeType, setSwipeType] = useState<'seek' | 'volume' | null>(null);
   const [swipeValue, setSwipeValue] = useState<number>(0);
   const swipeStartValueRef = useRef<number>(0);
+  const swipeSeekTargetRef = useRef<number | null>(null);
+  const swipeOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showSwipeOverlay, setShowSwipeOverlay] = useState(false);
 
   // Mobile settings panel state
@@ -1313,6 +1316,43 @@ export const VideoPlayer = ({
         }
       }, 800);
     };
+    // Seeking (playing or paused): show the spinner right away and keep nudging
+    // HLS to load at the target until a frame is decodable. `waiting` alone is
+    // not enough: it is skipped while paused, so a paused far seek never loaded.
+    let seekRetryTimer: ReturnType<typeof setInterval> | null = null;
+    const stopSeekRetry = () => {
+      if (seekRetryTimer) {
+        clearInterval(seekRetryTimer);
+        seekRetryTimer = null;
+      }
+    };
+    const handleSeeking = () => {
+      const target = video.currentTime;
+      const buffered = isTimeBuffered(video.buffered, target);
+      if (!buffered) setIsLoading(true);
+      stopSeekRetry();
+      if (buffered) return;
+      let ticks = 0;
+      seekRetryTimer = setInterval(() => {
+        ticks++;
+        if (!video.seeking && video.readyState >= 2) return stopSeekRetry();
+        const hls = hlsRef.current;
+        if (hls && ticks % 2 === 0) {
+          try {
+            if (ticks >= 8) hls.recoverMediaError();
+            else hls.startLoad(video.currentTime);
+          } catch { /* ignore */ }
+        }
+        if (ticks >= 30) stopSeekRetry();
+      }, 1000);
+    };
+    const handleSeeked = () => {
+      stopSeekRetry();
+      if (video.readyState >= 2) {
+        setIsLoading(false);
+        safeSetIsBuffering(false);
+      }
+    };
     const handleCanPlay = () => {
       if (waitingTimerRef.current) {
         clearTimeout(waitingTimerRef.current);
@@ -1369,6 +1409,8 @@ export const VideoPlayer = ({
     video.addEventListener('progress', handleProgress);
     video.addEventListener('ended', handleEnded);
     video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('seeking', handleSeeking);
+    video.addEventListener('seeked', handleSeeked);
     video.addEventListener('canplay', handleCanPlay);
     video.addEventListener('canplaythrough', handleCanPlay);
     video.addEventListener('playing', handleCanPlay);
@@ -1387,6 +1429,9 @@ export const VideoPlayer = ({
       video.removeEventListener('progress', handleProgress);
       video.removeEventListener('ended', handleEnded);
       video.removeEventListener('waiting', handleWaiting);
+      video.removeEventListener('seeking', handleSeeking);
+      video.removeEventListener('seeked', handleSeeked);
+      stopSeekRetry();
       video.removeEventListener('canplay', handleCanPlay);
       video.removeEventListener('canplaythrough', handleCanPlay);
       video.removeEventListener('playing', handleCanPlay);
@@ -1424,6 +1469,23 @@ export const VideoPlayer = ({
       onNextEpisode?.();
     }
   }, [showNextEpisodeCountdown, nextEpisodeCountdown, onNextEpisode, autoNextEnabled]);
+
+  // Watch keeps this instance mounted across episodes while in PiP (so the mini
+  // player follows the new episode); reset the per-episode UI when that happens.
+  const episodeKey = `${animeId}-${selectedEpisodeNum}`;
+  const prevEpisodeKeyRef = useRef(episodeKey);
+  useEffect(() => {
+    if (prevEpisodeKeyRef.current === episodeKey) return;
+    prevEpisodeKeyRef.current = episodeKey;
+    setShowNextEpisodeCountdown(false);
+    setNextEpisodeCountdown(10);
+    setShowSkipIntro(false);
+    setShowSkipOutro(false);
+    setCurrentTime(0);
+    setDuration(0);
+    durationRef.current = 0;
+    setBuffered(0);
+  }, [episodeKey]);
 
   // Picture-in-Picture handlers
   useEffect(() => {
@@ -1559,7 +1621,7 @@ export const VideoPlayer = ({
     const video = videoRef.current;
     if (!video) return;
 
-    const newVolume = value[0];
+    const newVolume = Math.max(0, Math.min(1, value[0]));
     video.volume = newVolume;
     setVolume(newVolume);
     setIsMuted(newVolume === 0);
@@ -1576,12 +1638,11 @@ export const VideoPlayer = ({
     isSeekingRef.current = true;
     seekStartTimeRef.current = Date.now();
     
-    // For HLS, trigger immediate load at seek position for instant response
-    if (hls && hls.media === video) {
+    video.currentTime = seekTime;
+    // Seeking outside the buffer: restart loading at the target so the frame appears
+    if (hls && hls.media === video && !isTimeBuffered(video.buffered, seekTime)) {
       hls.startLoad(seekTime);
     }
-    
-    video.currentTime = seekTime;
     setCurrentTime(seekTime);
     
     // Clear seeking state after a short delay (seek should complete within 2s)
@@ -1804,16 +1865,20 @@ export const VideoPlayer = ({
     const dy = touch.clientY - touchStartPos.y;
 
     if (!isSwiping) {
-      if (Math.abs(dx) > 60) {
+      // Classify by the dominant axis so a sideways drag with some vertical
+      // drift is a seek, never a volume change.
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+        if (swipeOverlayTimerRef.current) clearTimeout(swipeOverlayTimerRef.current);
         setIsSwiping(true);
         setSwipeType('seek');
         swipeStartValueRef.current = videoRef.current.currentTime;
         setShowSwipeOverlay(true);
         setShowControls(false);
-      } else if (Math.abs(dy) > 60) {
+      } else if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) {
         const rect = containerRef.current.getBoundingClientRect();
         const startXRel = touchStartPos.x - rect.left;
         if (startXRel > rect.width * 0.5) {
+          if (swipeOverlayTimerRef.current) clearTimeout(swipeOverlayTimerRef.current);
           setIsSwiping(true);
           setSwipeType('volume');
           swipeStartValueRef.current = volume;
@@ -1828,8 +1893,9 @@ export const VideoPlayer = ({
       const rect = containerRef.current.getBoundingClientRect();
       const seekDelta = (dx / rect.width) * (duration || 300);
       const newTime = Math.max(0, Math.min(duration, swipeStartValueRef.current + seekDelta));
+      // Preview only; the seek is committed once on release ("Release to Seek")
       setSwipeValue(newTime);
-      videoRef.current.currentTime = newTime;
+      swipeSeekTargetRef.current = newTime;
     } else if (swipeType === 'volume') {
       const rect = containerRef.current.getBoundingClientRect();
       const volumeDelta = -(dy / (rect.height * 0.5));
@@ -1842,13 +1908,22 @@ export const VideoPlayer = ({
 
   const handleTouchEnd = useCallback(() => {
     if (isSwiping) {
+      if (swipeType === 'seek' && swipeSeekTargetRef.current !== null) {
+        handleSeek([swipeSeekTargetRef.current]);
+      }
+      swipeSeekTargetRef.current = null;
       setIsSwiping(false);
-      setSwipeType(null);
-      setTimeout(() => setShowSwipeOverlay(false), 500);
+      // Keep swipeType until the overlay hides; clearing it first made a seek
+      // swipe's fade-out render as "Volume <seconds × 100>%".
+      if (swipeOverlayTimerRef.current) clearTimeout(swipeOverlayTimerRef.current);
+      swipeOverlayTimerRef.current = setTimeout(() => {
+        setShowSwipeOverlay(false);
+        setSwipeType(null);
+      }, 500);
     }
     setTouchStartPos(null);
     setTouchCurrentPos(null);
-  }, [isSwiping]);
+  }, [isSwiping, swipeType, handleSeek]);
 
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -1932,7 +2007,7 @@ export const VideoPlayer = ({
               <>
                 <div className="flex items-center gap-3">
                   {swipeValue === 0 ? <VolumeX className="w-8 h-8 text-red-500" /> : <Volume2 className="w-8 h-8 text-fox-orange" />}
-                  <span className="text-3xl font-bold text-white">{Math.round(swipeValue * 100)}%</span>
+                  <span className="text-3xl font-bold text-white">{Math.round(Math.max(0, Math.min(1, swipeValue)) * 100)}%</span>
                 </div>
                 <span className="text-white/60 text-sm">Volume</span>
               </>

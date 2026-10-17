@@ -420,6 +420,42 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
   // Embedded players are cross-origin, so progress uses their message API.
   const isEmbedSource = useMemo(() => embedUrlFor(videoSource) !== null, [videoSource]);
   const embedFallbackUrl = embedUrlFor(videoSource);
+
+  // Picture-in-Picture follows a <video> element, not the page. While PiP is open the
+  // next episode must reuse the same player instance (stable key) and stay mounted
+  // while its source resolves, or the browser closes the mini player.
+  const [pipActive, setPipActive] = useState(false);
+  useEffect(() => {
+    const sync = () => setPipActive(!!document.pictureInPictureElement);
+    document.addEventListener('enterpictureinpicture', sync, true);
+    document.addEventListener('leavepictureinpicture', sync, true);
+    return () => {
+      document.removeEventListener('enterpictureinpicture', sync, true);
+      document.removeEventListener('leavepictureinpicture', sync, true);
+    };
+  }, []);
+  const episodePlayerKey = `${cleanAnimeId}-${selectedEpisodeNum}-${audioType}`;
+  const playerKeyRef = useRef(episodePlayerKey);
+  const lastEpisodePlayerKeyRef = useRef(episodePlayerKey);
+  if (episodePlayerKey !== lastEpisodePlayerKeyRef.current) {
+    lastEpisodePlayerKeyRef.current = episodePlayerKey;
+    if (!pipActive) playerKeyRef.current = episodePlayerKey;
+  }
+  const livePlayer = videoSource && !embedFallbackUrl && !streamLoading
+    ? {
+        src: videoSource.url || '',
+        isM3U8: videoSource.isM3U8,
+        reloadToken: streamUpdatedAt,
+        subtitles: streamData?.subtitles,
+        intro: streamData?.intro,
+        outro: streamData?.outro,
+        episodeNum: selectedEpisodeNum,
+      }
+    : null;
+  const heldPlayerRef = useRef<NonNullable<typeof livePlayer> | null>(null);
+  if (livePlayer) heldPlayerRef.current = livePlayer;
+  const pipHeldPlayer = !livePlayer && pipActive && !streamError ? heldPlayerRef.current : null;
+
   const embedPlaybackUrl = useMemo(() => {
     const saved = WatchHistory.get().find((item) =>
       (item.animeId === cleanAnimeId || item.animeId === anime?.id) && item.episodeNumber === selectedEpisodeNum
@@ -1150,7 +1186,30 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
             <div className="relative aspect-[16/9] w-full overflow-hidden bg-black sm:rounded-b-2xl" ref={playerRef}>
               {/* Before the episode list arrives the stream query is disabled, which reports
                   "not loading" — that is still finding a source, not "No source". */}
-              {streamLoading || (!streamData && !streamError) ? (
+              {(pipHeldPlayer ?? livePlayer) && !embedFallbackUrl ? (() => {
+                const p = (pipHeldPlayer ?? livePlayer)!;
+                return (
+                  <VideoPlayer
+                    key={playerKeyRef.current}
+                    src={p.src}
+                    reloadToken={p.reloadToken}
+                    isM3U8={p.isM3U8}
+                    subtitles={p.subtitles}
+                    intro={p.intro}
+                    outro={p.outro}
+                    onError={handlePlayerError}
+                    poster={episodeDetails?.get(p.episodeNum)?.thumbnail || currentEpisode?.thumbnail || artwork?.banner || artwork?.trailerThumb || anime.banner || undefined}
+                    onNextEpisode={handleNextEpisode}
+                    hasNextEpisode={hasNext}
+                    animeId={cleanAnimeId}
+                    selectedEpisodeNum={p.episodeNum}
+                    animeTitle={anime.title}
+                    animeImage={anime.image}
+                    animeSeason={anime.season}
+                    isAdult={adult}
+                  />
+                );
+              })() : streamLoading || (!streamData && !streamError) ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black">
                   <Loader2 className="h-7 w-7 animate-spin text-white/50" />
                   <div className="text-center">
@@ -1176,26 +1235,6 @@ const Watch = ({ adult = false }: { adult?: boolean }) => {
                   allowFullScreen
                   allow="autoplay; encrypted-media; picture-in-picture"
                   referrerPolicy="no-referrer"
-                />
-              ) : videoSource ? (
-                <VideoPlayer
-                  key={`${cleanAnimeId}-${selectedEpisodeNum}-${audioType}`}
-                  src={videoSource?.url || ''}
-                  reloadToken={streamUpdatedAt}
-                  isM3U8={videoSource?.isM3U8}
-                  subtitles={streamData?.subtitles}
-                  intro={streamData?.intro}
-                  outro={streamData?.outro}
-                  onError={handlePlayerError}
-                  poster={episodeDetails?.get(selectedEpisodeNum)?.thumbnail || currentEpisode?.thumbnail || artwork?.banner || artwork?.trailerThumb || anime.banner || undefined}
-                  onNextEpisode={handleNextEpisode}
-                  hasNextEpisode={hasNext}
-                  animeId={cleanAnimeId}
-                  selectedEpisodeNum={selectedEpisodeNum}
-                  animeTitle={anime.title}
-                  animeImage={anime.image}
-                  animeSeason={anime.season}
-                  isAdult={adult}
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center bg-black px-6">
