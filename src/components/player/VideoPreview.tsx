@@ -1,254 +1,254 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useCallback,
   useImperativeHandle,
+  useReducer,
   forwardRef,
-  useLayoutEffect,
 } from 'react';
 import Hls from 'hls.js';
+import { PostProxyLoader } from '@/lib/hls-post-loader';
+import {
+  FrameStore,
+  StoryboardBuilder,
+  THUMB_W,
+  THUMB_H,
+  canBuildStoryboard,
+} from '@/lib/seek-thumbnails';
 
-// â”€â”€â”€ Public API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Public API ─────────────────────────────────────────────────────────────
 
 export interface VideoPreviewHandle {
-  /** Called by VideoPlayer on timeupdate â€” kept for backwards compat but unused now. */
+  /** Kept for backwards compat; frames are captured from the main video automatically. */
   captureFrame: (video: HTMLVideoElement, time: number) => void;
 }
 
 export interface VideoPreviewProps {
-  /** Main video element ref â€” we clone its src for the hidden seek-video. */
+  /** Main video element — frames are captured from it while it plays. */
   videoRef: React.RefObject<HTMLVideoElement>;
+  /**
+   * The stream URL the player loaded (proxied). The main video's currentSrc is a
+   * MediaSource blob under hls.js, which a second element cannot open.
+   */
+  src?: string;
+  isM3U8?: boolean;
   duration: number;
   isHovering: boolean;
   mouseX: number;
   containerRef: React.RefObject<HTMLDivElement>;
-  /** Anime poster shown while hidden video is seeking. */
+  /** Anime poster shown until the first frame exists. */
   poster: string;
-  /** Set false if the video is cross-origin tainted (canvas capture will fail). */
-  canCapture?: boolean;
+  /** While true, the background sweep yields bandwidth to playback. */
+  isBuffering?: boolean;
 }
 
-// â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Constants ──────────────────────────────────────────────────────────────
 
 const PREVIEW_W = 224;
 const PREVIEW_H = 126; // 16:9
-const SEEK_DEBOUNCE_MS = 100; // Increased debounce to reduce rapid seeks
-const SEEKED_TIMEOUT_MS = 3000; // Increased timeout for HLS buffering (3s)
+/** The sweep waits this long so it never competes with the first frames of playback. */
+const SWEEP_DELAY_MS = 4000;
+/** Main-video capture runs at most this often. */
+const LIVE_CAPTURE_MS = 1000;
+/** Fallback seeker: give up on one seek after this long. */
+const FALLBACK_SEEK_TIMEOUT_MS = 4000;
 
-// â”€â”€â”€ Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const saveData = () =>
+  typeof navigator !== 'undefined' &&
+  Boolean((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData);
 
-export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
-  { videoRef, duration, isHovering, mouseX, containerRef, poster, canCapture = true },
-  ref
-) => {
-  const [previewTime, setPreviewTime] = useState(0);
-  const [position, setPosition] = useState(0);
-  const [isSeeking, setIsSeeking] = useState(false);
-  const [isReady, setIsReady] = useState(false);
-  const [hlsReady, setHlsReady] = useState(false);
+const coarsePointer = () =>
+  typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
 
-  const hiddenVideoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const seekDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSrcRef = useRef<string>('');
-  const lastSeekTimeRef = useRef<number>(-1);
-  const hlsRef = useRef<Hls | null>(null);
+/** Background sweep size: every segment on desktop, a coarse grid on phones, none on Save-Data. */
+const sweepLimit = () => (saveData() ? 0 : coarsePointer() ? 48 : 400);
 
-  // Backwards-compat: captureFrame is now a no-op since we seek live
-  useImperativeHandle(ref, () => ({
-    captureFrame: (_video: HTMLVideoElement, _time: number) => { /* no-op: live seek handles previews */ },
-  }), []);
+const formatTime = (s: number): string => {
+  if (!isFinite(s) || s < 0) return '0:00';
+  const hrs = Math.floor(s / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  const secs = Math.floor(s % 60);
+  if (hrs > 0) return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
 
-  // â”€â”€ Create / manage the hidden video element â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  useLayoutEffect(() => {
-    const v = document.createElement('video');
+// ─── Fallback: a hidden element seeked on demand ────────────────────────────
+// For streams the storyboard cannot read (MP4, fMP4, encrypted HLS, no WebCodecs).
+
+class HiddenSeeker {
+  private video = document.createElement('video');
+  private hls: Hls | null = null;
+  private target: number | null = null;
+  private busy = false;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(src: string, isM3U8: boolean, private store: FrameStore, private onFrame: () => void) {
+    const v = this.video;
     v.muted = true;
     v.preload = 'auto';
     v.playsInline = true;
     v.crossOrigin = 'anonymous';
     v.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;';
     document.body.appendChild(v);
-    hiddenVideoRef.current = v;
 
-    return () => {
-      v.src = '';
-      v.load();
-      if (document.body.contains(v)) document.body.removeChild(v);
-      hiddenVideoRef.current = null;
+    if (isM3U8 && Hls.isSupported()) {
+      this.hls = new Hls({
+        autoStartLoad: false,
+        startLevel: 0,
+        capLevelToPlayerSize: false,
+        maxBufferLength: 2,
+        maxMaxBufferLength: 4,
+        backBufferLength: 0,
+        loader: PostProxyLoader,
+      });
+      this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (this.hls) this.hls.currentLevel = 0;
+        this.next();
+      });
+      this.hls.loadSource(src);
+      this.hls.attachMedia(v);
+    } else {
+      v.src = src;
+    }
+    v.addEventListener('seeked', this.capture);
+    v.addEventListener('loadedmetadata', () => this.next());
+  }
+
+  request(time: number) {
+    this.target = time;
+    this.next();
+  }
+
+  private next = () => {
+    const v = this.video;
+    if (this.busy || this.target === null) return;
+    if (this.hls ? !this.hls.levels.length : v.readyState < 1) return;
+    const time = this.target;
+    this.target = null;
+    this.busy = true;
+    this.hls?.startLoad(time);
+    v.currentTime = time;
+    this.timer = setTimeout(this.release, FALLBACK_SEEK_TIMEOUT_MS);
+  };
+
+  private capture = () => {
+    const v = this.video;
+    const time = v.currentTime;
+    const finish = () => this.release();
+    const draw = () => {
+      if (v.readyState < 2 || !v.videoWidth) return finish();
+      createImageBitmap(v, { resizeWidth: THUMB_W, resizeHeight: THUMB_H, resizeQuality: 'medium' })
+        .then((bmp) => { this.store.add(time, bmp); this.onFrame(); })
+        .catch(() => { /* tainted or not decoded yet */ })
+        .finally(finish);
     };
-  }, []);
+    // A seeked element may not have decoded the frame yet; wait for it to be presented.
+    const rvfc = (v as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }).requestVideoFrameCallback;
+    if (rvfc && v.readyState < 2) rvfc.call(v, draw); else draw();
+  };
 
-  // â”€â”€ Sync src from main video when it changes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  private release = () => {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.busy = false;
+    this.next();
+  };
+
+  destroy() {
+    if (this.timer) clearTimeout(this.timer);
+    this.hls?.destroy();
+    this.video.removeAttribute('src');
+    this.video.load();
+    this.video.remove();
+  }
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
+
+export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
+  { videoRef, src, isM3U8 = true, duration, isHovering, mouseX, containerRef, poster, isBuffering = false },
+  ref
+) => {
+  const [previewTime, setPreviewTime] = useState(0);
+  const [position, setPosition] = useState(0);
+  const [hasFrame, setHasFrame] = useState(false);
+  const [frameTime, setFrameTime] = useState<number | null>(null);
+  const [frameVersion, bumpFrames] = useReducer((n: number) => n + 1, 0);
+  /** The stream the storyboard could not read; it falls back to the hidden seeker. */
+  const [unreadableSrc, setUnreadableSrc] = useState<string | null>(null);
+  const useStoryboard = Boolean(src) && src !== unreadableSrc && isM3U8 && canBuildStoryboard();
+
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const storeRef = useRef<FrameStore>();
+  if (!storeRef.current) storeRef.current = new FrameStore();
+  const builderRef = useRef<StoryboardBuilder | null>(null);
+  const seekerRef = useRef<HiddenSeeker | null>(null);
+
+  useImperativeHandle(ref, () => ({
+    captureFrame: () => { /* frames are captured from the main video's timeupdate */ },
+  }), []);
+
+  // ── One frame source per stream ───────────────────────────────────────────
   useEffect(() => {
-    const mainVideo = videoRef.current;
-    const hidden = hiddenVideoRef.current;
-    if (!hidden || !mainVideo) return;
+    const store = storeRef.current!;
+    store.clear();
+    setHasFrame(false);
+    bumpFrames();
+    if (!src) return;
 
-    const syncSrc = () => {
-      const src = mainVideo.currentSrc || mainVideo.src;
-      if (!src || src === lastSrcRef.current) return;
-      lastSrcRef.current = src;
-      setIsReady(false);
-      setHlsReady(false);
-      lastSeekTimeRef.current = -1;
+    if (useStoryboard) {
+      const builder = new StoryboardBuilder(src, store, {
+        onFrame: bumpFrames,
+        onUnsupported: () => setUnreadableSrc(src),
+        sweepLimit: sweepLimit(),
+      });
+      builderRef.current = builder;
+      const sweep = setTimeout(() => builder.startSweep(), SWEEP_DELAY_MS);
+      return () => {
+        clearTimeout(sweep);
+        builder.destroy();
+        builderRef.current = null;
+      };
+    }
 
-      // Check if it's an HLS stream
-      const isHls = src.includes('.m3u8') || src.includes('m3u8');
-
-      if (isHls && Hls.isSupported()) {
-        // Destroy existing HLS instance
-        if (hlsRef.current) {
-          hlsRef.current.destroy();
-          hlsRef.current = null;
-        }
-
-        // Create new HLS instance for preview
-        const hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: false,
-          backBufferLength: 5,
-          maxBufferLength: 10,
-          maxMaxBufferLength: 20,
-          // Optimized for seeking: smaller buffers, faster startup
-          startLevel: -1,
-          abrEwmaDefaultEstimate: 500_000, // Start low for quick seek
-          fragLoadingMaxRetry: 3,
-          manifestLoadingMaxRetry: 2,
-          fragLoadingRetryDelay: 100,
-          manifestLoadingRetryDelay: 200,
-          fragLoadingTimeOut: 5000,
-          manifestLoadingTimeOut: 8000,
-        });
-
-        hls.loadSource(src);
-        hls.attachMedia(hidden);
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          console.log('[VideoPreview] HLS manifest parsed, ready for seeking');
-          // Start playing muted in background to enable seeking
-          hidden.play().then(() => {
-            console.log('[VideoPreview] Hidden video started playing');
-            // Pause immediately after first frame to save bandwidth
-            setTimeout(() => {
-              hidden.pause();
-              setHlsReady(true);
-            }, 500);
-          }).catch((err) => {
-            console.warn('[VideoPreview] Autoplay blocked:', err);
-            hidden.pause();
-            setHlsReady(true);
-          });
-        });
-
-        hls.on(Hls.Events.FRAG_LOADED, (event, data) => {
-          console.log('[VideoPreview] HLS fragment loaded:', data.frag.sn);
-        });
-
-        hls.on(Hls.Events.ERROR, (event, data) => {
-          console.error('[VideoPreview] HLS error:', data.type, data.details, data.fatal);
-          if (data.fatal) {
-            hls.destroy();
-            hlsRef.current = null;
-            setHlsReady(false);
-          }
-        });
-
-        hlsRef.current = hls;
-      } else {
-        // Direct video source (MP4, etc.)
-        if (hlsRef.current) {
-          hlsRef.current.destroy();
-          hlsRef.current = null;
-        }
-        hidden.src = src;
-        hidden.load();
-        hidden.pause();
-      }
-    };
-
-    // Sync immediately and whenever the main video's src changes
-    syncSrc();
-    mainVideo.addEventListener('loadedmetadata', syncSrc);
+    const seeker = new HiddenSeeker(src, isM3U8, store, bumpFrames);
+    seekerRef.current = seeker;
     return () => {
-      mainVideo.removeEventListener('loadedmetadata', syncSrc);
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
+      seeker.destroy();
+      seekerRef.current = null;
     };
+  }, [src, isM3U8, useStoryboard]);
+
+  useEffect(() => { builderRef.current?.setPaused(isBuffering); }, [isBuffering]);
+
+  useEffect(() => () => storeRef.current?.clear(), []);
+
+  // ── Frames from the main video, free while it plays ───────────────────────
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    let last = 0;
+    let busy = false;
+    const grab = () => {
+      const now = performance.now();
+      if (busy || now - last < LIVE_CAPTURE_MS) return;
+      if (video.readyState < 2 || video.seeking || !video.videoWidth) return;
+      const time = video.currentTime;
+      if (storeRef.current!.has(time)) return;
+      last = now;
+      busy = true;
+      createImageBitmap(video, { resizeWidth: THUMB_W, resizeHeight: THUMB_H, resizeQuality: 'medium' })
+        .then((bmp) => { storeRef.current!.add(time, bmp); bumpFrames(); })
+        .catch(() => { /* tainted cross-origin media: storyboard still covers it */ })
+        .finally(() => { busy = false; });
+    };
+    video.addEventListener('timeupdate', grab);
+    return () => video.removeEventListener('timeupdate', grab);
   }, [videoRef]);
 
-  // â”€â”€ Paint one frame to the canvas via rAF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const paintFrame = useCallback(() => {
-    const hidden = hiddenVideoRef.current;
-    const canvas = canvasRef.current;
-    if (!hidden || !canvas) return;
-    if (hidden.readyState < 2 || hidden.videoWidth === 0) return;
-
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-
-    try {
-      ctx.drawImage(hidden, 0, 0, PREVIEW_W, PREVIEW_H);
-      setIsReady(true);
-      setIsSeeking(false);
-    } catch (err) {
-      // CORS error - video is tainted, can't capture
-      console.warn('[VideoPreview] Canvas capture failed (CORS):', err);
-      setIsSeeking(false);
-    }
-  }, []);
-
-  // â”€â”€ Seek the hidden video to a target time â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const seekTo = useCallback((time: number) => {
-    const hidden = hiddenVideoRef.current;
-    const hls = hlsRef.current;
-    if (!hidden || !hidden.src) return;
-    
-    // For HLS, wait until manifest is parsed before seeking
-    if (hls && hls.media === hidden && !hlsReady) {
-      console.log('[VideoPreview] HLS not ready yet, skipping seek');
-      return;
-    }
-    
-    // Skip if already at this frame (reduced tolerance for smoother previews)
-    if (Math.abs(time - lastSeekTimeRef.current) < 0.05) return;
-
-    lastSeekTimeRef.current = time;
-    setIsSeeking(true);
-
-    if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
-
-    const onSeeked = () => {
-      if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
-      seekTimeoutRef.current = null;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = requestAnimationFrame(paintFrame);
-      hidden.removeEventListener('seeked', onSeeked);
-    };
-
-    hidden.addEventListener('seeked', onSeeked);
-
-    // For HLS, ensure we start loading before seeking
-    if (hls && hls.media === hidden) {
-      // Trigger HLS to start loading if needed
-      hls.startLoad(time);
-    }
-
-    hidden.currentTime = time;
-
-    // Guard: if seeked never fires (e.g. cross-origin restriction), paint what we have
-    seekTimeoutRef.current = setTimeout(() => {
-      hidden.removeEventListener('seeked', onSeeked);
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      rafRef.current = requestAnimationFrame(paintFrame);
-    }, SEEKED_TIMEOUT_MS);
-  }, [paintFrame, hlsReady]);
-
-  // â”€â”€ Track mouse/touch position â†’ debounced seek â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Pointer → time, and ask for that frame ────────────────────────────────
   useEffect(() => {
     if (!isHovering || !containerRef.current || !duration) return;
 
@@ -257,36 +257,33 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
     const width = containerRef.current.offsetWidth || containerRef.current.getBoundingClientRect().width;
     if (!width) return;
     const x = Math.max(0, Math.min(mouseX, width));
-    const pct = x / width;
-    const time = pct * duration;
+    const time = (x / width) * duration;
 
     setPreviewTime(time);
     setPosition(x);
 
-    if (seekDebounceRef.current) clearTimeout(seekDebounceRef.current);
-    seekDebounceRef.current = setTimeout(() => seekTo(time), SEEK_DEBOUNCE_MS);
-  }, [mouseX, isHovering, duration, containerRef, seekTo]);
+    builderRef.current?.startSweep();
+    void builderRef.current?.request(time);
+    seekerRef.current?.request(time);
+  }, [mouseX, isHovering, duration, containerRef]);
 
-  // â”€â”€ Cleanup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  useEffect(() => {
-    return () => {
-      if (seekDebounceRef.current) clearTimeout(seekDebounceRef.current);
-      if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, []);
+  // ── Paint the nearest frame we have, immediately ──────────────────────────
+  const paint = useCallback(() => {
+    const canvas = canvasRef.current;
+    const frame = storeRef.current!.nearest(previewTime);
+    if (!canvas || !frame) { setHasFrame(false); setFrameTime(null); return; }
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(frame.bitmap, 0, 0, canvas.width, canvas.height);
+    setHasFrame(true);
+    setFrameTime(frame.time);
+  }, [previewTime]);
 
-  // â”€â”€ Time formatter â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const formatTime = useCallback((s: number): string => {
-    if (!isFinite(s) || s < 0) return '0:00';
-    const hrs = Math.floor(s / 3600);
-    const mins = Math.floor((s % 3600) / 60);
-    const secs = Math.floor(s % 60);
-    if (hrs > 0) return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  }, []);
+  useLayoutEffect(() => {
+    if (isHovering) paint();
+  }, [isHovering, paint, frameVersion]);
 
-  // â”€â”€ Layout: clamp so preview never overflows the progress bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Layout: clamp so preview never overflows the progress bar ─────────────
   const halfW = PREVIEW_W / 2 + 8;
   const containerWidth = containerRef.current?.offsetWidth || containerRef.current?.getBoundingClientRect().width || 800;
   const clampedLeft = Math.max(halfW, Math.min(position, containerWidth - halfW));
@@ -301,42 +298,29 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
         transform: 'translateX(-50%)',
         animation: 'vp-fadeIn 100ms ease both',
       }}
+      data-testid="seek-preview"
+      data-has-frame={hasFrame || undefined}
+      data-frame-time={frameTime ?? undefined}
     >
-      {/* â”€â”€ Preview card â”€â”€ */}
       <div
-        className="relative overflow-hidden rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.9)]"
+        className="relative overflow-hidden rounded-xl bg-zinc-900 shadow-[0_8px_32px_rgba(0,0,0,0.9)]"
         style={{ width: PREVIEW_W, height: PREVIEW_H }}
       >
-        {/* Border glow */}
         <div className="absolute -inset-px rounded-xl border border-white/20 z-10 pointer-events-none" />
 
-        {/* Poster / loading placeholder â€” shown until canvas is ready */}
-        <div
-          className="absolute inset-0 transition-opacity duration-150"
-          style={{ opacity: isReady ? 0 : 1 }}
-        >
-          {poster ? (
-            <img src={poster} className="w-full h-full object-cover" alt="" style={{ opacity: 0.4 }} />
-          ) : (
-            <div className="absolute inset-0 bg-zinc-900" />
-          )}
-          {(isSeeking || !hlsReady) && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            </div>
-          )}
-        </div>
+        {/* Poster until the first real frame exists — no spinner, the bar stays usable. */}
+        {!hasFrame && poster && (
+          <img src={poster} className="absolute inset-0 w-full h-full object-cover opacity-50" alt="" />
+        )}
 
-        {/* Live canvas â€” always mounted so seeked frames paint into it immediately */}
         <canvas
           ref={canvasRef}
-          width={PREVIEW_W}
-          height={PREVIEW_H}
+          width={THUMB_W}
+          height={THUMB_H}
           className="absolute inset-0 w-full h-full"
-          style={{ opacity: isReady ? 1 : 0, transition: 'opacity 150ms ease' }}
+          style={{ opacity: hasFrame ? 1 : 0 }}
         />
 
-        {/* Time badge */}
         <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 to-transparent pt-6 pb-1.5 px-2 flex justify-center z-10">
           <span className="text-[13px] font-bold text-white tabular-nums tracking-wide drop-shadow-lg">
             {formatTime(previewTime)}
@@ -344,7 +328,6 @@ export const VideoPreview = forwardRef<VideoPreviewHandle, VideoPreviewProps>((
         </div>
       </div>
 
-      {/* Pointer arrow */}
       <div className="w-2.5 h-2.5 bg-black rotate-45 -mt-[5px] border-r border-b border-white/15 shadow-xl" />
 
       <style>{`

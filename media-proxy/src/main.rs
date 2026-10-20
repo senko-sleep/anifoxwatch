@@ -30,6 +30,11 @@
 //!
 //! Node never sees the payload, and the client never learns the upstream URL: the redirect is
 //! internal, so the CDN link and its referer requirements stay on the server side.
+//!
+//! A delegated request carrying `kf=1` asks for only the segment's first video frame, for the
+//! player's seek-bar storyboard; see [`keyframe`].
+
+mod keyframe;
 
 use std::{convert::Infallible, net::SocketAddr, time::Duration};
 
@@ -41,6 +46,7 @@ use axum::{
     Router,
 };
 use futures_util::TryStreamExt;
+use keyframe::{Cut, KeyframeCutter};
 
 /// Signals that Node has authorized a media fetch and wants this process to perform it.
 const HDR_FETCH: &str = "x-media-fetch";
@@ -94,7 +100,7 @@ fn apply_cors(headers: &mut HeaderMap) {
     );
     headers.insert(
         header::ACCESS_CONTROL_EXPOSE_HEADERS,
-        HeaderValue::from_static("Content-Length, Content-Range, Accept-Ranges"),
+        HeaderValue::from_static("Content-Length, Content-Range, Accept-Ranges, X-Keyframe-Cut"),
     );
     headers.insert(
         header::ACCESS_CONTROL_ALLOW_HEADERS,
@@ -135,13 +141,10 @@ fn error_response(status: StatusCode, reason: &str) -> Response {
 /// The client's `Range` is forwarded verbatim and the upstream's status is preserved, so a seek
 /// stays a 206 with its `Content-Range` intact. Rewriting either one to 200 is what makes a
 /// player refuse to scrub.
-async fn serve_media(
-    state: &AppState,
-    directive: &HeaderMap,
-    client_range: Option<HeaderValue>,
-) -> Response {
+/// The upstream request Node's directive describes.
+fn upstream_request(state: &AppState, directive: &HeaderMap) -> Result<reqwest::RequestBuilder, Response> {
     let Some(target) = directive.get(HDR_FETCH).and_then(|v| v.to_str().ok()) else {
-        return error_response(StatusCode::BAD_GATEWAY, "missing_media_target");
+        return Err(error_response(StatusCode::BAD_GATEWAY, "missing_media_target"));
     };
 
     let mut request = state
@@ -156,6 +159,18 @@ async fn serve_media(
     if let Some(origin) = directive.get(HDR_ORIGIN).and_then(|v| v.to_str().ok()) {
         request = request.header(header::ORIGIN, origin);
     }
+    Ok(request)
+}
+
+async fn serve_media(
+    state: &AppState,
+    directive: &HeaderMap,
+    client_range: Option<HeaderValue>,
+) -> Response {
+    let mut request = match upstream_request(state, directive) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
     if let Some(range) = client_range {
         request = request.header(header::RANGE, range);
     }
@@ -180,6 +195,63 @@ async fn serve_media(
     *response.status_mut() = status;
     *response.headers_mut() = headers;
     response
+}
+
+/// Reads the segment only as far as the end of its first video frame, then drops the upstream
+/// connection and answers with that prefix. The rest of the segment never crosses either link.
+async fn serve_keyframe(state: &AppState, directive: &HeaderMap) -> Response {
+    let request = match upstream_request(state, directive) {
+        Ok(request) => request,
+        Err(response) => return response,
+    };
+
+    let read = async {
+        let upstream = request.send().await.map_err(|_| "upstream_unreachable")?;
+        if !upstream.status().is_success() {
+            return Err("upstream_status");
+        }
+        let mut body = upstream.bytes_stream();
+        let mut buf: Vec<u8> = Vec::with_capacity(256 * 1024);
+        let mut cutter = KeyframeCutter::default();
+        loop {
+            match body.try_next().await {
+                Ok(Some(chunk)) => buf.extend_from_slice(&chunk),
+                Ok(None) => {
+                    let cut = cutter.finish(buf.len());
+                    return Ok((buf, cut));
+                }
+                Err(_) => return Err("upstream_interrupted"),
+            }
+            match cutter.scan(&buf) {
+                Cut::More => continue,
+                cut => return Ok((buf, cut)), // dropping `body` closes the CDN connection
+            }
+        }
+    };
+
+    let (mut buf, cut) = match tokio::time::timeout(Duration::from_secs(20), read).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(reason)) => return error_response(StatusCode::BAD_GATEWAY, reason),
+        Err(_) => return error_response(StatusCode::GATEWAY_TIMEOUT, "keyframe_timeout"),
+    };
+    let n = match cut {
+        Cut::At(n) => n,
+        Cut::Unsupported(reason) => return error_response(StatusCode::UNPROCESSABLE_ENTITY, reason),
+        Cut::More => return error_response(StatusCode::BAD_GATEWAY, "keyframe_incomplete"),
+    };
+    buf.truncate(n);
+
+    let mut response = Response::new(Body::from(buf));
+    let headers = response.headers_mut();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("video/mp2t"));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"));
+    headers.insert("x-keyframe-cut", HeaderValue::from(n));
+    apply_cors(headers);
+    response
+}
+
+fn wants_keyframe(query: Option<&str>) -> bool {
+    query.is_some_and(|q| q.split('&').any(|pair| pair == "kf=1"))
 }
 
 /// Forward every request to Node, then either stream its response back or carry out the media
@@ -221,6 +293,9 @@ async fn handle(State(state): State<AppState>, request: Request) -> Result<Respo
     // The internal redirect. Node has decided what to serve and has sent no body of its own.
     if node_response.headers().contains_key(HDR_FETCH) {
         let directive = node_response.headers().clone();
+        if wants_keyframe(parts.uri.query()) {
+            return Ok(serve_keyframe(&state, &directive).await);
+        }
         let client_range = parts.headers.get(header::RANGE).cloned();
         return Ok(serve_media(&state, &directive, client_range).await);
     }

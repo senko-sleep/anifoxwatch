@@ -228,6 +228,8 @@ export const VideoPlayer = ({
   const [selectedSubtitle, setSelectedSubtitle] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isBuffering, setIsBuffering] = useState(false);
+  /** The proxied URL actually loaded; the seek preview reads its own frames from it. */
+  const [loadedSrc, setLoadedSrc] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [hlsStats, setHlsStats] = useState<{ level: number; bandwidth: number } | null>(null);
   const [availableLevels, setAvailableLevels] = useState<{ height: number; bitrate: number }[]>([]);
@@ -386,6 +388,8 @@ export const VideoPlayer = ({
       }
       return `${apiUrl('/api/stream/proxy')}?url=${encodeURIComponent(s)}`;
     })();
+
+    setLoadedSrc(resolvedSrc);
 
     // Reset state
     setIsLoading(true);
@@ -2444,6 +2448,9 @@ export const VideoPlayer = ({
               <VideoPreview
                 ref={videoPreviewRef}
                 videoRef={videoRef}
+                src={loadedSrc}
+                isM3U8={isM3U8}
+                isBuffering={isBuffering}
                 duration={duration}
                 isHovering={isProgressHovering || isProgressTouching}
                 mouseX={isProgressTouching ? progressTouchX : progressMouseX}

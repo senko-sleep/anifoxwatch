@@ -6,7 +6,7 @@ description = "Data-plane proxy for AniStream Hub: Node decides, this streams th
 
 [dependencies]
 axum = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 # No gzip/brotli: those make reqwest transparently decompress a body while its Content-Encoding
 # header is still forwarded to the client, which then tries to decompress it a second time. A
 # proxy wants the bytes exactly as they arrived, so compression is left to the two real endpoints.
